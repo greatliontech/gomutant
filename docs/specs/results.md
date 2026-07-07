@@ -25,11 +25,17 @@ generated each moves a pin and invalidates the record exactly as a body edit
 does. A record is never partially trusted: any moved pin re-measures the
 whole target.
 
-**REQ-result-export** (structural): Findings MUST be expressible in a
-portable, versioned export — the interchange a downstream consumer reads,
-carrying per-symbol records with their pins, survivors, and dispositions —
-so gomutant's results are consumable without reaching into its internal
-store.
+**REQ-result-export** (structural): Findings MUST be serializable to a
+portable, versioned document that gomutant owns — carrying, per mutated
+symbol, the pins that scope the record (body hash; the oracle as test symbols
+each with its body hash; operator version; budget; toolchain), the mutant and
+kill counts, each survivor's position and operator, and each attested
+disposition with its reason. A version tag lets a consumer reject a document
+it does not understand. This is the inverse of the targeting seam: gomutant
+parses a producer's format going in (REQ-target-producers) but owns the
+result format going out, so a downstream reader — a dashboard, a CI step, or
+stipulator recovering findings by label — consumes gomutant's contract, never
+its internal store.
 
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among

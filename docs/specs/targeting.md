@@ -22,11 +22,17 @@ symbols), and zero or more labels. Mutation operators, the per-symbol budget,
 and execution limits are run-wide configuration, not per-target state — a
 target says *what* to break and *what catches it*, never *how* to break it.
 
-**REQ-target-producers** (behavior): gomutant MUST treat every source of
-targets identically — auto-discovery, a config file, and a target set handed
-in by an external producer are one input path, not three. No producer is
-privileged; the tool is complete standalone and merely accepts richer targets
-when a caller supplies them.
+**REQ-target-producers** (behavior): gomutant MUST reduce every source of
+targets to one internal model — auto-discovery, a config file, and an
+external producer's document are parsed onto the same target set, never three
+code paths downstream of the parse. A producer emits its own format and
+gomutant parses it; no producer is required to speak a gomutant-defined
+schema, and none is privileged. The reference external producer is
+stipulator: gomutant parses stipulator's targets export — each entry's
+symbol becomes a mutated body, its witness tests become the oracle, and its
+requirement identifiers ride as labels — so stipulator owns that wire format
+and gomutant owns the adapter, keeping stipulator ignorant of gomutant while
+the tool stays complete standalone.
 
 **REQ-target-oracle** (behavior): A target's oracle MUST be the sole arbiter
 of a kill: a mutant of the target is killed only when a test in that oracle
