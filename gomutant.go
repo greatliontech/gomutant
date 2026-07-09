@@ -183,3 +183,33 @@ func splitTestSymbol(symbol string) (pkg, fn string) {
 	}
 	return symbol[:i], symbol[i+1:]
 }
+
+// ParseStipulatorTargets parses stipulator's targets export — the reference
+// external producer (REQ-target-producers): each entry's symbol becomes a
+// mutated body, its witness tests become the oracle, and its requirement
+// identifiers ride as labels. stipulator owns the wire format; this adapter
+// owns the mapping, so stipulator stays ignorant of gomutant.
+func ParseStipulatorTargets(data []byte) ([]Target, error) {
+	var doc struct {
+		Version int `json:"stipulatorTargets"`
+		Targets []struct {
+			Symbol       string   `json:"symbol"`
+			Witnesses    []string `json:"witnesses,omitempty"`
+			Requirements []string `json:"requirements,omitempty"`
+		} `json:"targets"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("gomutant: parse stipulator targets export: %w", err)
+	}
+	if doc.Version != 1 {
+		return nil, fmt.Errorf("gomutant: stipulator targets export version %d not understood (want 1)", doc.Version)
+	}
+	out := make([]Target, 0, len(doc.Targets))
+	for _, t := range doc.Targets {
+		if t.Symbol == "" {
+			return nil, fmt.Errorf("gomutant: stipulator export entry with no symbol")
+		}
+		out = append(out, Target{Symbol: t.Symbol, Oracle: t.Witnesses, Labels: t.Requirements})
+	}
+	return out, nil
+}

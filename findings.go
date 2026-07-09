@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // OraclePin is one oracle test the finding ran against, pinned by symbol and
@@ -190,4 +192,33 @@ func shiftPos(pos string, delta int) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("%s:%d:%s", parts[0], line+delta, parts[2]), true
+}
+
+// Fresh reports whether a prior finding still covers the target at the
+// requested budget — the REQ-result-stale pin check as a query, computed
+// against the current tree without running anything. A caller reminding
+// about unhardened or stale-measured symbols asks this instead of
+// re-deriving pin arithmetic.
+func (t *Tree) Fresh(f Finding, tg Target, budget int) (bool, error) {
+	if f.Symbol != tg.Symbol {
+		return false, fmt.Errorf("gomutant: finding %s checked against target %s", f.Symbol, tg.Symbol)
+	}
+	toolchain, err := engine.Toolchain(t.dir)
+	if err != nil {
+		return false, err
+	}
+	bodyHash, err := t.eng.BodyHash(tg.Symbol)
+	if err != nil {
+		return false, err
+	}
+	oracle := t.resolveOracle(tg)
+	pins := make([]OraclePin, 0, len(oracle))
+	for _, o := range oracle {
+		oh, err := t.eng.BodyHash(o)
+		if err != nil {
+			return false, err
+		}
+		pins = append(pins, OraclePin{Symbol: o, Hash: oh})
+	}
+	return pinsMatch(f, bodyHash, pins, engine.OperatorSet, toolchain) && budgetCovers(f.Budget, budget), nil
 }
