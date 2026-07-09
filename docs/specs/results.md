@@ -12,10 +12,29 @@ detects that a target's body or an oracle test has changed.
 mutated symbol and pin the inputs that produced it — the symbol's body hash,
 the oracle as a set of test symbols each with its own body hash, the operator
 version, the mutant budget, and the identity of the toolchain that ran the
-mutants — carrying the mutant count, the kill count, and each survivor's
-position and operator. The oracle is pinned by content, not merely by name:
-strengthening a test moves its body hash, so a record cannot keep reporting a
-survivor a now-sharper test would kill.
+mutants — carrying the mutant count, the kill count, each survivor's position
+and operator, and the body's first-line anchor that positions are rebased
+against (REQ-attest-survivor). The oracle is pinned by content, not merely by
+name: strengthening a test moves its body hash, so a record cannot keep
+reporting a survivor a now-sharper test would kill. The toolchain identity
+carries the platform — version and GOOS/GOARCH — because the same body under
+the same oracle kills differently across toolchains and platforms, so records
+are per-platform by construction: a team spanning platforms regenerates from
+one designated platform rather than ping-ponging the store.
+
+**REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
+unrecognized field by discarding it rather than refusing the document. The
+tolerance is safe because its direction is anti-flattering: every open
+finding is a genuinely measured survivor, so a dropped field can re-stale
+the record (a missing pin no longer covers the request — REQ-result-stale)
+or widen the open set (a dropped disposition-bearing field puts attested
+survivors back among open findings), but can never serve a kill or an
+equivalence the inputs don't back. A wrongly widened open set costs a
+re-judgment or a spurious caller-policy failure — the safe direction —
+where a wrongly served claim would be the corrupted flattering measurement
+the keystone refuses (REQ-core-attributed-kills). Tolerance governs unknown
+*fields* within an understood document; an unknown document *version* is the
+structural boundary and is rejected per REQ-result-export's version tag.
 
 **REQ-result-stale** (behavior): gomutant MUST re-measure a target rather
 than serve a record whose pins no longer cover the request — an edit to the
@@ -41,7 +60,10 @@ its internal store.
 equivalent with a recorded reason, refused unless the named mutant is among
 the record's current survivors, and shed whenever any pin moves — every body,
 oracle, or operator version's equivalences are judged afresh, and a record's
-open findings are its survivors less its attested ones.
+open findings are its survivors less its attested ones. Positions are
+location metadata, rebased against the record's body-line anchor
+(REQ-result-record) when carried across regenerations: drift from edits
+outside the body never sheds a disposition.
 
 **REQ-result-findings** (behavior): gomutant MUST present survivors as
 findings awaiting disposition, never as a pass/fail verdict — strengthen a

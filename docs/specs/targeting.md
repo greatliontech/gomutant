@@ -46,6 +46,24 @@ a derived one — the tests of the symbol's own package — so a bare list of
 symbols, or whole-package discovery, is a usable run without a caller
 enumerating tests. An explicit oracle overrides the default.
 
+**REQ-target-changed** (behavior): Auto-discovery MUST offer a changed-scope
+mode that targets only the symbols whose bodies differ from a caller-named
+git ref — compared by canonical body hash per declaration, so a one-function
+edit in a thirty-function file yields one target, formatting churn yields
+none, a declaration absent at the ref (a new file or a new symbol) reads as
+changed, a symbol deleted since the ref yields no target (nothing remains to
+mutate), and an unparseable prior version conservatively reads as all
+changed. Test sources are oracles, never targets, and are excluded from the
+changed surface. The mode MUST also report the changed-but-untargeted
+residue with the engine-level reason each path yielded no target — a test
+file, a generated file, a non-Go or data-only file, a changed file declaring
+no function body, a file whose declared bodies are all canonically unchanged
+(formatting-only churn), or a file whose only change is a deleted symbol —
+so a caller layering its own classification (or a user deciding what to
+hand-mutate) sees the whole changed surface, never a silently narrowed one.
+This is what keeps an incremental run proportional to the edit rather than
+to the tree.
+
 **REQ-target-labels** (behavior): Labels MUST be carried from a target onto
 every finding it produces, unmodified and uninterpreted, so a finding can be
 grouped by a caller's own vocabulary. gomutant reads no meaning from a label;

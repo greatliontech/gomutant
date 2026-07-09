@@ -18,9 +18,9 @@ integer-literal increments; break/continue swaps; statement deletion —
 dropping an assignment's store while still evaluating its right-hand side, so
 removal-class mutants compile — and zero-value return substitution, each
 applied syntactically. A mutant that fails to compile, does not differ from
-the baseline, or renders identically to an earlier mutant is discarded, and a
-run that times out counts as killed. The set carries a version identifier so
-a finding records which operators generated it.
+the baseline, or renders identically to an earlier mutant is discarded (a
+timed-out run is a kill — REQ-exec-attribution). The set carries a version
+identifier so a finding records which operators generated it.
 
 **REQ-mut-budget** (behavior): A run MUST accept a per-symbol mutant budget,
 bounding how many mutants a target generates so an incremental run completes
@@ -33,4 +33,8 @@ generated.
 overlay that leaves the working tree untouched, compiling and running it in
 isolation — concurrent mutants share nothing but a content-addressed build
 cache, so a run neither corrupts the working copy nor lets one mutant's
-compilation perturb another's.
+compilation perturb another's. The purity extends to run time: a mutant run
+must not write into the tree through the tests it executes either — a
+property-test library that persists a failure reproducer on a mutant-induced
+failure is run with that persistence disabled, both to keep the tree clean
+and so one mutant's reproducer can never replay into the next mutant's run.
