@@ -213,3 +213,19 @@ func ParseStipulatorTargets(data []byte) ([]Target, error) {
 	}
 	return out, nil
 }
+
+// LoadTargets parses a targets document of any producer gomutant understands
+// (REQ-target-producers), sniffed by its version key: gomutant's own
+// document, or stipulator's targets export.
+func LoadTargets(data []byte) ([]Target, error) {
+	var probe struct {
+		Stipulator *int `json:"stipulatorTargets"`
+	}
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return nil, fmt.Errorf("gomutant: parse targets document: %w", err)
+	}
+	if probe.Stipulator != nil {
+		return ParseStipulatorTargets(data)
+	}
+	return ParseTargets(data)
+}

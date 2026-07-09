@@ -38,6 +38,21 @@ invalidates and serves the rest from the document. Open findings are
 survivors minus attested dispositions; whether they fail a build is the
 caller's policy, not gomutant's verdict.
 
+## MCP
+
+Agents drive gomutant over the Model Context Protocol — `gomutant mcp` serves
+stdio with the same operations as tools: `run`, `discover`, `findings`,
+`attest_survivor`, and `ephemeral`. The ephemeral tool takes a hand-crafted
+mutation as exact-match edits (state the change, not the file):
+
+```json
+{"file": "lib/parse.go",
+ "edits": [{"old": "return dec(v)", "new": "return dec(v[1:])"}],
+ "test_pkg": "example.com/lib", "run": "^TestParse$"}
+```
+
+An edit that matches nothing or ambiguously is refused, never guessed.
+
 ## Library
 
 The CLI is a thin shell over the root package:

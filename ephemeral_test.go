@@ -64,6 +64,19 @@ func TestEphemeral(t *testing.T) {
 		t.Fatalf("uncompilable replacement scored: %v", err)
 	}
 
+	// The edits form measures identically to the whole replacement
+	// (REQ-exec-ephemeral): state the change, not the file.
+	res, err = tr.EphemeralEdits(ctx, "lib/lib.go", []Edit{{Old: "return a + b", New: "return a + b + 1"}}, "example.com/fixture/lib", "^TestAdd$", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Killed || res.Killer != "example.com/fixture/lib.TestAdd" {
+		t.Fatalf("edits mutant = %+v, want killed by TestAdd", res)
+	}
+	if _, err := tr.EphemeralEdits(ctx, "lib/lib.go", []Edit{{Old: "no such text", New: "x"}}, "example.com/fixture/lib", "^TestAdd$", time.Minute); err == nil {
+		t.Fatal("zero-match edit scored")
+	}
+
 	// The tree was never touched.
 	after, err := os.ReadFile(libPath)
 	if err != nil {

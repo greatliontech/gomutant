@@ -29,10 +29,13 @@ finding, because a corrupted measurement read as a sound one inflates kills
 in the flattering direction.
 
 **REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant — a
-caller-supplied replacement of one source file, exercised through a build
+caller-supplied replacement of one source file, given whole or as exact-match
+edits applied to the file's current content, exercised through a build
 overlay against a named oracle test, the tree never touched — for the manual
 mutations the operator set cannot generate (generated-data drift, resolver
-seams, caller mappings). Before running the mutant it MUST probe the named
+seams, caller mappings). An edit that matches nothing, or matches more than
+once, is refused rather than guessed: a mutation applied somewhere the
+caller did not mean is a measurement of the wrong mutant. Before running the mutant it MUST probe the named
 test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
 and read as a fabricated kill — the flattering direction

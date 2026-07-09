@@ -3,9 +3,12 @@ package gomutant
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -221,4 +224,83 @@ func (t *Tree) Fresh(f Finding, tg Target, budget int) (bool, error) {
 		pins = append(pins, OraclePin{Symbol: o, Hash: oh})
 	}
 	return pinsMatch(f, bodyHash, pins, engine.OperatorSet, toolchain) && budgetCovers(f.Budget, budget), nil
+}
+
+// MergeFindings merges a run's findings over a prior document by symbol — a
+// measured or cached finding replaces its symbol's record, untouched symbols
+// persist, so a scoped run never drops the rest of the document
+// (REQ-result-export; skipped results are excluded by Export, the single
+// owner of that rule).
+func MergeFindings(prior, fresh []Finding) []Finding {
+	bySym := map[string]Finding{}
+	for _, f := range prior {
+		bySym[f.Symbol] = f
+	}
+	for _, f := range fresh {
+		// A skipped result measured nothing: it must never shadow a symbol's
+		// real record — Export's exclusion rule serializes nothing-measured,
+		// the merge's rule is that nothing-measured never overwrites
+		// something-measured.
+		if f.Skipped != "" {
+			continue
+		}
+		bySym[f.Symbol] = f
+	}
+	out := make([]Finding, 0, len(bySym))
+	for _, f := range bySym {
+		out = append(out, f)
+	}
+	return out
+}
+
+// UpdateDocument applies update to the findings document at path under an
+// exclusive lockfile, re-reading the document inside the lock so a
+// concurrent session's dispositions are never clobbered by a stale snapshot
+// (REQ-mcp-findings-doc): load-then-long-run-then-write is the caller's
+// shape, but the merge always runs against the freshest document. A missing
+// document reads as empty; a lock held elsewhere is retried briefly and then
+// surfaced with the lock path, so a crashed holder is operator-removable.
+func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)) error {
+	lock := path + ".lock"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	acquired := false
+	for range 50 {
+		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			f.Close()
+			acquired = true
+			break
+		}
+		if !os.IsExist(err) {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !acquired {
+		return fmt.Errorf("gomutant: findings document locked by another session; remove %s if its holder is gone", lock)
+	}
+	defer os.Remove(lock)
+
+	var prior []Finding
+	data, err := os.ReadFile(path)
+	switch {
+	case os.IsNotExist(err):
+	case err != nil:
+		return err
+	default:
+		if prior, err = ParseFindings(data); err != nil {
+			return err
+		}
+	}
+	next, err := update(prior)
+	if err != nil {
+		return err
+	}
+	doc, err := Export(next)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(doc, '\n'), 0o644)
 }
