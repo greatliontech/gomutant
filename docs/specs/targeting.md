@@ -42,9 +42,14 @@ the mutant never counts — the oracle scopes the measurement to the tests that
 claim to vouch for the symbol.
 
 **REQ-target-default** (behavior): A target given no oracle MUST fall back to
-a derived one — the tests of the symbol's own package — so a bare list of
-symbols, or whole-package discovery, is a usable run without a caller
-enumerating tests. An explicit oracle overrides the default.
+a derived one — the runnable tests of the symbol's own package: its Test
+functions and the seed-corpus runs of its Fuzz targets, both variants, and
+nothing an ordinary `go test` invocation would not execute (a helper whose
+name merely starts with Test, or the TestMain harness, can kill nothing, so
+admitting it would derive an oracle that executes nothing and every mutant
+would survive an empty run) — so a bare list of symbols, or whole-package
+discovery, is a usable run without a caller enumerating tests. An explicit
+oracle overrides the default.
 
 **REQ-target-changed** (behavior): Auto-discovery MUST offer a changed-scope
 mode that targets only the symbols whose bodies differ from a caller-named
@@ -58,7 +63,9 @@ changed surface. The mode MUST also report the changed-but-untargeted
 residue with the engine-level reason each path yielded no target — a test
 file, a generated file, a non-Go or data-only file, a changed file declaring
 no function body, a file whose declared bodies are all canonically unchanged
-(formatting-only churn), or a file whose only change is a deleted symbol —
+(formatting-only churn), a file whose only change is a deleted symbol, or a
+Go file the loaded packages do not cover (deleted, unparseable, or excluded
+by build constraints — an unbound surface named as such, never mislabeled) —
 so a caller layering its own classification (or a user deciding what to
 hand-mutate) sees the whole changed surface, never a silently narrowed one.
 This is what keeps an incremental run proportional to the edit rather than

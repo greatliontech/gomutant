@@ -27,3 +27,19 @@ func TestGuarded(t *testing.T) {
 		t.Fatal("broken")
 	}
 }
+
+// Testhelper is not a runnable test — the lowercase continuation and the
+// non-harness signature mean go test never runs it — so it must never enter
+// a derived oracle.
+func Testhelper(n int) int { return n }
+
+// FuzzAdd's seed corpus runs in an ordinary go test invocation, so it is
+// part of the package's derived oracle.
+func FuzzAdd(f *testing.F) {
+	f.Add(1, 2)
+	f.Fuzz(func(t *testing.T, a, b int) {
+		if Add(a, b) != Add(b, a) {
+			t.Fatal("Add not commutative")
+		}
+	})
+}

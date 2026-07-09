@@ -1,0 +1,214 @@
+package gomutant
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+const fixtureDir = "internal/engine/testdata/fixturemod"
+
+func fixtureTree(t *testing.T) *Tree {
+	t.Helper()
+	tr, err := Load(fixtureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tr
+}
+
+// TestDiscover pins whole-tree discovery (REQ-target-producers): every
+// non-test, non-generated function and method is a target with the default
+// oracle; test functions and generated symbols are not.
+func TestDiscover(t *testing.T) {
+	tr := fixtureTree(t)
+	targets := tr.Discover()
+	got := map[string]bool{}
+	for _, tg := range targets {
+		got[tg.Symbol] = true
+		if len(tg.Oracle) != 0 || len(tg.Labels) != 0 {
+			t.Fatalf("discovered target carries oracle/labels: %+v", tg)
+		}
+	}
+	for _, want := range []string{
+		"example.com/fixture/lib.Add",
+		"example.com/fixture/methods.Counter.Inc",
+		"example.com/fixture/methods.Box.Get",
+	} {
+		if !got[want] {
+			t.Errorf("discovery missed %s", want)
+		}
+	}
+	for _, absent := range []string{
+		"example.com/fixture/lib.TestAdd", // a test, never a target
+		"example.com/fixture/genp.G.M",    // generated
+	} {
+		if got[absent] {
+			t.Errorf("discovery targeted %s", absent)
+		}
+	}
+}
+
+// TestDiscoverChanged pins changed-scope discovery and the residue report
+// (REQ-target-changed): only changed bodies target; every changed-but-
+// untargeted path carries its engine-level reason.
+func TestDiscoverChanged(t *testing.T) {
+	tr := fixtureTree(t)
+	libSrc, err := os.ReadFile(filepath.Join(fixtureDir, "lib", "lib.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dotSrc, err := os.ReadFile(filepath.Join(fixtureDir, "dot", "dot.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := map[string][]byte{
+		// Add's body differed at the reference: only Add targets.
+		"lib/lib.go": []byte(strings.Replace(string(libSrc), "return a + b", "return a - b", 1)),
+		// Formatting-only churn: same canonical bodies.
+		"lib/opsites.go": mustRead(t, filepath.Join(fixtureDir, "lib", "opsites.go"), "\t", "    "),
+		// The reference had one more function than the working file: a
+		// deleted symbol, nothing left to mutate.
+		"dot/dot.go": append(append([]byte{}, dotSrc...), []byte("\nfunc Gone() int { return 9 }\n")...),
+		// A loaded Go file declaring no function body.
+		"lib/doc.go": nil,
+		// genp/gen.go and the test file: reference content irrelevant.
+		"genp/gen.go":     nil,
+		"lib/lib_test.go": nil,
+		"README.md":       nil,
+	}
+	paths := []string{"lib/lib.go", "lib/opsites.go", "genp/gen.go", "lib/lib_test.go", "README.md", "dot.x/dotx.go", "dot/dot.go", "lib/doc.go", "lib/removed.go"}
+	targets, residue := tr.DiscoverChanged(paths, func(p string) ([]byte, bool) {
+		b, ok := refs[p]
+		if p == "dot.x/dotx.go" {
+			return nil, false // absent at the reference: a new file, all changed
+		}
+		return b, ok && b != nil
+	})
+
+	syms := map[string]bool{}
+	for _, tg := range targets {
+		syms[tg.Symbol] = true
+	}
+	if !syms["example.com/fixture/lib.Add"] {
+		t.Errorf("changed body not targeted: %v", targets)
+	}
+	if syms["example.com/fixture/lib.Weak"] {
+		t.Error("unchanged body targeted")
+	}
+	if !syms["example.com/fixture/dot.x.F"] {
+		t.Error("new file's symbol not targeted")
+	}
+
+	reasons := map[string]string{}
+	for _, r := range residue {
+		reasons[r.Path] = r.Reason
+	}
+	for path, want := range map[string]string{
+		"lib/opsites.go":  "formatting-only churn",
+		"genp/gen.go":     "generated",
+		"lib/lib_test.go": "test file",
+		"README.md":       "not a Go source file",
+		"dot/dot.go":      "only deleted symbols",
+		"lib/doc.go":      "no function body declared",
+		"lib/removed.go":  "not in the loaded packages",
+	} {
+		if !strings.Contains(reasons[path], want) {
+			t.Errorf("residue[%s] = %q, want reason containing %q", path, reasons[path], want)
+		}
+	}
+	if _, ok := reasons["lib/lib.go"]; ok {
+		t.Error("a targeting file also reported as residue")
+	}
+}
+
+func mustRead(t *testing.T, path, old, new string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []byte(strings.ReplaceAll(string(b), old, new))
+}
+
+// TestParseTargets pins the config-file producer (REQ-target-producers):
+// one JSON document onto the same model, a symbol-less entry refused.
+func TestParseTargets(t *testing.T) {
+	doc := `{"targets": [
+		{"symbol": "example.com/p.F"},
+		{"symbol": "example.com/p.G", "oracle": ["example.com/p.TestG"], "labels": ["REQ-x"]}
+	]}`
+	targets, err := ParseTargets([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Target{
+		{Symbol: "example.com/p.F"},
+		{Symbol: "example.com/p.G", Oracle: []string{"example.com/p.TestG"}, Labels: []string{"REQ-x"}},
+	}
+	if !reflect.DeepEqual(targets, want) {
+		t.Fatalf("targets = %+v", targets)
+	}
+	if _, err := ParseTargets([]byte(`{"targets": [{"oracle": ["x"]}]}`)); err == nil {
+		t.Fatal("symbol-less target accepted")
+	}
+	if _, err := ParseTargets([]byte(`not json`)); err == nil {
+		t.Fatal("malformed document accepted")
+	}
+}
+
+// TestResolveOracle pins oracle resolution (REQ-target-oracle,
+// REQ-target-default): explicit oracles pass through untouched; an empty
+// oracle derives the tests of the symbol's own package, both variants.
+func TestResolveOracle(t *testing.T) {
+	tr := fixtureTree(t)
+	explicit := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/plain.TestPlain"}}
+	if got := tr.resolveOracle(explicit); !reflect.DeepEqual(got, explicit.Oracle) {
+		t.Fatalf("explicit oracle rewritten: %v", got)
+	}
+	got := tr.resolveOracle(Target{Symbol: "example.com/fixture/lib.Add"})
+	want := map[string]bool{
+		"example.com/fixture/lib.TestAdd": true, // in-package
+		"example.com/fixture/lib.TestExt": true, // external variant
+		"example.com/fixture/lib.FuzzAdd": true, // fuzz seed corpus runs in go test
+	}
+	found := 0
+	for _, sym := range got {
+		if want[sym] {
+			found++
+		}
+		// TestMain is the harness; Testhelper never runs (lowercase
+		// continuation, non-harness signature): neither can kill, so
+		// admitting either would derive an oracle that executes nothing.
+		if strings.Contains(sym, "TestMain") || strings.Contains(sym, "Testhelper") {
+			t.Fatalf("non-runnable %s in a derived oracle: %v", sym, got)
+		}
+	}
+	if found != len(want) {
+		t.Fatalf("derived oracle = %v, want all of %v", got, want)
+	}
+	// A Test-named function with a signature go test rejects can never run:
+	// the derived oracle stays empty rather than executing nothing.
+	if got := tr.resolveOracle(Target{Symbol: "example.com/fixture/badtest.B"}); len(got) != 0 {
+		t.Fatalf("malformed test signature entered a derived oracle: %v", got)
+	}
+}
+
+// TestPkgRuns pins per-package oracle scoping (REQ-exec-oracle-run): tests
+// group by package, each package running exactly its own oracle pattern.
+func TestPkgRuns(t *testing.T) {
+	runs := pkgRuns([]string{
+		"example.com/a.TestX",
+		"example.com/b.TestX",
+		"example.com/a.TestY",
+	})
+	want := []pkgRun{
+		{pkg: "example.com/a", runRegex: "^(TestX|TestY)$"},
+		{pkg: "example.com/b", runRegex: "^(TestX)$"},
+	}
+	if !reflect.DeepEqual(runs, want) {
+		t.Fatalf("pkgRuns = %+v, want %+v", runs, want)
+	}
+}
