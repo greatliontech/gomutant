@@ -168,6 +168,11 @@ func TestResolveOracle(t *testing.T) {
 	if got := tr.resolveOracle(explicit); !reflect.DeepEqual(got, explicit.Oracle) {
 		t.Fatalf("explicit oracle rewritten: %v", got)
 	}
+	// An explicitly empty oracle derives nothing: nothing vouches, so
+	// nothing is measured (REQ-target-default).
+	if got := tr.resolveOracle(Target{Symbol: "example.com/fixture/lib.Add", OracleExplicit: true}); len(got) != 0 {
+		t.Fatalf("explicitly empty oracle inherited a default: %v", got)
+	}
 	got := tr.resolveOracle(Target{Symbol: "example.com/fixture/lib.Add"})
 	want := map[string]bool{
 		"example.com/fixture/lib.TestAdd": true, // in-package

@@ -26,6 +26,11 @@ type Target struct {
 	Symbol string   `json:"symbol"`
 	Oracle []string `json:"oracle,omitempty"`
 	Labels []string `json:"labels,omitempty"`
+	// OracleExplicit marks the oracle as a producer's complete statement of
+	// who vouches — even when empty. An explicitly empty oracle derives
+	// nothing: the target reports as measurable by nothing rather than
+	// inheriting package tests it never claimed (REQ-target-default).
+	OracleExplicit bool `json:"oracleExplicit,omitempty"`
 }
 
 // Residue is one changed-but-untargeted path from changed-scope discovery,
@@ -130,7 +135,7 @@ func ParseTargets(data []byte) ([]Target, error) {
 // (REQ-target-oracle, REQ-target-default). A target whose effective oracle
 // is empty has nothing that can kill — the caller sees it and decides.
 func (t *Tree) resolveOracle(tg Target) []string {
-	if len(tg.Oracle) > 0 {
+	if len(tg.Oracle) > 0 || tg.OracleExplicit {
 		return tg.Oracle
 	}
 	pkg, _ := t.eng.PackageOf(tg.Symbol)
@@ -209,7 +214,12 @@ func ParseStipulatorTargets(data []byte) ([]Target, error) {
 		if t.Symbol == "" {
 			return nil, fmt.Errorf("gomutant: stipulator export entry with no symbol")
 		}
-		out = append(out, Target{Symbol: t.Symbol, Oracle: t.Witnesses, Labels: t.Requirements})
+		// The export is a complete statement of who vouches: an entry
+		// without witnesses is an explicitly empty oracle, never gomutant's
+		// package-test default — measuring a producer's unwitnessed symbol
+		// against tests it never bound would label findings with evidence
+		// the producer never claimed (REQ-target-default).
+		out = append(out, Target{Symbol: t.Symbol, Oracle: t.Witnesses, Labels: t.Requirements, OracleExplicit: true})
 	}
 	return out, nil
 }

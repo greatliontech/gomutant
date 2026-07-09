@@ -27,6 +27,11 @@ func TestParseStipulatorTargets(t *testing.T) {
 	if len(targets[1].Oracle) != 0 {
 		t.Fatalf("witness-less entry grew an oracle: %+v", targets[1])
 	}
+	// The export is a complete statement: a witness-less entry is an
+	// explicitly empty oracle, never the package-test default.
+	if !targets[0].OracleExplicit || !targets[1].OracleExplicit {
+		t.Fatalf("export oracles not explicit: %+v", targets)
+	}
 	if _, err := ParseStipulatorTargets([]byte(`{"stipulatorTargets": 2, "targets": []}`)); err == nil {
 		t.Fatal("unknown export version accepted")
 	}

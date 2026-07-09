@@ -49,7 +49,11 @@ name merely starts with Test, or the TestMain harness, can kill nothing, so
 admitting it would derive an oracle that executes nothing and every mutant
 would survive an empty run) — so a bare list of symbols, or whole-package
 discovery, is a usable run without a caller enumerating tests. An explicit
-oracle overrides the default.
+oracle overrides the default — including an explicitly *empty* one: a
+producer whose document is a complete statement of who vouches (stipulator's
+export) marks its oracles explicit, and an unwitnessed target then reports
+as measurable by nothing rather than inheriting package tests it never
+claimed, which would launder unbound kills into the producer's labels.
 
 **REQ-target-changed** (behavior): Auto-discovery MUST offer a changed-scope
 mode that targets only the symbols whose bodies differ from a caller-named
