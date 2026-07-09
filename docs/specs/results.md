@@ -13,7 +13,7 @@ mutated symbol and pin the inputs that produced it — the symbol's body hash,
 the oracle as a set of test symbols each with its own body hash, the operator
 version, the mutant budget, and the identity of the toolchain that ran the
 mutants — carrying the mutant count, the kill count, each survivor's position
-and operator, and the body's first-line anchor that positions are rebased
+and operator, and the declaration's first-line anchor that positions are rebased
 against (REQ-attest-survivor). The oracle is pinned by content, not merely by
 name: strengthening a test moves its body hash, so a record cannot keep
 reporting a survivor a now-sharper test would kill. The toolchain identity

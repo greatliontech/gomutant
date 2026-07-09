@@ -38,13 +38,17 @@ func Weak(x int) int {
 // logical operands, loops, and literals — one site per operator family.
 func Mixed(xs []int) int {
 	total := 0
+	count := 0
 	for _, x := range xs {
 		if x < 0 || x > 99 {
 			continue
 		}
+		if x > 1 && x < 50 {
+			count++
+		}
 		total += x * 2
 	}
-	total = total + 3
+	total = total + 3 + count
 	return total
 }
 
