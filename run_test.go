@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,10 @@ func TestRunEndToEnd(t *testing.T) {
 		{Symbol: "example.com/fixture/lib.I", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
 	}
 
-	first, err := tr.Run(ctx, targets, Options{})
+	var firstDecisions []RunDecision
+	first, err := tr.Run(ctx, targets, Options{Decision: func(decision RunDecision) {
+		firstDecisions = append(firstDecisions, decision)
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +53,9 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 	if iface.Skipped != "not a function" {
 		t.Fatalf("interface target = %+v, want skipped as not a function", iface)
+	}
+	if len(firstDecisions) != 3 || firstDecisions[0].Reason != "no-prior" || firstDecisions[1].Reason != "no-prior" || firstDecisions[2].Action != "skipped" || firstDecisions[2].Reason != "not a function" {
+		t.Fatalf("first decisions = %+v", firstDecisions)
 	}
 	if len(weak.Open()) != len(weak.Survivors) {
 		t.Fatalf("open != survivors before any attestation")
@@ -99,7 +106,10 @@ func TestRunEndToEnd(t *testing.T) {
 	for i := range tampered {
 		tampered[i].TargetEvidence.MaximalClosure = "not-the-current-closure"
 	}
-	moved, err := tr.Run(ctx, targets[:2], Options{Prior: tampered})
+	var movedDecisions []RunDecision
+	moved, err := tr.Run(ctx, targets[:2], Options{Prior: tampered, Decision: func(decision RunDecision) {
+		movedDecisions = append(movedDecisions, decision)
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +118,9 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 	if len(moved[1].Attested) != 0 {
 		t.Fatalf("attestation survived a pin move: %+v", moved[1].Attested)
+	}
+	if len(movedDecisions) != 2 || movedDecisions[0].Reason != "stale" || movedDecisions[1].Reason != "stale" {
+		t.Fatalf("moved decisions = %+v", movedDecisions)
 	}
 
 	// A capped prior finding never answers a larger request: budget 1 is
@@ -128,12 +141,18 @@ func TestRunEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wider, err := tr.Run(ctx, targets[:1], Options{Budget: 2, Prior: cappedPrior})
+	var widerDecisions []RunDecision
+	wider, err := tr.Run(ctx, targets[:1], Options{Budget: 2, Prior: cappedPrior, Decision: func(decision RunDecision) {
+		widerDecisions = append(widerDecisions, decision)
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if wider[0].Cached {
 		t.Fatal("a capped finding answered a larger budget request")
+	}
+	if len(widerDecisions) != 1 || widerDecisions[0].Reason != "budget" {
+		t.Fatalf("wider decisions = %+v", widerDecisions)
 	}
 	// And the same capped request is served from the capped record.
 	same, err := tr.Run(ctx, targets[:1], Options{Budget: 1, Prior: cappedPrior})
@@ -142,6 +161,56 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 	if !same[0].Cached {
 		t.Fatal("a covering capped finding was re-measured")
+	}
+}
+
+func TestSummarizeRun(t *testing.T) {
+	findings := []Finding{
+		{Symbol: "p.Measured", Mutants: 3, Killed: 2, Discarded: 1,
+			Survivors: []Survivor{{Position: "p.go:1:1", Operator: "x"}}},
+		{Symbol: "p.Cached", Cached: true, Mutants: 2, Killed: 1,
+			Survivors: []Survivor{{Position: "p.go:2:1", Operator: "x"}},
+			Attested:  []Attestation{{Position: "p.go:2:1", Operator: "x", Reason: "same"}}},
+		{Symbol: "p.Skipped", Skipped: "no oracle"},
+	}
+	want := RunSummary{Targets: 3, Measured: 1, Cached: 1, Skipped: 1, Generated: 6, Discarded: 1, Killed: 3, Survived: 2, Attested: 1, Open: 1}
+	if got := SummarizeRun(findings); got != want {
+		t.Fatalf("summary = %+v, want %+v", got, want)
+	}
+}
+
+func TestRunDecisionsAndCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
+	collect := func(ctx context.Context, opts Options) ([]Finding, []RunDecision, error) {
+		var decisions []RunDecision
+		opts.Decision = func(decision RunDecision) { decisions = append(decisions, decision) }
+		findings, err := tr.Run(ctx, []Target{target}, opts)
+		return findings, decisions, err
+	}
+	first, decisions, err := collect(context.Background(), Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (RunDecision{Symbol: target.Symbol, Action: "measure", Reason: "no-prior", Mutants: 1}); len(decisions) != 1 || decisions[0] != want {
+		t.Fatalf("first decisions = %+v, want %+v", decisions, want)
+	}
+	_, decisions, err = collect(context.Background(), Options{Budget: 1, Prior: first})
+	if err != nil || len(decisions) != 1 || decisions[0].Action != "cached" {
+		t.Fatalf("cached decisions = %+v, %v", decisions, err)
+	}
+	_, decisions, err = collect(context.Background(), Options{Budget: 1, Prior: first, Force: true})
+	if err != nil || len(decisions) != 1 || decisions[0].Reason != "forced" {
+		t.Fatalf("forced decisions = %+v, %v", decisions, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	findings, decisions, err := collect(ctx, Options{Budget: 1})
+	if !errors.Is(err, context.Canceled) || findings != nil || len(decisions) != 0 {
+		t.Fatalf("cancelled run = findings %+v, decisions %+v, error %v", findings, decisions, err)
 	}
 }
 

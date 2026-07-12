@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,15 +62,28 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if err := os.WriteFile(targetsPath, []byte(`{"targets":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runCommand(runOptions{dir: dir, findingsFile: defaultFindings, targetsFile: targetsPath}); err != nil {
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, targetsFile: targetsPath}); err != nil {
 		t.Fatal(err)
 	}
 	retained, err := loadFindings(path)
 	if err != nil || len(retained) != 1 {
 		t.Fatalf("scoped zero-target run pruned findings: %+v, %v", retained, err)
 	}
-	if err := runCommand(runOptions{dir: dir, findingsFile: defaultFindings}); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := runCommand(ctx, runOptions{dir: dir, findingsFile: defaultFindings}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled empty whole-tree run = %v", err)
+	}
+	retained, err = loadFindings(path)
+	if err != nil || len(retained) != 1 {
+		t.Fatalf("cancelled empty whole-tree run changed findings: %+v, %v", retained, err)
+	}
+	var output bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, output: &output}); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "no targets\nsummary   0 targets: 0 measured, 0 cached, 0 skipped; 0 generated, 0 killed, 0 survived, 0 discarded; 0 attested, 0 open\n") {
+		t.Fatalf("empty whole-tree output = %q", output.String())
 	}
 	got, err := loadFindings(path)
 	if err != nil || len(got) != 0 {
@@ -147,5 +162,50 @@ func TestCobraCommandTree(t *testing.T) {
 	}
 	if err := Execute([]string{"run", "-budget", "1"}); err == nil || !strings.Contains(err.Error(), "unknown shorthand") {
 		t.Fatalf("single-dash long flag accepted: %v", err)
+	}
+}
+
+func TestRenderRunStatus(t *testing.T) {
+	var output bytes.Buffer
+	renderRunDecision(&output, gomutant.RunDecision{Symbol: "p.F", Action: "measure", Reason: "forced", Mutants: 3})
+	renderRunDecision(&output, gomutant.RunDecision{Symbol: "p.G", Action: "cached"})
+	renderRunSummary(&output, gomutant.RunSummary{Targets: 2, Measured: 1, Cached: 1, Generated: 3, Killed: 2, Survived: 1, Attested: 1, Open: 0})
+	want := "measure   p.F  3 mutants (forced)\n" +
+		"cached    p.G\n" +
+		"summary   2 targets: 1 measured, 1 cached, 0 skipped; 3 generated, 2 killed, 1 survived, 0 discarded; 1 attested, 0 open\n"
+	if output.String() != want {
+		t.Fatalf("run status = %q, want %q", output.String(), want)
+	}
+}
+
+func TestRunCommandCancellationLeavesFindingsUntouched(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":         "module example.com/cancel\n\ngo 1.26.5\n",
+		"cancel.go":      "package cancel\nfunc Value() int { return 1 }\n",
+		"cancel_test.go": "package cancel\nimport \"testing\"\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fail() } }\n",
+		"targets.json":   `{"targets":[{"symbol":"example.com/cancel.Value","oracle":["example.com/cancel.TestValue"]}]}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	document, err := gomutant.Export(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(dir, "findings.json")
+	if err := os.WriteFile(docPath, document, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = runCommand(ctx, runOptions{dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: docPath, budget: 1})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled command = %v", err)
+	}
+	got, err := os.ReadFile(docPath)
+	if err != nil || !bytes.Equal(got, document) {
+		t.Fatalf("findings changed on cancellation: %v\n%s", err, got)
 	}
 }

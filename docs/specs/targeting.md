@@ -95,3 +95,14 @@ labels, and changed-scope residue with reasons. Duplicate symbols and invalid
 or ambiguous oracles are refused exactly as a run refuses them. Human and
 machine-readable CLI views and MCP discovery derive from the same target
 descriptions, so inspection cannot disagree with execution.
+
+**REQ-target-filtering** (behavior): Run and target inspection MUST accept
+repeatable package and symbol filters over every target producer. Filters use
+the complete-input pattern language of `github.com/greatliontech/glob`:
+package patterns match the target's Go import path and symbol patterns match
+its fully qualified symbol. A target matches when it matches at least one
+pattern of each supplied kind; omitting a kind imposes no constraint. An
+invalid pattern or a supplied filter set selecting no targets is refused
+rather than treated as a successful empty run. Filtering is scoped: it says
+which existing targets to inspect or measure, never that unselected symbols
+ceased to exist.

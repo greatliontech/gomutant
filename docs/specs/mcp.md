@@ -13,6 +13,9 @@ optional opaque-label filtering, dispositioning a survivor, and running an ephem
 a thin shell over the same library. The server is the primary face: the CLI
 is a subset over the same library, so nothing either face does bypasses the
 engine's rules — but a tool may exist server-side first.
+Run and discovery tools expose the same package and symbol filters as the
+library (REQ-target-filtering); run results expose the same ordered target
+decisions and aggregate summary as the CLI (REQ-exec-run-status).
 
 **REQ-mcp-findings-doc** (behavior): The server MUST maintain the same
 findings document the CLI maintains — a measuring tool merges fresh findings

@@ -93,6 +93,8 @@ contains no targets, because such records can never be measured again and
 presenting their survivors as open would mislead callers. Changed-scope and
 explicit-target runs retain every unmeasured document entry: their target sets
 assert only what to measure, never that an omitted symbol no longer exists.
+Package- or symbol-filtered runs are likewise scoped and retain every
+unmeasured entry, even when their targets came from whole-tree discovery.
 
 **REQ-result-inspection** (behavior): Findings inspection MUST classify every
 record as `current` when all recorded mutation-domain and subject evidence

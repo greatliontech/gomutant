@@ -81,3 +81,21 @@ flaky oracle yields flaky kills, which is itself a finding about the tests.
 gomutant does not promise identical survivors across runs — it promises that
 an outcome it cannot attribute is refused (REQ-exec-attribution), so noise
 aborts rather than scoring.
+
+**REQ-exec-run-status** (behavior): Before executing mutants, a run MUST report
+one target decision in target order: `cached` when reusable prior evidence is
+served, `skipped` with the skip reason when no measurement can run, or
+`measure` with the generated mutant count and one reason from `no-prior`,
+`forced`, `budget`, or `stale`. Forced is reported when force overrides an
+existing record; budget when the requested budget exceeds that record's
+coverage; stale when another reuse pin fails. Concurrent worker completion
+order never changes these decisions or the final per-target and aggregate
+summary. CLI progress renders the ordered decisions before mutant execution;
+CLI and MCP final results expose the same decisions and totals. Open survivors
+remain advisory and do not change successful exit semantics.
+
+**REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
+caller-context cancellation MUST cancel in-flight oracle processes, wait for
+their cleanup, return an operational cancellation error, and leave the
+findings document unchanged. A cancelled run never reports or persists a
+partial measurement.

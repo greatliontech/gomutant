@@ -119,6 +119,15 @@ func (t *Tree) splitSymbol(symbol string) (string, string) {
 	return best, strings.TrimPrefix(symbol, best+".")
 }
 
+// PackagePath returns the loaded Go import path that owns symbol.
+func (t *Tree) PackagePath(symbol string) (string, error) {
+	pkgPath, _ := t.splitSymbol(symbol)
+	if pkgPath == "" {
+		return "", fmt.Errorf("symbol %s: no loaded package matches its import path", symbol)
+	}
+	return pkgPath, nil
+}
+
 // lookup finds a package-scope object, or a method through its receiver type
 // name.
 func lookup(pkg *types.Package, parts []string) types.Object {

@@ -39,3 +39,18 @@ func TestDiscoverTargetsLoadsExplicitDocument(t *testing.T) {
 		t.Fatal("targets and changed accepted together")
 	}
 }
+
+func TestDiscoverTargetsFiltersEveryProducer(t *testing.T) {
+	view, err := discoverTargets(discoverOptions{
+		dir: fixtureDir, packages: []string{"example.com/fixture/methods"}, symbols: []string{"example.com/fixture/methods.Counter.*"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Targets) != 2 || view.Targets[0].Symbol != "example.com/fixture/methods.Counter.Inc" || view.Targets[1].Symbol != "example.com/fixture/methods.Counter.Value" {
+		t.Fatalf("filtered discovery = %+v", view.Targets)
+	}
+	if _, err := discoverTargets(discoverOptions{dir: fixtureDir, symbols: []string{"example.com/fixture/lib.Absent"}}); err == nil {
+		t.Fatal("empty filtered discovery succeeded")
+	}
+}

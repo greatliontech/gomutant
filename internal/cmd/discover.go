@@ -13,6 +13,7 @@ import (
 
 type discoverOptions struct {
 	dir, changed, targetsFile string
+	packages, symbols         []string
 	json                      bool
 }
 
@@ -31,6 +32,8 @@ func newDiscoverCommand() *cobra.Command {
 	f.StringVar(&o.changed, "changed", "", "inspect symbols whose bodies differ from this git ref")
 	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery")
 	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable targets")
+	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
+	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
 	return cmd
 }
 
@@ -94,6 +97,10 @@ func discoverTargets(o discoverOptions) (discoveryView, error) {
 		targets, view.Residue = tree.DiscoverChanged(paths, func(p string) ([]byte, bool) {
 			return gitref.Show(o.dir, o.changed, p)
 		})
+	}
+	targets, err = tree.FilterTargets(targets, o.packages, o.symbols)
+	if err != nil {
+		return view, err
 	}
 	view.Targets, err = tree.DescribeTargets(targets)
 	return view, err

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -208,7 +207,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		args = append(args, "-test.testlogfile="+testlog)
 		baseArgs = append(baseArgs, "-test.testlogfile="+baseTestlog)
 	}
-	cmd := exec.CommandContext(runCtx, "go", args...)
+	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
@@ -264,7 +263,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	if pkg := failedPackage(stdout.Bytes()); pkg != "" {
 		baseCtx, baseCancel := context.WithTimeout(parent, timeout)
 		defer baseCancel()
-		base := exec.CommandContext(baseCtx, "go", baseArgs...)
+		base := commandContext(baseCtx, "go", baseArgs...)
 		base.Dir = dir
 		base.Env = env
 		baseErr := base.Run()
@@ -380,7 +379,7 @@ func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Du
 	// fails on the clean baseline would otherwise write a reproducer into
 	// the tree, the very invariant the runner protects (REQ-mut-overlay).
 	args := append([]string{"test", "-json", "-count=1", "-run", run, testPkg}, binFlags...)
-	cmd := exec.CommandContext(ctx2, "go", args...)
+	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir
 	cmd.Env = env
 	var buf bytes.Buffer
@@ -389,6 +388,9 @@ func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Du
 	runErr := cmd.Run()
 	if ctx2.Err() == context.DeadlineExceeded {
 		return 0, false, fmt.Errorf("baseline test timed out")
+	}
+	if err := ctx2.Err(); err != nil {
+		return 0, false, err
 	}
 	if strings.Contains(buf.String(), "[build failed]") {
 		return 0, false, fmt.Errorf("baseline test failed to build")

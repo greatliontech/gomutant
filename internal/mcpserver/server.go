@@ -98,14 +98,16 @@ func (s *Server) loadFindings(override string) ([]gomutant.Finding, error) {
 }
 
 type runIn struct {
-	TargetsPath string `json:"targets_path,omitempty" jsonschema:"path to a targets document (gomutant's format or stipulator's export); overrides discovery"`
-	TargetsJSON string `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
-	Changed     string `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
-	Budget      int    `json:"budget,omitempty" jsonschema:"mutants per symbol; 0 means exhaustive"`
-	TimeoutSec  int    `json:"timeout_sec,omitempty" jsonschema:"one mutant's oracle-run budget in seconds; 0 means 60"`
-	Jobs        int    `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
-	Force       bool   `json:"force,omitempty" jsonschema:"re-measure targets whose prior finding still covers"`
-	Findings    string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
+	TargetsPath string   `json:"targets_path,omitempty" jsonschema:"path to a targets document (gomutant's format or stipulator's export); overrides discovery"`
+	TargetsJSON string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
+	Changed     string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
+	Budget      int      `json:"budget,omitempty" jsonschema:"mutants per symbol; 0 means exhaustive"`
+	TimeoutSec  int      `json:"timeout_sec,omitempty" jsonschema:"one mutant's oracle-run budget in seconds; 0 means 60"`
+	Jobs        int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
+	Force       bool     `json:"force,omitempty" jsonschema:"re-measure targets whose prior finding still covers"`
+	Findings    string   `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
+	Packages    []string `json:"packages,omitempty" jsonschema:"package import-path glob filters; alternatives"`
+	Symbols     []string `json:"symbols,omitempty" jsonschema:"fully qualified symbol glob filters; alternatives"`
 }
 
 type findingOut struct {
@@ -122,9 +124,11 @@ type findingOut struct {
 }
 
 type runOut struct {
-	Findings []findingOut       `json:"findings"`
-	Residue  []gomutant.Residue `json:"residue,omitempty"`
-	Document string             `json:"document"`
+	Findings  []findingOut           `json:"findings"`
+	Residue   []gomutant.Residue     `json:"residue,omitempty"`
+	Decisions []gomutant.RunDecision `json:"decisions"`
+	Summary   gomutant.RunSummary    `json:"summary"`
+	Document  string                 `json:"document"`
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (*mcp.CallToolResult, runOut, error) {
@@ -165,7 +169,17 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		targets = tree.Discover()
 		wholeTree = true
 	}
+	targets, err = tree.FilterTargets(targets, in.Packages, in.Symbols)
+	if err != nil {
+		return nil, out, err
+	}
+	if len(in.Packages) != 0 || len(in.Symbols) != 0 {
+		wholeTree = false
+	}
 	if len(targets) == 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, out, err
+		}
 		out.Document = s.findingsPath(in.Findings)
 		if wholeTree {
 			err := gomutant.UpdateDocument(out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
@@ -182,15 +196,17 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return nil, out, err
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
-		Budget:  in.Budget,
-		Timeout: time.Duration(in.TimeoutSec) * time.Second,
-		Jobs:    in.Jobs,
-		Force:   in.Force,
-		Prior:   prior,
+		Budget:   in.Budget,
+		Timeout:  time.Duration(in.TimeoutSec) * time.Second,
+		Jobs:     in.Jobs,
+		Force:    in.Force,
+		Prior:    prior,
+		Decision: func(decision gomutant.RunDecision) { out.Decisions = append(out.Decisions, decision) },
 	})
 	if err != nil {
 		return nil, out, err
 	}
+	out.Summary = gomutant.SummarizeRun(findings)
 	for _, f := range findings {
 		out.Findings = append(out.Findings, findingOut{
 			Symbol: f.Symbol, Labels: f.Labels,
@@ -213,9 +229,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 }
 
 type discoverIn struct {
-	TargetsPath string `json:"targets_path,omitempty" jsonschema:"path to a targets document; overrides discovery"`
-	TargetsJSON string `json:"targets_json,omitempty" jsonschema:"inline targets document; overrides discovery"`
-	Changed     string `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
+	TargetsPath string   `json:"targets_path,omitempty" jsonschema:"path to a targets document; overrides discovery"`
+	TargetsJSON string   `json:"targets_json,omitempty" jsonschema:"inline targets document; overrides discovery"`
+	Changed     string   `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
+	Packages    []string `json:"packages,omitempty" jsonschema:"package import-path glob filters; alternatives"`
+	Symbols     []string `json:"symbols,omitempty" jsonschema:"fully qualified symbol glob filters; alternatives"`
 }
 
 type discoverOut struct {
@@ -271,6 +289,10 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 		})
 	default:
 		targets = tree.Discover()
+	}
+	targets, err = tree.FilterTargets(targets, in.Packages, in.Symbols)
+	if err != nil {
+		return nil, out, err
 	}
 	out.Targets, err = tree.DescribeTargets(targets)
 	if err != nil {

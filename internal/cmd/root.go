@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -11,9 +12,14 @@ const defaultFindings = ".gomutant/findings.json"
 
 // Execute runs the gomutant command tree with args.
 func Execute(args []string) error {
+	return ExecuteContext(context.Background(), args)
+}
+
+// ExecuteContext runs the gomutant command tree with args and cancellation.
+func ExecuteContext(ctx context.Context, args []string) error {
 	cmd := newRootCommand()
 	cmd.SetArgs(args)
-	return cmd.Execute()
+	return cmd.ExecuteContext(ctx)
 }
 
 func newRootCommand() *cobra.Command {

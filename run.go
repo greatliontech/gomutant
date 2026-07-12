@@ -31,6 +31,53 @@ type Options struct {
 	// Prior findings (a parsed document): a target whose pins all hold is
 	// served from here instead of re-measured (REQ-result-stale).
 	Prior []Finding
+	// Decision receives each target's deterministic pre-execution disposition
+	// in target order (REQ-exec-run-status).
+	Decision func(RunDecision)
+}
+
+// RunDecision explains whether one target is cached, skipped, or measured.
+type RunDecision struct {
+	Symbol  string `json:"symbol"`
+	Action  string `json:"action"`
+	Reason  string `json:"reason,omitempty"`
+	Mutants int    `json:"mutants,omitempty"`
+}
+
+// RunSummary is the aggregate final disposition of one selected target set.
+type RunSummary struct {
+	Targets   int `json:"targets"`
+	Measured  int `json:"measured"`
+	Cached    int `json:"cached"`
+	Skipped   int `json:"skipped"`
+	Generated int `json:"generated"`
+	Discarded int `json:"discarded"`
+	Killed    int `json:"killed"`
+	Survived  int `json:"survived"`
+	Attested  int `json:"attested"`
+	Open      int `json:"open"`
+}
+
+// SummarizeRun derives deterministic aggregate totals from findings.
+func SummarizeRun(findings []Finding) RunSummary {
+	summary := RunSummary{Targets: len(findings)}
+	for _, finding := range findings {
+		switch {
+		case finding.Skipped != "":
+			summary.Skipped++
+		case finding.Cached:
+			summary.Cached++
+		default:
+			summary.Measured++
+		}
+		summary.Generated += finding.Mutants + finding.Discarded
+		summary.Discarded += finding.Discarded
+		summary.Killed += finding.Killed
+		summary.Survived += finding.Mutants - finding.Killed
+		summary.Attested += len(finding.Attested)
+		summary.Open += len(finding.Open())
+	}
+	return summary
 }
 
 // group is one test-binary invocation: a package, its oracle's -run
@@ -49,6 +96,9 @@ type group struct {
 // cannot attribute an outcome aborts without findings
 // (REQ-core-attributed-kills).
 func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Finding, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if opts.Budget < 0 {
 		return nil, fmt.Errorf("gomutant: budget must be non-negative")
 	}
@@ -94,7 +144,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 
 	findings := make([]Finding, len(targets))
 	var pending []work
+	decisions := make([]RunDecision, len(targets))
 	for i, tg := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		f := &findings[i]
 		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, Timeout: opts.Timeout.String()}
 		oracle := t.resolveOracle(tg)
@@ -102,6 +156,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// Nothing can kill: the caller sees it and decides
 			// (REQ-target-default).
 			f.Skipped = "no oracle"
+			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
 			continue
 		}
 		if err := t.eng.ValidateOracle(oracle); err != nil {
@@ -112,6 +167,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// A type or variable target is a legitimate reference with no
 			// body to mutate: reported, never fatal, never silently dropped.
 			f.Skipped = "not a function"
+			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
 			continue
 		}
 		if err != nil {
@@ -131,7 +187,19 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			oracleViews = append(oracleViews, view)
 		}
 
-		if rec, ok := prior[tg.Symbol]; ok && !opts.Force && budgetCovers(rec.Budget, opts.Budget) {
+		rec, hasPrior := prior[tg.Symbol]
+		reason := "no-prior"
+		if hasPrior {
+			switch {
+			case opts.Force:
+				reason = "forced"
+			case !budgetCovers(rec.Budget, opts.Budget):
+				reason = "budget"
+			default:
+				reason = "stale"
+			}
+		}
+		if hasPrior && !opts.Force && budgetCovers(rec.Budget, opts.Budget) {
 			matches, err := evidenceSetMatches(*rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.Timeout.String())
 			if err != nil {
 				return nil, err
@@ -141,6 +209,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				cached.Labels = append([]string(nil), tg.Labels...)
 				cached.Cached = true
 				findings[i] = cached
+				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached"}
 				continue
 			}
 		}
@@ -149,6 +218,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err != nil {
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
+		decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Mutants: len(mutants)}
 		f.Budget = opts.Budget
 		if opts.Budget > 0 && len(mutants) < opts.Budget {
 			// The cap did not bind: the run is exhaustive, and the finding
@@ -185,6 +255,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			oracleSet[o] = true
 		}
 		pending = append(pending, work{target: i, mutants: mutants, groups: groups, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews})
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if opts.Decision != nil {
+		for _, decision := range decisions {
+			opts.Decision(decision)
+		}
 	}
 
 	// Phase two: the pool. Outcomes land in a preallocated matrix so

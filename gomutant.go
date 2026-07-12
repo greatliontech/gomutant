@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/greatliontech/glob"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -33,6 +34,66 @@ type Target struct {
 	// nothing: the target reports as measurable by nothing rather than
 	// inheriting package tests it never claimed (REQ-target-default).
 	OracleExplicit bool `json:"oracleExplicit,omitempty"`
+}
+
+// FilterTargets selects targets by package import path and fully qualified
+// symbol using complete-input glob patterns (REQ-target-filtering). Patterns
+// within one kind are alternatives; package and symbol filters both constrain
+// the result when supplied.
+func (t *Tree) FilterTargets(targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
+	compile := func(kind string, sources []string) ([]*glob.Pattern, error) {
+		patterns := make([]*glob.Pattern, 0, len(sources))
+		for _, source := range sources {
+			pattern, err := glob.Compile(source)
+			if err != nil {
+				return nil, fmt.Errorf("gomutant: invalid %s filter %q: %w", kind, source, err)
+			}
+			patterns = append(patterns, pattern)
+		}
+		return patterns, nil
+	}
+	packages, err := compile("package", packagePatterns)
+	if err != nil {
+		return nil, err
+	}
+	symbols, err := compile("symbol", symbolPatterns)
+	if err != nil {
+		return nil, err
+	}
+	if len(packages) == 0 && len(symbols) == 0 {
+		return append([]Target(nil), targets...), nil
+	}
+	matches := func(patterns []*glob.Pattern, value string) bool {
+		if len(patterns) == 0 {
+			return true
+		}
+		for _, pattern := range patterns {
+			if pattern.Match(value) {
+				return true
+			}
+		}
+		return false
+	}
+	selected := make([]Target, 0, len(targets))
+	for _, target := range targets {
+		if !matches(symbols, target.Symbol) {
+			continue
+		}
+		if len(packages) != 0 {
+			pkgPath, err := t.eng.PackagePath(target.Symbol)
+			if err != nil {
+				return nil, err
+			}
+			if !matches(packages, pkgPath) {
+				continue
+			}
+		}
+		selected = append(selected, target)
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("gomutant: target filters matched no targets")
+	}
+	return selected, nil
 }
 
 // TargetDescription is one target with the effective oracle a run would use.

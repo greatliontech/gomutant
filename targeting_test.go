@@ -51,6 +51,63 @@ func TestDiscover(t *testing.T) {
 	}
 }
 
+func TestFilterTargets(t *testing.T) {
+	tr := fixtureTree(t)
+	targets := tr.Discover()
+	selected, err := tr.FilterTargets(targets,
+		[]string{"example.com/fixture/{lib,dot.x}"},
+		[]string{"{example.com/fixture/lib.Add,example.com/fixture/dot.x.F}"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(selected))
+	for _, target := range selected {
+		got = append(got, target.Symbol)
+	}
+	want := []string{"example.com/fixture/dot.x.F", "example.com/fixture/lib.Add"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filtered targets = %v, want %v", got, want)
+	}
+	if _, err := tr.FilterTargets(targets, []string{"["}, nil); err == nil || !strings.Contains(err.Error(), "invalid package filter") {
+		t.Fatalf("invalid filter = %v", err)
+	}
+	if _, err := tr.FilterTargets(targets, nil, []string{"["}); err == nil || !strings.Contains(err.Error(), "invalid symbol filter") {
+		t.Fatalf("invalid symbol filter = %v", err)
+	}
+	symbolOnly, err := tr.FilterTargets(targets, nil, []string{"example.com/fixture/lib.Add"})
+	if err != nil || len(symbolOnly) != 1 || symbolOnly[0].Symbol != "example.com/fixture/lib.Add" {
+		t.Fatalf("symbol-only selection = %+v, %v", symbolOnly, err)
+	}
+	packageOnly, err := tr.FilterTargets([]Target{
+		{Symbol: "example.com/fixture/lib.Add"},
+		{Symbol: "example.com/fixture/methods.Counter.Inc"},
+		{Symbol: "example.com/fixture/lib.Weak"},
+	}, []string{"example.com/fixture/lib"}, nil)
+	if err != nil || len(packageOnly) != 2 || packageOnly[0].Symbol != "example.com/fixture/lib.Add" || packageOnly[1].Symbol != "example.com/fixture/lib.Weak" {
+		t.Fatalf("package-only selection = %+v, %v", packageOnly, err)
+	}
+	invalid := []Target{{Symbol: "not/a/loaded.Symbol"}, {Symbol: "example.com/fixture/lib.Add"}}
+	selected, err = tr.FilterTargets(invalid, nil, []string{"example.com/fixture/lib.Add"})
+	if err != nil || len(selected) != 1 || selected[0].Symbol != "example.com/fixture/lib.Add" {
+		t.Fatalf("excluded invalid target = %+v, %v", selected, err)
+	}
+	if _, err := tr.FilterTargets(invalid[:1], []string{"**"}, nil); err == nil || !strings.Contains(err.Error(), "no loaded package") {
+		t.Fatalf("selected invalid target = %v", err)
+	}
+	if _, err := tr.FilterTargets(targets, nil, []string{"example.com/fixture/lib.Absent"}); err == nil || !strings.Contains(err.Error(), "matched no targets") {
+		t.Fatalf("empty selection = %v", err)
+	}
+	copy, err := tr.FilterTargets(targets, nil, nil)
+	if err != nil || !reflect.DeepEqual(copy, targets) {
+		t.Fatalf("unfiltered copy = %v, %v", copy, err)
+	}
+	copy[0].Symbol = "changed"
+	if targets[0].Symbol == "changed" {
+		t.Fatal("unfiltered selection aliases the target slice")
+	}
+}
+
 // TestDiscoverChanged pins changed-scope discovery and the residue report
 // (REQ-target-changed): only changed bodies target; every changed-but-
 // untargeted path carries its engine-level reason.

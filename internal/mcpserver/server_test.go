@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +53,15 @@ func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	retained, err := s.loadFindings("")
 	if err != nil || len(retained) != 1 {
 		t.Fatalf("scoped zero-target run pruned findings: %+v, %v", retained, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := s.toolRun(ctx, nil, runIn{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled empty whole-tree run = %v", err)
+	}
+	retained, err = s.loadFindings("")
+	if err != nil || len(retained) != 1 {
+		t.Fatalf("cancelled empty whole-tree run changed findings: %+v, %v", retained, err)
 	}
 	if _, _, err := s.toolRun(context.Background(), nil, runIn{}); err != nil {
 		t.Fatal(err)
@@ -116,6 +126,9 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if len(out.Findings[0].Operators) == 0 {
 		t.Fatal("run omitted operator summaries")
 	}
+	if len(out.Decisions) != 1 || out.Decisions[0].Action != "measure" || out.Summary.Measured != 1 || out.Summary.Targets != 1 {
+		t.Fatalf("run status = decisions %+v, summary %+v", out.Decisions, out.Summary)
+	}
 	if _, err := os.Stat(filepath.Join(s.dir, defaultFindings)); err != nil {
 		t.Fatalf("findings document not written: %v", err)
 	}
@@ -155,6 +168,9 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if !out2.Findings[0].Cached || out2.Findings[0].Attested != 1 {
 		t.Fatalf("rerun = %+v, want cached with the disposition intact", out2.Findings[0])
 	}
+	if len(out2.Decisions) != 1 || out2.Decisions[0].Action != "cached" || out2.Summary.Cached != 1 {
+		t.Fatalf("cached run status = decisions %+v, summary %+v", out2.Decisions, out2.Summary)
+	}
 
 	// A scoped run of a different symbol never drops the rest of the
 	// document (REQ-mcp-findings-doc).
@@ -173,6 +189,20 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 	if !syms["example.com/fixture/lib.Weak"] || !syms["example.com/fixture/lib.Add"] {
 		t.Fatalf("scoped run dropped document entries: %v", syms)
+	}
+	if _, _, err := s.toolRun(ctx, nil, runIn{Symbols: []string{"example.com/fixture/lib.Add"}, Budget: 1}); err != nil {
+		t.Fatal(err)
+	}
+	all, err = s.loadFindings("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syms = map[string]bool{}
+	for _, finding := range all {
+		syms[finding.Symbol] = true
+	}
+	if !syms["example.com/fixture/lib.Weak"] || !syms["example.com/fixture/lib.Add"] {
+		t.Fatalf("filtered whole-tree run dropped document entries: %v", syms)
 	}
 }
 
@@ -263,6 +293,12 @@ func TestToolDiscover(t *testing.T) {
 	}
 	if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"targets":[]}`, Changed: "HEAD"}); err == nil {
 		t.Fatal("multiple discovery forms accepted")
+	}
+	_, filtered, err := s.toolDiscover(context.Background(), nil, discoverIn{
+		Packages: []string{"example.com/fixture/methods"}, Symbols: []string{"example.com/fixture/methods.Counter.*"},
+	})
+	if err != nil || len(filtered.Targets) != 2 || filtered.Targets[0].Symbol != "example.com/fixture/methods.Counter.Inc" || filtered.Targets[1].Symbol != "example.com/fixture/methods.Counter.Value" {
+		t.Fatalf("filtered discovery = %+v, %v", filtered, err)
 	}
 }
 

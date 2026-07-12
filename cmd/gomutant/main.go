@@ -3,14 +3,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	internalcmd "github.com/greatliontech/gomutant/internal/cmd"
 )
 
 func main() {
-	if err := internalcmd.Execute(os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := internalcmd.ExecuteContext(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "gomutant:", err)
 		os.Exit(1)
 	}

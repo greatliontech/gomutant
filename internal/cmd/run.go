@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -13,15 +14,17 @@ import (
 
 type runOptions struct {
 	dir, changed, targetsFile, findingsFile string
+	packages, symbols                       []string
 	budget, jobs                            int
 	timeout                                 time.Duration
 	force                                   bool
+	output                                  io.Writer
 }
 
 func newRunCommand() *cobra.Command {
 	o := runOptions{}
-	cmd := &cobra.Command{Use: "run", Short: "Measure mutants and update findings", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
-		return runCommand(o)
+	cmd := &cobra.Command{Use: "run", Short: "Measure mutants and update findings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return runCommand(cmd.Context(), o)
 	}}
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
@@ -32,10 +35,16 @@ func newRunCommand() *cobra.Command {
 	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref")
 	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read and update")
+	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
+	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
 	return cmd
 }
 
-func runCommand(o runOptions) error {
+func runCommand(ctx context.Context, o runOptions) error {
+	out := o.output
+	if out == nil {
+		out = os.Stdout
+	}
 	tree, err := gomutant.Load(o.dir)
 	if err != nil {
 		return err
@@ -62,13 +71,21 @@ func runCommand(o runOptions) error {
 	default:
 		targets = tree.Discover()
 	}
-	for _, r := range residue {
-		fmt.Printf("changed, untargeted  %s  (%s)\n", r.Path, r.Reason)
+	targets, err = tree.FilterTargets(targets, o.packages, o.symbols)
+	if err != nil {
+		return err
 	}
-	wholeTree := o.targetsFile == "" && o.changed == ""
+	for _, r := range residue {
+		fmt.Fprintf(out, "changed, untargeted  %s  (%s)\n", r.Path, r.Reason)
+	}
+	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
 	docPath := findingsAt(o.dir, o.findingsFile)
 	if len(targets) == 0 {
-		fmt.Println("no targets")
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "no targets")
+		renderRunSummary(out, gomutant.RunSummary{})
 		if wholeTree {
 			return gomutant.UpdateDocument(docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				return gomutant.MergeWholeFindings(current, nil, nil), nil
@@ -80,8 +97,11 @@ func runCommand(o runOptions) error {
 	if err != nil {
 		return err
 	}
-	findings, err := tree.Run(context.Background(), targets, gomutant.Options{
+	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		Budget: o.budget, Timeout: o.timeout, Jobs: o.jobs, Force: o.force, Prior: prior,
+		Decision: func(decision gomutant.RunDecision) {
+			renderRunDecision(out, decision)
+		},
 	})
 	if err != nil {
 		return err
@@ -89,24 +109,42 @@ func runCommand(o runOptions) error {
 	for _, f := range findings {
 		switch {
 		case f.Skipped != "":
-			fmt.Printf("skipped   %s  (%s)\n", f.Symbol, f.Skipped)
+			fmt.Fprintf(out, "skipped   %s  (%s)\n", f.Symbol, f.Skipped)
 		case f.Cached:
-			fmt.Printf("cached    %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
+			fmt.Fprintf(out, "cached    %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
 		default:
-			fmt.Printf("measured  %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
+			fmt.Fprintf(out, "measured  %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
 		}
 		for _, s := range f.Open() {
-			fmt.Printf("          survivor %s %s\n", s.Position, s.Operator)
+			fmt.Fprintf(out, "          survivor %s %s\n", s.Position, s.Operator)
 		}
 		for _, summary := range f.Operators {
-			fmt.Printf("          operator %s: %d generated, %d killed, %d survived, %d discarded\n",
+			fmt.Fprintf(out, "          operator %s: %d generated, %d killed, %d survived, %d discarded\n",
 				summary.Operator, summary.Generated, summary.Killed, summary.Survived, summary.Discarded)
 		}
 	}
+	summary := gomutant.SummarizeRun(findings)
+	renderRunSummary(out, summary)
 	return gomutant.UpdateDocument(docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if wholeTree {
 			return gomutant.MergeWholeFindings(current, findings, targets), nil
 		}
 		return gomutant.MergeFindings(current, findings), nil
 	})
+}
+
+func renderRunDecision(w io.Writer, decision gomutant.RunDecision) {
+	switch {
+	case decision.Action == "measure":
+		fmt.Fprintf(w, "measure   %s  %d mutants (%s)\n", decision.Symbol, decision.Mutants, decision.Reason)
+	case decision.Reason != "":
+		fmt.Fprintf(w, "%-9s %s  (%s)\n", decision.Action, decision.Symbol, decision.Reason)
+	default:
+		fmt.Fprintf(w, "%-9s %s\n", decision.Action, decision.Symbol)
+	}
+}
+
+func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
+	fmt.Fprintf(w, "summary   %d targets: %d measured, %d cached, %d skipped; %d generated, %d killed, %d survived, %d discarded; %d attested, %d open\n",
+		summary.Targets, summary.Measured, summary.Cached, summary.Skipped, summary.Generated, summary.Killed, summary.Survived, summary.Discarded, summary.Attested, summary.Open)
 }
