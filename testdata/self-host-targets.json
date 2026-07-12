@@ -1,0 +1,24 @@
+{
+  "targets": [
+    {
+      "symbol": "github.com/greatliontech/gomutant.Tree.FilterTargets",
+      "oracle": ["github.com/greatliontech/gomutant.TestFilterTargets"]
+    },
+    {
+      "symbol": "github.com/greatliontech/gomutant.SummarizeRun",
+      "oracle": ["github.com/greatliontech/gomutant.TestSummarizeRun"]
+    },
+    {
+      "symbol": "github.com/greatliontech/gomutant/internal/cmd.renderRunDecision",
+      "oracle": ["github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus"]
+    },
+    {
+      "symbol": "github.com/greatliontech/gomutant/internal/cmd.renderRunSummary",
+      "oracle": ["github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus"]
+    },
+    {
+      "symbol": "github.com/greatliontech/gomutant/internal/engine.Tree.PackagePath",
+      "oracle": ["github.com/greatliontech/gomutant.TestFilterTargets"]
+    }
+  ]
+}

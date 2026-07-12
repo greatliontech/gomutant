@@ -108,6 +108,50 @@ func TestFilterTargets(t *testing.T) {
 	}
 }
 
+func TestSelfHostTargetsResolve(t *testing.T) {
+	data, err := os.ReadFile("testdata/self-host-targets.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := LoadTargets(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 5 {
+		t.Fatalf("self-host target count = %d, want 5", len(targets))
+	}
+	want := map[string]string{
+		"github.com/greatliontech/gomutant.Tree.FilterTargets":               "github.com/greatliontech/gomutant.TestFilterTargets",
+		"github.com/greatliontech/gomutant.SummarizeRun":                     "github.com/greatliontech/gomutant.TestSummarizeRun",
+		"github.com/greatliontech/gomutant/internal/cmd.renderRunDecision":   "github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus",
+		"github.com/greatliontech/gomutant/internal/cmd.renderRunSummary":    "github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus",
+		"github.com/greatliontech/gomutant/internal/engine.Tree.PackagePath": "github.com/greatliontech/gomutant.TestFilterTargets",
+	}
+	for _, target := range targets {
+		oracle, ok := want[target.Symbol]
+		if !ok || len(target.Oracle) != 1 || target.Oracle[0] != oracle {
+			t.Fatalf("unexpected self-host target: %+v", target)
+		}
+		delete(want, target.Symbol)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing self-host targets: %v", want)
+	}
+	tree, err := Load(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptions, err := tree.DescribeTargets(targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, description := range descriptions {
+		if !description.OracleExplicit || len(description.Oracle) != 1 || description.Skipped != "" {
+			t.Fatalf("self-host target is not directly measurable: %+v", description)
+		}
+	}
+}
+
 // TestDiscoverChanged pins changed-scope discovery and the residue report
 // (REQ-target-changed): only changed bodies target; every changed-but-
 // untargeted path carries its engine-level reason.
