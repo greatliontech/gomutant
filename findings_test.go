@@ -17,11 +17,13 @@ func TestSameAttestationPins(t *testing.T) {
 		mut  func(*Finding)
 	}{
 		{"operator set", func(f *Finding) { f.OperatorSet = "go/3" }},
+		{"oracle selection", func(f *Finding) { f.OracleExplicit = !f.OracleExplicit }},
 		{"budget", func(f *Finding) { f.Budget = 2 }},
 		{"timeout", func(f *Finding) { f.Timeout = "2m0s" }},
 		{"target evidence", func(f *Finding) { f.TargetEvidence.RuntimeDigest = "moved" }},
 		{"oracle evidence", func(f *Finding) { f.OracleEvidence[0].RuntimeDigest = "moved" }},
 		{"oracle removed", func(f *Finding) { f.OracleEvidence = nil }},
+		{"oracle duplicated", func(f *Finding) { f.OracleEvidence = []SubjectEvidence{oracle, oracle} }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -32,6 +34,32 @@ func TestSameAttestationPins(t *testing.T) {
 				t.Fatal("moved pin matched")
 			}
 		})
+	}
+}
+
+func TestFindingDispositionViewsAreCanonical(t *testing.T) {
+	finding := Finding{
+		Survivors: []Survivor{
+			{Position: "z.go:2:1", Operator: "b"}, {Position: "a.go:1:1", Operator: "z"},
+			{Position: "m.go:1:1", Operator: "b"}, {Position: "a.go:1:1", Operator: "c"},
+			{Position: "a.go:1:1", Operator: "b"}, {Position: "a.go:1:1", Operator: "a"},
+		},
+		Attested: []Attestation{
+			{Position: "z.go:2:1", Operator: "b", Reason: "third"},
+			{Position: "a.go:1:1", Operator: "z", Reason: "second"},
+			{Position: "a.go:1:1", Operator: "a", Reason: "first"},
+		},
+	}
+	open := finding.Open()
+	if len(open) != 3 || open[0].Operator != "b" || open[1].Operator != "c" || open[2].Position != "m.go:1:1" {
+		t.Fatalf("open = %+v", open)
+	}
+	attested := finding.AttestedDispositions()
+	if len(attested) != 3 || attested[0].Position != "a.go:1:1" || attested[0].Operator != "a" || attested[1].Operator != "z" || attested[2].Position != "z.go:2:1" {
+		t.Fatalf("attested = %+v", attested)
+	}
+	if finding.Survivors[0].Position != "z.go:2:1" || finding.Attested[0].Position != "z.go:2:1" {
+		t.Fatal("canonical views mutated the finding record")
 	}
 }
 

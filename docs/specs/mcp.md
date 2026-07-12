@@ -8,8 +8,8 @@ stance whole: no tool renders a pass/fail verdict (REQ-result-findings).
 **REQ-mcp-tools** (behavior): The MCP server MUST expose the library's
 operations as tools — measuring a target set (every producer form: discovery,
 changed scope, a targets document in gomutant's or a parsed producer's
-format), discovering targets without running, reading open findings grouped
-by label, dispositioning a survivor, and running an ephemeral mutant — each
+format), discovering targets without running, inspecting findings with
+optional opaque-label filtering, dispositioning a survivor, and running an ephemeral mutant — each
 a thin shell over the same library. The server is the primary face: the CLI
 is a subset over the same library, so nothing either face does bypasses the
 engine's rules — but a tool may exist server-side first.

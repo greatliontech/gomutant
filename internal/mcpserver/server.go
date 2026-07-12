@@ -46,7 +46,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolDiscover)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "findings",
-		Description: "Open findings (survivors minus attested dispositions) from the findings document, grouped by label. A finding means the tests vouching for that symbol did not notice the mutation: strengthen a test or attest an equivalence.",
+		Description: "Inspect every findings record as current, stale, unverifiable, or detached, with its open survivors and attested dispositions. Filter by opaque label; inspection runs no tests.",
 	}, s.toolFindings)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "attest_survivor",
@@ -245,49 +245,58 @@ type findingsIn struct {
 	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
 }
 
-type openFinding struct {
-	Symbol   string `json:"symbol"`
-	Position string `json:"position"`
-	Operator string `json:"operator"`
+type inspectedFinding struct {
+	Symbol   string                 `json:"symbol"`
+	Labels   []string               `json:"labels,omitempty"`
+	State    gomutant.FindingState  `json:"state"`
+	Reason   string                 `json:"reason,omitempty"`
+	Open     []gomutant.Survivor    `json:"open"`
+	Attested []gomutant.Attestation `json:"attested"`
 }
 
 type findingsOut struct {
-	ByLabel map[string][]openFinding `json:"byLabel"`
+	Findings []inspectedFinding `json:"findings"`
 }
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
-	out := findingsOut{ByLabel: map[string][]openFinding{}}
+	out := findingsOut{Findings: []inspectedFinding{}}
 	all, err := s.loadFindings(in.Findings)
 	if err != nil {
 		return nil, out, err
 	}
-	for _, f := range all {
-		open := f.Open()
-		if len(open) == 0 {
+	if len(all) == 0 {
+		return nil, out, nil
+	}
+	tree, err := gomutant.Load(s.dir)
+	if err != nil {
+		return nil, out, err
+	}
+	for _, finding := range all {
+		if in.Label != "" && !containsLabel(finding.Labels, in.Label) {
 			continue
 		}
-		labels := f.Labels
-		if len(labels) == 0 {
-			labels = []string{"(unlabeled)"}
+		inspection, err := tree.InspectFinding(finding)
+		if err != nil {
+			return nil, out, err
 		}
-		for _, l := range labels {
-			if in.Label != "" && l != in.Label {
-				continue
-			}
-			for _, sv := range open {
-				out.ByLabel[l] = append(out.ByLabel[l], openFinding{Symbol: f.Symbol, Position: sv.Position, Operator: sv.Operator})
-			}
-		}
-	}
-	for _, group := range out.ByLabel {
-		sort.Slice(group, func(i, j int) bool {
-			if group[i].Symbol != group[j].Symbol {
-				return group[i].Symbol < group[j].Symbol
-			}
-			return group[i].Position < group[j].Position
+		labels := append([]string(nil), finding.Labels...)
+		sort.Strings(labels)
+		out.Findings = append(out.Findings, inspectedFinding{
+			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
+			Open: finding.Open(), Attested: finding.AttestedDispositions(),
 		})
 	}
+	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].Symbol < out.Findings[j].Symbol })
 	return nil, out, nil
+}
+
+func containsLabel(labels []string, want string) bool {
+	for _, label := range labels {
+		if label == want {
+			return true
+		}
+	}
+	return false
 }
 
 type attestIn struct {

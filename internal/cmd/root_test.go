@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,46 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	got, err := loadFindings(path)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("whole-tree empty discovery retained findings: %+v, %v", got, err)
+	}
+}
+
+func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := gomutant.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := func(symbol string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	finding := gomutant.Finding{Symbol: "example.com/empty.Deleted", Labels: []string{"REQ-Z", "REQ-A"}, BodyHash: "body", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, Mutants: 1,
+		Survivors: []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}},
+		Attested:  []gomutant.Attestation{{Position: "old.go:1:1", Operator: "zero return", Reason: "equivalent"}}}
+	views, err := inspectFindings(tree, []gomutant.Finding{finding}, "REQ-A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || views[0].State != gomutant.FindingDetached || len(views[0].Open) != 0 || len(views[0].Attested) != 1 || views[0].Labels[0] != "REQ-A" {
+		t.Fatalf("detached attested view = %+v", views)
+	}
+	views, err = inspectFindings(tree, []gomutant.Finding{finding}, "REQ-other")
+	if err != nil || len(views) != 0 {
+		t.Fatalf("label filter = %+v, %v", views, err)
+	}
+	var output bytes.Buffer
+	if err := renderFindingsJSON(&output, views); err != nil {
+		t.Fatal(err)
+	}
+	var decoded []findingView
+	if err := json.Unmarshal(output.Bytes(), &decoded); err != nil || decoded == nil || len(decoded) != 0 {
+		t.Fatalf("filtered-empty JSON = %q, %+v, %v", output.String(), decoded, err)
 	}
 }
 

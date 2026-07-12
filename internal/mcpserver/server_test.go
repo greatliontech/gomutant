@@ -121,22 +121,25 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	group := fOut.ByLabel["REQ-weak"]
-	if len(group) != len(out.Findings[0].Open) {
-		t.Fatalf("findings = %+v", fOut.ByLabel)
+	if len(fOut.Findings) != 1 || fOut.Findings[0].State != gomutant.FindingCurrent || len(fOut.Findings[0].Open) != len(out.Findings[0].Open) {
+		t.Fatalf("findings = %+v", fOut.Findings)
+	}
+	_, filtered, err := s.toolFindings(ctx, nil, findingsIn{Label: "REQ-other"})
+	if err != nil || filtered.Findings == nil || len(filtered.Findings) != 0 {
+		t.Fatalf("filtered-empty findings = %+v, %v", filtered, err)
 	}
 
-	sv := group[0]
+	sv := fOut.Findings[0].Open[0]
 	_, aOut, err := s.toolAttest(ctx, nil, attestIn{
-		Symbol: sv.Symbol, Position: sv.Position, Operator: sv.Operator, Reason: "equivalent by inspection",
+		Symbol: fOut.Findings[0].Symbol, Position: sv.Position, Operator: sv.Operator, Reason: "equivalent by inspection",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if aOut.Open != len(group)-1 {
-		t.Fatalf("attest left %d open, want %d", aOut.Open, len(group)-1)
+	if aOut.Open != len(fOut.Findings[0].Open)-1 {
+		t.Fatalf("attest left %d open, want %d", aOut.Open, len(fOut.Findings[0].Open)-1)
 	}
-	if _, _, err := s.toolAttest(ctx, nil, attestIn{Symbol: sv.Symbol, Position: "nowhere:1:1", Operator: "x", Reason: "r"}); err == nil {
+	if _, _, err := s.toolAttest(ctx, nil, attestIn{Symbol: fOut.Findings[0].Symbol, Position: "nowhere:1:1", Operator: "x", Reason: "r"}); err == nil {
 		t.Fatal("attested a non-survivor")
 	}
 

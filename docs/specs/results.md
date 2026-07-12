@@ -17,7 +17,7 @@ disposition, including incomplete-process reasons.
 **REQ-result-record** (behavior): A finding record MUST be keyed by the
 mutated symbol and pin the inputs that produced it — target subject evidence,
 the oracle as a set of distinct subject evidence records, the operator version,
-the mutant budget, and the exact effective per-mutant timeout encoded as a
+whether the oracle was explicit or package-derived, the mutant budget, and the exact effective per-mutant timeout encoded as a
 canonical Go duration string — carrying the capture commit and dirty provenance,
 the mutant count, the kill count, each survivor's position
 and operator. The oracle is pinned by identity and complete Gofresh evidence,
@@ -47,7 +47,7 @@ structural boundary and is rejected per REQ-result-export's version tag.
 than serve a record whose pins no longer cover the request — an edit to the
 target or any target/oracle dependency, a changed runtime input, purity,
 toolchain, or build configuration, an added or removed oracle identity, a new
-operator version, a different effective timeout, or a request for more mutants
+oracle selection mode or operator version, a different effective timeout, or a request for more mutants
 than a capped record generated each invalidates the record. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures. A record
 is never partially trusted: any moved pin remeasures the whole target.
@@ -55,7 +55,7 @@ is never partially trusted: any moved pin remeasures the whole target.
 **REQ-result-export** (structural): Findings MUST be serializable to a
 portable version-1 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence;
-operator version; budget; timeout; commit and dirty provenance), the mutant and
+oracle selection mode; operator version; budget; timeout; commit and dirty provenance), the mutant and
 kill counts, each survivor's position and operator, and each attested
 disposition with its reason. A version tag lets a consumer reject a document
 it does not understand. This is the inverse of the targeting seam: gomutant
@@ -86,3 +86,12 @@ contains no targets, because such records can never be measured again and
 presenting their survivors as open would mislead callers. Changed-scope and
 explicit-target runs retain every unmeasured document entry: their target sets
 assert only what to measure, never that an omitted symbol no longer exists.
+
+**REQ-result-inspection** (behavior): Findings inspection MUST classify every
+record as `current` when all recorded mutation-domain and subject evidence
+still proves reusable, `stale` when a comparable input moved, `unverifiable`
+when current evidence cannot prove reuse, or `detached` when the mutated symbol
+no longer resolves. The classification is advisory and runs no tests. Human
+and machine-readable views carry the reason plus open survivors and attested
+dispositions independently of that state, including fully attested records;
+filtering by an opaque label changes only which records are rendered.

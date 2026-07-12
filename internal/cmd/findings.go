@@ -1,13 +1,30 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"sort"
+	"strings"
 
+	gomutant "github.com/greatliontech/gomutant"
 	"github.com/spf13/cobra"
 )
 
-type findingsOptions struct{ dir, findingsFile, label string }
+type findingsOptions struct {
+	dir, findingsFile, label string
+	json                     bool
+}
+
+type findingView struct {
+	Symbol   string                 `json:"symbol"`
+	Labels   []string               `json:"labels,omitempty"`
+	State    gomutant.FindingState  `json:"state"`
+	Reason   string                 `json:"reason,omitempty"`
+	Open     []gomutant.Survivor    `json:"open"`
+	Attested []gomutant.Attestation `json:"attested"`
+}
 
 func newFindingsCommand() *cobra.Command {
 	o := findingsOptions{}
@@ -18,6 +35,7 @@ func newFindingsCommand() *cobra.Command {
 	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read")
 	f.StringVar(&o.label, "label", "", "show only findings carrying this label")
+	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable findings")
 	return cmd
 }
 
@@ -26,39 +44,79 @@ func findingsCommand(o findingsOptions) error {
 	if err != nil {
 		return err
 	}
-	byLabel := map[string][]string{}
-	for _, f := range all {
-		open := f.Open()
-		if len(open) == 0 {
-			continue
+	if len(all) == 0 {
+		if o.json {
+			return renderFindingsJSON(os.Stdout, []findingView{})
 		}
-		labels := f.Labels
+		fmt.Println("no findings")
+		return nil
+	}
+	tree, err := gomutant.Load(o.dir)
+	if err != nil {
+		return err
+	}
+	views, err := inspectFindings(tree, all, o.label)
+	if err != nil {
+		return err
+	}
+	if o.json {
+		return renderFindingsJSON(os.Stdout, views)
+	}
+	if len(views) == 0 {
+		fmt.Println("no findings")
+		return nil
+	}
+	for _, view := range views {
+		labels := view.Labels
 		if len(labels) == 0 {
 			labels = []string{"(unlabeled)"}
 		}
-		for _, l := range labels {
-			if o.label != "" && l != o.label {
-				continue
-			}
-			for _, s := range open {
-				byLabel[l] = append(byLabel[l], fmt.Sprintf("%s  %s %s", f.Symbol, s.Position, s.Operator))
-			}
+		fmt.Printf("%s\n", strings.Join(labels, ", "))
+		fmt.Printf("  %s  %s", view.State, view.Symbol)
+		if view.Reason != "" {
+			fmt.Printf("  (%s)", view.Reason)
 		}
-	}
-	if len(byLabel) == 0 {
-		fmt.Println("no open findings")
-		return nil
-	}
-	labels := make([]string, 0, len(byLabel))
-	for l := range byLabel {
-		labels = append(labels, l)
-	}
-	sort.Strings(labels)
-	for _, l := range labels {
-		fmt.Printf("%s\n", l)
-		for _, line := range byLabel[l] {
-			fmt.Printf("  %s\n", line)
+		fmt.Printf("  %d open, %d attested\n", len(view.Open), len(view.Attested))
+		for _, survivor := range view.Open {
+			fmt.Printf("    survivor %s %s\n", survivor.Position, survivor.Operator)
+		}
+		for _, attestation := range view.Attested {
+			fmt.Printf("    attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
 		}
 	}
 	return nil
+}
+
+func renderFindingsJSON(w io.Writer, views []findingView) error {
+	return json.NewEncoder(w).Encode(views)
+}
+
+func inspectFindings(tree *gomutant.Tree, all []gomutant.Finding, label string) ([]findingView, error) {
+	views := make([]findingView, 0, len(all))
+	for _, finding := range all {
+		if label != "" && !contains(finding.Labels, label) {
+			continue
+		}
+		inspection, err := tree.InspectFinding(finding)
+		if err != nil {
+			return nil, err
+		}
+		labels := append([]string(nil), finding.Labels...)
+		sort.Strings(labels)
+		views = append(views, findingView{
+			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
+			Open: finding.Open(), Attested: finding.AttestedDispositions(),
+		})
+	}
+	sort.Slice(views, func(i, j int) bool { return views[i].Symbol < views[j].Symbol })
+	return views, nil
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

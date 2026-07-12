@@ -5,7 +5,7 @@
 - [x] 3. Expose multi-file edit batches through MCP for agent dogfooding, retaining whole-replacement and single-file sequential-edit forms and returning every overlaid file consistently.
 - [x] 4. Refactor the CLI into `internal/cmd` with one file per command, then add batch input from a JSON file or stdin without compatibility flag rewriting.
 - [x] 5. Define findings-document hygiene: whole-tree runs remove entries for symbols no longer present, while changed-scope and explicit-target runs retain every unmeasured entry.
-- [ ] 6. Make findings inspection evaluate and report current, stale, unverifiable, detached, open, and attested states without serving stale measurements, with deterministic human and machine-readable views.
+- [x] 6. Make findings inspection evaluate and report current, stale, unverifiable, detached, open, and attested states without serving stale measurements, with deterministic human and machine-readable views.
 - [ ] 7. Add a CLI target-inspection command equivalent to MCP discovery, rendering the exact symbols, explicit or derived oracles, labels, and changed-but-untargeted residue a subsequent run would use.
 - [ ] 8. Record and report the mutation surface by operator and disposition — generated, discarded, killed, and survived — so users can distinguish oracle strength from absent or inapplicable operators.
 - [ ] 9. Add standalone run controls for package and symbol filtering, signal-driven cancellation, deterministic progress and final summaries, and explicit cache/force decisions without changing advisory exit semantics.

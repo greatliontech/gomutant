@@ -88,6 +88,7 @@ type Finding struct {
 	Budget         int               `json:"budget"`
 	TargetEvidence SubjectEvidence   `json:"targetEvidence"`
 	OracleEvidence []SubjectEvidence `json:"oracleEvidence"`
+	OracleExplicit bool              `json:"oracleExplicit"`
 	Timeout        string            `json:"timeout"`
 	Commit         string            `json:"commit,omitempty"`
 	Dirty          bool              `json:"dirty"`
@@ -118,7 +119,29 @@ func (f *Finding) Open() []Survivor {
 			open = append(open, s)
 		}
 	}
+	sort.Slice(open, func(i, j int) bool {
+		if open[i].Position != open[j].Position {
+			return open[i].Position < open[j].Position
+		}
+		return open[i].Operator < open[j].Operator
+	})
 	return open
+}
+
+// AttestedDispositions returns a canonical copy of the finding's equivalent-
+// mutant dispositions for deterministic views.
+func (f *Finding) AttestedDispositions() []Attestation {
+	attested := append([]Attestation(nil), f.Attested...)
+	sort.Slice(attested, func(i, j int) bool {
+		if attested[i].Position != attested[j].Position {
+			return attested[i].Position < attested[j].Position
+		}
+		if attested[i].Operator != attested[j].Operator {
+			return attested[i].Operator < attested[j].Operator
+		}
+		return false
+	})
+	return attested
 }
 
 // Attest records a survivor disposition on the finding, refused unless the
@@ -207,10 +230,10 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	known := map[string]bool{
 		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
 		"budget": true, "targetEvidence": true, "oracleEvidence": true,
-		"timeout": true, "commit": true, "dirty": true, "mutants": true,
+		"oracleExplicit": true, "timeout": true, "commit": true, "dirty": true, "mutants": true,
 		"killed": true, "discarded": true, "survivors": true, "attested": true,
 	}
-	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "timeout", "dirty", "mutants", "killed"}
+	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "timeout", "dirty", "mutants", "killed"}
 	findings := make([]Finding, len(rawFindings))
 	symbols := map[string]bool{}
 	for i, raw := range rawFindings {
@@ -502,7 +525,7 @@ func (t *Tree) FreshFor(f Finding, tg Target, budget int, timeout time.Duration)
 	if !budgetCovers(f.Budget, budget) {
 		return false, nil
 	}
-	return evidenceSetMatches(f, targetView, oracleViews, engine.OperatorSet, timeout.String())
+	return evidenceSetMatches(f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String())
 }
 
 // MergeFindings merges a run's findings over a prior document by symbol — a

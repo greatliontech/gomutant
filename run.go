@@ -95,7 +95,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	var pending []work
 	for i, tg := range targets {
 		f := &findings[i]
-		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, Timeout: opts.Timeout.String()}
+		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, Timeout: opts.Timeout.String()}
 		oracle := t.resolveOracle(tg)
 		if len(oracle) == 0 {
 			// Nothing can kill: the caller sees it and decides
@@ -131,7 +131,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 
 		if rec, ok := prior[tg.Symbol]; ok && !opts.Force && budgetCovers(rec.Budget, opts.Budget) {
-			matches, err := evidenceSetMatches(*rec, targetView, oracleViews, engine.OperatorSet, opts.Timeout.String())
+			matches, err := evidenceSetMatches(*rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.Timeout.String())
 			if err != nil {
 				return nil, err
 			}
