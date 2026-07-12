@@ -71,6 +71,11 @@ result changes no file are refused before any test process starts. The whole
 batch becomes one overlay or none of it does; there is no fuzzy matching,
 partial application, or worktree write.
 
+The CLI batch input is a JSON object with exactly one `edits` array whose
+entries carry string `file`, `old_string`, and `new_string` fields; unknown
+document or entry fields and trailing JSON values are refused. A batch path
+of `-` reads that document from standard input.
+
 Reproducibility across runs is bounded by the oracle's own determinism: a
 flaky oracle yields flaky kills, which is itself a finding about the tests.
 gomutant does not promise identical survivors across runs — it promises that

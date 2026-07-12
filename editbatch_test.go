@@ -57,6 +57,26 @@ func TestPrepareEditBatch(t *testing.T) {
 	}
 }
 
+func TestParseEditBatch(t *testing.T) {
+	edits, err := ParseEditBatch([]byte(`{"edits":[{"file":"a.go","old_string":"old","new_string":"new"}]}`))
+	if err != nil || len(edits) != 1 || edits[0].File != "a.go" || edits[0].OldString != "old" || edits[0].NewString != "new" {
+		t.Fatalf("parsed edits = %+v, %v", edits, err)
+	}
+	for _, input := range []string{
+		`{"edits":[]}`,
+		`{"edits":[],"unknown":true}`,
+		`{"edits":[],"edits":[]}`,
+		`{"edits":[{"file":"a.go","old_string":"x","new_string":"y","unknown":true}]}`,
+		`{"edits":[{"file":"a.go","file":"b.go","old_string":"x","new_string":"y"}]}`,
+		`{"edits":[{"file":"a.go","old_string":"x"}]}`,
+		`{"edits":[{"file":"a.go","old_string":"x","new_string":"y"}]} {}`,
+	} {
+		if _, err := ParseEditBatch([]byte(input)); err == nil {
+			t.Fatalf("invalid edit batch accepted: %s", input)
+		}
+	}
+}
+
 func TestPrepareEditBatchRejectsInvalidEdits(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("alpha beta alpha\n"), 0o644); err != nil {

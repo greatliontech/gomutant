@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -17,6 +18,45 @@ type BatchEdit struct {
 	File      string `json:"file"`
 	OldString string `json:"old_string"`
 	NewString string `json:"new_string"`
+}
+
+// ParseEditBatch parses the CLI's strict JSON edit-batch document.
+func ParseEditBatch(data []byte) ([]BatchEdit, error) {
+	fields, err := decodeKnownObject(data, map[string]bool{"edits": true})
+	if err != nil {
+		return nil, fmt.Errorf("gomutant: parse edit batch: %w", err)
+	}
+	var strict struct {
+		Edits []json.RawMessage `json:"edits"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&strict); err != nil {
+		return nil, fmt.Errorf("gomutant: parse edit batch: %w", err)
+	}
+	if _, ok := fields["edits"]; !ok || isJSONNull(fields["edits"]) || len(strict.Edits) == 0 {
+		return nil, fmt.Errorf("gomutant: edit batch is empty")
+	}
+	edits := make([]BatchEdit, len(strict.Edits))
+	known := map[string]bool{"file": true, "old_string": true, "new_string": true}
+	for i, raw := range strict.Edits {
+		entryFields, err := decodeKnownObject(raw, known)
+		if err != nil {
+			return nil, fmt.Errorf("gomutant: parse edit batch entry %d: %w", i, err)
+		}
+		for _, name := range []string{"file", "old_string", "new_string"} {
+			value, ok := entryFields[name]
+			if !ok || isJSONNull(value) {
+				return nil, fmt.Errorf("gomutant: parse edit batch entry %d: missing field %s", i, name)
+			}
+		}
+		entryDec := json.NewDecoder(bytes.NewReader(raw))
+		entryDec.DisallowUnknownFields()
+		if err := entryDec.Decode(&edits[i]); err != nil {
+			return nil, fmt.Errorf("gomutant: parse edit batch entry %d: %w", i, err)
+		}
+	}
+	return edits, nil
 }
 
 type fileReplacement struct {

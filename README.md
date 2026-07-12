@@ -28,6 +28,10 @@ gomutant findings
 # Disposition a survivor as equivalent, with the reasoning on record.
 gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \
     --operator "zero return" --reason "result unused on this path"
+
+# Run an atomic agent-authored edit batch without touching the tree.
+gomutant ephemeral --batch edits.json --test-pkg example.com/pkg \
+    --run '^TestF$'
 ```
 
 Findings live in a versioned JSON document (default

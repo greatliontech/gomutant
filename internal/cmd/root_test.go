@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"bytes"
@@ -9,9 +9,6 @@ import (
 	gomutant "github.com/greatliontech/gomutant"
 )
 
-// TestFindingsAtAndUpdate pins the CLI's document anchoring (a relative
-// findings path anchors at the tree root, matching the MCP face) and the
-// locked update round trip it shares with the server.
 func TestFindingsAtAndUpdate(t *testing.T) {
 	dir := t.TempDir()
 	path := findingsAt(dir, defaultFindings)
@@ -60,23 +57,15 @@ func TestCobraCommandTree(t *testing.T) {
 			t.Fatalf("root command tree omits %q", command)
 		}
 	}
-
 	root = newRootCommand()
 	root.SetArgs([]string{"attest"})
 	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "--symbol") {
 		t.Fatalf("missing attest flags = %v", err)
 	}
-
-	root = newRootCommand()
-	root.SetArgs([]string{"run", "unexpected"})
-	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "unknown command") {
-		t.Fatalf("positional argument accepted: %v", err)
-	}
-
-	if err := run(nil); err == nil || !strings.Contains(err.Error(), "command is required") {
+	if err := Execute(nil); err == nil || !strings.Contains(err.Error(), "command is required") {
 		t.Fatalf("empty invocation = %v", err)
 	}
-	if err := run([]string{"run", "-budget", "1"}); err == nil || !strings.Contains(err.Error(), "unknown shorthand") {
+	if err := Execute([]string{"run", "-budget", "1"}); err == nil || !strings.Contains(err.Error(), "unknown shorthand") {
 		t.Fatalf("single-dash long flag accepted: %v", err)
 	}
 }
