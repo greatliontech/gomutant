@@ -14,15 +14,19 @@ import (
 	"golang.org/x/tools/imports"
 )
 
-// Mutant is one syntactic mutation of a symbol's body: the full mutated
-// file, ready for an overlay run.
-type Mutant struct {
-	Symbol   string
-	Operator string
-	Position string
-	// File is the original file's absolute path; Source the mutated bytes.
+// Replacement is one original file and its complete overlaid content.
+type Replacement struct {
 	File   string
 	Source []byte
+}
+
+// Mutant is one mutation represented by every file replacement that must be
+// visible atomically during its overlay run.
+type Mutant struct {
+	Symbol       string
+	Operator     string
+	Position     string
+	Replacements []Replacement
 }
 
 // OperatorSet identifies the mutant-generation basis; finding records pin
@@ -256,11 +260,10 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 		}
 		p := pkg.Fset.Position(s.pos)
 		out = append(out, Mutant{
-			Symbol:   symbol,
-			Operator: s.op,
-			Position: fmt.Sprintf("%s:%d:%d", filepath.Base(p.Filename), p.Line, p.Column),
-			File:     path,
-			Source:   mutated,
+			Symbol:       symbol,
+			Operator:     s.op,
+			Position:     fmt.Sprintf("%s:%d:%d", filepath.Base(p.Filename), p.Line, p.Column),
+			Replacements: []Replacement{{File: path, Source: mutated}},
 		})
 	}
 	return out, nil

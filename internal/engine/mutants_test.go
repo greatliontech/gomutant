@@ -17,7 +17,7 @@ func TestMutants(t *testing.T) {
 	ops := map[string]bool{}
 	for _, m := range ms {
 		ops[m.Operator] = true
-		if m.Position == "" || len(m.Source) == 0 || m.File == "" {
+		if m.Position == "" || len(m.Replacements) != 1 || len(m.Replacements[0].Source) == 0 || m.Replacements[0].File == "" {
 			t.Fatalf("incomplete mutant: %+v", m)
 		}
 	}
@@ -60,7 +60,7 @@ func TestMutants(t *testing.T) {
 		}
 		seen := map[string]string{}
 		for _, m := range ms {
-			key := string(m.Source)
+			key := string(m.Replacements[0].Source)
 			if prev, dup := seen[key]; dup {
 				t.Fatalf("%s: mutants %s and %s render identically", symbol, prev, m.Position+" "+m.Operator)
 			}
@@ -120,7 +120,7 @@ func TestMutants(t *testing.T) {
 	}
 	pruned := false
 	for _, m := range logs {
-		if m.Operator == "delete statement" && !strings.Contains(string(m.Source), `"fmt"`) {
+		if m.Operator == "delete statement" && !strings.Contains(string(m.Replacements[0].Source), `"fmt"`) {
 			pruned = true
 		}
 	}

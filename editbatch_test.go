@@ -50,6 +50,11 @@ func TestPrepareEditBatch(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].File != "a.go" {
 		t.Fatalf("effective replacements with one no-op file = %+v, %v", got, err)
 	}
+	write("empty.go", "x")
+	got, err = prepareEditBatch(root, []BatchEdit{{File: "empty.go", OldString: "x", NewString: ""}})
+	if err != nil || len(got) != 1 || got[0].Source == nil || len(got[0].Source) != 0 {
+		t.Fatalf("empty replacement = %+v, %v", got, err)
+	}
 }
 
 func TestPrepareEditBatchRejectsInvalidEdits(t *testing.T) {

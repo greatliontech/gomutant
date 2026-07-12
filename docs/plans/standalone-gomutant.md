@@ -1,6 +1,6 @@
 # Standalone gomutant
 
-- [ ] 1. Contract and resolve atomic multi-file exact-match edit batches against one original snapshot, rejecting invalid or escaping files, missing or ambiguous matches, overlaps, and no-op edits.
+- [x] 1. Contract and resolve atomic multi-file exact-match edit batches against one original snapshot, rejecting invalid or escaping files, missing or ambiguous matches, overlaps, and no-op edits.
 - [ ] 2. Generalize ephemeral execution to an atomic multi-file Go overlay while preserving baseline probes, attributed outcomes, source-tree immutability, and incomplete-observation evidence.
 - [ ] 3. Expose multi-file edit batches through the library, CLI JSON file-or-stdin input, and MCP, retaining whole-replacement and single-file sequential-edit forms and returning every overlaid file consistently across surfaces.
 - [ ] 4. Define findings-document hygiene: whole-tree runs remove entries for symbols no longer present, scoped runs retain unmeasured entries, and findings inspection identifies detached entries before the next whole-tree run.

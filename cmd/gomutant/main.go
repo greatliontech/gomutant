@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
@@ -275,9 +276,9 @@ func ephemeralCommand(o ephemeralOptions) error {
 		return err
 	}
 	if res.Killed {
-		fmt.Printf("killed    %s  by %s\n", res.File, res.Killer)
+		fmt.Printf("killed    %s  by %s\n", strings.Join(res.Files, ", "), res.Killer)
 	} else {
-		fmt.Printf("SURVIVED  %s  — %s did not notice the mutation\n", res.File, res.Run)
+		fmt.Printf("SURVIVED  %s  — %s did not notice the mutation\n", strings.Join(res.Files, ", "), res.Run)
 	}
 	return nil
 }

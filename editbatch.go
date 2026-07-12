@@ -107,7 +107,9 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 		if bytes.Equal(out.Bytes(), group.source) {
 			continue
 		}
-		replacements = append(replacements, fileReplacement{File: group.file, Abs: group.abs, Source: out.Bytes()})
+		source := make([]byte, out.Len())
+		copy(source, out.Bytes())
+		replacements = append(replacements, fileReplacement{File: group.file, Abs: group.abs, Source: source})
 	}
 	if len(replacements) == 0 {
 		return nil, fmt.Errorf("gomutant: edit batch changes no files")

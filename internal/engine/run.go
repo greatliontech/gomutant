@@ -165,13 +165,31 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
 	defer os.RemoveAll(tmp)
-	mutFile := filepath.Join(tmp, "mutant.go")
-	if err := os.WriteFile(mutFile, m.Source, 0o644); err != nil {
-		return MutantDiscarded, "", runtimeinput.State{}, err
+	if len(m.Replacements) == 0 {
+		return MutantDiscarded, "", runtimeinput.State{}, fmt.Errorf("mutant has no file replacements")
+	}
+	replace := make(map[string]string, len(m.Replacements))
+	for i, replacement := range m.Replacements {
+		if replacement.File == "" || replacement.Source == nil {
+			return MutantDiscarded, "", runtimeinput.State{}, fmt.Errorf("mutant replacement %d is incomplete", i+1)
+		}
+		if _, duplicate := replace[replacement.File]; duplicate {
+			return MutantDiscarded, "", runtimeinput.State{}, fmt.Errorf("mutant replaces %s more than once", replacement.File)
+		}
+		mutFile := filepath.Join(tmp, fmt.Sprintf("replacement-%d%s", i, filepath.Ext(replacement.File)))
+		if err := os.WriteFile(mutFile, replacement.Source, 0o644); err != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, err
+		}
+		replace[replacement.File] = mutFile
 	}
 	overlay := filepath.Join(tmp, "overlay.json")
-	oj := fmt.Sprintf(`{"Replace": {%q: %q}}`, m.File, mutFile)
-	if err := os.WriteFile(overlay, []byte(oj), 0o644); err != nil {
+	oj, err := json.Marshal(struct {
+		Replace map[string]string
+	}{Replace: replace})
+	if err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
+	if err := os.WriteFile(overlay, oj, 0o644); err != nil {
 		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
 

@@ -17,10 +17,10 @@ import (
 // attributed killer. It is evidence for the caller to act on, never
 // persisted to a finding record.
 type EphemeralResult struct {
-	File    string `json:"file"`
-	TestPkg string `json:"testPkg"`
-	Run     string `json:"run"`
-	Killed  bool   `json:"killed"`
+	Files   []string `json:"files"`
+	TestPkg string   `json:"testPkg"`
+	Run     string   `json:"run"`
+	Killed  bool     `json:"killed"`
 	// Killer names the failing test, a timeout, or a package-scope failure
 	// when Killed; empty when the mutant survived.
 	Killer string `json:"killer,omitempty"`
@@ -56,6 +56,26 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 		return nil, fmt.Errorf("mutant is identical to %s: nothing to measure", file)
 	}
 
+	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, timeout)
+}
+
+func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, timeout time.Duration) (*EphemeralResult, error) {
+	if len(replacements) == 0 {
+		return nil, fmt.Errorf("manual mutant has no file replacements")
+	}
+	seen := map[string]bool{}
+	for i, replacement := range replacements {
+		if replacement.File == "" || replacement.Abs == "" || replacement.Source == nil {
+			return nil, fmt.Errorf("manual mutant replacement %d is incomplete", i+1)
+		}
+		if seen[replacement.Abs] {
+			return nil, fmt.Errorf("manual mutant replaces %s more than once", replacement.File)
+		}
+		seen[replacement.Abs] = true
+	}
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
 	// A rapid property failing on the baseline or against the mutant must
 	// never write a reproducer into the tree (REQ-mut-overlay).
 	var binFlags []string
@@ -75,21 +95,38 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 		return nil, fmt.Errorf("the named test does not pass on the unmutated tree in %s: a kill against it would be fabricated", testPkg)
 	}
 
-	m := engine.Mutant{File: abs, Source: mutant}
+	files := make([]string, len(replacements))
+	engineReplacements := make([]engine.Replacement, len(replacements))
+	for i, replacement := range replacements {
+		files[i] = replacement.File
+		engineReplacements[i] = engine.Replacement{File: replacement.Abs, Source: replacement.Source}
+	}
+	m := engine.Mutant{Replacements: engineReplacements}
 	outcome, killer, err := engine.RunMutantEnv(ctx, t.dir, m, []string{testPkg}, run, timeout, binFlags, env)
 	if err != nil {
 		return nil, err
 	}
 	if outcome == engine.MutantDiscarded {
-		return nil, fmt.Errorf("mutant did not compile: nothing was measured — check the replacement source for %s", file)
+		return nil, fmt.Errorf("mutant did not compile: nothing was measured — check the replacements for %s", strings.Join(files, ", "))
 	}
 	return &EphemeralResult{
-		File:    file,
+		Files:   files,
 		TestPkg: testPkg,
 		Run:     run,
 		Killed:  outcome == engine.MutantKilled,
 		Killer:  killer,
 	}, nil
+}
+
+// EphemeralBatch runs one atomic multi-file exact-match edit batch as a manual
+// mutant. Every edit resolves against the original files before one overlay
+// exposes all effective replacements to the named test.
+func (t *Tree) EphemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, timeout time.Duration) (*EphemeralResult, error) {
+	replacements, err := prepareEditBatch(t.dir, edits)
+	if err != nil {
+		return nil, err
+	}
+	return t.runEphemeral(ctx, replacements, testPkg, run, timeout)
 }
 
 // Edit is one exact-match replacement inside an ephemeral mutant's source:

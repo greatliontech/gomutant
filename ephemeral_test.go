@@ -27,6 +27,11 @@ func TestEphemeral(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	docPath := filepath.Join(fixtureDir, "lib", "doc.go")
+	origDoc, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Breaking Add's tested arm: TestAdd kills, attributed.
 	broken := strings.Replace(string(orig), "return a + b", "return a + b + 1", 1)
@@ -85,6 +90,16 @@ func TestEphemeral(t *testing.T) {
 	if _, err := tr.EphemeralEdits(ctx, "lib/lib.go", []Edit{{Old: "no such text", New: "x"}}, "example.com/fixture/lib", "^TestAdd$", time.Minute); err == nil {
 		t.Fatal("zero-match edit scored")
 	}
+	res, err = tr.EphemeralBatch(ctx, []BatchEdit{
+		{File: "lib/lib.go", OldString: "return a + b", NewString: "return a + b + manualDelta()"},
+		{File: "lib/doc.go", OldString: "package lib", NewString: "package lib\n\nfunc manualDelta() int { return 1 }"},
+	}, "example.com/fixture/lib", "^TestAdd$", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Killed || len(res.Files) != 2 || res.Files[0] != "lib/doc.go" || res.Files[1] != "lib/lib.go" {
+		t.Fatalf("multi-file edit batch = %+v", res)
+	}
 
 	// The tree was never touched.
 	after, err := os.ReadFile(libPath)
@@ -93,5 +108,12 @@ func TestEphemeral(t *testing.T) {
 	}
 	if string(after) != string(orig) {
 		t.Fatal("the working tree was modified")
+	}
+	afterDoc, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterDoc) != string(origDoc) {
+		t.Fatal("the secondary overlaid file was modified")
 	}
 }
