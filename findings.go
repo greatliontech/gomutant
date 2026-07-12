@@ -69,6 +69,15 @@ type Attestation struct {
 	Reason   string `json:"reason"`
 }
 
+// OperatorSummary accounts for every generated mutant of one operator.
+type OperatorSummary struct {
+	Operator  string `json:"operator"`
+	Generated int    `json:"generated"`
+	Discarded int    `json:"discarded"`
+	Killed    int    `json:"killed"`
+	Survived  int    `json:"survived"`
+}
+
 type survivorKey struct {
 	position string
 	operator string
@@ -93,11 +102,12 @@ type Finding struct {
 	Commit         string            `json:"commit,omitempty"`
 	Dirty          bool              `json:"dirty"`
 
-	Mutants   int           `json:"mutants"`
-	Killed    int           `json:"killed"`
-	Discarded int           `json:"discarded,omitempty"`
-	Survivors []Survivor    `json:"survivors,omitempty"`
-	Attested  []Attestation `json:"attested,omitempty"`
+	Mutants   int               `json:"mutants"`
+	Killed    int               `json:"killed"`
+	Discarded int               `json:"discarded,omitempty"`
+	Operators []OperatorSummary `json:"operators"`
+	Survivors []Survivor        `json:"survivors,omitempty"`
+	Attested  []Attestation     `json:"attested,omitempty"`
 
 	// Run metadata, never persisted: a cached finding was served from the
 	// prior document under matching pins; a skipped one names why nothing
@@ -192,6 +202,9 @@ func Export(findings []Finding) ([]byte, error) {
 		if f.OracleEvidence == nil {
 			f.OracleEvidence = []SubjectEvidence{}
 		}
+		if f.Operators == nil {
+			f.Operators = []OperatorSummary{}
+		}
 		kept = append(kept, f)
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Symbol < kept[j].Symbol })
@@ -231,9 +244,9 @@ func ParseFindings(data []byte) ([]Finding, error) {
 		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
 		"budget": true, "targetEvidence": true, "oracleEvidence": true,
 		"oracleExplicit": true, "timeout": true, "commit": true, "dirty": true, "mutants": true,
-		"killed": true, "discarded": true, "survivors": true, "attested": true,
+		"killed": true, "discarded": true, "operators": true, "survivors": true, "attested": true,
 	}
-	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "timeout", "dirty", "mutants", "killed"}
+	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "timeout", "dirty", "mutants", "killed", "operators"}
 	findings := make([]Finding, len(rawFindings))
 	symbols := map[string]bool{}
 	for i, raw := range rawFindings {
@@ -332,10 +345,12 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 		finding.Killed > finding.Mutants || len(finding.Survivors) != finding.Mutants-finding.Killed {
 		return false, fmt.Errorf("mutant counts do not match killed and survivor records")
 	}
-	if finding.Budget < 0 || finding.Budget > 0 && finding.Budget != finding.Mutants+finding.Discarded {
+	generatedTotal, countsSafe := addNonnegative(finding.Mutants, finding.Discarded)
+	if !countsSafe || finding.Budget < 0 || finding.Budget > 0 && finding.Budget != generatedTotal {
 		return false, fmt.Errorf("budget does not match generated mutant count")
 	}
 	survivors := make(map[survivorKey]bool, len(finding.Survivors))
+	survivorsByOperator := map[string]int{}
 	if raw, ok := fields["survivors"]; ok {
 		var records []json.RawMessage
 		if err := json.Unmarshal(raw, &records); err != nil {
@@ -356,6 +371,46 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 			return false, fmt.Errorf("duplicate survivor %s %s", survivor.Position, survivor.Operator)
 		}
 		survivors[key] = true
+		survivorsByOperator[survivor.Operator]++
+	}
+	if raw, ok := fields["operators"]; ok {
+		var records []json.RawMessage
+		if err := json.Unmarshal(raw, &records); err != nil {
+			return false, fmt.Errorf("operators: %w", err)
+		}
+		previous := ""
+		remainingGenerated, remainingDiscarded := generatedTotal, finding.Discarded
+		remainingKilled, remainingSurvived := finding.Killed, len(finding.Survivors)
+		for i, record := range records {
+			if _, err := validateRequiredObject(record,
+				map[string]bool{"operator": true, "generated": true, "discarded": true, "killed": true, "survived": true},
+				[]string{"operator", "generated", "discarded", "killed", "survived"}); err != nil {
+				return false, fmt.Errorf("operator summary %d: %w", i, err)
+			}
+			summary := finding.Operators[i]
+			if summary.Operator == "" || summary.Generated <= 0 || summary.Discarded < 0 || summary.Killed < 0 || summary.Survived < 0 ||
+				summary.Discarded > summary.Generated || summary.Killed > summary.Generated-summary.Discarded ||
+				summary.Survived != summary.Generated-summary.Discarded-summary.Killed {
+				return false, fmt.Errorf("operator summary %d counts are invalid", i)
+			}
+			if i > 0 && summary.Operator <= previous {
+				return false, fmt.Errorf("operator summaries are not canonically ordered")
+			}
+			if summary.Survived != survivorsByOperator[summary.Operator] {
+				return false, fmt.Errorf("operator summary %s does not match survivor identities", summary.Operator)
+			}
+			if summary.Generated > remainingGenerated || summary.Discarded > remainingDiscarded || summary.Killed > remainingKilled || summary.Survived > remainingSurvived {
+				return false, fmt.Errorf("operator summaries exceed finding totals")
+			}
+			previous = summary.Operator
+			remainingGenerated -= summary.Generated
+			remainingDiscarded -= summary.Discarded
+			remainingKilled -= summary.Killed
+			remainingSurvived -= summary.Survived
+		}
+		if remainingGenerated != 0 || remainingDiscarded != 0 || remainingKilled != 0 || remainingSurvived != 0 {
+			return false, fmt.Errorf("operator summaries do not match finding totals")
+		}
 	}
 	attested := map[survivorKey]bool{}
 	if raw, ok := fields["attested"]; ok {
@@ -383,6 +438,13 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 		attested[key] = true
 	}
 	return complete, nil
+}
+
+func addNonnegative(a, b int) (int, bool) {
+	if a < 0 || b < 0 || b > int(^uint(0)>>1)-a {
+		return 0, false
+	}
+	return a + b, true
 }
 
 func validateSubjectEvidence(raw json.RawMessage) (bool, error) {

@@ -25,7 +25,8 @@ func TestFindingsAtAndUpdate(t *testing.T) {
 		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
 	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
-		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, Mutants: 1, Killed: 1}}
+		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, Mutants: 1, Killed: 1,
+		Operators: []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}}
 	err := gomutant.UpdateDocument(path, func(prior []gomutant.Finding) ([]gomutant.Finding, error) {
 		return gomutant.MergeFindings(prior, fresh), nil
 	})

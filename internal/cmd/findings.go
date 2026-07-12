@@ -18,12 +18,13 @@ type findingsOptions struct {
 }
 
 type findingView struct {
-	Symbol   string                 `json:"symbol"`
-	Labels   []string               `json:"labels,omitempty"`
-	State    gomutant.FindingState  `json:"state"`
-	Reason   string                 `json:"reason,omitempty"`
-	Open     []gomutant.Survivor    `json:"open"`
-	Attested []gomutant.Attestation `json:"attested"`
+	Symbol    string                     `json:"symbol"`
+	Labels    []string                   `json:"labels,omitempty"`
+	State     gomutant.FindingState      `json:"state"`
+	Reason    string                     `json:"reason,omitempty"`
+	Operators []gomutant.OperatorSummary `json:"operators"`
+	Open      []gomutant.Survivor        `json:"open"`
+	Attested  []gomutant.Attestation     `json:"attested"`
 }
 
 func newFindingsCommand() *cobra.Command {
@@ -80,6 +81,10 @@ func findingsCommand(o findingsOptions) error {
 		for _, survivor := range view.Open {
 			fmt.Printf("    survivor %s %s\n", survivor.Position, survivor.Operator)
 		}
+		for _, summary := range view.Operators {
+			fmt.Printf("    operator %s: %d generated, %d killed, %d survived, %d discarded\n",
+				summary.Operator, summary.Generated, summary.Killed, summary.Survived, summary.Discarded)
+		}
 		for _, attestation := range view.Attested {
 			fmt.Printf("    attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
 		}
@@ -105,7 +110,8 @@ func inspectFindings(tree *gomutant.Tree, all []gomutant.Finding, label string) 
 		sort.Strings(labels)
 		views = append(views, findingView{
 			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-			Open: finding.Open(), Attested: finding.AttestedDispositions(),
+			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
+			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
 		})
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].Symbol < views[j].Symbol })

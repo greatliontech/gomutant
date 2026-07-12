@@ -67,6 +67,23 @@ func TestMutants(t *testing.T) {
 			seen[key] = m.Position + " " + m.Operator
 		}
 	}
+	nested, err := tr.Mutants("example.com/fixture/lib.Nested", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities := map[string]bool{}
+	disambiguated := false
+	for _, m := range nested {
+		identity := m.Position + " " + m.Operator
+		if identities[identity] {
+			t.Fatalf("duplicate mutant identity %q", identity)
+		}
+		identities[identity] = true
+		disambiguated = disambiguated || strings.Contains(m.Position, "#2")
+	}
+	if !disambiguated {
+		t.Fatal("nested logical mutants did not disambiguate an overlapping position")
+	}
 	// Two identical statements delete to the same render: dedup collapses
 	// them to one effective mutant.
 	dup, err := tr.Mutants("example.com/fixture/lib.Dup", 0)

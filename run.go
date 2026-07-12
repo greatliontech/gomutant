@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -282,15 +283,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		sourceFiles = withModuleSelectionPaths(sourceFiles)
 		sourceFiles = append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum"))
 		f.Dirty = repository.pathsDirty(sourceFiles, state)
+		f.Operators = summarizeOperators(w.mutants, outcomes[wi])
+		for _, summary := range f.Operators {
+			f.Discarded += summary.Discarded
+			f.Mutants += summary.Killed + summary.Survived
+			f.Killed += summary.Killed
+		}
 		for mi, m := range w.mutants {
 			switch outcomes[wi][mi] {
-			case engine.MutantDiscarded:
-				f.Discarded++
-			case engine.MutantKilled:
-				f.Mutants++
-				f.Killed++
 			case engine.MutantSurvived:
-				f.Mutants++
 				f.Survivors = append(f.Survivors, Survivor{Position: m.Position, Operator: m.Operator})
 			}
 		}
@@ -316,6 +317,34 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
 	}
 	return findings, nil
+}
+
+func summarizeOperators(mutants []engine.Mutant, outcomes []engine.MutantOutcome) []OperatorSummary {
+	byOperator := map[string]*OperatorSummary{}
+	operators := make([]string, 0)
+	for i, mutant := range mutants {
+		summary := byOperator[mutant.Operator]
+		if summary == nil {
+			summary = &OperatorSummary{Operator: mutant.Operator}
+			byOperator[mutant.Operator] = summary
+			operators = append(operators, mutant.Operator)
+		}
+		summary.Generated++
+		switch outcomes[i] {
+		case engine.MutantDiscarded:
+			summary.Discarded++
+		case engine.MutantKilled:
+			summary.Killed++
+		case engine.MutantSurvived:
+			summary.Survived++
+		}
+	}
+	sort.Strings(operators)
+	summaries := make([]OperatorSummary, 0, len(operators))
+	for _, operator := range operators {
+		summaries = append(summaries, *byOperator[operator])
+	}
+	return summaries
 }
 
 // attributedKill enforces the oracle as the sole arbiter (REQ-target-oracle,

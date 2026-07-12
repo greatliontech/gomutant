@@ -234,6 +234,7 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 
 	var out []Mutant
 	seen := map[string]bool{}
+	identities := map[string]int{}
 	for _, s := range sites {
 		if budget > 0 && len(out) >= budget {
 			break
@@ -259,10 +260,16 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 			mutated = fixed
 		}
 		p := pkg.Fset.Position(s.pos)
+		position := fmt.Sprintf("%s:%d:%d", filepath.Base(p.Filename), p.Line, p.Column)
+		identity := position + "|" + s.op
+		identities[identity]++
+		if identities[identity] > 1 {
+			position += fmt.Sprintf("#%d", identities[identity])
+		}
 		out = append(out, Mutant{
 			Symbol:       symbol,
 			Operator:     s.op,
-			Position:     fmt.Sprintf("%s:%d:%d", filepath.Base(p.Filename), p.Line, p.Column),
+			Position:     position,
 			Replacements: []Replacement{{File: path, Source: mutated}},
 		})
 	}

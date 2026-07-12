@@ -20,7 +20,8 @@ the oracle as a set of distinct subject evidence records, the operator version,
 whether the oracle was explicit or package-derived, the mutant budget, and the exact effective per-mutant timeout encoded as a
 canonical Go duration string — carrying the capture commit and dirty provenance,
 the mutant count, the kill count, each survivor's position
-and operator. The oracle is pinned by identity and complete Gofresh evidence,
+and operator, plus per-operator generated, discarded, killed, and survived
+counts whose sums equal the finding totals. The oracle is pinned by identity and complete Gofresh evidence,
 not merely by name: strengthening a test or any source it
 depends on moves its closure, so a record cannot keep reporting a survivor a
 now-sharper test would kill. The merged runtime-input evidence is attached to
@@ -57,13 +58,19 @@ portable version-1 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence;
 oracle selection mode; operator version; budget; timeout; commit and dirty provenance), the mutant and
 kill counts, each survivor's position and operator, and each attested
-disposition with its reason. A version tag lets a consumer reject a document
+disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
 it does not understand. This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 stipulator recovering findings by label — consumes gomutant's contract, never
 its internal store. A clean break changes the version-1 shape directly;
 documents missing any required version-1 field are malformed and refused.
+
+A survivor position is `file.go:line:column`. When distinct generated mutants
+share that position and operator, the second and later identities append
+`#<source-order occurrence>`. The discriminator is part of the survivor and
+attestation identity so overlapping syntax-tree mutation sites cannot collapse
+into one disposition.
 
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among

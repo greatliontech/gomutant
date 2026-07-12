@@ -109,15 +109,16 @@ type runIn struct {
 }
 
 type findingOut struct {
-	Symbol    string              `json:"symbol"`
-	Labels    []string            `json:"labels,omitempty"`
-	Mutants   int                 `json:"mutants"`
-	Killed    int                 `json:"killed"`
-	Discarded int                 `json:"discarded,omitempty"`
-	Attested  int                 `json:"attested,omitempty"`
-	Open      []gomutant.Survivor `json:"open,omitempty"`
-	Cached    bool                `json:"cached,omitempty"`
-	Skipped   string              `json:"skipped,omitempty"`
+	Symbol    string                     `json:"symbol"`
+	Labels    []string                   `json:"labels,omitempty"`
+	Mutants   int                        `json:"mutants"`
+	Killed    int                        `json:"killed"`
+	Discarded int                        `json:"discarded,omitempty"`
+	Operators []gomutant.OperatorSummary `json:"operators"`
+	Attested  int                        `json:"attested,omitempty"`
+	Open      []gomutant.Survivor        `json:"open,omitempty"`
+	Cached    bool                       `json:"cached,omitempty"`
+	Skipped   string                     `json:"skipped,omitempty"`
 }
 
 type runOut struct {
@@ -194,7 +195,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		out.Findings = append(out.Findings, findingOut{
 			Symbol: f.Symbol, Labels: f.Labels,
 			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
-			Attested: len(f.Attested), Open: f.Open(),
+			Attested: len(f.Attested), Operators: append([]gomutant.OperatorSummary{}, f.Operators...), Open: f.Open(),
 			Cached: f.Cached, Skipped: f.Skipped,
 		})
 	}
@@ -284,12 +285,13 @@ type findingsIn struct {
 }
 
 type inspectedFinding struct {
-	Symbol   string                 `json:"symbol"`
-	Labels   []string               `json:"labels,omitempty"`
-	State    gomutant.FindingState  `json:"state"`
-	Reason   string                 `json:"reason,omitempty"`
-	Open     []gomutant.Survivor    `json:"open"`
-	Attested []gomutant.Attestation `json:"attested"`
+	Symbol    string                     `json:"symbol"`
+	Labels    []string                   `json:"labels,omitempty"`
+	State     gomutant.FindingState      `json:"state"`
+	Reason    string                     `json:"reason,omitempty"`
+	Operators []gomutant.OperatorSummary `json:"operators"`
+	Open      []gomutant.Survivor        `json:"open"`
+	Attested  []gomutant.Attestation     `json:"attested"`
 }
 
 type findingsOut struct {
@@ -321,7 +323,8 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		sort.Strings(labels)
 		out.Findings = append(out.Findings, inspectedFinding{
 			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-			Open: finding.Open(), Attested: finding.AttestedDispositions(),
+			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
+			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
 		})
 	}
 	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].Symbol < out.Findings[j].Symbol })

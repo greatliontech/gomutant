@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // TestRunEndToEnd pins the orchestration against the fixture tree: a
@@ -36,6 +37,9 @@ func TestRunEndToEnd(t *testing.T) {
 	add, weak, iface := first[0], first[1], first[2]
 	if add.Cached || add.Mutants == 0 || add.Killed != add.Mutants || len(add.Survivors) != 0 {
 		t.Fatalf("Add = %+v, want all mutants killed fresh", add)
+	}
+	if len(add.Operators) == 0 {
+		t.Fatal("Add finding omitted operator summaries")
 	}
 	if add.BodyHash == "" || add.TargetEvidence.Toolchain == "" || add.OperatorSet == "" || len(add.OracleEvidence) != 1 {
 		t.Fatalf("Add pins incomplete: %+v", add)
@@ -318,7 +322,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(`{"version": 99, "findings": []}`)); err == nil {
 		t.Fatal("unknown version accepted")
 	}
-	fs, err := ParseFindings([]byte(`{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"timeout":"1m0s","dirty":true,"mutants":0,"killed":0,"futureField":{"nested":true}}]}`))
+	fs, err := ParseFindings([]byte(`{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"timeout":"1m0s","dirty":true,"mutants":0,"killed":0,"operators":[],"futureField":{"nested":true}}]}`))
 	if err != nil || len(fs) != 1 || fs[0].Symbol != "p.F" {
 		t.Fatalf("tolerant parse failed: %v %+v", err, fs)
 	}
@@ -341,7 +345,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 			}
 		})
 	}
-	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"timeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`
+	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"timeout":"1m0s","dirty":true,"mutants":0,"killed":0,"operators":[]}]}`
 	nonGitFindings, err := ParseFindings([]byte(nonGit))
 	if err != nil || len(nonGitFindings) != 1 {
 		t.Fatalf("non-Git provenance rejected: %v %+v", err, nonGitFindings)
@@ -350,6 +354,43 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(withoutOracleMode)); err == nil {
 		t.Fatal("finding without oracle selection mode accepted")
 	}
+	withoutOperators := strings.Replace(nonGit, `,"operators":[]`, "", 1)
+	if _, err := ParseFindings([]byte(withoutOperators)); err == nil {
+		t.Fatal("finding without operator summaries accepted")
+	}
+	badOperators := strings.Replace(nonGit, `"operators":[]`, `"operators":[{"operator":"zero return","generated":1,"discarded":0,"killed":0,"survived":0}]`, 1)
+	if _, err := ParseFindings([]byte(badOperators)); err == nil {
+		t.Fatal("operator summary inconsistent with totals accepted")
+	}
+	nullOperators := strings.Replace(nonGit, `"operators":[]`, `"operators":null`, 1)
+	if _, err := ParseFindings([]byte(nullOperators)); err == nil {
+		t.Fatal("null operator summaries accepted")
+	}
+	expectInvalidExport := func(name string, finding Finding) {
+		t.Helper()
+		if _, err := Export([]Finding{finding}); err == nil {
+			t.Fatalf("%s operator summaries accepted", name)
+		}
+	}
+	base := nonGitFindings[0]
+	base.Mutants, base.Killed = 2, 2
+	base.Operators = []OperatorSummary{{Operator: "z", Generated: 1, Killed: 1}, {Operator: "a", Generated: 1, Killed: 1}}
+	expectInvalidExport("unsorted", base)
+	base.Operators = []OperatorSummary{{Operator: "a", Generated: 1, Killed: 1}, {Operator: "a", Generated: 1, Killed: 1}}
+	expectInvalidExport("duplicate", base)
+	base.Mutants, base.Killed = 1, 0
+	base.Survivors = []Survivor{{Position: "f.go:1:1", Operator: "b"}}
+	base.Operators = []OperatorSummary{{Operator: "a", Generated: 1, Survived: 1}}
+	expectInvalidExport("survivor mismatch", base)
+	base.Mutants, base.Killed, base.Discarded, base.Survivors = 0, 0, 0, nil
+	base.Operators = []OperatorSummary{{Operator: "a"}}
+	expectInvalidExport("zero generated", base)
+	base.Mutants, base.Killed, base.Discarded = int(^uint(0)>>1), int(^uint(0)>>1), 1
+	base.Operators = []OperatorSummary{{Operator: "a", Generated: int(^uint(0) >> 1), Killed: int(^uint(0) >> 1)}}
+	expectInvalidExport("overflow", base)
+	base.Mutants, base.Killed, base.Discarded = 1, 1, 0
+	base.Operators = []OperatorSummary{{Operator: "a", Generated: 1, Discarded: -1, Killed: 1, Survived: 1}}
+	expectInvalidExport("negative", base)
 	invalidExport := nonGitFindings[0]
 	invalidExport.Dirty = false
 	if _, err := Export([]Finding{invalidExport}); err == nil {
@@ -375,7 +416,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(wrongTarget)); err == nil {
 		t.Fatal("mismatched target evidence accepted")
 	}
-	emptyOracle := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"oracleExplicit":true,"timeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`
+	emptyOracle := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"oracleExplicit":true,"timeout":"1m0s","dirty":true,"mutants":0,"killed":0,"operators":[]}]}`
 	if _, err := ParseFindings([]byte(emptyOracle)); err == nil {
 		t.Fatal("empty oracle evidence accepted")
 	}
@@ -394,5 +435,15 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	emptyPins := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"","operatorSet":"","budget":1,"targetEvidence":{"symbol":"","maximalClosure":"","toolchain":"","buildConfig":"","runtimeInputs":"","runtimeDigest":""},"oracleEvidence":[],"timeout":"","dirty":true,"mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"unsupported"}]}]}`
 	if _, err := ParseFindings([]byte(emptyPins)); err == nil {
 		t.Fatal("empty required pins accepted")
+	}
+}
+
+func TestSummarizeOperators(t *testing.T) {
+	mutants := []engine.Mutant{{Operator: "zero return"}, {Operator: "swap"}, {Operator: "zero return"}, {Operator: "swap"}}
+	outcomes := []engine.MutantOutcome{engine.MutantKilled, engine.MutantSurvived, engine.MutantDiscarded, engine.MutantKilled}
+	got := summarizeOperators(mutants, outcomes)
+	if len(got) != 2 || got[0] != (OperatorSummary{Operator: "swap", Generated: 2, Killed: 1, Survived: 1}) ||
+		got[1] != (OperatorSummary{Operator: "zero return", Generated: 2, Discarded: 1, Killed: 1}) {
+		t.Fatalf("operator summaries = %+v", got)
 	}
 }

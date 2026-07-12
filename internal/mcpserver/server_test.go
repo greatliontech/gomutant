@@ -113,6 +113,9 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if len(out.Findings) != 1 || len(out.Findings[0].Open) == 0 || out.Findings[0].Labels[0] != "REQ-weak" {
 		t.Fatalf("run = %+v", out)
 	}
+	if len(out.Findings[0].Operators) == 0 {
+		t.Fatal("run omitted operator summaries")
+	}
 	if _, err := os.Stat(filepath.Join(s.dir, defaultFindings)); err != nil {
 		t.Fatalf("findings document not written: %v", err)
 	}

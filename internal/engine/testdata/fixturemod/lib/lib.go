@@ -60,6 +60,11 @@ func Mixed(xs []int) int {
 	return total
 }
 
+// Nested identifies overlapping logical mutation sites.
+func Nested(a, b, c bool) bool {
+	return a || b || c
+}
+
 // Guarded doubles n behind a goroutine whose guard panics on negatives:
 // mutating the guard detonates off the test goroutine, so go test emits
 // only a package-level fail — the attribution edge the baseline probe

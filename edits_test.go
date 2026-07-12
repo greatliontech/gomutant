@@ -91,6 +91,7 @@ func TestUpdateDocument(t *testing.T) {
 	}
 	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, Mutants: 1,
+		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "zero return"}}}}
 	if err := UpdateDocument(path, func(prior []Finding) ([]Finding, error) {
 		return MergeFindings(prior, seed), nil
@@ -109,7 +110,8 @@ func TestUpdateDocument(t *testing.T) {
 	// The long session writes its (stale-snapshot-independent) merge: the
 	// update sees the re-read document, disposition intact.
 	fresh := []Finding{{Symbol: "p.B", BodyHash: "h2", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
-		TargetEvidence: evidence("p.B"), OracleEvidence: []SubjectEvidence{evidence("p.TestB")}, Mutants: 1, Killed: 1}}
+		TargetEvidence: evidence("p.B"), OracleEvidence: []SubjectEvidence{evidence("p.TestB")}, Mutants: 1, Killed: 1,
+		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}}
 	if err := UpdateDocument(path, func(current []Finding) ([]Finding, error) {
 		for _, f := range current {
 			if f.Symbol == "p.A" && len(f.Attested) != 1 {

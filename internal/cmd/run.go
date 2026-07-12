@@ -98,6 +98,10 @@ func runCommand(o runOptions) error {
 		for _, s := range f.Open() {
 			fmt.Printf("          survivor %s %s\n", s.Position, s.Operator)
 		}
+		for _, summary := range f.Operators {
+			fmt.Printf("          operator %s: %d generated, %d killed, %d survived, %d discarded\n",
+				summary.Operator, summary.Generated, summary.Killed, summary.Survived, summary.Discarded)
+		}
 	}
 	return gomutant.UpdateDocument(docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if wholeTree {
