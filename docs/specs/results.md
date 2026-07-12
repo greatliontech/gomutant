@@ -20,14 +20,14 @@ the oracle as a set of distinct subject evidence records, the operator version,
 the mutant budget, and the exact effective per-mutant timeout encoded as a
 canonical Go duration string — carrying the capture commit and dirty provenance,
 the mutant count, the kill count, each survivor's position
-and operator, and the declaration's first-line anchor that positions are rebased
-against (REQ-attest-survivor). The oracle is pinned by identity and complete
-Gofresh evidence, not merely by name: strengthening a test or any source it
+and operator. The oracle is pinned by identity and complete Gofresh evidence,
+not merely by name: strengthening a test or any source it
 depends on moves its closure, so a record cannot keep reporting a survivor a
 now-sharper test would kill. The merged runtime-input evidence is attached to
 every subject because process-wide observations cannot soundly be attributed
-more narrowly. Dirty provenance bars a finding from explicit committed-baseline
-use but does not prevent reuse in the unchanged working tree.
+more narrowly. Dirty provenance bars a finding from explicit committed-baseline use
+but does not prevent reuse in the unchanged working tree. The commit is omitted only
+when no repository HEAD exists; that unavailable provenance carries `dirty=true`.
 
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
@@ -53,7 +53,7 @@ oracle Gofresh verdict must be valid; stale or unverifiable remeasures. A record
 is never partially trusted: any moved pin remeasures the whole target.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable version-2 document that gomutant owns — carrying, per mutated
+portable version-1 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence;
 operator version; budget; timeout; commit and dirty provenance), the mutant and
 kill counts, each survivor's position and operator, and each attested
@@ -62,16 +62,17 @@ it does not understand. This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 stipulator recovering findings by label — consumes gomutant's contract, never
-its internal store. Version 1 is rejected and regenerated.
+its internal store. A clean break changes the version-1 shape directly; a legacy
+record missing a required pin remeasures under REQ-result-stale.
 
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among
 the record's current survivors, and shed whenever any pin moves — every subject
 evidence or mutation-domain pin's equivalences are judged afresh, and a record's
-open findings are its survivors less its attested ones. Positions are
-location metadata, rebased against the record's body-line anchor
-(REQ-result-record) when carried across regenerations: drift from edits
-outside the body never sheds a disposition.
+open findings are its survivors less its attested ones. Positions are location
+metadata only: a remeasurement under identical pins carries a disposition only
+when the same position and operator survive again; source-evidence drift sheds it
+rather than attempting to infer that a closure change was location-only.
 
 **REQ-result-findings** (behavior): gomutant MUST present survivors as
 findings awaiting disposition, never as a pass/fail verdict — strengthen a

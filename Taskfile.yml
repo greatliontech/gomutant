@@ -1,0 +1,10 @@
+version: "3"
+
+tasks:
+  install:
+    desc: Install gomutant to ~/.local/bin with zsh completion
+    cmds:
+      - mkdir -p $HOME/.local/bin $HOME/.local/share/zsh/site-functions
+      - go build -o $HOME/.local/bin/gomutant ./cmd/gomutant
+      - $HOME/.local/bin/gomutant completion zsh > $HOME/.local/share/zsh/site-functions/_gomutant
+      - echo "note - ensure fpath includes ~/.local/share/zsh/site-functions before compinit"

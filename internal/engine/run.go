@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 // MutantOutcome classifies one overlay run.
@@ -96,19 +99,80 @@ const PackageKillerPrefix = "(package failure: "
 // flag, a loaded machine, a dying binary — and returns an error, never a
 // kill: a corrupted measurement must never read as a sound one.
 func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string) (MutantOutcome, string, error) {
+	outcome, killer, _, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", GoEnv(dir))
+	return outcome, killer, err
+}
+
+// RunMutantEnv is RunMutant under an already-frozen complete environment.
+func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (MutantOutcome, string, error) {
+	outcome, killer, _, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", env)
+	return outcome, killer, err
+}
+
+// RunMutantObserved is RunMutant with finalized absolute runtime-input evidence
+// for the test process and any differential baseline process it launches.
+func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string) (MutantOutcome, string, runtimeinput.State, error) {
+	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, GoEnv(dir))
+}
+
+// RunMutantObservedEnv is RunMutantObserved under an already-frozen complete
+// environment.
+func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (MutantOutcome, string, runtimeinput.State, error) {
+	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, env)
+}
+
+func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (MutantOutcome, string, runtimeinput.State, error) {
+	firstOutcome, firstKiller, firstState, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, env)
+	if err != nil || !firstState.OK || firstState.Unverifiable {
+		return firstOutcome, firstKiller, firstState, err
+	}
+	empty, err := runtimeinput.MergeEnv(moduleDir, env)
+	if err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
+	empty, err = runtimeinput.AbsoluteEnv(empty, moduleDir, env)
+	if err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
+	if firstState == empty {
+		return firstOutcome, firstKiller, firstState, nil
+	}
+
+	// The first run discovers runtime identities. The second is the scored
+	// measurement: requiring the complete state to match before and after it
+	// prevents a test from consuming one value and pinning a later value.
+	secondOutcome, secondKiller, secondState, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, env)
+	if err != nil {
+		return secondOutcome, secondKiller, secondState, err
+	}
+	combined, err := runtimeinput.MergeEnv(dir, env, firstState, secondState)
+	if err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
+	if secondState.Unverifiable {
+		return secondOutcome, secondKiller, combined, nil
+	}
+	if firstState != secondState {
+		return MutantDiscarded, "", runtimeinput.State{}, fmt.Errorf("runtime inputs changed between discovery and measurement")
+	}
+	return secondOutcome, secondKiller, combined, nil
+}
+
+func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (MutantOutcome, string, runtimeinput.State, error) {
+	capture := moduleDir != "" && packageDir != ""
 	tmp, err := os.MkdirTemp("", "gomutant-*")
 	if err != nil {
-		return MutantDiscarded, "", err
+		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
 	defer os.RemoveAll(tmp)
 	mutFile := filepath.Join(tmp, "mutant.go")
 	if err := os.WriteFile(mutFile, m.Source, 0o644); err != nil {
-		return MutantDiscarded, "", err
+		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
 	overlay := filepath.Join(tmp, "overlay.json")
 	oj := fmt.Sprintf(`{"Replace": {%q: %q}}`, m.File, mutFile)
 	if err := os.WriteFile(overlay, []byte(oj), 0o644); err != nil {
-		return MutantDiscarded, "", err
+		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
 
 	parent := ctx
@@ -116,31 +180,60 @@ func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 	defer cancel()
 	// -failfast: one oracle failure decides the binary's verdict; the
 	// remaining tests in it prove nothing further about this mutant.
+	testlog := filepath.Join(tmp, "mutant.testlog")
+	baseTestlog := filepath.Join(tmp, "baseline.testlog")
 	baseArgs := append([]string{"test", "-json", "-count=1", "-failfast", "-run", runRegex}, testPkgs...)
 	baseArgs = append(baseArgs, binFlags...)
 	args := append([]string{"test", "-json", "-overlay", overlay, "-count=1", "-failfast", "-run", runRegex}, testPkgs...)
 	args = append(args, binFlags...)
+	if capture {
+		args = append(args, "-test.testlogfile="+testlog)
+		baseArgs = append(baseArgs, "-test.testlogfile="+baseTestlog)
+	}
 	cmd := exec.CommandContext(runCtx, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = goworkEnv(dir)
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 
-	killer := firstFailingTest(stdout.Bytes())
+	if runCtx.Err() == context.DeadlineExceeded {
+		state, err := processObservation(testlog, moduleDir, packageDir, "mutant test process timed out", env, capture)
+		return MutantKilled, TimeoutKiller, state, err
+	}
+	if runCtx.Err() != nil {
+		state, observationErr := processObservation(testlog, moduleDir, packageDir, "mutant test process was cancelled", env, capture)
+		if observationErr != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, observationErr
+		}
+		return MutantDiscarded, "", state, ctx.Err()
+	}
+	killer, parseErr := firstFailingTest(stdout.Bytes())
+	if parseErr != nil {
+		state, observationErr := processObservation(testlog, moduleDir, packageDir, "go test output was malformed before observation finalization", env, capture)
+		if observationErr != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, observationErr
+		}
+		return MutantDiscarded, "", state, fmt.Errorf("parse go test output: %w", parseErr)
+	}
 	switch {
 	case runErr == nil:
-		return MutantSurvived, "", nil
-	case runCtx.Err() == context.DeadlineExceeded:
-		return MutantKilled, TimeoutKiller, nil
-	case runCtx.Err() != nil:
-		// A cancelled run proves nothing about the mutant.
-		return MutantDiscarded, "", ctx.Err()
+		state, err := processObservation(testlog, moduleDir, packageDir, "", env, capture)
+		return MutantSurvived, "", state, err
 	case strings.Contains(stdout.String(), "[build failed]"):
-		return MutantDiscarded, "", nil
+		state, err := processObservation(testlog, moduleDir, packageDir, "mutant test process did not start because the mutant failed to build", env, capture)
+		return MutantDiscarded, "", state, err
 	case killer != "":
-		return MutantKilled, killer, nil
+		reason := ""
+		if testProcessPanicked(stdout.Bytes()) || !testFailureCompleted(stdout.Bytes(), killer) {
+			reason = "mutant test process panicked before observation finalization"
+			if !testProcessPanicked(stdout.Bytes()) {
+				reason = "mutant test process exited before observation finalization"
+			}
+		}
+		state, err := processObservation(testlog, moduleDir, packageDir, reason, env, capture)
+		return MutantKilled, killer, state, err
 	}
 
 	// The run failed with no test-level attribution. Two very different
@@ -155,17 +248,101 @@ func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 		defer baseCancel()
 		base := exec.CommandContext(baseCtx, "go", baseArgs...)
 		base.Dir = dir
-		base.Env = goworkEnv(dir)
+		base.Env = env
 		baseErr := base.Run()
+		mutantState, err := processObservation(testlog, moduleDir, packageDir, "mutant test process exited before observation finalization", env, capture)
+		if err != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, err
+		}
 		if baseCtx.Err() != nil {
-			// A cancelled probe proves nothing — never "noise".
-			return MutantDiscarded, "", baseCtx.Err()
+			baselineState, observationErr := processObservation(baseTestlog, moduleDir, packageDir, "baseline test process did not complete", env, capture)
+			if observationErr != nil {
+				return MutantDiscarded, "", runtimeinput.State{}, observationErr
+			}
+			state, mergeErr := mergeProcessObservations(dir, env, capture, mutantState, baselineState)
+			if mergeErr != nil {
+				return MutantDiscarded, "", runtimeinput.State{}, mergeErr
+			}
+			return MutantDiscarded, "", state, baseCtx.Err()
 		}
 		if baseErr == nil {
-			return MutantKilled, PackageKillerPrefix + pkg + ")", nil
+			baselineState, err := processObservation(baseTestlog, moduleDir, packageDir, "", env, capture)
+			if err != nil {
+				return MutantDiscarded, "", runtimeinput.State{}, err
+			}
+			state, err := mergeProcessObservations(dir, env, capture, mutantState, baselineState)
+			return MutantKilled, PackageKillerPrefix + pkg + ")", state, err
+		}
+		baselineState, observationErr := processObservation(baseTestlog, moduleDir, packageDir, "baseline test process failed before observation finalization", env, capture)
+		if observationErr != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, observationErr
+		}
+		state, mergeErr := mergeProcessObservations(dir, env, capture, mutantState, baselineState)
+		if mergeErr != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, mergeErr
+		}
+		return MutantDiscarded, "", state, fmt.Errorf("mutant run failed with no test-attributed kill (environmental noise, not a kill; baseline probe did not clear it): %v: %s", runErr, tail(stderr.String()+stdout.String(), 400))
+	}
+	state, observationErr := processObservation(testlog, moduleDir, packageDir, "mutant test process failed before attributable completion", env, capture)
+	if observationErr != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, observationErr
+	}
+	return MutantDiscarded, "", state, fmt.Errorf("mutant run failed with no test-attributed kill (environmental noise, not a kill; baseline probe did not clear it): %v: %s", runErr, tail(stderr.String()+stdout.String(), 400))
+}
+
+func processObservation(path, moduleDir, packageDir, incompleteReason string, env []string, capture bool) (runtimeinput.State, error) {
+	if !capture {
+		return runtimeinput.State{}, nil
+	}
+	var state runtimeinput.State
+	var err error
+	if incompleteReason != "" {
+		incomplete, incompleteErr := runtimeinput.IncompleteEnv(moduleDir, incompleteReason, env)
+		if incompleteErr != nil {
+			return runtimeinput.State{}, incompleteErr
+		}
+		data, readErr := os.ReadFile(path)
+		if os.IsNotExist(readErr) {
+			state = incomplete
+		} else if readErr != nil {
+			return runtimeinput.State{}, readErr
+		} else {
+			partial, parseErr := runtimeinput.FromTestLogEnv(data, moduleDir, packageDir, env)
+			if parseErr != nil {
+				// A killed process can leave an oversized partial scanner token.
+				// Preserve every complete record before that unfinished tail.
+				lastRecord := bytes.LastIndexByte(data, '\n')
+				if lastRecord < 0 {
+					return incomplete, nil
+				}
+				partial, parseErr = runtimeinput.FromTestLogEnv(data[:lastRecord+1], moduleDir, packageDir, env)
+				if parseErr != nil {
+					return runtimeinput.State{}, parseErr
+				}
+			}
+			state, err = runtimeinput.MergeEnv(moduleDir, env, partial, incomplete)
+		}
+	} else {
+		data, readErr := os.ReadFile(path)
+		if os.IsNotExist(readErr) {
+			state, err = runtimeinput.IncompleteEnv(moduleDir, "test process produced no runtime-input log", env)
+		} else if readErr != nil {
+			return runtimeinput.State{}, readErr
+		} else {
+			state, err = runtimeinput.FromTestLogEnv(data, moduleDir, packageDir, env)
 		}
 	}
-	return MutantDiscarded, "", fmt.Errorf("mutant run failed with no test-attributed kill (environmental noise, not a kill; baseline probe did not clear it): %v: %s", runErr, tail(stderr.String()+stdout.String(), 400))
+	if err != nil {
+		return runtimeinput.State{}, err
+	}
+	return runtimeinput.AbsoluteEnv(state, moduleDir, env)
+}
+
+func mergeProcessObservations(root string, env []string, capture bool, states ...runtimeinput.State) (runtimeinput.State, error) {
+	if !capture {
+		return runtimeinput.State{}, nil
+	}
+	return runtimeinput.MergeEnv(root, env, states...)
 }
 
 // TestProbe runs the named test on the unmutated tree and reports how many
@@ -174,6 +351,11 @@ func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 // matching zero tests, or a test already failing on the clean tree, cannot
 // attribute a mutant, so a verdict against it would be a fabricated finding.
 func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string) (ran int, passed bool, err error) {
+	return TestProbeEnv(ctx, dir, testPkg, run, timeout, binFlags, GoEnv(dir))
+}
+
+// TestProbeEnv is TestProbe under an already-frozen complete environment.
+func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (ran int, passed bool, err error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
@@ -182,7 +364,7 @@ func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Durat
 	args := append([]string{"test", "-json", "-count=1", "-run", run, testPkg}, binFlags...)
 	cmd := exec.CommandContext(ctx2, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = goworkEnv(dir)
+	cmd.Env = env
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -193,7 +375,11 @@ func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Durat
 	if strings.Contains(buf.String(), "[build failed]") {
 		return 0, false, fmt.Errorf("baseline test failed to build")
 	}
-	return countTopTests(buf.Bytes()), runErr == nil, nil
+	ran, err = countTopTests(buf.Bytes())
+	if err != nil {
+		return 0, false, fmt.Errorf("parse baseline test output: %w", err)
+	}
+	return ran, runErr == nil, nil
 }
 
 // failedPackage scans a go test -json stream for a package-level fail event,
@@ -220,37 +406,97 @@ func failedPackage(stream []byte) string {
 // symbol form oracles pin. The subtest path is stripped HERE, where the Test
 // field is unambiguous; in the joined form the first "/" lands inside the
 // import path.
-func firstFailingTest(stream []byte) string {
+func firstFailingTest(stream []byte) (string, error) {
 	type event struct {
 		Action, Package, Test string
 	}
 	dec := json.NewDecoder(bytes.NewReader(stream))
-	for dec.More() {
+	killer := ""
+	for {
 		var e event
-		if dec.Decode(&e) != nil {
-			return ""
+		if err := dec.Decode(&e); err != nil {
+			if err == io.EOF {
+				return killer, nil
+			}
+			return "", err
 		}
-		if e.Action == "fail" && e.Test != "" {
+		if killer == "" && e.Action == "fail" && e.Test != "" {
 			name := e.Test
 			if i := strings.Index(name, "/"); i >= 0 {
 				name = name[:i]
 			}
-			return e.Package + "." + name
+			killer = e.Package + "." + name
 		}
 	}
-	return ""
 }
 
-// countTopTests counts the distinct top-level tests (excluding subtests)
-// that reported a pass or fail in a go test -json stream.
-func countTopTests(stream []byte) int {
-	type event struct{ Action, Test string }
-	seen := map[string]bool{}
+func testProcessPanicked(stream []byte) bool {
+	type event struct{ Output string }
 	dec := json.NewDecoder(bytes.NewReader(stream))
 	for dec.More() {
 		var e event
 		if dec.Decode(&e) != nil {
-			break
+			return false
+		}
+		if strings.HasPrefix(strings.TrimSpace(e.Output), "panic:") {
+			return true
+		}
+	}
+	return false
+}
+
+func testFailureCompleted(stream []byte, failingTest string) bool {
+	type event struct {
+		Action  string
+		Package string
+		Test    string
+		Output  string
+	}
+	dec := json.NewDecoder(bytes.NewReader(stream))
+	active := map[string]bool{}
+	marker := false
+	for {
+		var e event
+		if err := dec.Decode(&e); err != nil {
+			return err == io.EOF && marker && len(active) == 0
+		}
+		switch e.Action {
+		case "run":
+			if e.Test != "" {
+				active[e.Test] = true
+			}
+		case "pass", "fail", "skip":
+			if e.Test != "" {
+				delete(active, e.Test)
+			}
+		}
+		if e.Action != "output" || e.Test == "" {
+			continue
+		}
+		name := e.Test
+		if i := strings.Index(name, "/"); i >= 0 {
+			name = name[:i]
+		}
+		expected := strings.TrimPrefix(failingTest, e.Package+".")
+		if name == expected && strings.HasPrefix(strings.TrimSpace(e.Output), "--- FAIL: "+name) {
+			marker = true
+		}
+	}
+}
+
+// countTopTests counts the distinct top-level tests (excluding subtests)
+// that reported a pass or fail in a go test -json stream.
+func countTopTests(stream []byte) (int, error) {
+	type event struct{ Action, Test string }
+	seen := map[string]bool{}
+	dec := json.NewDecoder(bytes.NewReader(stream))
+	for {
+		var e event
+		if err := dec.Decode(&e); err != nil {
+			if err == io.EOF {
+				return len(seen), nil
+			}
+			return 0, err
 		}
 		if e.Test == "" || strings.Contains(e.Test, "/") {
 			continue
@@ -259,7 +505,6 @@ func countTopTests(stream []byte) int {
 			seen[e.Test] = true
 		}
 	}
-	return len(seen)
 }
 
 // tail returns the last n bytes of s, for error surfacing.

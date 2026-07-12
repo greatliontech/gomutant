@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 // TestRunEndToEnd pins the orchestration against the fixture tree: a
@@ -35,7 +37,7 @@ func TestRunEndToEnd(t *testing.T) {
 	if add.Cached || add.Mutants == 0 || add.Killed != add.Mutants || len(add.Survivors) != 0 {
 		t.Fatalf("Add = %+v, want all mutants killed fresh", add)
 	}
-	if add.BodyHash == "" || add.Toolchain == "" || add.OperatorSet == "" || len(add.Oracle) != 1 {
+	if add.BodyHash == "" || add.TargetEvidence.Toolchain == "" || add.OperatorSet == "" || len(add.OracleEvidence) != 1 {
 		t.Fatalf("Add pins incomplete: %+v", add)
 	}
 	if len(weak.Survivors) == 0 || weak.Labels[0] != "REQ-weak" {
@@ -87,11 +89,11 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 
 	// A moved pin re-measures instead of serving the cache, and sheds the
-	// attestation: every body version's equivalences are re-judged
+	// attestation: every source-evidence version's equivalences are re-judged
 	// (REQ-result-stale, REQ-attest-survivor).
 	tampered := append([]Finding(nil), prior...)
 	for i := range tampered {
-		tampered[i].BodyHash = "not-the-current-body"
+		tampered[i].TargetEvidence.MaximalClosure = "not-the-current-closure"
 	}
 	moved, err := tr.Run(ctx, targets[:2], Options{Prior: tampered})
 	if err != nil {
@@ -139,11 +141,41 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 }
 
-// TestAttestationRebasesAcrossDrift pins the rebase wiring
-// (REQ-attest-survivor): an edit above the declaration shifts every absolute
-// position, and a carried disposition rebases against the recorded anchor
-// instead of being shed — drift outside the body never sheds a disposition.
-func TestAttestationRebasesAcrossDrift(t *testing.T) {
+// TestRunUnionsEveryProcessObservation pins REQ-exec-observation end to end:
+// distinct mutants read distinct files before the oracle kills them, and both
+// identities must survive in the finding-wide runtime manifest.
+func TestRunUnionsEveryProcessObservation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	tg := Target{Symbol: "example.com/fixture/lib.PickInput", Oracle: []string{"example.com/fixture/lib.TestPickInput"}}
+	findings, err := tr.Run(context.Background(), []Target{tg}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Mutants != 2 || findings[0].Killed != 2 {
+		t.Fatalf("PickInput finding = %+v, want two killed mutants", findings)
+	}
+	paths, err := runtimeinput.Paths(findings[0].TargetEvidence.RuntimeInputs, tr.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, path := range paths {
+		seen[filepath.Base(path)] = true
+	}
+	for _, name := range []string{"input-0.txt", "input-2.txt"} {
+		if !seen[name] {
+			t.Fatalf("runtime paths = %v, missing %s", paths, name)
+		}
+	}
+}
+
+// TestAttestationShedsAcrossSourceDrift pins REQ-attest-survivor: even when
+// the mutated body is unchanged, moved subject evidence requires every
+// equivalence to be judged afresh.
+func TestAttestationShedsAcrossSourceDrift(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
@@ -178,8 +210,9 @@ func TestAttestationRebasesAcrossDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Shift the declaration down one line without touching any body: the
-	// body hash holds (pins match), every absolute position moves by one.
+	// Shift the declaration down one line without touching its body. The
+	// maximal source closure still moves, so the prior disposition is judged
+	// afresh rather than inferred to be location-only.
 	libPath := filepath.Join(tmp, "lib", "lib.go")
 	src, err := os.ReadFile(libPath)
 	if err != nil {
@@ -193,16 +226,11 @@ func TestAttestationRebasesAcrossDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A disposition naming a mutant that is no longer a survivor must be
-	// dropped by the open-membership filter, not carried on faith.
-	prior[0].Attested = append(prior[0].Attested, Attestation{Position: "lib.go:1:1", Operator: "no-op", Reason: "stale"})
-
 	tr2, err := Load(tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Force the re-measure: with pins unmoved a plain run would serve the
-	// cache and never reach the rebase.
+	// Force the re-measure so the new evidence is produced and compared.
 	moved, err := tr2.Run(ctx, targets, Options{Force: true, Prior: prior})
 	if err != nil {
 		t.Fatal(err)
@@ -211,15 +239,11 @@ func TestAttestationRebasesAcrossDrift(t *testing.T) {
 	if got.Cached {
 		t.Fatal("forced run served from cache")
 	}
-	want, ok := shiftPos(s0.Position, 1)
-	if !ok {
-		t.Fatal(err)
+	if len(got.Attested) != 0 {
+		t.Fatalf("attestation = %+v, want shed after closure drift", got.Attested)
 	}
-	if len(got.Attested) != 1 || got.Attested[0].Position != want {
-		t.Fatalf("attestation = %+v, want carried at %s", got.Attested, want)
-	}
-	if len(got.Open()) != len(got.Survivors)-1 {
-		t.Fatalf("open = %d of %d survivors; the rebased disposition must close one", len(got.Open()), len(got.Survivors))
+	if len(got.Open()) != len(got.Survivors) {
+		t.Fatalf("open = %d of %d survivors after disposition shedding", len(got.Open()), len(got.Survivors))
 	}
 }
 
@@ -234,6 +258,43 @@ func TestRunDuplicateTargetRefused(t *testing.T) {
 	}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "duplicate target symbol") {
 		t.Fatalf("duplicate targets accepted: %v", err)
+	}
+}
+
+func TestRunRejectsNegativeBudget(t *testing.T) {
+	tr := fixtureTree(t)
+	_, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add"}}, Options{Budget: -1})
+	if err == nil || !strings.Contains(err.Error(), "budget must be non-negative") {
+		t.Fatalf("negative budget accepted: %v", err)
+	}
+}
+
+// TestRunRejectsAmbiguousOracle pins the orchestration guard from
+// REQ-target-oracle: same-named in-package and external tests cannot be mapped
+// back from one displayed test event, so the run must stop before mutation.
+func TestRunRejectsAmbiguousOracle(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":           "module example.com/ambiguous\n\ngo 1.26\n",
+		"p.go":             "package ambiguous\n\nfunc F() int { return 1 }\n",
+		"internal_test.go": "package ambiguous\n\nimport \"testing\"\nfunc TestSame(t *testing.T) {}\n",
+		"external_test.go": "package ambiguous_test\n\nimport \"testing\"\nfunc TestSame(t *testing.T) {}\n",
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = tree.Run(context.Background(), []Target{{
+		Symbol: "example.com/ambiguous.F",
+		Oracle: []string{"example.com/ambiguous.TestSame"},
+	}}, Options{Budget: 1})
+	if err == nil || !strings.Contains(err.Error(), "ambiguous across test package variants") {
+		t.Fatalf("ambiguous oracle run = %v", err)
 	}
 }
 
@@ -264,15 +325,80 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if err != nil || len(fs) != 1 || fs[0].Symbol != "p.F" {
 		t.Fatalf("tolerant parse failed: %v %+v", err, fs)
 	}
-}
-
-// TestShiftPos pins position rebasing (REQ-attest-survivor): line moves by
-// the anchor delta, malformed positions report false.
-func TestShiftPos(t *testing.T) {
-	if got, ok := shiftPos("lib.go:10:5", 3); !ok || got != "lib.go:13:5" {
-		t.Fatalf("shiftPos = %q %v", got, ok)
+	for name, doc := range map[string]string{
+		"null budget":                    `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":null,"targetEvidence":{},"oracleEvidence":[],"timeout":"1m0s","mutants":1,"killed":1}]}`,
+		"null dirty":                     `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"timeout":"1m0s","dirty":null,"mutants":1,"killed":1}]}`,
+		"duplicate budget":               `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"budget":0,"targetEvidence":{},"oracleEvidence":[],"timeout":"1m0s","mutants":1,"killed":1}]}`,
+		"duplicate version":              `{"version":1,"version":99,"findings":[]}`,
+		"missing survivors":              `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"timeout":"1m0s","mutants":1,"killed":0}]}`,
+		"empty attestation reason":       `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"timeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":""}]}]}`,
+		"duplicate nested evidence":      `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{"symbol":"p.F","symbol":"p.G"},"oracleEvidence":[],"timeout":"1m0s","mutants":0,"killed":0}]}`,
+		"inflated budget":                `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":2,"targetEvidence":{},"oracleEvidence":[],"timeout":"1m0s","mutants":1,"killed":1}]}`,
+		"colliding attestation identity": `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"timeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"a|b.go:1:1","operator":"zero return"}],"attested":[{"position":"a","operator":"b.go:1:1|zero return","reason":"not the survivor"}]}]}`,
+		"duplicate symbols":              `{"version":1,"findings":[{"symbol":"p.F","mutants":0,"killed":0},{"symbol":"p.F","mutants":0,"killed":0}]}`,
+		"duplicate oracle symbols":       `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{},"oracleEvidence":[{"symbol":"p.TestF"},{"symbol":"p.TestF"}],"timeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseFindings([]byte(doc)); err == nil {
+				t.Fatal("malformed known field accepted")
+			}
+		})
 	}
-	if _, ok := shiftPos("garbage", 1); ok {
-		t.Fatal("malformed position rebased")
+	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"timeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`
+	nonGitFindings, err := ParseFindings([]byte(nonGit))
+	if err != nil || len(nonGitFindings) != 1 || nonGitFindings[0].pinsIncomplete {
+		t.Fatalf("non-Git provenance rejected: %v %+v", err, nonGitFindings)
+	}
+	digestAt := strings.LastIndex(nonGit, `"runtimeDigest":"d"`)
+	if digestAt < 0 {
+		t.Fatal("runtime digest fixture missing")
+	}
+	mismatchedRuntime := nonGit[:digestAt] + `"runtimeDigest":"other"` + nonGit[digestAt+len(`"runtimeDigest":"d"`):]
+	if _, err := ParseFindings([]byte(mismatchedRuntime)); err == nil {
+		t.Fatal("per-subject runtime evidence mismatch accepted")
+	}
+	partialRuntime := nonGit[:digestAt-1] + nonGit[digestAt+len(`"runtimeDigest":"d"`):]
+	partialFindings, err := ParseFindings([]byte(partialRuntime))
+	if err != nil || len(partialFindings) != 1 || !partialFindings[0].pinsIncomplete {
+		t.Fatalf("partial legacy runtime evidence not accepted for remeasurement: %v %+v", err, partialFindings)
+	}
+	impossibleRuntime := strings.ReplaceAll(nonGit, `"runtimeDigest":"d"`, `"runtimeUnverifiable":true,"runtimeDigest":"d"`)
+	impossibleFindings, err := ParseFindings([]byte(impossibleRuntime))
+	if err != nil || len(impossibleFindings) != 1 || !impossibleFindings[0].pinsIncomplete {
+		t.Fatalf("impossible runtime disposition retained authority: %v %+v", err, impossibleFindings)
+	}
+	wrongTarget := strings.Replace(nonGit, `"targetEvidence":{"symbol":"p.F"`, `"targetEvidence":{"symbol":"p.G"`, 1)
+	wrongTargetFindings, err := ParseFindings([]byte(wrongTarget))
+	if err != nil || len(wrongTargetFindings) != 1 || !wrongTargetFindings[0].pinsIncomplete {
+		t.Fatalf("mismatched target evidence accepted: %v %+v", err, wrongTargetFindings)
+	}
+	emptyOracle := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"timeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`
+	emptyOracleFindings, err := ParseFindings([]byte(emptyOracle))
+	if err != nil || len(emptyOracleFindings) != 1 || !emptyOracleFindings[0].pinsIncomplete {
+		t.Fatalf("empty oracle evidence accepted: %v %+v", err, emptyOracleFindings)
+	}
+	withoutDirty := strings.Replace(nonGit, `,"dirty":true`, "", 1)
+	withoutDirtyFindings, err := ParseFindings([]byte(withoutDirty))
+	if err != nil || len(withoutDirtyFindings) != 1 || !withoutDirtyFindings[0].pinsIncomplete {
+		t.Fatalf("missing commit without dirty provenance accepted: %v %+v", err, withoutDirtyFindings)
+	}
+	legacy := `{"version":1,"findings":[{"symbol":"p.F","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"legacy"}]}]}`
+	legacyFindings, err := ParseFindings([]byte(legacy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacyFindings[0].Open()) != 1 {
+		t.Fatal("incomplete legacy pins retained attestation authority")
+	}
+	if err := legacyFindings[0].Attest("f.go:1:1", "op", "again"); err == nil {
+		t.Fatal("attested finding with incomplete pins")
+	}
+	emptyPins := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"","operatorSet":"","budget":1,"targetEvidence":{"symbol":"","maximalClosure":"","toolchain":"","buildConfig":"","runtimeInputs":"","runtimeDigest":""},"oracleEvidence":[],"timeout":"","dirty":true,"mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"unsupported"}]}]}`
+	emptyPinFindings, err := ParseFindings([]byte(emptyPins))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !emptyPinFindings[0].pinsIncomplete || len(emptyPinFindings[0].Open()) != 1 {
+		t.Fatal("empty required pins retained disposition authority")
 	}
 }

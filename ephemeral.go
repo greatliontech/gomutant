@@ -63,7 +63,8 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 		binFlags = []string{"-rapid.nofailfile"}
 	}
 
-	ran, passed, err := engine.TestProbe(ctx, t.dir, testPkg, run, timeout, binFlags)
+	env := t.eng.GoEnv()
+	ran, passed, err := engine.TestProbeEnv(ctx, t.dir, testPkg, run, timeout, binFlags, env)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +76,7 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 	}
 
 	m := engine.Mutant{File: abs, Source: mutant}
-	outcome, killer, err := engine.RunMutant(ctx, t.dir, m, []string{testPkg}, run, timeout, binFlags)
+	outcome, killer, err := engine.RunMutantEnv(ctx, t.dir, m, []string{testPkg}, run, timeout, binFlags, env)
 	if err != nil {
 		return nil, err
 	}

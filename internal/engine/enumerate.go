@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"go/ast"
 	"go/types"
 	"sort"
@@ -19,7 +20,7 @@ import (
 func (t *Tree) DeclaredSymbols() []string {
 	seen := map[string]bool{}
 	for _, pkg := range t.pkgs {
-		pkgPath := strings.TrimSuffix(pkg.PkgPath, "_test")
+		pkgPath := basePackagePath(pkg)
 		for _, f := range pkg.Syntax {
 			name := pkg.Fset.Position(f.Pos()).Filename
 			if strings.HasSuffix(name, "_test.go") || ast.IsGenerated(f) {
@@ -50,7 +51,7 @@ func (t *Tree) DeclaredSymbols() []string {
 func (t *Tree) TestsOf(pkgPath string) []string {
 	seen := map[string]bool{}
 	for _, pkg := range t.pkgs {
-		if strings.TrimSuffix(pkg.PkgPath, "_test") != pkgPath {
+		if basePackagePath(pkg) != pkgPath {
 			continue
 		}
 		for _, f := range pkg.Syntax {
@@ -75,6 +76,52 @@ func (t *Tree) TestsOf(pkgPath string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ValidateOracle rejects symbols that are not runnable tests or that name more
+// than one source declaration across in-package and external test variants.
+func (t *Tree) ValidateOracle(symbols []string) error {
+	seen := map[string]bool{}
+	for _, symbol := range symbols {
+		if seen[symbol] {
+			return fmt.Errorf("oracle repeats test identity %s", symbol)
+		}
+		seen[symbol] = true
+		pkgPath, name := t.PackageOf(symbol)
+		if pkgPath == "" || name == "" || strings.Contains(name, ".") {
+			return fmt.Errorf("oracle %s does not name a top-level test", symbol)
+		}
+		runnable := false
+		for _, candidate := range t.TestsOf(pkgPath) {
+			if candidate == symbol {
+				runnable = true
+				break
+			}
+		}
+		if !runnable {
+			return fmt.Errorf("oracle %s is not a runnable test", symbol)
+		}
+		declarations := map[string]bool{}
+		for _, pkg := range t.pkgs {
+			if basePackagePath(pkg) != pkgPath {
+				continue
+			}
+			for _, file := range pkg.Syntax {
+				for _, decl := range file.Decls {
+					fn, ok := decl.(*ast.FuncDecl)
+					if !ok || fn.Recv != nil || fn.Name.Name != name || !runnableTest(pkg, fn) {
+						continue
+					}
+					pos := pkg.Fset.Position(fn.Pos())
+					declarations[fmt.Sprintf("%s:%d", pos.Filename, pos.Offset)] = true
+				}
+			}
+		}
+		if len(declarations) != 1 {
+			return fmt.Errorf("oracle %s is ambiguous across test package variants", symbol)
+		}
+	}
+	return nil
 }
 
 // PackageOf splits a resolver symbol into its import path and the

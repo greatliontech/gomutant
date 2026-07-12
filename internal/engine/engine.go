@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,6 +27,7 @@ import (
 // members are all in scope.
 type Tree struct {
 	pkgs []*packages.Package
+	env  []string
 	// dir is the absolute tree root Load resolved, kept to reconcile
 	// Fset-absolute file paths back to the tree-relative paths callers speak.
 	dir string
@@ -42,12 +42,13 @@ func Load(dir string) (*Tree, error) {
 	if err != nil {
 		return nil, err
 	}
-	env := goworkEnv(dir)
+	env := GoEnv(dir)
 	var pkgs []*packages.Package
 	for _, m := range members {
 		cfg := &packages.Config{
 			Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
-				packages.NeedTypes | packages.NeedTypesInfo,
+				packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule |
+				packages.NeedForTest,
 			Dir:   filepath.Join(dir, m),
 			Env:   env,
 			Tests: true,
@@ -64,7 +65,35 @@ func Load(dir string) (*Tree, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolving tree root %s: %w", dir, err)
 	}
-	return &Tree{pkgs: pkgs, dir: abs}, nil
+	return &Tree{pkgs: pkgs, dir: abs, env: append([]string(nil), env...)}, nil
+}
+
+func basePackagePath(pkg *packages.Package) string {
+	if pkg.ForTest != "" {
+		return pkg.ForTest
+	}
+	return pkg.PkgPath
+}
+
+// PackageContext returns the module and package directories used by a test
+// binary for pkgPath.
+func (t *Tree) PackageContext(pkgPath string) (moduleDir, packageDir string, err error) {
+	var fallback *packages.Package
+	for _, pkg := range t.pkgs {
+		if basePackagePath(pkg) != pkgPath || pkg.Module == nil || len(pkg.GoFiles) == 0 {
+			continue
+		}
+		if pkg.PkgPath == pkgPath && pkg.ForTest == "" {
+			return pkg.Module.Dir, filepath.Dir(pkg.GoFiles[0]), nil
+		}
+		if fallback == nil {
+			fallback = pkg
+		}
+	}
+	if fallback != nil {
+		return fallback.Module.Dir, filepath.Dir(fallback.GoFiles[0]), nil
+	}
+	return "", "", fmt.Errorf("package %s has no loaded module context", pkgPath)
 }
 
 // workspaceMembers returns the tree's Go module directories, relative to
@@ -101,39 +130,30 @@ func workspaceMembers(dir string) ([]string, error) {
 	return members, nil
 }
 
-// goworkEnv pins workspace mode for a spawned go command or package load:
+// GoEnv returns the complete process environment with workspace mode pinned for
+// a spawned go command or package load:
 // the tree's own go.work when it has one, explicitly off otherwise. The go
 // command discovers workspace files by walking UP, so an enclosing
 // repository's workspace would otherwise leak into fixture trees that are
 // not its members and refuse their "./..." patterns.
-func goworkEnv(dir string) []string {
+func GoEnv(dir string) []string {
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(name, "GOWORK") {
+			env = append(env, entry)
+		}
+	}
 	work := filepath.Join(dir, "go.work")
 	if _, err := os.Stat(work); err == nil {
 		if abs, aerr := filepath.Abs(work); aerr == nil {
 			work = abs
 		}
-		return append(os.Environ(), "GOWORK="+work)
+		return append(env, "GOWORK="+work)
 	}
-	return append(os.Environ(), "GOWORK=off")
+	return append(env, "GOWORK=off")
 }
 
-// Toolchain reports the identity of the go command the engine invokes in dir
-// — "GOVERSION GOOS/GOARCH" — under the same GOWORK pinning as every other
-// invocation. Records pin this identity because the same body under the same
-// oracle kills differently across toolchains and platforms
-// (REQ-result-record). It is the exec'd toolchain, deliberately not this
-// binary's runtime version: the oracle runs under the former.
-func Toolchain(dir string) (string, error) {
-	cmd := exec.Command("go", "env", "GOVERSION", "GOOS", "GOARCH")
-	cmd.Dir = dir
-	cmd.Env = goworkEnv(dir)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("resolving toolchain identity: %w", err)
-	}
-	f := strings.Fields(string(out))
-	if len(f) != 3 {
-		return "", fmt.Errorf("unexpected go env output %q", out)
-	}
-	return f[0] + " " + f[1] + "/" + f[2], nil
-}
+// GoEnv returns the environment used by this tree's package loads and test
+// processes.
+func (t *Tree) GoEnv() []string { return append([]string(nil), t.env...) }

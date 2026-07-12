@@ -1,25 +1,58 @@
 package gomutant
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
 
+	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
-// OraclePin is one oracle test the finding ran against, pinned by symbol and
-// the body hash it ran at (REQ-result-record): an edit to a bound test moves
-// its hash and re-stales the record, so a strengthened test never leaves a
-// stale survivor.
-type OraclePin struct {
-	Symbol string `json:"symbol"`
-	Hash   string `json:"hash"`
+// SubjectEvidence is gomutant's persisted encoding of one Gofresh code-result
+// fingerprint plus the runtime disposition shared by the finding.
+type SubjectEvidence struct {
+	Symbol              string `json:"symbol"`
+	MaximalClosure      string `json:"maximalClosure"`
+	Toolchain           string `json:"toolchain"`
+	BuildConfig         string `json:"buildConfig"`
+	PurityAssertion     string `json:"purityAssertion,omitempty"`
+	RuntimeInputs       string `json:"runtimeInputs"`
+	RuntimeDigest       string `json:"runtimeDigest"`
+	RuntimeUnverifiable bool   `json:"runtimeUnverifiable,omitempty"`
+	RuntimeReason       string `json:"runtimeReason,omitempty"`
+}
+
+func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtimeinput.State) SubjectEvidence {
+	return SubjectEvidence{
+		Symbol:              symbol,
+		MaximalClosure:      fp.MaximalClosure,
+		Toolchain:           fp.Guards.Toolchain,
+		BuildConfig:         fp.Guards.BuildConfig,
+		PurityAssertion:     fp.PurityAssertion,
+		RuntimeInputs:       fp.RuntimeInputs,
+		RuntimeDigest:       fp.RuntimeDigest,
+		RuntimeUnverifiable: state.Unverifiable,
+		RuntimeReason:       state.Reason,
+	}
+}
+
+func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
+	return gofresh.Fingerprint{
+		MaximalClosure:  e.MaximalClosure,
+		Guards:          guard.Guards{Toolchain: e.Toolchain, BuildConfig: e.BuildConfig},
+		PurityAssertion: e.PurityAssertion,
+		RuntimeInputs:   e.RuntimeInputs,
+		RuntimeDigest:   e.RuntimeDigest,
+		ResultKind:      gofresh.CodeResult,
+	}
 }
 
 // Survivor is one mutant no oracle test noticed.
@@ -36,6 +69,11 @@ type Attestation struct {
 	Reason   string `json:"reason"`
 }
 
+type survivorKey struct {
+	position string
+	operator string
+}
+
 // Finding is one target's measurement, keyed by the mutated symbol and
 // pinned to the exact inputs that produced it (REQ-result-record). Open
 // findings are Survivors less Attested.
@@ -45,12 +83,14 @@ type Finding struct {
 
 	// The pins (REQ-result-stale): any moved pin re-measures the whole
 	// target.
-	BodyHash    string      `json:"bodyHash"`
-	BodyLine    int         `json:"bodyLine,omitempty"`
-	Oracle      []OraclePin `json:"oracle,omitempty"`
-	OperatorSet string      `json:"operatorSet"`
-	Budget      int         `json:"budget,omitempty"`
-	Toolchain   string      `json:"toolchain"`
+	BodyHash       string            `json:"bodyHash"`
+	OperatorSet    string            `json:"operatorSet"`
+	Budget         int               `json:"budget"`
+	TargetEvidence SubjectEvidence   `json:"targetEvidence"`
+	OracleEvidence []SubjectEvidence `json:"oracleEvidence"`
+	Timeout        string            `json:"timeout"`
+	Commit         string            `json:"commit,omitempty"`
+	Dirty          bool              `json:"dirty,omitempty"`
 
 	Mutants   int           `json:"mutants"`
 	Killed    int           `json:"killed"`
@@ -61,20 +101,24 @@ type Finding struct {
 	// Run metadata, never persisted: a cached finding was served from the
 	// prior document under matching pins; a skipped one names why nothing
 	// was measured ("no oracle", "not a function").
-	Cached  bool   `json:"-"`
-	Skipped string `json:"-"`
+	Cached         bool   `json:"-"`
+	Skipped        string `json:"-"`
+	pinsIncomplete bool
 }
 
 // Open returns the finding's open survivors — survivors less attested
 // dispositions (REQ-attest-survivor, REQ-result-findings).
 func (f *Finding) Open() []Survivor {
-	attested := map[string]bool{}
+	if f.pinsIncomplete {
+		return append([]Survivor(nil), f.Survivors...)
+	}
+	attested := map[survivorKey]bool{}
 	for _, a := range f.Attested {
-		attested[a.Position+"|"+a.Operator] = true
+		attested[survivorKey{a.Position, a.Operator}] = true
 	}
 	var open []Survivor
 	for _, s := range f.Survivors {
-		if !attested[s.Position+"|"+s.Operator] {
+		if !attested[survivorKey{s.Position, s.Operator}] {
 			open = append(open, s)
 		}
 	}
@@ -84,6 +128,9 @@ func (f *Finding) Open() []Survivor {
 // Attest records a survivor disposition on the finding, refused unless the
 // named mutant is among its current survivors (REQ-attest-survivor).
 func (f *Finding) Attest(position, operator, reason string) error {
+	if f.pinsIncomplete {
+		return fmt.Errorf("gomutant: finding pins are incomplete; remeasure before attesting")
+	}
 	if reason == "" {
 		return fmt.Errorf("gomutant: attestation needs a reason")
 	}
@@ -126,6 +173,9 @@ func Export(findings []Finding) ([]byte, error) {
 		if f.Skipped != "" {
 			continue
 		}
+		if f.OracleEvidence == nil {
+			f.OracleEvidence = []SubjectEvidence{}
+		}
 		kept = append(kept, f)
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Symbol < kept[j].Symbol })
@@ -137,36 +187,274 @@ func Export(findings []Finding) ([]byte, error) {
 // (REQ-result-tolerant — encoding/json drops unknown fields, and a document
 // missing a pin re-stales at the next run).
 func ParseFindings(data []byte) ([]Finding, error) {
-	var doc document
-	if err := json.Unmarshal(data, &doc); err != nil {
+	top, err := decodeKnownObject(data, map[string]bool{"version": true, "findings": true})
+	if err != nil {
 		return nil, fmt.Errorf("gomutant: parse findings document: %w", err)
 	}
-	if doc.Version != DocumentVersion {
-		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d)", doc.Version, DocumentVersion)
+	var version int
+	if err := json.Unmarshal(top["version"], &version); err != nil {
+		return nil, fmt.Errorf("gomutant: parse findings version: %w", err)
 	}
-	return doc.Findings, nil
+	if version != DocumentVersion {
+		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d)", version, DocumentVersion)
+	}
+	if isJSONNull(top["findings"]) {
+		return nil, fmt.Errorf("gomutant: findings must be an array")
+	}
+	var rawFindings []json.RawMessage
+	if err := json.Unmarshal(top["findings"], &rawFindings); err != nil {
+		return nil, fmt.Errorf("gomutant: parse findings: %w", err)
+	}
+	known := map[string]bool{
+		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
+		"budget": true, "targetEvidence": true, "oracleEvidence": true,
+		"timeout": true, "commit": true, "dirty": true, "mutants": true,
+		"killed": true, "discarded": true, "survivors": true, "attested": true,
+	}
+	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "timeout", "mutants", "killed"}
+	findings := make([]Finding, len(rawFindings))
+	symbols := map[string]bool{}
+	for i, raw := range rawFindings {
+		fields, err := decodeKnownObject(raw, known)
+		if err != nil {
+			return nil, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+		}
+		complete := true
+		for _, name := range required {
+			value, ok := fields[name]
+			if !ok {
+				complete = false
+			} else if isJSONNull(value) {
+				return nil, fmt.Errorf("gomutant: finding %d field %s is null", i, name)
+			}
+		}
+		if value, ok := fields["dirty"]; ok && isJSONNull(value) {
+			return nil, fmt.Errorf("gomutant: finding %d field dirty is null", i)
+		}
+		if err := json.Unmarshal(raw, &findings[i]); err != nil {
+			return nil, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+		}
+		if findings[i].Symbol == "" || findings[i].BodyHash == "" || findings[i].OperatorSet == "" || findings[i].Timeout == "" {
+			complete = false
+		} else if duration, err := time.ParseDuration(findings[i].Timeout); err != nil || duration <= 0 || duration.String() != findings[i].Timeout {
+			complete = false
+		}
+		if symbols[findings[i].Symbol] {
+			return nil, fmt.Errorf("gomutant: duplicate finding symbol %s", findings[i].Symbol)
+		}
+		symbols[findings[i].Symbol] = true
+		nestedComplete, err := validateFindingEncoding(fields, &findings[i])
+		if err != nil {
+			return nil, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+		}
+		complete = complete && nestedComplete
+		if findings[i].Commit == "" && !findings[i].Dirty {
+			complete = false
+		}
+		findings[i].pinsIncomplete = !complete
+	}
+	return findings, nil
 }
 
-// pinsMatch reports whether a prior finding's pins cover the current target
-// state (REQ-result-stale): same body hash, same oracle content (compared as
-// a set — judged on content, not order), same operator set, same toolchain.
-func pinsMatch(prior Finding, bodyHash string, oracle []OraclePin, operatorSet, toolchain string) bool {
-	if prior.BodyHash != bodyHash || prior.OperatorSet != operatorSet || prior.Toolchain != toolchain {
-		return false
-	}
-	if len(prior.Oracle) != len(oracle) {
-		return false
-	}
-	bySym := make(map[string]string, len(prior.Oracle))
-	for _, p := range prior.Oracle {
-		bySym[p.Symbol] = p.Hash
-	}
-	for _, c := range oracle {
-		if h, ok := bySym[c.Symbol]; !ok || h != c.Hash {
-			return false
+func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding) (bool, error) {
+	complete := true
+	for name, value := range fields {
+		if isJSONNull(value) {
+			return false, fmt.Errorf("field %s is null", name)
 		}
 	}
-	return true
+	if raw, ok := fields["targetEvidence"]; ok {
+		valid, err := validateSubjectEvidence(raw)
+		if err != nil {
+			return false, fmt.Errorf("targetEvidence: %w", err)
+		}
+		complete = complete && valid
+		if finding.TargetEvidence.Symbol != finding.Symbol {
+			complete = false
+		}
+	}
+	if raw, ok := fields["oracleEvidence"]; ok {
+		var oracle []json.RawMessage
+		if err := json.Unmarshal(raw, &oracle); err != nil {
+			return false, fmt.Errorf("oracleEvidence: %w", err)
+		}
+		if len(oracle) == 0 {
+			complete = false
+		}
+		seenOracle := map[string]bool{}
+		for i, evidence := range oracle {
+			valid, err := validateSubjectEvidence(evidence)
+			if err != nil {
+				return false, fmt.Errorf("oracleEvidence %d: %w", i, err)
+			}
+			complete = complete && valid
+			if seenOracle[finding.OracleEvidence[i].Symbol] {
+				return false, fmt.Errorf("duplicate oracle evidence symbol %s", finding.OracleEvidence[i].Symbol)
+			}
+			seenOracle[finding.OracleEvidence[i].Symbol] = true
+		}
+	}
+	if complete {
+		for _, evidence := range finding.OracleEvidence {
+			if evidence.RuntimeInputs != finding.TargetEvidence.RuntimeInputs ||
+				evidence.RuntimeDigest != finding.TargetEvidence.RuntimeDigest ||
+				evidence.RuntimeUnverifiable != finding.TargetEvidence.RuntimeUnverifiable ||
+				evidence.RuntimeReason != finding.TargetEvidence.RuntimeReason {
+				return false, fmt.Errorf("subject runtime evidence is not finding-wide")
+			}
+		}
+	}
+	if finding.Mutants < 0 || finding.Killed < 0 || finding.Discarded < 0 ||
+		finding.Killed > finding.Mutants || len(finding.Survivors) != finding.Mutants-finding.Killed {
+		return false, fmt.Errorf("mutant counts do not match killed and survivor records")
+	}
+	if finding.Budget < 0 || finding.Budget > 0 && finding.Budget != finding.Mutants+finding.Discarded {
+		return false, fmt.Errorf("budget does not match generated mutant count")
+	}
+	survivors := make(map[survivorKey]bool, len(finding.Survivors))
+	if raw, ok := fields["survivors"]; ok {
+		var records []json.RawMessage
+		if err := json.Unmarshal(raw, &records); err != nil {
+			return false, fmt.Errorf("survivors: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true}, []string{"position", "operator"}); err != nil {
+				return false, fmt.Errorf("survivor %d: %w", i, err)
+			}
+		}
+	}
+	for _, survivor := range finding.Survivors {
+		if survivor.Position == "" || survivor.Operator == "" {
+			return false, fmt.Errorf("survivor identity is incomplete")
+		}
+		key := survivorKey{survivor.Position, survivor.Operator}
+		if survivors[key] {
+			return false, fmt.Errorf("duplicate survivor %s %s", survivor.Position, survivor.Operator)
+		}
+		survivors[key] = true
+	}
+	attested := map[survivorKey]bool{}
+	if raw, ok := fields["attested"]; ok {
+		var records []json.RawMessage
+		if err := json.Unmarshal(raw, &records); err != nil {
+			return false, fmt.Errorf("attested: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "reason": true}, []string{"position", "operator", "reason"}); err != nil {
+				return false, fmt.Errorf("attestation %d: %w", i, err)
+			}
+		}
+	}
+	for _, attestation := range finding.Attested {
+		key := survivorKey{attestation.Position, attestation.Operator}
+		if attestation.Position == "" || attestation.Operator == "" || attestation.Reason == "" {
+			return false, fmt.Errorf("attestation is incomplete")
+		}
+		if !survivors[key] {
+			return false, fmt.Errorf("attestation does not name a survivor")
+		}
+		if attested[key] {
+			return false, fmt.Errorf("duplicate attestation %s %s", attestation.Position, attestation.Operator)
+		}
+		attested[key] = true
+	}
+	return complete, nil
+}
+
+func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
+	known := map[string]bool{
+		"symbol": true, "maximalClosure": true, "toolchain": true, "buildConfig": true,
+		"purityAssertion": true, "runtimeInputs": true, "runtimeDigest": true,
+		"runtimeUnverifiable": true, "runtimeReason": true,
+	}
+	required := []string{"symbol", "maximalClosure", "toolchain", "buildConfig", "runtimeInputs", "runtimeDigest"}
+	fields, err := decodeKnownObject(raw, known)
+	if err != nil {
+		return false, err
+	}
+	for name, value := range fields {
+		if isJSONNull(value) {
+			return false, fmt.Errorf("field %s is null", name)
+		}
+	}
+	for _, name := range required {
+		if _, ok := fields[name]; !ok {
+			return false, nil
+		}
+	}
+	var evidence SubjectEvidence
+	if err := json.Unmarshal(raw, &evidence); err != nil {
+		return false, err
+	}
+	if evidence.RuntimeUnverifiable != (evidence.RuntimeReason != "") {
+		return false, nil
+	}
+	return evidence.Symbol != "" && evidence.MaximalClosure != "" && evidence.Toolchain != "" &&
+		evidence.BuildConfig != "" && evidence.RuntimeInputs != "" && evidence.RuntimeDigest != "", nil
+}
+
+func validateRequiredObject(raw json.RawMessage, known map[string]bool, required []string) (map[string]json.RawMessage, error) {
+	fields, err := decodeKnownObject(raw, known)
+	if err != nil {
+		return nil, err
+	}
+	for name, value := range fields {
+		if isJSONNull(value) {
+			return nil, fmt.Errorf("field %s is null", name)
+		}
+	}
+	for _, name := range required {
+		if _, ok := fields[name]; !ok {
+			return nil, fmt.Errorf("missing field %s", name)
+		}
+	}
+	return fields, nil
+}
+
+func decodeKnownObject(data []byte, known map[string]bool) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	token, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return nil, fmt.Errorf("expected object")
+	}
+	fields := map[string]json.RawMessage{}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		name, ok := key.(string)
+		if !ok {
+			return nil, fmt.Errorf("object key is not a string")
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		if known[name] {
+			if _, duplicate := fields[name]; duplicate {
+				return nil, fmt.Errorf("duplicate field %s", name)
+			}
+			fields[name] = value
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("trailing data")
+		}
+		return nil, err
+	}
+	return fields, nil
+}
+
+func isJSONNull(value json.RawMessage) bool {
+	return len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null"))
 }
 
 // budgetCovers reports whether a finding measured under the recorded cap
@@ -180,50 +468,40 @@ func budgetCovers(recorded, req int) bool {
 	return req > 0 && req <= recorded
 }
 
-// shiftPos rebases a file:line:col position by delta lines; false when the
-// position does not parse. Positions are absolute file coordinates, so a
-// disposition carried across regenerations rebases against the recorded
-// declaration anchor first — drift from edits above the body never sheds it
-// (REQ-attest-survivor).
-func shiftPos(pos string, delta int) (string, bool) {
-	parts := strings.Split(pos, ":")
-	if len(parts) != 3 {
-		return "", false
-	}
-	line, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return "", false
-	}
-	return fmt.Sprintf("%s:%d:%s", parts[0], line+delta, parts[2]), true
-}
-
 // Fresh reports whether a prior finding still covers the target at the
 // requested budget — the REQ-result-stale pin check as a query, computed
 // against the current tree without running anything. A caller reminding
 // about unhardened or stale-measured symbols asks this instead of
 // re-deriving pin arithmetic.
 func (t *Tree) Fresh(f Finding, tg Target, budget int) (bool, error) {
+	return t.FreshFor(f, tg, budget, 60*time.Second)
+}
+
+// FreshFor is Fresh under an explicit effective per-mutant timeout.
+func (t *Tree) FreshFor(f Finding, tg Target, budget int, timeout time.Duration) (bool, error) {
 	if f.Symbol != tg.Symbol {
 		return false, fmt.Errorf("gomutant: finding %s checked against target %s", f.Symbol, tg.Symbol)
 	}
-	toolchain, err := engine.Toolchain(t.dir)
-	if err != nil {
-		return false, err
-	}
-	bodyHash, err := t.eng.BodyHash(tg.Symbol)
-	if err != nil {
-		return false, err
-	}
 	oracle := t.resolveOracle(tg)
-	pins := make([]OraclePin, 0, len(oracle))
-	for _, o := range oracle {
-		oh, err := t.eng.BodyHash(o)
+	if err := t.eng.ValidateOracle(oracle); err != nil {
+		return false, err
+	}
+	targetView, err := t.newSubjectView(tg.Symbol)
+	if err != nil {
+		return false, err
+	}
+	oracleViews := make([]*subjectView, 0, len(oracle))
+	for _, symbol := range oracle {
+		view, err := t.newSubjectView(symbol)
 		if err != nil {
 			return false, err
 		}
-		pins = append(pins, OraclePin{Symbol: o, Hash: oh})
+		oracleViews = append(oracleViews, view)
 	}
-	return pinsMatch(f, bodyHash, pins, engine.OperatorSet, toolchain) && budgetCovers(f.Budget, budget), nil
+	if !budgetCovers(f.Budget, budget) {
+		return false, nil
+	}
+	return evidenceSetMatches(f, targetView, oracleViews, engine.OperatorSet, timeout.String())
 }
 
 // MergeFindings merges a run's findings over a prior document by symbol — a

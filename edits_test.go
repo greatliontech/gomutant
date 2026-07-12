@@ -71,7 +71,11 @@ func TestMergeFindingsSkipNeverShadows(t *testing.T) {
 // held elsewhere is surfaced with its path, never silently overwritten.
 func TestUpdateDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "findings.json")
-	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", Toolchain: "tc",
+	evidence := func(symbol string) SubjectEvidence {
+		return SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, Mutants: 1,
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "zero return"}}}}
 	if err := UpdateDocument(path, func(prior []Finding) ([]Finding, error) {
 		return MergeFindings(prior, seed), nil
@@ -89,7 +93,8 @@ func TestUpdateDocument(t *testing.T) {
 
 	// The long session writes its (stale-snapshot-independent) merge: the
 	// update sees the re-read document, disposition intact.
-	fresh := []Finding{{Symbol: "p.B", BodyHash: "h2", OperatorSet: "go/2", Toolchain: "tc", Mutants: 1, Killed: 1}}
+	fresh := []Finding{{Symbol: "p.B", BodyHash: "h2", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence("p.B"), OracleEvidence: []SubjectEvidence{evidence("p.TestB")}, Mutants: 1, Killed: 1}}
 	if err := UpdateDocument(path, func(current []Finding) ([]Finding, error) {
 		for _, f := range current {
 			if f.Symbol == "p.A" && len(f.Attested) != 1 {

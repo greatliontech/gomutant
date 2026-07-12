@@ -38,6 +38,12 @@ otherwise cannot prove its log complete contributes an explicit unverifiable
 observation rather than an empty observation assertion. A stale or unverifiable
 subject remeasures the finding; an incomplete log is never silently discarded.
 
+**REQ-exec-quiescence** (behavior): The caller MUST exclude source and build-input
+mutation from target loading through run completion. gomutant validates captured
+source views after execution and refuses ordinary drift, but, like its Gofresh
+producer boundary, cannot prove that an external actor did not change and restore an
+input while a compiler read it.
+
 **REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant — a
 caller-supplied replacement of one source file, given whole or as exact-match
 edits applied to the file's current content, exercised through a build

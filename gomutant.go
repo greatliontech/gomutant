@@ -10,6 +10,7 @@ package gomutant
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -49,11 +50,15 @@ type Tree struct {
 // Load loads the Go tree rooted at dir: a module, or a workspace whose
 // go.work members are all in scope.
 func Load(dir string) (*Tree, error) {
-	e, err := engine.Load(dir)
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
+	}
+	e, err := engine.Load(abs)
 	if err != nil {
 		return nil, err
 	}
-	return &Tree{eng: e, dir: dir}, nil
+	return &Tree{eng: e, dir: abs}, nil
 }
 
 // Discover targets every top-level function and method declared in the

@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -33,21 +35,27 @@ type Options struct {
 // group is one test-binary invocation: a package, its oracle's -run
 // pattern, and the binary's flags.
 type group struct {
-	pkgs     []string
-	runRegex string
-	flags    []string
+	pkgs                  []string
+	runRegex              string
+	flags                 []string
+	moduleDir, packageDir string
 }
 
 // Run mutates each target and executes its oracle per mutant, fanning
 // mutant runs across a worker pool (REQ-exec-oracle-run). Prior findings
-// are served only when every pin holds — body hash, oracle content,
-// operator set, toolchain, and a covering budget — unless forced
-// (REQ-result-stale). A run that cannot attribute an outcome aborts without
-// findings (REQ-core-attributed-kills).
+// are served only when every target and oracle evidence record, operator,
+// timeout, and budget pin holds, unless forced (REQ-result-stale). A run that
+// cannot attribute an outcome aborts without findings
+// (REQ-core-attributed-kills).
 func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Finding, error) {
+	if opts.Budget < 0 {
+		return nil, fmt.Errorf("gomutant: budget must be non-negative")
+	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 60 * time.Second
 	}
+	repository := captureRepositoryState(t.dir)
+	runEnv := t.eng.GoEnv()
 	jobs := opts.Jobs
 	if jobs <= 0 {
 		jobs = max(1, runtime.NumCPU()/2)
@@ -62,18 +70,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 	}
 
-	toolchain, err := engine.Toolchain(t.dir)
-	if err != nil {
-		return nil, err
-	}
-
 	// Phase one, sequential: resolve every target to a terminal finding
 	// (skipped, cached) or to a mutant work list.
 	type work struct {
-		target    int
-		mutants   []engine.Mutant
-		groups    []group
-		oracleSet map[string]bool
+		target      int
+		mutants     []engine.Mutant
+		groups      []group
+		oracleSet   map[string]bool
+		targetView  *subjectView
+		oracleViews []*subjectView
 	}
 	// Findings are keyed by symbol (REQ-result-record): two targets naming
 	// one symbol would collide in the document, so the set is refused up
@@ -90,13 +95,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	var pending []work
 	for i, tg := range targets {
 		f := &findings[i]
-		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, Toolchain: toolchain}
+		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, Timeout: opts.Timeout.String()}
 		oracle := t.resolveOracle(tg)
 		if len(oracle) == 0 {
 			// Nothing can kill: the caller sees it and decides
 			// (REQ-target-default).
 			f.Skipped = "no oracle"
 			continue
+		}
+		if err := t.eng.ValidateOracle(oracle); err != nil {
+			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
 		bodyHash, err := t.eng.BodyHash(tg.Symbol)
 		if errors.Is(err, engine.ErrNotFunction) {
@@ -109,30 +117,31 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
 		f.BodyHash = bodyHash
-		// Pin each oracle test by the body hash it ran at
-		// (REQ-result-record).
-		pins := make([]OraclePin, 0, len(oracle))
-		for _, o := range oracle {
-			oh, err := t.eng.BodyHash(o)
-			if err != nil {
-				return nil, fmt.Errorf("target %s oracle %s: %w", tg.Symbol, o, err)
-			}
-			pins = append(pins, OraclePin{Symbol: o, Hash: oh})
+		targetView, err := t.newSubjectView(tg.Symbol)
+		if err != nil {
+			return nil, fmt.Errorf("target %s freshness: %w", tg.Symbol, err)
 		}
-		f.Oracle = pins
+		oracleViews := make([]*subjectView, 0, len(oracle))
+		for _, symbol := range oracle {
+			view, err := t.newSubjectView(symbol)
+			if err != nil {
+				return nil, fmt.Errorf("target %s oracle %s freshness: %w", tg.Symbol, symbol, err)
+			}
+			oracleViews = append(oracleViews, view)
+		}
 
-		if rec, ok := prior[tg.Symbol]; ok && !opts.Force &&
-			pinsMatch(*rec, bodyHash, pins, engine.OperatorSet, toolchain) &&
-			budgetCovers(rec.Budget, opts.Budget) {
-			f.Cached = true
-			f.BodyLine = rec.BodyLine
-			f.Budget = rec.Budget
-			f.Mutants = rec.Mutants
-			f.Killed = rec.Killed
-			f.Discarded = rec.Discarded
-			f.Survivors = append([]Survivor(nil), rec.Survivors...)
-			f.Attested = append([]Attestation(nil), rec.Attested...)
-			continue
+		if rec, ok := prior[tg.Symbol]; ok && !opts.Force && budgetCovers(rec.Budget, opts.Budget) {
+			matches, err := evidenceSetMatches(*rec, targetView, oracleViews, engine.OperatorSet, opts.Timeout.String())
+			if err != nil {
+				return nil, err
+			}
+			if matches {
+				cached := *rec
+				cached.Labels = append([]string(nil), tg.Labels...)
+				cached.Cached = true
+				findings[i] = cached
+				continue
+			}
 		}
 
 		mutants, err := t.eng.Mutants(tg.Symbol, opts.Budget)
@@ -145,10 +154,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// should answer exhaustive requests from cache.
 			f.Budget = 0
 		}
-		if len(mutants) > 0 {
-			f.BodyLine = mutants[0].BodyLine
-		}
-
 		// Per-package oracle scoping (REQ-exec-oracle-run), with the rapid
 		// failfile flag only in front of binaries that register it
 		// (REQ-mut-overlay).
@@ -168,21 +173,27 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if rapid[pr.pkg] {
 				flags = []string{"-rapid.nofailfile"}
 			}
-			groups = append(groups, group{[]string{pr.pkg}, pr.runRegex, flags})
+			moduleDir, packageDir, err := t.eng.PackageContext(pr.pkg)
+			if err != nil {
+				return nil, err
+			}
+			groups = append(groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
 		}
 		oracleSet := make(map[string]bool, len(oracle))
 		for _, o := range oracle {
 			oracleSet[o] = true
 		}
-		pending = append(pending, work{target: i, mutants: mutants, groups: groups, oracleSet: oracleSet})
+		pending = append(pending, work{target: i, mutants: mutants, groups: groups, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews})
 	}
 
 	// Phase two: the pool. Outcomes land in a preallocated matrix so
 	// aggregation is deterministic regardless of completion order; the first
 	// error cancels everything in flight.
 	outcomes := make([][]engine.MutantOutcome, len(pending))
+	observations := make([][]runtimeinput.State, len(pending))
 	for wi := range pending {
 		outcomes[wi] = make([]engine.MutantOutcome, len(pending[wi].mutants))
+		observations[wi] = make([]runtimeinput.State, len(pending[wi].mutants))
 	}
 	type job struct{ wi, mi int }
 	jobCh := make(chan job)
@@ -199,11 +210,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				w := pending[j.wi]
 				m := w.mutants[j.mi]
 				outcome := engine.MutantSurvived
+				var processStates []runtimeinput.State
 				for _, g := range w.groups {
 					if outcome != engine.MutantSurvived {
 						break
 					}
-					out, killer, err := engine.RunMutant(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.Timeout, g.flags)
+					out, killer, state, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.Timeout, g.flags, g.moduleDir, g.packageDir, runEnv)
+					processStates = append(processStates, state)
 					if err == nil && out == engine.MutantKilled {
 						err = attributedKill(killer, w.oracleSet)
 					}
@@ -216,6 +229,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					}
 					outcome = out
 				}
+				state, err := runtimeinput.MergeEnv(t.dir, runEnv, processStates...)
+				if err != nil {
+					errOnce.Do(func() {
+						poolErr = fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+						cancel()
+					})
+					return
+				}
+				observations[j.wi][j.mi] = state
 				outcomes[j.wi][j.mi] = outcome
 			}
 		}()
@@ -240,6 +262,26 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// Phase three, sequential: aggregate in target and mutant order.
 	for wi, w := range pending {
 		f := &findings[w.target]
+		states := append([]runtimeinput.State(nil), observations[wi]...)
+		state, err := runtimeinput.MergeEnv(t.dir, runEnv, states...)
+		if err != nil {
+			return nil, err
+		}
+		targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, state)
+		if err != nil {
+			return nil, err
+		}
+		f.TargetEvidence = targetEvidence
+		f.OracleEvidence = oracleEvidence
+		f.Commit = repository.commit
+		sourceFiles := append([]string(nil), w.targetView.view.SourceFiles()...)
+		for _, oracleView := range w.oracleViews {
+			sourceFiles = append(sourceFiles, oracleView.view.SourceFiles()...)
+		}
+		sourceFiles = append(sourceFiles, repository.historicalPackageFiles(sourceFiles)...)
+		sourceFiles = withModuleSelectionPaths(sourceFiles)
+		sourceFiles = append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum"))
+		f.Dirty = repository.pathsDirty(sourceFiles, state)
 		for mi, m := range w.mutants {
 			switch outcomes[wi][mi] {
 			case engine.MutantDiscarded:
@@ -253,23 +295,25 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 		// A re-measure with unchanged pins keeps prior attestations that
-		// still name a survivor; changed pins shed them, so every body
-		// version's equivalences are re-judged (REQ-attest-survivor). Old
-		// positions rebase against the recorded declaration anchor first.
-		if rec, ok := prior[targets[w.target].Symbol]; ok &&
-			pinsMatch(*rec, f.BodyHash, f.Oracle, engine.OperatorSet, toolchain) {
-			delta := f.BodyLine - rec.BodyLine
-			open := map[string]bool{}
+		// still name the exact survivor; changed pins shed them, so every
+		// evidence version's equivalences are re-judged (REQ-attest-survivor).
+		if rec, ok := prior[targets[w.target].Symbol]; ok {
+			if !sameAttestationPins(*rec, *f) {
+				continue
+			}
+			open := map[survivorKey]bool{}
 			for _, s := range f.Survivors {
-				open[s.Position+"|"+s.Operator] = true
+				open[survivorKey{s.Position, s.Operator}] = true
 			}
 			for _, a := range rec.Attested {
-				pos, ok := shiftPos(a.Position, delta)
-				if ok && open[pos+"|"+a.Operator] {
-					f.Attested = append(f.Attested, Attestation{Position: pos, Operator: a.Operator, Reason: a.Reason})
+				if open[survivorKey{a.Position, a.Operator}] {
+					f.Attested = append(f.Attested, a)
 				}
 			}
 		}
+	}
+	if repository.headMoved() {
+		return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
 	}
 	return findings, nil
 }

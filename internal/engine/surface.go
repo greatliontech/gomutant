@@ -62,7 +62,7 @@ func (t *Tree) Surface(paths []string, ref func(path string) ([]byte, bool)) []F
 	}
 	byPath := map[string]*fileDecls{}
 	for _, pkg := range t.pkgs {
-		pkgPath := strings.TrimSuffix(pkg.PkgPath, "_test")
+		pkgPath := basePackagePath(pkg)
 		for _, f := range pkg.Syntax {
 			abs := pkg.Fset.Position(f.Pos()).Filename
 			rel, err := filepath.Rel(t.dir, abs)

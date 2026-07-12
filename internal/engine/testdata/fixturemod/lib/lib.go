@@ -18,6 +18,8 @@ type I interface {
 
 // Add exists for mutation testing: TestAdd pins both branches, so every
 // mutant dies.
+//
+//gofresh:pure
 func Add(a, b int) int {
 	if a == 0 {
 		return b
@@ -25,8 +27,14 @@ func Add(a, b int) int {
 	return a + b
 }
 
+func PickInput() int { return 1 }
+
+func PanicValue() int { return 1 }
+
 // Weak exists for mutation testing: TestWeak never exercises the large-x
 // branch, so mutants inside it survive.
+//
+//gofresh:pure
 func Weak(x int) int {
 	if x > 100 {
 		return x - 1

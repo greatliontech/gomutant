@@ -1,10 +1,15 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 // TestRunMutantOutcomes pins the overlay runner end to end
@@ -62,6 +67,120 @@ func TestRunMutantOutcomes(t *testing.T) {
 	}
 }
 
+func TestRunMutantObservedReturnsCompletedEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	tr := fixtureTree(t)
+	mutants, err := tr.Mutants("example.com/fixture/lib.Add", 1)
+	if err != nil || len(mutants) == 0 {
+		t.Fatalf("Mutants: %v", err)
+	}
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+		[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.OK || state.Manifest == "" || state.Digest == "" {
+		t.Fatalf("observation = %+v", state)
+	}
+}
+
+func TestMissingProcessLogIsIncomplete(t *testing.T) {
+	moduleDir, err := filepath.Abs("testdata/fixturemod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := processObservation(filepath.Join(t.TempDir(), "missing.testlog"), moduleDir,
+		filepath.Join(moduleDir, "lib"), "", GoEnv(moduleDir), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Unverifiable || !strings.Contains(state.Reason, "produced no runtime-input log") {
+		t.Fatalf("missing-log observation = %+v, want explicit incompleteness", state)
+	}
+}
+
+func TestIncompleteProcessRetainsPartialLog(t *testing.T) {
+	moduleDir, err := filepath.Abs("testdata/fixturemod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(moduleDir, "lib", "input-0.txt")
+	logPath := filepath.Join(t.TempDir(), "partial.testlog")
+	log := append([]byte("open input-0.txt\n"), bytes.Repeat([]byte{'x'}, 128<<10)...)
+	if err := os.WriteFile(logPath, log, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state, err := processObservation(logPath, moduleDir, filepath.Join(moduleDir, "lib"),
+		"test process timed out", GoEnv(moduleDir), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths, err := runtimeinput.Paths(state.Manifest, moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Unverifiable || len(paths) != 1 || paths[0] != input {
+		t.Fatalf("partial observation = %+v, paths %v", state, paths)
+	}
+}
+
+func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
+	tr := fixtureTree(t)
+	mutants, err := tr.Mutants("example.com/fixture/lib.Add", 1)
+	if err != nil || len(mutants) != 1 {
+		t.Fatalf("Mutants: %v, count %d", err, len(mutants))
+	}
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(t.TempDir(), "moving-input")
+	if err := os.WriteFile(input, []byte("A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOMUTANT_MOVING_INPUT", input)
+	outcome, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+		[]string{"example.com/fixture/lib"}, "^TestMovingInput$", 60*time.Second, nil, moduleDir, packageDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != MutantSurvived || killer != "" {
+		t.Fatalf("stable-input measurement = %v/%q, want survivor from second run", outcome, killer)
+	}
+	if !state.OK || state.Unverifiable {
+		t.Fatalf("runtime state = %+v", state)
+	}
+}
+
+func TestNamedTestPanicIsIncompleteEvidence(t *testing.T) {
+	tr := fixtureTree(t)
+	mutants, err := tr.Mutants("example.com/fixture/lib.PanicValue", 1)
+	if err != nil || len(mutants) != 1 {
+		t.Fatalf("Mutants: %v, count %d", err, len(mutants))
+	}
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+		[]string{"example.com/fixture/lib"}, "^TestNamedPanic$", 60*time.Second, nil, moduleDir, packageDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != MutantKilled || killer != "example.com/fixture/lib.TestNamedPanic" {
+		t.Fatalf("named panic = %v/%q, want attributed kill", outcome, killer)
+	}
+	if !state.Unverifiable || !strings.Contains(state.Reason, "panicked before observation finalization") {
+		t.Fatalf("named-panic observation = %+v, want explicit incompleteness", state)
+	}
+}
+
 // TestRunMutantGoroutinePanicIsAKill pins the package-level attribution arm
 // (REQ-exec-attribution): a mutant that detonates in a goroutine emits no
 // test-level fail event — the differential baseline probe clears the
@@ -76,6 +195,10 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
 	pkgKills, timeoutKills := 0, 0
 	for _, m := range ms {
 		// Two of Guarded's mutants drop the channel send, so the receiver
@@ -83,19 +206,25 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 		// suffices — the legitimate run is sub-second — and keeps this
 		// exhaustive loop from paying a long timeout for mutants that are
 		// incidental to the package-kill this test asserts.
-		out, killer, err := RunMutant(context.Background(), "testdata/fixturemod", m,
-			[]string{"example.com/fixture/lib"}, "^TestGuarded$", 5*time.Second, nil)
+		out, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+			[]string{"example.com/fixture/lib"}, "^TestGuarded$", 5*time.Second, nil, moduleDir, packageDir)
 		if err != nil {
 			t.Fatalf("mutant %s %s aborted as noise: %v", m.Position, m.Operator, err)
 		}
 		if out == MutantKilled && strings.HasPrefix(killer, PackageKillerPrefix) {
 			pkgKills++
+			if !state.Unverifiable {
+				t.Fatalf("package-failure observation = %+v, want unverifiable", state)
+			}
 			if killer != PackageKillerPrefix+"example.com/fixture/lib)" {
 				t.Fatalf("sentinel = %q", killer)
 			}
 		}
 		if out == MutantKilled && killer == TimeoutKiller {
 			timeoutKills++
+			if !state.Unverifiable {
+				t.Fatalf("timeout observation = %+v, want unverifiable", state)
+			}
 		}
 	}
 	if pkgKills == 0 {
@@ -121,9 +250,13 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	discarded := 0
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, m := range ms {
-		out, killer, err := RunMutant(context.Background(), "testdata/fixturemod", m,
-			[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil)
+		out, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+			[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir)
 		if err != nil {
 			t.Fatalf("mutant %s %s: %v", m.Position, m.Operator, err)
 		}
@@ -131,6 +264,9 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 			discarded++
 			if killer != "" {
 				t.Fatalf("discarded mutant carries killer %q", killer)
+			}
+			if !state.Unverifiable || !strings.Contains(state.Reason, "failed to build") {
+				t.Fatalf("discarded mutant observation = %+v, want explicit build incompleteness", state)
 			}
 		}
 	}
@@ -152,11 +288,18 @@ func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 	if err != nil || len(ms) == 0 {
 		t.Fatalf("no mutants: %v", err)
 	}
-	out, killer, err := RunMutant(context.Background(), "testdata/fixturemod", ms[0],
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
 		[]string{"example.com/fixture/plain"}, "^TestPlain$", 60*time.Second,
-		[]string{"-no.such.flag"})
+		[]string{"-no.such.flag"}, moduleDir, packageDir)
 	if err == nil || !strings.Contains(err.Error(), "no test-attributed kill") {
 		t.Fatalf("noise read as outcome %v killer %q err %v", out, killer, err)
+	}
+	if !state.Unverifiable {
+		t.Fatalf("noise observation = %+v, want explicit incompleteness", state)
 	}
 }
 
@@ -189,11 +332,43 @@ func TestFirstFailingTest(t *testing.T) {
 {"Action":"fail","Package":"example.com/p","Test":"TestA"}
 {"Action":"fail","Package":"example.com/p"}
 `)
-	if got := firstFailingTest(stream); got != "example.com/p.TestA" {
+	if got, err := firstFailingTest(stream); err != nil || got != "example.com/p.TestA" {
 		t.Fatalf("killer = %q", got)
 	}
-	if got := firstFailingTest([]byte(`{"Action":"fail","Package":"example.com/p"}` + "\n")); got != "" {
+	if got, err := firstFailingTest([]byte(`{"Action":"fail","Package":"example.com/p"}` + "\n")); err != nil || got != "" {
 		t.Fatalf("package-level fail attributed: %q", got)
+	}
+	malformed := append(stream, []byte("not-json\n")...)
+	if got, err := firstFailingTest(malformed); err == nil || got != "" {
+		t.Fatalf("malformed tail accepted as %q: %v", got, err)
+	}
+	countStream := []byte(`{"Action":"pass","Test":"TestA"}` + "\nnot-json\n")
+	if count, err := countTopTests(countStream); err == nil || count != 0 {
+		t.Fatalf("malformed count stream accepted: count=%d err=%v", count, err)
+	}
+	normalFailure := []byte(`{"Action":"output","Test":"TestA","Output":"--- FAIL: TestA (0.00s)\n"}` + "\n")
+	if !testFailureCompleted(normalFailure, "TestA") {
+		t.Fatal("normal harness failure read as abrupt")
+	}
+	if testFailureCompleted([]byte(`{"Action":"fail","Test":"TestA"}`+"\n"), "TestA") {
+		t.Fatal("synthetic failure without harness marker read as complete")
+	}
+	parallelAbrupt := []byte(`{"Action":"run","Test":"TestA"}
+{"Action":"run","Test":"TestB"}
+{"Action":"output","Test":"TestA","Output":"--- FAIL: TestA (0.00s)\n"}
+{"Action":"fail","Test":"TestA"}
+`)
+	if testFailureCompleted(parallelAbrupt, "TestA") {
+		t.Fatal("unfinished parallel test read as complete")
+	}
+	otherMarker := []byte(`{"Action":"run","Test":"TestA"}
+{"Action":"run","Test":"TestB"}
+{"Action":"output","Test":"TestA","Output":"--- FAIL: TestA (0.00s)\n"}
+{"Action":"fail","Test":"TestA"}
+{"Action":"fail","Test":"TestB"}
+`)
+	if testFailureCompleted(otherMarker, "TestB") {
+		t.Fatal("another test's harness marker legitimized the failing test")
 	}
 }
 

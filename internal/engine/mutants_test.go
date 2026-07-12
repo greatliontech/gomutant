@@ -17,7 +17,7 @@ func TestMutants(t *testing.T) {
 	ops := map[string]bool{}
 	for _, m := range ms {
 		ops[m.Operator] = true
-		if m.Position == "" || len(m.Source) == 0 || m.BodyLine == 0 || m.File == "" {
+		if m.Position == "" || len(m.Source) == 0 || m.File == "" {
 			t.Fatalf("incomplete mutant: %+v", m)
 		}
 	}

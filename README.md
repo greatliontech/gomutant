@@ -17,26 +17,26 @@ The contract lives in [docs/specs](docs/specs/overview.md).
 gomutant run
 
 # Measure only what changed since a ref, budgeted for the hot loop.
-gomutant run -changed HEAD -budget 5
+gomutant run --changed HEAD --budget 5
 
 # Explicit targets (symbol + oracle + labels) from a JSON document.
-gomutant run -targets targets.json
+gomutant run --targets targets.json
 
 # Open findings, grouped by label.
 gomutant findings
 
 # Disposition a survivor as equivalent, with the reasoning on record.
-gomutant attest -symbol example.com/pkg.F -position f.go:10:5 \
-    -operator "zero return" -reason "result unused on this path"
+gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \
+    --operator "zero return" --reason "result unused on this path"
 ```
 
 Findings live in a versioned JSON document (default
 `.gomutant/findings.json`), pinned to the inputs that produced them — the
-target's body hash, each oracle test's body hash, the operator-set version,
-the budget, and the toolchain. A run re-measures exactly what a moved pin
-invalidates and serves the rest from the document. Open findings are
-survivors minus attested dispositions; whether they fail a build is the
-caller's policy, not gomutant's verdict.
+target and oracle source closures, observed runtime inputs, toolchain and
+build configuration, operator-set version, budget, and effective timeout. A
+run re-measures exactly what a moved pin invalidates and serves the rest from
+the document. Open findings are survivors minus attested dispositions;
+whether they fail a build is the caller's policy, not gomutant's verdict.
 
 ## MCP
 

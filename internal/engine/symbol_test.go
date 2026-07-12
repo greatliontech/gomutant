@@ -2,6 +2,8 @@ package engine
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,6 +15,53 @@ func fixtureTree(t *testing.T) *Tree {
 		t.Fatal(err)
 	}
 	return tr
+}
+
+func TestValidateOracleRejectsAmbiguousTestVariants(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/ambiguous\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package ambiguous\n\nfunc F() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal_test.go"), []byte("package ambiguous\n\nimport \"testing\"\nfunc TestSame(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "external_test.go"), []byte("package ambiguous_test\n\nimport \"testing\"\nfunc TestSame(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.ValidateOracle([]string{"example.com/ambiguous.TestSame"}); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ValidateOracle = %v, want ambiguity", err)
+	}
+}
+
+func TestPackageContextSupportsTestOnlyPackage(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/testonly\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "only_test.go"), []byte("package testonly_test\n\nimport \"testing\"\nfunc TestOnly(t *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moduleDir, packageDir, err := tree.PackageContext("example.com/testonly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moduleDir != dir || packageDir != dir {
+		t.Fatalf("context = %s / %s, want %s", moduleDir, packageDir, dir)
+	}
+	if err := tree.ValidateOracle([]string{"example.com/testonly.TestOnly"}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestBodyHash pins the body-hash contract (REQ-result-record): stable across
@@ -133,18 +182,5 @@ func TestLoadWorkspace(t *testing.T) {
 	}
 	if _, err := Load("testdata/escapemod"); err == nil || !strings.Contains(err.Error(), "escapes the tree") {
 		t.Fatalf("escaping go.work member accepted: %v", err)
-	}
-}
-
-// TestToolchain pins the platform-bearing identity records pin
-// (REQ-result-record): "GOVERSION GOOS/GOARCH".
-func TestToolchain(t *testing.T) {
-	id, err := Toolchain("testdata/fixturemod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parts := strings.Fields(id)
-	if len(parts) != 2 || !strings.HasPrefix(parts[0], "go") || !strings.Contains(parts[1], "/") {
-		t.Fatalf("toolchain identity %q", id)
 	}
 }

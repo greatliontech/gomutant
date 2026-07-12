@@ -2,34 +2,34 @@ package gomutant
 
 import "testing"
 
-// TestPinsMatch pins the staleness predicate leg by leg (REQ-result-stale):
-// any moved pin — body, oracle membership or content, operator set,
-// toolchain — re-measures; order of oracle pins never matters.
-func TestPinsMatch(t *testing.T) {
-	oracle := []OraclePin{{Symbol: "p.TestA", Hash: "ha"}, {Symbol: "p.TestB", Hash: "hb"}}
-	base := Finding{BodyHash: "body", OperatorSet: "go/2", Toolchain: "tc",
-		Oracle: []OraclePin{{Symbol: "p.TestB", Hash: "hb"}, {Symbol: "p.TestA", Hash: "ha"}}} // reordered
-	if !pinsMatch(base, "body", oracle, "go/2", "tc") {
-		t.Fatal("matching pins (reordered oracle) read as stale")
+func TestSameAttestationPins(t *testing.T) {
+	target := SubjectEvidence{Symbol: "p.F", MaximalClosure: "f", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	oracle := SubjectEvidence{Symbol: "p.TestF", MaximalClosure: "test", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	secondOracle := SubjectEvidence{Symbol: "p.TestG", MaximalClosure: "test-g", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	base := Finding{OperatorSet: "go/2", Budget: 3, Timeout: "1m0s", TargetEvidence: target, OracleEvidence: []SubjectEvidence{oracle, secondOracle}}
+	reordered := base
+	reordered.OracleEvidence = []SubjectEvidence{secondOracle, oracle}
+	if !sameAttestationPins(base, reordered) {
+		t.Fatal("identical pins did not match")
 	}
 	cases := []struct {
 		name string
-		mut  func(f *Finding)
+		mut  func(*Finding)
 	}{
-		{"body moved", func(f *Finding) { f.BodyHash = "other" }},
-		{"operator set moved", func(f *Finding) { f.OperatorSet = "go/3" }},
-		{"toolchain moved", func(f *Finding) { f.Toolchain = "tc2" }},
-		{"oracle test strengthened", func(f *Finding) { f.Oracle[0].Hash = "hb2" }},
-		{"oracle test renamed", func(f *Finding) { f.Oracle[0].Symbol = "p.TestC" }},
-		{"oracle test dropped", func(f *Finding) { f.Oracle = f.Oracle[:1] }},
+		{"operator set", func(f *Finding) { f.OperatorSet = "go/3" }},
+		{"budget", func(f *Finding) { f.Budget = 2 }},
+		{"timeout", func(f *Finding) { f.Timeout = "2m0s" }},
+		{"target evidence", func(f *Finding) { f.TargetEvidence.RuntimeDigest = "moved" }},
+		{"oracle evidence", func(f *Finding) { f.OracleEvidence[0].RuntimeDigest = "moved" }},
+		{"oracle removed", func(f *Finding) { f.OracleEvidence = nil }},
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			prior := base
-			prior.Oracle = append([]OraclePin(nil), base.Oracle...)
-			c.mut(&prior)
-			if pinsMatch(prior, "body", oracle, "go/2", "tc") {
-				t.Fatal("moved pin still matched")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			current := base
+			current.OracleEvidence = append([]SubjectEvidence(nil), base.OracleEvidence...)
+			tc.mut(&current)
+			if sameAttestationPins(base, current) {
+				t.Fatal("moved pin matched")
 			}
 		})
 	}

@@ -6,5 +6,4 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [rename-sheds-dispositions](rename-sheds-dispositions.md) | a file rename sheds attestations on the forced/widened re-measure path | when survivor identity gains a file-independent component |
 | [stale-document-entries](stale-document-entries.md) | findings for deleted symbols persist and read as open | when document hygiene first bites, or the findings verb next changes |

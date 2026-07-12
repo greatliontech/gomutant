@@ -7,16 +7,17 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/greatliontech/gomutant/internal/mcpserver"
+	"github.com/spf13/cobra"
 )
 
 const defaultFindings = ".gomutant/findings.json"
@@ -29,40 +30,85 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: gomutant <run|findings|attest|ephemeral|mcp> [flags]")
-	}
-	switch args[0] {
-	case "run":
-		return cmdRun(args[1:])
-	case "findings":
-		return cmdFindings(args[1:])
-	case "attest":
-		return cmdAttest(args[1:])
-	case "ephemeral":
-		return cmdEphemeral(args[1:])
-	case "mcp":
-		return cmdMCP(args[1:])
-	default:
-		return fmt.Errorf("unknown command %q (want run, findings, attest, or ephemeral)", args[0])
-	}
+	cmd := newRootCommand()
+	cmd.SetArgs(normalizeLegacyFlags(args))
+	return cmd.Execute()
 }
 
-func cmdRun(args []string) error {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	dir := fs.String("dir", ".", "tree root (module or workspace)")
-	budget := fs.Int("budget", 0, "mutants per symbol; 0 = exhaustive")
-	timeout := fs.Duration("timeout", 60*time.Second, "one mutant's oracle run budget")
-	jobs := fs.Int("jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
-	force := fs.Bool("force", false, "re-measure targets whose prior finding still covers")
-	changed := fs.String("changed", "", "target only symbols whose bodies differ from this git ref")
-	targetsFile := fs.String("targets", "", "JSON targets document; overrides discovery")
-	findingsFile := fs.String("findings", defaultFindings, "findings document to read and update")
-	if err := fs.Parse(args); err != nil {
-		return err
+func newRootCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "gomutant",
+		Short:         "Mutation testing for Go",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(*cobra.Command, []string) error {
+			return fmt.Errorf("a command is required")
+		},
 	}
+	cmd.AddCommand(newRunCommand(), newFindingsCommand(), newAttestCommand(), newEphemeralCommand(), newMCPCommand())
+	return cmd
+}
 
-	tree, err := gomutant.Load(*dir)
+func normalizeLegacyFlags(args []string) []string {
+	long := map[string]bool{
+		"budget": true, "changed": true, "dir": true, "file": true, "findings": true,
+		"force": true, "jobs": true, "label": true, "operator": true, "position": true,
+		"reason": true, "replacement": true, "run": true, "symbol": true, "targets": true,
+		"test-pkg": true, "timeout": true,
+	}
+	normalized := append([]string(nil), args...)
+	for i := 0; i < len(normalized); i++ {
+		arg := normalized[i]
+		if arg == "--" {
+			break
+		}
+		if len(arg) < 3 || arg[0] != '-' {
+			continue
+		}
+		legacy := arg[1] != '-'
+		name := strings.TrimLeft(arg, "-")
+		before, _, hasValue := strings.Cut(name, "=")
+		if hasValue {
+			name = before
+		}
+		if long[name] {
+			if legacy {
+				normalized[i] = "-" + arg
+			}
+			if name != "force" && !hasValue {
+				i++
+			}
+		}
+	}
+	return normalized
+}
+
+type runOptions struct {
+	dir, changed, targetsFile, findingsFile string
+	budget, jobs                            int
+	timeout                                 time.Duration
+	force                                   bool
+}
+
+func newRunCommand() *cobra.Command {
+	o := runOptions{}
+	cmd := &cobra.Command{Use: "run", Short: "Measure mutants and update findings", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
+		return runCommand(o)
+	}}
+	f := cmd.Flags()
+	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
+	f.IntVar(&o.budget, "budget", 0, "mutants per symbol; 0 = exhaustive")
+	f.DurationVar(&o.timeout, "timeout", 60*time.Second, "one mutant's oracle run budget")
+	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
+	f.BoolVar(&o.force, "force", false, "re-measure targets whose prior finding still covers")
+	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref")
+	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery")
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read and update")
+	return cmd
+}
+
+func runCommand(o runOptions) error {
+	tree, err := gomutant.Load(o.dir)
 	if err != nil {
 		return err
 	}
@@ -70,21 +116,21 @@ func cmdRun(args []string) error {
 	var targets []gomutant.Target
 	var residue []gomutant.Residue
 	switch {
-	case *targetsFile != "":
-		data, err := os.ReadFile(*targetsFile)
+	case o.targetsFile != "":
+		data, err := os.ReadFile(o.targetsFile)
 		if err != nil {
 			return err
 		}
 		if targets, err = gomutant.LoadTargets(data); err != nil {
 			return err
 		}
-	case *changed != "":
-		paths, err := gitref.ChangedPaths(*dir, *changed)
+	case o.changed != "":
+		paths, err := gitref.ChangedPaths(o.dir, o.changed)
 		if err != nil {
 			return err
 		}
 		targets, residue = tree.DiscoverChanged(paths, func(p string) ([]byte, bool) {
-			return gitref.Show(*dir, *changed, p)
+			return gitref.Show(o.dir, o.changed, p)
 		})
 	default:
 		targets = tree.Discover()
@@ -99,13 +145,13 @@ func cmdRun(args []string) error {
 
 	// The default document anchors at -dir, matching the MCP face: the two
 	// faces compose through one record wherever the tree is.
-	docPath := findingsAt(*dir, *findingsFile)
+	docPath := findingsAt(o.dir, o.findingsFile)
 	prior, err := loadFindings(docPath)
 	if err != nil {
 		return err
 	}
 	findings, err := tree.Run(context.Background(), targets, gomutant.Options{
-		Budget: *budget, Timeout: *timeout, Jobs: *jobs, Force: *force, Prior: prior,
+		Budget: o.budget, Timeout: o.timeout, Jobs: o.jobs, Force: o.force, Prior: prior,
 	})
 	if err != nil {
 		return err
@@ -129,15 +175,22 @@ func cmdRun(args []string) error {
 	})
 }
 
-func cmdFindings(args []string) error {
-	fs := flag.NewFlagSet("findings", flag.ContinueOnError)
-	dir := fs.String("dir", ".", "tree root the default document anchors at")
-	findingsFile := fs.String("findings", defaultFindings, "findings document to read")
-	label := fs.String("label", "", "show only findings carrying this label")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	all, err := loadFindings(findingsAt(*dir, *findingsFile))
+type findingsOptions struct{ dir, findingsFile, label string }
+
+func newFindingsCommand() *cobra.Command {
+	o := findingsOptions{}
+	cmd := &cobra.Command{Use: "findings", Short: "List open mutation findings", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
+		return findingsCommand(o)
+	}}
+	f := cmd.Flags()
+	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read")
+	f.StringVar(&o.label, "label", "", "show only findings carrying this label")
+	return cmd
+}
+
+func findingsCommand(o findingsOptions) error {
+	all, err := loadFindings(findingsAt(o.dir, o.findingsFile))
 	if err != nil {
 		return err
 	}
@@ -154,7 +207,7 @@ func cmdFindings(args []string) error {
 			labels = []string{"(unlabeled)"}
 		}
 		for _, l := range labels {
-			if *label != "" && l != *label {
+			if o.label != "" && l != o.label {
 				continue
 			}
 			for _, s := range open {
@@ -180,62 +233,79 @@ func cmdFindings(args []string) error {
 	return nil
 }
 
-func cmdAttest(args []string) error {
-	fs := flag.NewFlagSet("attest", flag.ContinueOnError)
-	dir := fs.String("dir", ".", "tree root the default document anchors at")
-	findingsFile := fs.String("findings", defaultFindings, "findings document to update")
-	symbol := fs.String("symbol", "", "the mutated symbol")
-	position := fs.String("position", "", "the survivor's position (file:line:col)")
-	operator := fs.String("operator", "", "the survivor's operator")
-	reason := fs.String("reason", "", "why the mutant is equivalent")
-	if err := fs.Parse(args); err != nil {
-		return err
+type attestOptions struct{ dir, findingsFile, symbol, position, operator, reason string }
+
+func newAttestCommand() *cobra.Command {
+	o := attestOptions{}
+	cmd := &cobra.Command{Use: "attest", Short: "Attest an equivalent surviving mutant", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
+		return attestCommand(o)
+	}}
+	f := cmd.Flags()
+	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to update")
+	f.StringVar(&o.symbol, "symbol", "", "the mutated symbol")
+	f.StringVar(&o.position, "position", "", "the survivor's position (file:line:col)")
+	f.StringVar(&o.operator, "operator", "", "the survivor's operator")
+	f.StringVar(&o.reason, "reason", "", "why the mutant is equivalent")
+	return cmd
+}
+
+func attestCommand(o attestOptions) error {
+	if o.symbol == "" || o.position == "" || o.operator == "" || o.reason == "" {
+		return fmt.Errorf("attest needs --symbol, --position, --operator, and --reason")
 	}
-	if *symbol == "" || *position == "" || *operator == "" || *reason == "" {
-		return fmt.Errorf("attest needs -symbol, -position, -operator, and -reason")
-	}
-	return gomutant.UpdateDocument(findingsAt(*dir, *findingsFile), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+	return gomutant.UpdateDocument(findingsAt(o.dir, o.findingsFile), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		for i := range all {
-			if all[i].Symbol == *symbol {
-				return all, all[i].Attest(*position, *operator, *reason)
+			if all[i].Symbol == o.symbol {
+				return all, all[i].Attest(o.position, o.operator, o.reason)
 			}
 		}
-		return nil, fmt.Errorf("no finding for %s", *symbol)
+		return nil, fmt.Errorf("no finding for %s", o.symbol)
 	})
 }
 
-func cmdMCP(args []string) error {
-	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
-	dir := fs.String("dir", ".", "tree root (module or workspace)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	return mcpserver.New(*dir).Run(context.Background())
+func newMCPCommand() *cobra.Command {
+	dir := "."
+	cmd := &cobra.Command{Use: "mcp", Short: "Serve gomutant over MCP", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
+		return mcpserver.New(dir).Run(context.Background())
+	}}
+	cmd.Flags().StringVar(&dir, "dir", ".", "tree root (module or workspace)")
+	return cmd
 }
 
-func cmdEphemeral(args []string) error {
-	fs := flag.NewFlagSet("ephemeral", flag.ContinueOnError)
-	dir := fs.String("dir", ".", "tree root (module or workspace)")
-	file := fs.String("file", "", "tree-relative source file to replace")
-	replacement := fs.String("replacement", "", "path to the whole replacement source")
-	testPkg := fs.String("test-pkg", "", "package whose named test decides the kill")
-	runPat := fs.String("run", "", "-run pattern naming the deciding test")
-	timeout := fs.Duration("timeout", 60*time.Second, "the run's budget")
-	if err := fs.Parse(args); err != nil {
-		return err
+type ephemeralOptions struct {
+	dir, file, replacement, testPkg, runPat string
+	timeout                                 time.Duration
+}
+
+func newEphemeralCommand() *cobra.Command {
+	o := ephemeralOptions{}
+	cmd := &cobra.Command{Use: "ephemeral", Short: "Run one replacement source as a manual mutant", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
+		return ephemeralCommand(o)
+	}}
+	f := cmd.Flags()
+	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
+	f.StringVar(&o.file, "file", "", "tree-relative source file to replace")
+	f.StringVar(&o.replacement, "replacement", "", "path to the whole replacement source")
+	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill")
+	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
+	f.DurationVar(&o.timeout, "timeout", 60*time.Second, "the run's budget")
+	return cmd
+}
+
+func ephemeralCommand(o ephemeralOptions) error {
+	if o.file == "" || o.replacement == "" || o.testPkg == "" || o.runPat == "" {
+		return fmt.Errorf("ephemeral needs --file, --replacement, --test-pkg, and --run")
 	}
-	if *file == "" || *replacement == "" || *testPkg == "" || *runPat == "" {
-		return fmt.Errorf("ephemeral needs -file, -replacement, -test-pkg, and -run")
-	}
-	mutant, err := os.ReadFile(*replacement)
+	mutant, err := os.ReadFile(o.replacement)
 	if err != nil {
 		return err
 	}
-	tree, err := gomutant.Load(*dir)
+	tree, err := gomutant.Load(o.dir)
 	if err != nil {
 		return err
 	}
-	res, err := tree.Ephemeral(context.Background(), *file, mutant, *testPkg, *runPat, *timeout)
+	res, err := tree.Ephemeral(context.Background(), o.file, mutant, o.testPkg, o.runPat, o.timeout)
 	if err != nil {
 		return err
 	}

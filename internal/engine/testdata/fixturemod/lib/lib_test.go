@@ -1,8 +1,59 @@
 package lib
 
-import "testing"
+import (
+	"fmt"
+	"os"
+	"testing"
+)
 
+//gofresh:pure
+func TestPickInput(t *testing.T) {
+	got := PickInput()
+	_, _ = os.ReadFile(fmt.Sprintf("input-%d.txt", got))
+	if got != 1 {
+		t.Fatalf("PickInput() = %d", got)
+	}
+}
+
+func TestMovingInput(t *testing.T) {
+	path := os.Getenv("GOMUTANT_MOVING_INPUT")
+	if path == "" {
+		t.Skip("mutation-run fixture")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) == "A" {
+		if err := os.WriteFile(path, []byte("B"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if Add(1, 2) != 3 {
+			t.Fatal("sum")
+		}
+	}
+}
+
+func TestNamedPanic(t *testing.T) {
+	if PanicValue() != 1 {
+		panic("mutant changed value")
+	}
+}
+
+//gofresh:pure
+func TestFrozenEnvironment(t *testing.T) {
+	if os.Getenv("GOMUTANT_FROZEN_INPUT") != "loaded" {
+		return
+	}
+	if Add(1, 2) != 3 {
+		t.Fatal("sum")
+	}
+}
+
+//gofresh:pure
 func TestAdd(t *testing.T) {
+	_ = os.Getenv("GOMUTANT_TEST_INPUT")
+	_ = os.Getenv("GOWORK")
 	if Add(1, 2) != 3 {
 		t.Fatal("sum")
 	}
@@ -11,6 +62,7 @@ func TestAdd(t *testing.T) {
 	}
 }
 
+//gofresh:pure
 func TestWeak(t *testing.T) {
 	if Weak(5) != 5 {
 		t.Fatal("small arm")

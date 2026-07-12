@@ -20,10 +20,6 @@ type Mutant struct {
 	Symbol   string
 	Operator string
 	Position string
-	// BodyLine is the mutated body's first line: positions are absolute, so
-	// matching them across regenerations rebases against this anchor
-	// (REQ-attest-survivor).
-	BodyLine int
 	// File is the original file's absolute path; Source the mutated bytes.
 	File   string
 	Source []byte
@@ -263,7 +259,6 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 			Symbol:   symbol,
 			Operator: s.op,
 			Position: fmt.Sprintf("%s:%d:%d", filepath.Base(p.Filename), p.Line, p.Column),
-			BodyLine: pkg.Fset.Position(fd.Pos()).Line,
 			File:     path,
 			Source:   mutated,
 		})

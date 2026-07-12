@@ -108,7 +108,7 @@ func (t *Tree) object(symbol string) (types.Object, error) {
 func (t *Tree) splitSymbol(symbol string) (string, string) {
 	best := ""
 	for _, pkg := range t.pkgs {
-		p := strings.TrimSuffix(pkg.PkgPath, "_test")
+		p := basePackagePath(pkg)
 		if strings.HasPrefix(symbol, p+".") && len(p) > len(best) {
 			best = p
 		}

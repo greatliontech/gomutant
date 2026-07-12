@@ -18,7 +18,9 @@ func TestEphemeral(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test")
 	}
+	t.Setenv("GOMUTANT_FROZEN_INPUT", "loaded")
 	tr := fixtureTree(t)
+	t.Setenv("GOMUTANT_FROZEN_INPUT", "changed-after-load")
 	ctx := context.Background()
 	libPath := filepath.Join(fixtureDir, "lib", "lib.go")
 	orig, err := os.ReadFile(libPath)
@@ -34,6 +36,13 @@ func TestEphemeral(t *testing.T) {
 	}
 	if !res.Killed || res.Killer != "example.com/fixture/lib.TestAdd" {
 		t.Fatalf("breaking mutant = %+v, want killed by TestAdd", res)
+	}
+	res, err = tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestFrozenEnvironment$", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Killed || res.Killer != "example.com/fixture/lib.TestFrozenEnvironment" {
+		t.Fatalf("frozen-environment mutant = %+v, want attributed kill", res)
 	}
 
 	// Breaking only Weak's untested branch: TestWeak cannot see it.
