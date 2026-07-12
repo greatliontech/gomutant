@@ -19,7 +19,8 @@ unattributable and aborts a sweep the per-package form completes.
 
 **REQ-exec-attribution** (behavior): A kill MUST be one of exactly three
 attributed events, enforcing REQ-core-attributed-kills: a named oracle test
-reporting failure in the run's structured output; a timeout; or a
+that passed in a pre-measurement run of the unmutated tree reporting failure
+in the mutant run's structured output; a timeout; or a
 package-scope failure with no test-level event — admitted only when a
 baseline probe of the unmutated tree passes, which distinguishes a
 goroutine-panic-class kill from environmental noise. A run that fails in any
@@ -27,9 +28,12 @@ other way — a build error the overlay should have prevented, a killer test
 outside the oracle, output that does not parse — aborts without recording a
 finding, because a corrupted measurement read as a sound one inflates kills
 in the flattering direction.
+Each distinct package-scoped oracle group needed by fresh targets is probed
+once per run before mutant execution. A group that matches no tests or does
+not pass unmutated refuses the measurement; cached findings launch no probe.
 
 **REQ-exec-observation** (behavior): gomutant MUST capture one independent Go
-testlog observation for every mutant and package-baseline process it launches,
+testlog observation for every mutant and oracle-baseline process it launches,
 finalize completed logs against that process's package working
 directory, and merge their states as a deterministic union. The merged state is
 attached conservatively to the target and every oracle subject in the finding.
@@ -99,3 +103,8 @@ caller-context cancellation MUST cancel in-flight oracle processes, wait for
 their cleanup, return an operational cancellation error, and leave the
 findings document unchanged. A cancelled run never reports or persists a
 partial measurement.
+
+Mutation execution is supported on Unix and Windows hosts, where gomutant can
+own and terminate a process group or Job Object. Other host operating systems
+are refused during tree loading rather than admitted with weaker descendant
+cleanup semantics.

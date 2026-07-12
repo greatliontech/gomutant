@@ -130,6 +130,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		oracleSet   map[string]bool
 		targetView  *subjectView
 		oracleViews []*subjectView
+		baselines   []runtimeinput.State
 	}
 	// Findings are keyed by symbol (REQ-result-record): two targets naming
 	// one symbol would collide in the document, so the set is refused up
@@ -144,6 +145,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 
 	findings := make([]Finding, len(targets))
 	var pending []work
+	type baselineKey struct {
+		pkg, run, flags, moduleDir, packageDir string
+	}
+	baselineCache := map[baselineKey]runtimeinput.State{}
 	decisions := make([]RunDecision, len(targets))
 	for i, tg := range targets {
 		if err := ctx.Err(); err != nil {
@@ -250,11 +255,31 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			groups = append(groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
 		}
+		baselines := make([]runtimeinput.State, 0, len(groups))
+		for _, group := range groups {
+			key := baselineKey{pkg: group.pkgs[0], run: group.runRegex, flags: strings.Join(group.flags, "\x00"), moduleDir: group.moduleDir, packageDir: group.packageDir}
+			state, ok := baselineCache[key]
+			if !ok {
+				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.Timeout, group.flags, group.moduleDir, group.packageDir, runEnv)
+				if err != nil {
+					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
+				}
+				if ran == 0 {
+					return nil, fmt.Errorf("target %s oracle baseline matched no tests in %s", tg.Symbol, group.pkgs[0])
+				}
+				if !passed {
+					return nil, fmt.Errorf("target %s oracle baseline does not pass in %s", tg.Symbol, group.pkgs[0])
+				}
+				state = observed
+				baselineCache[key] = state
+			}
+			baselines = append(baselines, state)
+		}
 		oracleSet := make(map[string]bool, len(oracle))
 		for _, o := range oracle {
 			oracleSet[o] = true
 		}
-		pending = append(pending, work{target: i, mutants: mutants, groups: groups, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews})
+		pending = append(pending, work{target: i, mutants: mutants, groups: groups, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, baselines: baselines})
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -341,7 +366,8 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// Phase three, sequential: aggregate in target and mutant order.
 	for wi, w := range pending {
 		f := &findings[w.target]
-		states := append([]runtimeinput.State(nil), observations[wi]...)
+		states := append([]runtimeinput.State(nil), w.baselines...)
+		states = append(states, observations[wi]...)
 		state, err := runtimeinput.MergeEnv(t.dir, runEnv, states...)
 		if err != nil {
 			return nil, err

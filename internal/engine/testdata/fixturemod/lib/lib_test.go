@@ -34,6 +34,37 @@ func TestMovingInput(t *testing.T) {
 	}
 }
 
+func TestUnstableInput(t *testing.T) {
+	path := os.Getenv("GOMUTANT_UNSTABLE_INPUT")
+	if path == "" {
+		t.Skip("baseline-run fixture")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := []byte("A")
+	if string(data) == "A" {
+		next = []byte("B")
+	}
+	if err := os.WriteFile(path, next, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUnstableBaselineResult(t *testing.T) {
+	path := os.Getenv("GOMUTANT_UNSTABLE_RESULT")
+	if path == "" {
+		t.Skip("baseline-run fixture")
+	}
+	if _, err := os.ReadFile(path); err == nil {
+		t.Fatal("second baseline fails")
+	}
+	if err := os.WriteFile(path, []byte("seen"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNamedPanic(t *testing.T) {
 	if PanicValue() != 1 {
 		panic("mutant changed value")

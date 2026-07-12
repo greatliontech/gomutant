@@ -79,15 +79,6 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 	if len(edits) == 0 {
 		return nil, fmt.Errorf("gomutant: edit batch is empty")
 	}
-	root, err := filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return nil, fmt.Errorf("gomutant: resolve tree root: %w", err)
-	}
-
 	type fileEdits struct {
 		file    string
 		abs     string
@@ -102,7 +93,7 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 		if edit.OldString == edit.NewString {
 			return nil, fmt.Errorf("gomutant: batch edit %d is byte-identical", i+1)
 		}
-		abs, err := resolveBatchFile(root, edit.File)
+		abs, err := resolveTreeFile(root, edit.File)
 		if err != nil {
 			return nil, fmt.Errorf("gomutant: batch edit %d: %w", i+1, err)
 		}
@@ -158,9 +149,13 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 	return replacements, nil
 }
 
-func resolveBatchFile(root, file string) (string, error) {
-	if file == "" || strings.Contains(file, `\`) || path.IsAbs(file) || driveQualified(file) || path.Clean(file) != file || file == "." || strings.HasPrefix(file, "../") {
+func resolveTreeFile(root, file string) (string, error) {
+	if strings.Contains(file, `\`) || path.IsAbs(file) || driveQualified(file) || path.Clean(file) != file || file == "." || strings.HasPrefix(file, "../") {
 		return "", fmt.Errorf("invalid tree-relative file %q", file)
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("gomutant: resolve tree root: %w", err)
 	}
 	abs := filepath.Join(root, filepath.FromSlash(file))
 	resolved, err := filepath.EvalSymlinks(abs)
@@ -168,7 +163,10 @@ func resolveBatchFile(root, file string) (string, error) {
 		return "", fmt.Errorf("resolve file %q: %w", file, err)
 	}
 	rel, err := filepath.Rel(root, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil {
+		return "", fmt.Errorf("relativize file %q: %w", file, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("file %q escapes the tree", file)
 	}
 	info, err := os.Stat(resolved)

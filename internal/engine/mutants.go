@@ -175,6 +175,19 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 				},
 				revert: func() { v.Cond = orig },
 			})
+		case *ast.ForStmt:
+			if v.Cond == nil {
+				break
+			}
+			orig := v.Cond
+			sites = append(sites, site{
+				op:  "negate condition",
+				pos: v.Cond.Pos(),
+				apply: func() {
+					v.Cond = &ast.UnaryExpr{Op: token.NOT, X: &ast.ParenExpr{X: orig}}
+				},
+				revert: func() { v.Cond = orig },
+			})
 		case *ast.BlockStmt:
 			for i, st := range v.List {
 				switch typed := st.(type) {

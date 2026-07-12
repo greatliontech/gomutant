@@ -373,12 +373,78 @@ func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Durat
 
 // TestProbeEnv is TestProbe under an already-frozen complete environment.
 func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (ran int, passed bool, err error) {
+	ran, passed, _, err = testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", env)
+	return ran, passed, err
+}
+
+// TestProbeObservedEnv is TestProbe under a frozen environment with a
+// runtime-input observation rooted at moduleDir and packageDir.
+func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (ran int, passed bool, state runtimeinput.State, err error) {
+	ran, passed, first, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, env)
+	if err != nil {
+		return ran, passed, first, err
+	}
+	if !passed {
+		return ran, false, first, nil
+	}
+	if ran == 0 {
+		return 0, true, first, nil
+	}
+	if !first.OK || first.Unverifiable {
+		return ran, passed, first, err
+	}
+	empty, err := runtimeinput.MergeEnv(moduleDir, env)
+	if err != nil {
+		return 0, false, runtimeinput.State{}, err
+	}
+	empty, err = runtimeinput.AbsoluteEnv(empty, moduleDir, env)
+	if err != nil {
+		return 0, false, runtimeinput.State{}, err
+	}
+	if first == empty {
+		return ran, passed, first, nil
+	}
+	secondRan, secondPassed, second, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, env)
+	if err != nil {
+		return secondRan, secondPassed, second, err
+	}
+	combined, err := runtimeinput.MergeEnv(dir, env, first, second)
+	if err != nil {
+		return 0, false, runtimeinput.State{}, err
+	}
+	if second.Unverifiable {
+		return secondRan, secondPassed, combined, nil
+	}
+	if secondRan != ran {
+		return secondRan, secondPassed, runtimeinput.State{}, fmt.Errorf("baseline test count changed between discovery and measurement")
+	}
+	if !secondPassed {
+		return secondRan, false, runtimeinput.State{}, fmt.Errorf("baseline result changed between discovery and measurement")
+	}
+	if first != second {
+		return secondRan, secondPassed, runtimeinput.State{}, fmt.Errorf("baseline runtime inputs or result changed between discovery and measurement")
+	}
+	return secondRan, secondPassed, combined, nil
+}
+
+func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (ran int, passed bool, state runtimeinput.State, err error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
 	// fails on the clean baseline would otherwise write a reproducer into
 	// the tree, the very invariant the runner protects (REQ-mut-overlay).
 	args := append([]string{"test", "-json", "-count=1", "-run", run, testPkg}, binFlags...)
+	capture := moduleDir != "" && packageDir != ""
+	var testlog string
+	if capture {
+		tmp, err := os.MkdirTemp("", "gomutant-probe-*")
+		if err != nil {
+			return 0, false, runtimeinput.State{}, err
+		}
+		defer os.RemoveAll(tmp)
+		testlog = filepath.Join(tmp, "baseline.testlog")
+		args = append(args, "-test.testlogfile="+testlog)
+	}
 	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir
 	cmd.Env = env
@@ -387,19 +453,31 @@ func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Du
 	cmd.Stderr = &buf
 	runErr := cmd.Run()
 	if ctx2.Err() == context.DeadlineExceeded {
-		return 0, false, fmt.Errorf("baseline test timed out")
+		state, observationErr := processObservation(testlog, moduleDir, packageDir, "baseline test process timed out", env, capture)
+		if observationErr != nil {
+			return 0, false, runtimeinput.State{}, observationErr
+		}
+		return 0, false, state, fmt.Errorf("baseline test timed out")
 	}
 	if err := ctx2.Err(); err != nil {
-		return 0, false, err
+		state, observationErr := processObservation(testlog, moduleDir, packageDir, "baseline test process was cancelled", env, capture)
+		if observationErr != nil {
+			return 0, false, runtimeinput.State{}, observationErr
+		}
+		return 0, false, state, err
 	}
 	if strings.Contains(buf.String(), "[build failed]") {
-		return 0, false, fmt.Errorf("baseline test failed to build")
+		return 0, false, runtimeinput.State{}, fmt.Errorf("baseline test failed to build")
 	}
 	ran, err = countTopTests(buf.Bytes())
 	if err != nil {
-		return 0, false, fmt.Errorf("parse baseline test output: %w", err)
+		return 0, false, runtimeinput.State{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
-	return ran, runErr == nil, nil
+	state, err = processObservation(testlog, moduleDir, packageDir, "", env, capture)
+	if err != nil {
+		return 0, false, runtimeinput.State{}, err
+	}
+	return ran, runErr == nil, state, nil
 }
 
 // failedPackage scans a go test -json stream for a package-level fail event,

@@ -38,6 +38,13 @@ type Tree struct {
 // patterns are module-scoped, so nested modules would otherwise vanish from
 // symbol resolution. A load failure is an error, never an empty tree.
 func Load(dir string) (*Tree, error) {
+	return load(dir, processExecutionSupported)
+}
+
+func load(dir string, executionSupported bool) (*Tree, error) {
+	if !executionSupported {
+		return nil, fmt.Errorf("gomutant: mutation execution supports Unix and Windows hosts")
+	}
 	members, err := workspaceMembers(dir)
 	if err != nil {
 		return nil, err

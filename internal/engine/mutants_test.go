@@ -84,6 +84,17 @@ func TestMutants(t *testing.T) {
 	if !disambiguated {
 		t.Fatal("nested logical mutants did not disambiguate an overlapping position")
 	}
+	loop, err := tr.Mutants("example.com/fixture/lib.Loop", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loopOps := map[string]int{}
+	for _, mutant := range loop {
+		loopOps[mutant.Operator]++
+	}
+	if loopOps["negate condition"] != 1 {
+		t.Fatalf("loop condition negations = %d, want 1: %v", loopOps["negate condition"], loopOps)
+	}
 	// Two identical statements delete to the same render: dedup collapses
 	// them to one effective mutant.
 	dup, err := tr.Mutants("example.com/fixture/lib.Dup", 0)

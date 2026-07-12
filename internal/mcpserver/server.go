@@ -22,11 +22,21 @@ import (
 
 // Server is a dir-bound MCP server over the gomutant library.
 type Server struct {
-	dir string
+	dir            string
+	updateDocument func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error
 }
 
 // New builds a server rooted at dir.
-func New(dir string) *Server { return &Server{dir: dir} }
+func New(dir string) *Server {
+	return &Server{dir: dir, updateDocument: gomutant.UpdateDocumentContext}
+}
+
+func (s *Server) update(ctx context.Context, path string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
+	if s.updateDocument == nil {
+		return gomutant.UpdateDocumentContext(ctx, path, change)
+	}
+	return s.updateDocument(ctx, path, change)
+}
 
 // Run serves MCP over stdio until the context ends.
 func (s *Server) Run(ctx context.Context) error {
@@ -139,9 +149,20 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	var targets []gomutant.Target
 	wholeTree := false
+	forms := 0
+	if in.TargetsPath != "" {
+		forms++
+	}
+	if in.TargetsJSON != "" {
+		forms++
+	}
+	if in.Changed != "" {
+		forms++
+	}
+	if forms > 1 {
+		return nil, out, fmt.Errorf("give targets_path, targets_json, or changed, at most one")
+	}
 	switch {
-	case in.TargetsPath != "" && in.TargetsJSON != "":
-		return nil, out, fmt.Errorf("give targets_path or targets_json, not both")
 	case in.TargetsPath != "":
 		if err := localPath("targets_path", in.TargetsPath); err != nil {
 			return nil, out, err
@@ -182,7 +203,10 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 		out.Document = s.findingsPath(in.Findings)
 		if wholeTree {
-			err := gomutant.UpdateDocument(out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			err := s.update(ctx, out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				return gomutant.MergeWholeFindings(current, nil, nil), nil
 			})
 			if err != nil {
@@ -215,7 +239,10 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 			Cached: f.Cached, Skipped: f.Skipped,
 		})
 	}
-	err = gomutant.UpdateDocument(s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+	err = s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if wholeTree {
 			return gomutant.MergeWholeFindings(current, findings, targets), nil
 		}
@@ -381,7 +408,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 			return nil, out, fmt.Errorf("attest_survivor needs symbol, position, operator, and reason")
 		}
 	}
-	err := gomutant.UpdateDocument(s.findingsPath(in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+	err := s.update(ctx, s.findingsPath(in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		for i := range all {
 			if all[i].Symbol == in.Symbol {
 				if err := all[i].Attest(in.Position, in.Operator, in.Reason); err != nil {

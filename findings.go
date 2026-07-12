@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -643,12 +644,25 @@ func MergeWholeFindings(prior, fresh []Finding, discovered []Target) []Finding {
 // document reads as empty; a lock held elsewhere is retried briefly and then
 // surfaced with the lock path, so a crashed holder is operator-removable.
 func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)) error {
+	return UpdateDocumentContext(context.Background(), path, update)
+}
+
+// UpdateDocumentContext is UpdateDocument with cancellation serialized against
+// the atomic replacement: cancellation that wins before commit leaves the
+// prior document byte-for-byte unchanged.
+func UpdateDocumentContext(ctx context.Context, path string, update func(prior []Finding) ([]Finding, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	lock := path + ".lock"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	acquired := false
 	for range 50 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
 			f.Close()
@@ -658,7 +672,13 @@ func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)
 		if !os.IsExist(err) {
 			return err
 		}
-		time.Sleep(100 * time.Millisecond)
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	if !acquired {
 		return fmt.Errorf("gomutant: findings document locked by another session; remove %s if its holder is gone", lock)
@@ -666,12 +686,20 @@ func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)
 	defer os.Remove(lock)
 
 	var prior []Finding
+	existed := false
+	mode := os.FileMode(0o644)
 	data, err := os.ReadFile(path)
 	switch {
 	case os.IsNotExist(err):
 	case err != nil:
 		return err
 	default:
+		existed = true
+		if info, statErr := os.Stat(path); statErr != nil {
+			return statErr
+		} else {
+			mode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+		}
 		if prior, err = ParseFindings(data); err != nil {
 			return err
 		}
@@ -684,5 +712,53 @@ func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(doc, '\n'), 0o644)
+	writeTemp := func(contents []byte, mode os.FileMode) (string, error) {
+		tmp, err := os.CreateTemp(filepath.Dir(path), ".gomutant-findings-*")
+		if err != nil {
+			return "", err
+		}
+		tmpPath := tmp.Name()
+		if _, err := tmp.Write(contents); err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
+			return "", err
+		}
+		if err := tmp.Chmod(mode); err != nil {
+			tmp.Close()
+			os.Remove(tmpPath)
+			return "", err
+		}
+		if err := tmp.Close(); err != nil {
+			os.Remove(tmpPath)
+			return "", err
+		}
+		return tmpPath, nil
+	}
+	tmpPath, err := writeTemp(append(doc, '\n'), mode)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		if existed {
+			rollback, rollbackErr := writeTemp(data, mode)
+			if rollbackErr == nil {
+				rollbackErr = os.Rename(rollback, path)
+				os.Remove(rollback)
+			}
+			if rollbackErr != nil {
+				return fmt.Errorf("%w (restore prior findings: %v)", err, rollbackErr)
+			}
+		} else if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("%w (remove cancelled findings: %v)", err, removeErr)
+		}
+		return err
+	}
+	return nil
 }

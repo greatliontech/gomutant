@@ -238,7 +238,7 @@ func TestRunUnionsEveryProcessObservation(t *testing.T) {
 	for _, path := range paths {
 		seen[filepath.Base(path)] = true
 	}
-	for _, name := range []string{"input-0.txt", "input-2.txt"} {
+	for _, name := range []string{"input-0.txt", "input-1.txt", "input-2.txt"} {
 		if !seen[name] {
 			t.Fatalf("runtime paths = %v, missing %s", paths, name)
 		}
@@ -381,6 +381,17 @@ func TestRunNoOracle(t *testing.T) {
 	}
 	if fs[0].Skipped != "no oracle" {
 		t.Fatalf("finding = %+v, want skipped with no oracle", fs[0])
+	}
+}
+
+func TestRunRejectsFailingOracleBaseline(t *testing.T) {
+	tr := fixtureTree(t)
+	findings, err := tr.Run(context.Background(), []Target{{
+		Symbol: "example.com/fixture/lib.Add",
+		Oracle: []string{"example.com/fixture/failing.TestAlwaysFails"},
+	}}, Options{Budget: 1})
+	if err == nil || !strings.Contains(err.Error(), "oracle baseline does not pass") || findings != nil {
+		t.Fatalf("failing oracle baseline = findings %+v, error %v", findings, err)
 	}
 }
 

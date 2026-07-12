@@ -28,6 +28,13 @@ gomutant findings
 # Inspect effective symbols, derived or explicit oracles, labels, and residue.
 gomutant discover --changed HEAD
 
+# Preview and run one selected surface. Filters are repeatable globs;
+# alternatives within one kind are ORed, package and symbol kinds are ANDed.
+gomutant discover --package 'example.com/project/**' \
+    --symbol 'example.com/project/parser.*'
+gomutant run --package 'example.com/project/**' \
+    --symbol 'example.com/project/parser.*'
+
 # Disposition a survivor as equivalent, with the reasoning on record.
 gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \
     --operator "zero return" --reason "result unused on this path"
@@ -45,6 +52,54 @@ run re-measures exactly what a moved pin invalidates and serves the rest from
 the document. Open findings are survivors minus attested dispositions;
 whether they fail a build is the caller's policy, not gomutant's verdict.
 
+## Standalone workflow
+
+Inspect before measuring when selecting a changed or filtered surface. The
+`discover` command resolves the same targets and explicit or package-derived
+oracles as `run`; invalid patterns, ambiguous oracles, duplicate symbols, and
+filters matching nothing are refused by both. Changed-scope inspection also
+lists every changed path that cannot produce a target and why.
+Patterns match the complete package path or symbol. `*`, `?`, and character
+classes stay within one slash-separated component; a complete `**` component
+crosses zero or more components; braces provide alternatives.
+
+Use an explicit target document for a stable repeatable matrix. This repository
+dogfoods that path with:
+
+```
+gomutant discover --targets testdata/self-host-targets.json
+gomutant run --targets testdata/self-host-targets.json
+```
+
+A run reports every ordered target decision before launching mutants:
+`cached`, `skipped`, or `measure` with `no-prior`, `forced`, `budget`, or
+`stale`. It finishes with deterministic per-target findings and aggregate
+generated, discarded, killed, survived, attested, and open totals. Repeating
+the same run serves findings whose pins still hold; `--force` deliberately
+remeasures them. Package- and symbol-filtered runs are scoped and never delete
+findings outside their selected surface. An interrupt cancels the full oracle
+process tree and leaves the findings document unchanged.
+Before fresh mutant execution, each distinct oracle group must pass on the
+unmutated tree with stable runtime-input evidence; an already-failing or
+moving baseline refuses the measurement rather than fabricating kills.
+Mutation execution is supported on Unix and Windows hosts; other hosts are
+refused during tree loading rather than run with weaker cleanup guarantees.
+
+Review survivors independently of process success:
+
+```
+gomutant findings
+gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \
+    --operator 'zero return' --reason 'result unused on this path'
+```
+
+Strengthen a test for every non-equivalent survivor and rerun its target. Use
+an attestation only when the mutant is behaviorally equivalent, stating why;
+attestations remain visible on a stale record, but a remeasurement sheds them
+when the evidence pins move. Open survivors remain advisory, so a completed mutation run exits
+successfully regardless of their count. Operational errors, malformed or
+unattributable observations, and cancellation fail the command instead.
+
 ## MCP
 
 Agents drive gomutant over the Model Context Protocol — `gomutant mcp` serves
@@ -59,6 +114,10 @@ mutation as exact-match edits (state the change, not the file):
 ```
 
 An edit that matches nothing or ambiguously is refused, never guessed.
+The run and discovery tools accept the same package and symbol filters as the
+CLI. Run results include the same ordered cache/measurement decisions,
+per-operator dispositions, aggregate summary, changed-scope residue, and
+findings-document update semantics.
 
 ## Library
 

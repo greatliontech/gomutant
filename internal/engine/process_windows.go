@@ -14,6 +14,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const processExecutionSupported = true
+
 type jobCommand struct {
 	*exec.Cmd
 	ctx       context.Context

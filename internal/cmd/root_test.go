@@ -13,6 +13,15 @@ import (
 	gomutant "github.com/greatliontech/gomutant"
 )
 
+type cancellingWriter struct{ cancel context.CancelFunc }
+
+func (w cancellingWriter) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), "summary") {
+		w.cancel()
+	}
+	return len(p), nil
+}
+
 func TestFindingsAtAndUpdate(t *testing.T) {
 	dir := t.TempDir()
 	path := findingsAt(dir, defaultFindings)
@@ -207,5 +216,20 @@ func TestRunCommandCancellationLeavesFindingsUntouched(t *testing.T) {
 	got, err := os.ReadFile(docPath)
 	if err != nil || !bytes.Equal(got, document) {
 		t.Fatalf("findings changed on cancellation: %v\n%s", err, got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "targets.json"), []byte(`{"targets":[{"symbol":"example.com/cancel.Value","oracle":[],"oracleExplicit":true}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	err = runCommand(ctx, runOptions{
+		dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: docPath,
+		output: cancellingWriter{cancel: cancel},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation at update = %v", err)
+	}
+	got, err = os.ReadFile(docPath)
+	if err != nil || !bytes.Equal(got, document) {
+		t.Fatalf("findings changed by cancellation at update: %v\n%s", err, got)
 	}
 }

@@ -1,8 +1,11 @@
 package gomutant
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -136,6 +139,31 @@ func TestUpdateDocument(t *testing.T) {
 	}
 	if len(bySym["p.A"].Attested) != 1 || bySym["p.B"].Symbol == "" {
 		t.Fatalf("concurrent disposition clobbered: %+v", got)
+	}
+	wantMode := os.FileMode(0o600)
+	modeMask := os.FileMode(os.ModePerm)
+	if runtime.GOOS != "windows" {
+		wantMode |= os.ModeSticky
+		modeMask |= os.ModeSticky
+	}
+	if err := os.Chmod(path, wantMode); err != nil {
+		t.Fatal(err)
+	}
+	before := string(data)
+	ctx, cancel := context.WithCancel(context.Background())
+	err = UpdateDocumentContext(ctx, path, func(current []Finding) ([]Finding, error) {
+		cancel()
+		return current[:1], nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled update = %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != before {
+		t.Fatalf("cancelled update changed document: %v\n%s", err, after)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode()&modeMask != wantMode {
+		t.Fatalf("document mode = %v, %v; want %v", info, err, wantMode)
 	}
 
 	// A held lock is surfaced, never bypassed.

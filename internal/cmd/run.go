@@ -87,7 +87,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 		fmt.Fprintln(out, "no targets")
 		renderRunSummary(out, gomutant.RunSummary{})
 		if wholeTree {
-			return gomutant.UpdateDocument(docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			return gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				return gomutant.MergeWholeFindings(current, nil, nil), nil
 			})
 		}
@@ -125,7 +128,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	summary := gomutant.SummarizeRun(findings)
 	renderRunSummary(out, summary)
-	return gomutant.UpdateDocument(docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+	return gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if wholeTree {
 			return gomutant.MergeWholeFindings(current, findings, targets), nil
 		}

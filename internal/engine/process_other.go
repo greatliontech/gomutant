@@ -1,4 +1,4 @@
-//go:build !aix && !darwin && !dragonfly && !freebsd && !linux && !netbsd && !openbsd && !solaris && !windows
+//go:build !aix && !android && !darwin && !dragonfly && !freebsd && !illumos && !ios && !linux && !netbsd && !openbsd && !solaris && !windows
 
 package engine
 
@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"time"
 )
+
+const processExecutionSupported = false
 
 func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, name, args...)

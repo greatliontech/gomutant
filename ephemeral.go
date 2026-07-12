@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -41,7 +40,7 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	abs, err := filepath.Abs(filepath.Join(t.dir, filepath.FromSlash(file)))
+	abs, err := resolveTreeFile(t.dir, file)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +166,7 @@ func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
 // the file's current content (REQ-exec-ephemeral): the edits are applied and
 // the result runs exactly as a whole replacement would.
 func (t *Tree) EphemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, timeout time.Duration) (*EphemeralResult, error) {
-	abs, err := filepath.Abs(filepath.Join(t.dir, filepath.FromSlash(file)))
+	abs, err := resolveTreeFile(t.dir, file)
 	if err != nil {
 		return nil, err
 	}

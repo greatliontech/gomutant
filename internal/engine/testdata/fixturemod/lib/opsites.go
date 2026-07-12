@@ -19,3 +19,10 @@ func Concat(a, b string) string {
 func BigLit() uint64 {
 	return 0xFFFFFFFFFFFFFFFF
 }
+
+func Loop(n int) int {
+	for n < 3 {
+		n++
+	}
+	return n
+}

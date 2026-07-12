@@ -82,6 +82,9 @@ func TestPrepareEditBatchRejectsInvalidEdits(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("alpha beta alpha\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name  string
 		edits []BatchEdit
@@ -95,12 +98,16 @@ func TestPrepareEditBatchRejectsInvalidEdits(t *testing.T) {
 		{name: "overlap", edits: []BatchEdit{{File: "a.go", OldString: "alpha beta", NewString: "x"}, {File: "a.go", OldString: "beta alpha", NewString: "y"}}, want: "overlaps"},
 		{name: "introduced match", edits: []BatchEdit{{File: "a.go", OldString: "beta", NewString: "gamma"}, {File: "a.go", OldString: "gamma", NewString: "x"}}, want: "matches nothing"},
 		{name: "escape", edits: []BatchEdit{{File: "../a.go", OldString: "beta", NewString: "x"}}, want: "invalid tree-relative"},
+		{name: "empty file", edits: []BatchEdit{{OldString: "beta", NewString: "x"}}, want: "invalid tree-relative"},
+		{name: "root directory", edits: []BatchEdit{{File: ".", OldString: "beta", NewString: "x"}}, want: "invalid tree-relative"},
+		{name: "parent directory", edits: []BatchEdit{{File: "..", OldString: "beta", NewString: "x"}}, want: "escapes the tree"},
 		{name: "posix absolute", edits: []BatchEdit{{File: "/a.go", OldString: "beta", NewString: "x"}}, want: "invalid tree-relative"},
 		{name: "drive absolute", edits: []BatchEdit{{File: "C:/a.go", OldString: "beta", NewString: "x"}}, want: "invalid tree-relative"},
 		{name: "drive relative", edits: []BatchEdit{{File: "C:a.go", OldString: "beta", NewString: "x"}}, want: "invalid tree-relative"},
 		{name: "windows separator", edits: []BatchEdit{{File: `sub\a.go`, OldString: "beta", NewString: "x"}}, want: "invalid tree-relative"},
 		{name: "non canonical", edits: []BatchEdit{{File: "./a.go", OldString: "beta", NewString: "x"}}, want: "invalid tree-relative"},
 		{name: "missing file", edits: []BatchEdit{{File: "missing.go", OldString: "beta", NewString: "x"}}, want: "resolve file"},
+		{name: "non-regular file", edits: []BatchEdit{{File: "dir", OldString: "beta", NewString: "x"}}, want: "not a regular file"},
 		{name: "batch no-op", edits: []BatchEdit{{File: "a.go", OldString: "alpha beta", NewString: ""}, {File: "a.go", OldString: " alpha", NewString: "alpha beta alpha"}}, want: "changes no files"},
 	}
 	for _, tt := range tests {
@@ -110,6 +117,9 @@ func TestPrepareEditBatchRejectsInvalidEdits(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+	if _, err := prepareEditBatch(filepath.Join(root, "missing-root"), []BatchEdit{{File: "a.go", OldString: "beta", NewString: "x"}}); err == nil || !strings.Contains(err.Error(), "resolve tree root") {
+		t.Fatalf("missing root = %v", err)
 	}
 }
 

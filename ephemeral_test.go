@@ -117,3 +117,30 @@ func TestEphemeral(t *testing.T) {
 		t.Fatal("the secondary overlaid file was modified")
 	}
 }
+
+func TestEphemeralRejectsEscapingFiles(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "module")
+	if err := os.CopyFS(root, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(parent, "outside.go")
+	if err := os.WriteFile(outside, []byte("package outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link.go")); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"../outside.go", outside, `C:\outside.go`, "link.go"} {
+		if _, err := tree.Ephemeral(context.Background(), file, []byte("package changed\n"), "example.com/fixture/lib", "^TestAdd$", time.Minute); err == nil || (!strings.Contains(err.Error(), "tree-relative") && !strings.Contains(err.Error(), "escapes")) {
+			t.Fatalf("whole replacement accepted %q: %v", file, err)
+		}
+		if _, err := tree.EphemeralEdits(context.Background(), file, []Edit{{Old: "package", New: "package"}}, "example.com/fixture/lib", "^TestAdd$", time.Minute); err == nil || (!strings.Contains(err.Error(), "tree-relative") && !strings.Contains(err.Error(), "escapes")) {
+			t.Fatalf("sequential edits accepted %q: %v", file, err)
+		}
+	}
+}

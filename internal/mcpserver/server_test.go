@@ -120,7 +120,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Findings) != 1 || len(out.Findings[0].Open) == 0 || out.Findings[0].Labels[0] != "REQ-weak" {
+	if len(out.Findings) != 1 || len(out.Findings[0].Open) == 0 || out.Findings[0].Labels[0] != "REQ-weak" || out.Summary.Targets != 1 || out.Document == "" {
 		t.Fatalf("run = %+v", out)
 	}
 	if len(out.Findings[0].Operators) == 0 {
@@ -294,11 +294,63 @@ func TestToolDiscover(t *testing.T) {
 	if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"targets":[]}`, Changed: "HEAD"}); err == nil {
 		t.Fatal("multiple discovery forms accepted")
 	}
+	for _, in := range []runIn{
+		{TargetsPath: "targets.json", TargetsJSON: `{"targets":[]}`},
+		{TargetsPath: "targets.json", Changed: "HEAD"},
+		{TargetsJSON: `{"targets":[]}`, Changed: "HEAD"},
+		{TargetsPath: "targets.json", TargetsJSON: `{"targets":[]}`, Changed: "HEAD"},
+	} {
+		if _, _, err := s.toolRun(context.Background(), nil, in); err == nil || !strings.Contains(err.Error(), "at most one") {
+			t.Fatalf("run accepted multiple target forms %+v: %v", in, err)
+		}
+	}
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{"targets":[]}`, Findings: filepath.ToSlash(filepath.Join(t.TempDir(), "findings.json"))}); err != nil {
+		t.Fatalf("run refused one target form: %v", err)
+	}
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"oracleExplicit":true}]}`,
+		Symbols:     []string{"example.com/fixture/lib.Absent"},
+	}); err == nil || !strings.Contains(err.Error(), "matched no targets") {
+		t.Fatalf("run ignored symbol filter: %v", err)
+	}
+	if _, _, err := New(filepath.Join(t.TempDir(), "missing")).toolRun(context.Background(), nil, runIn{}); err == nil {
+		t.Fatal("run accepted an invalid tree")
+	}
 	_, filtered, err := s.toolDiscover(context.Background(), nil, discoverIn{
 		Packages: []string{"example.com/fixture/methods"}, Symbols: []string{"example.com/fixture/methods.Counter.*"},
 	})
 	if err != nil || len(filtered.Targets) != 2 || filtered.Targets[0].Symbol != "example.com/fixture/methods.Counter.Inc" || filtered.Targets[1].Symbol != "example.com/fixture/methods.Counter.Value" {
 		t.Fatalf("filtered discovery = %+v, %v", filtered, err)
+	}
+}
+
+func TestToolRunPropagatesUpdateFailure(t *testing.T) {
+	s := serverAt(t)
+	want := errors.New("update failed")
+	s.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error { return want }
+	_, _, err := s.toolRun(context.Background(), nil, runIn{
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"oracleExplicit":true}]}`,
+	})
+	if !errors.Is(err, want) {
+		t.Fatalf("update failure = %v, want %v", err, want)
+	}
+}
+
+func TestToolRunCancellationAtUpdateLeavesDocumentUntouched(t *testing.T) {
+	s := serverAt(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	called := false
+	s.updateDocument = func(_ context.Context, _ string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
+		called = true
+		cancel()
+		_, err := change(nil)
+		return err
+	}
+	_, _, err := s.toolRun(ctx, nil, runIn{
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"oracleExplicit":true}]}`,
+	})
+	if !called || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation at update = called %v, error %v", called, err)
 	}
 }
 

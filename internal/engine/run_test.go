@@ -399,4 +399,68 @@ func TestProbeBaseline(t *testing.T) {
 	if _, _, err := TestProbe(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", 60*time.Second, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled probe = %v", err)
 	}
+	tr := fixtureTree(t)
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := GoEnv("testdata/fixturemod")
+	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestPickInput$", time.Minute, nil, moduleDir, packageDir, env)
+	if err != nil || ran != 1 || !passed || !state.OK || state.Unverifiable {
+		t.Fatalf("observed passing baseline = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
+	}
+	ran, passed, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestNoSuch$", time.Minute, nil, moduleDir, packageDir, env)
+	if err != nil || ran != 0 || !passed {
+		t.Fatalf("observed zero-match baseline = ran %d, passed %v, error %v", ran, passed, err)
+	}
+	failingModule, failingDir, err := tr.PackageContext("example.com/fixture/failing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran, passed, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/failing", "^TestAlwaysFails$", time.Minute, nil, failingModule, failingDir, env)
+	if err != nil || ran != 1 || passed {
+		t.Fatalf("observed failing baseline = ran %d, passed %v, error %v", ran, passed, err)
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	if _, _, _, err := TestProbeObservedEnv(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", time.Minute, nil, moduleDir, packageDir, env); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled observed baseline = %v", err)
+	}
+}
+
+func TestProbeBaselineRejectsRuntimeInputDrift(t *testing.T) {
+	tr := fixtureTree(t)
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(t.TempDir(), "unstable-input")
+	if err := os.WriteFile(input, []byte("A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_INPUT="+input)
+	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableInput$", time.Minute, nil, moduleDir, packageDir, env)
+	if err == nil || (!strings.Contains(err.Error(), "changed between discovery and measurement") && !strings.Contains(err.Error(), "moved")) {
+		t.Fatalf("unstable baseline = %v", err)
+	}
+}
+
+func TestProbeBaselineRejectsResultDrift(t *testing.T) {
+	tr := fixtureTree(t)
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "baseline-result")
+	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_RESULT="+marker)
+	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableBaselineResult$", time.Minute, nil, moduleDir, packageDir, env)
+	if err == nil || !strings.Contains(err.Error(), "result changed between discovery and measurement") {
+		t.Fatalf("unstable baseline result = %v", err)
+	}
+}
+
+func TestLoadRefusesUnsupportedProcessExecution(t *testing.T) {
+	if _, err := load(t.TempDir(), false); err == nil || !strings.Contains(err.Error(), "supports Unix and Windows hosts") {
+		t.Fatalf("unsupported process execution = %v", err)
+	}
 }
