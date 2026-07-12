@@ -79,3 +79,10 @@ findings awaiting disposition, never as a pass/fail verdict — strengthen a
 test or attest an equivalence — so whether an open survivor should fail a
 build is a policy the caller applies to the findings, not a judgment the tool
 bakes in.
+
+**REQ-result-hygiene** (behavior): A whole-tree run MUST remove findings for
+symbols absent from its complete discovery snapshot, including when the tree
+contains no targets, because such records can never be measured again and
+presenting their survivors as open would mislead callers. Changed-scope and
+explicit-target runs retain every unmeasured document entry: their target sets
+assert only what to measure, never that an omitted symbol no longer exists.

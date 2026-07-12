@@ -133,6 +133,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return nil, out, err
 	}
 	var targets []gomutant.Target
+	wholeTree := false
 	switch {
 	case in.TargetsPath != "" && in.TargetsJSON != "":
 		return nil, out, fmt.Errorf("give targets_path or targets_json, not both")
@@ -161,9 +162,18 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		})
 	default:
 		targets = tree.Discover()
+		wholeTree = true
 	}
 	if len(targets) == 0 {
 		out.Document = s.findingsPath(in.Findings)
+		if wholeTree {
+			err := gomutant.UpdateDocument(out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+				return gomutant.MergeWholeFindings(current, nil, nil), nil
+			})
+			if err != nil {
+				return nil, out, err
+			}
+		}
 		return nil, out, nil
 	}
 	prior, err := s.loadFindings(in.Findings)
@@ -188,10 +198,10 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 			Cached: f.Cached, Skipped: f.Skipped,
 		})
 	}
-	// A scoped run never drops the rest of the document; the merge re-reads
-	// under the lock, so a disposition landing mid-run is never clobbered
-	// (REQ-mcp-findings-doc).
 	err = gomutant.UpdateDocument(s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+		if wholeTree {
+			return gomutant.MergeWholeFindings(current, findings, targets), nil
+		}
 		return gomutant.MergeFindings(current, findings), nil
 	})
 	if err != nil {

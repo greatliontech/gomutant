@@ -532,6 +532,24 @@ func MergeFindings(prior, fresh []Finding) []Finding {
 	return out
 }
 
+// MergeWholeFindings merges a whole-tree run and removes records whose
+// symbols are absent from the complete discovery snapshot
+// (REQ-result-hygiene). Scoped callers use MergeFindings instead.
+func MergeWholeFindings(prior, fresh []Finding, discovered []Target) []Finding {
+	current := make(map[string]bool, len(discovered))
+	for _, target := range discovered {
+		current[target.Symbol] = true
+	}
+	merged := MergeFindings(prior, fresh)
+	kept := merged[:0]
+	for _, finding := range merged {
+		if current[finding.Symbol] {
+			kept = append(kept, finding)
+		}
+	}
+	return kept
+}
+
 // UpdateDocument applies update to the findings document at path under an
 // exclusive lockfile, re-reading the document inside the lock so a
 // concurrent session's dispositions are never clobbered by a stale snapshot

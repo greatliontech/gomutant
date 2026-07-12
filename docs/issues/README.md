@@ -6,4 +6,3 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [stale-document-entries](stale-document-entries.md) | findings for deleted symbols persist and read as open | when document hygiene first bites, or the findings verb next changes |

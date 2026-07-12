@@ -65,11 +65,17 @@ func runCommand(o runOptions) error {
 	for _, r := range residue {
 		fmt.Printf("changed, untargeted  %s  (%s)\n", r.Path, r.Reason)
 	}
+	wholeTree := o.targetsFile == "" && o.changed == ""
+	docPath := findingsAt(o.dir, o.findingsFile)
 	if len(targets) == 0 {
 		fmt.Println("no targets")
+		if wholeTree {
+			return gomutant.UpdateDocument(docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+				return gomutant.MergeWholeFindings(current, nil, nil), nil
+			})
+		}
 		return nil
 	}
-	docPath := findingsAt(o.dir, o.findingsFile)
 	prior, err := loadFindings(docPath)
 	if err != nil {
 		return err
@@ -94,6 +100,9 @@ func runCommand(o runOptions) error {
 		}
 	}
 	return gomutant.UpdateDocument(docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+		if wholeTree {
+			return gomutant.MergeWholeFindings(current, findings, targets), nil
+		}
 		return gomutant.MergeFindings(current, findings), nil
 	})
 }

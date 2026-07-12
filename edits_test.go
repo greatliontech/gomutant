@@ -65,6 +65,21 @@ func TestMergeFindingsSkipNeverShadows(t *testing.T) {
 	}
 }
 
+func TestMergeWholeFindingsPrunesAbsentSymbols(t *testing.T) {
+	prior := []Finding{{Symbol: "p.Present", BodyHash: "old"}, {Symbol: "p.Deleted", BodyHash: "gone"}}
+	fresh := []Finding{{Symbol: "p.Present", BodyHash: "new"}}
+	got := MergeWholeFindings(prior, fresh, []Target{{Symbol: "p.Present"}, {Symbol: "p.Skipped"}})
+	if len(got) != 1 || got[0].Symbol != "p.Present" || got[0].BodyHash != "new" {
+		t.Fatalf("whole-tree merge = %+v", got)
+	}
+	if got := MergeWholeFindings(prior, nil, nil); len(got) != 0 {
+		t.Fatalf("empty whole-tree discovery retained findings: %+v", got)
+	}
+	if got := MergeFindings(prior, fresh); len(got) != 2 {
+		t.Fatalf("scoped merge pruned an unmeasured finding: %+v", got)
+	}
+}
+
 // TestUpdateDocument pins the locked read-merge-write (REQ-mcp-findings-doc):
 // a disposition landing between a session's read and its write survives,
 // because the merge runs against the re-read document under the lock; a lock

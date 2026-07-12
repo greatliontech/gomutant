@@ -23,6 +23,75 @@ func serverAt(t *testing.T) *Server {
 	return New(tmp)
 }
 
+func seededFinding(symbol string) gomutant.Finding {
+	evidence := func(name string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence(symbol), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
+}
+
+func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, defaultFindings)
+	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{seededFinding("example.com/empty.Old")}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{"targets":[]}`}); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := s.loadFindings("")
+	if err != nil || len(retained) != 1 {
+		t.Fatalf("scoped zero-target run pruned findings: %+v, %v", retained, err)
+	}
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.loadFindings("")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("whole-tree empty discovery retained findings: %+v, %v", got, err)
+	}
+}
+
+func TestToolRunWholeTreePrunesAlongsideCurrentMeasurement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test for one mutant")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/current\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "current.go"), []byte("package current\n\nfunc Value() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "current_test.go"), []byte("package current\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	path := filepath.Join(dir, defaultFindings)
+	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{seededFinding("example.com/current.Deleted")}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{Budget: 1}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.loadFindings("")
+	if err != nil || len(got) != 1 || got[0].Symbol != "example.com/current.Value" {
+		t.Fatalf("whole-tree reconciliation = %+v, %v", got, err)
+	}
+}
+
 // TestToolRunFindingsAttest drives the measuring loop end to end over the
 // protocol handlers (REQ-mcp-tools, REQ-mcp-findings-doc): a stipulator-form
 // inline document measures with labels riding through, the findings document
