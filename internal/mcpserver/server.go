@@ -8,8 +8,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -52,7 +54,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolAttest)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "ephemeral",
-		Description: "Run one manual mutant the operator set cannot generate: replace a file's content (whole, or as exact-match edits — state the change, not the file) and check whether the named test kills it. The tree is never touched; the result is evidence, never persisted.",
+		Description: "Run one manual mutant the operator set cannot generate: replace one file whole, apply sequential edits to one file, or apply an atomic exact-match edit batch across files, then check whether the named test kills it. The tree is never touched; the result is evidence, never persisted.",
 	}, s.toolEphemeral)
 	return srv
 }
@@ -74,7 +76,11 @@ func (s *Server) findingsPath(override string) string {
 // the surface is dir-bound, and an escaping ephemeral file would no-op in
 // the overlay and read as a survivor.
 func localPath(name, p string) error {
-	if p == "" || filepath.IsLocal(filepath.FromSlash(p)) {
+	if p == "" {
+		return nil
+	}
+	drive := len(p) >= 2 && p[1] == ':' && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z'))
+	if !strings.Contains(p, `\`) && !path.IsAbs(p) && !drive && path.Clean(p) == p && p != "." && !strings.HasPrefix(p, "../") {
 		return nil
 	}
 	return fmt.Errorf("%s %q escapes the tree", name, p)
@@ -309,29 +315,58 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 }
 
 type ephemeralIn struct {
-	File        string          `json:"file" jsonschema:"tree-relative source file to mutate"`
-	Replacement string          `json:"replacement,omitempty" jsonschema:"the whole replacement source; give this or edits"`
-	Edits       []gomutant.Edit `json:"edits,omitempty" jsonschema:"exact-match edits applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file"`
-	TestPkg     string          `json:"test_pkg" jsonschema:"go package path whose named test decides the kill"`
-	Run         string          `json:"run" jsonschema:"-run pattern naming the deciding test"`
-	TimeoutSec  int             `json:"timeout_sec,omitempty" jsonschema:"run budget in seconds; 0 means 60"`
+	File        string               `json:"file,omitempty" jsonschema:"tree-relative source file for replacement or edits; omit for batch_edits"`
+	Replacement string               `json:"replacement,omitempty" jsonschema:"the whole replacement source; give exactly one mutation form"`
+	Edits       []gomutant.Edit      `json:"edits,omitempty" jsonschema:"exact-match edits applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file"`
+	BatchEdits  []gomutant.BatchEdit `json:"batch_edits,omitempty" jsonschema:"atomic file-scoped exact-match edits; every match resolves against the original file snapshot"`
+	TestPkg     string               `json:"test_pkg" jsonschema:"go package path whose named test decides the kill"`
+	Run         string               `json:"run" jsonschema:"-run pattern naming the deciding test"`
+	TimeoutSec  int                  `json:"timeout_sec,omitempty" jsonschema:"run budget in seconds; 0 means 60"`
 }
 
 func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in ephemeralIn) (*mcp.CallToolResult, *gomutant.EphemeralResult, error) {
-	if in.File == "" || in.TestPkg == "" || in.Run == "" {
-		return nil, nil, fmt.Errorf("ephemeral needs file, test_pkg, and run")
+	if in.TestPkg == "" || in.Run == "" {
+		return nil, nil, fmt.Errorf("ephemeral needs test_pkg and run")
 	}
-	if err := localPath("file", in.File); err != nil {
-		return nil, nil, err
+	forms := 0
+	if in.Replacement != "" {
+		forms++
 	}
-	if (in.Replacement == "") == (len(in.Edits) == 0) {
-		return nil, nil, fmt.Errorf("give replacement or edits, exactly one")
+	if len(in.Edits) != 0 {
+		forms++
+	}
+	if len(in.BatchEdits) != 0 {
+		forms++
+	}
+	if forms != 1 {
+		return nil, nil, fmt.Errorf("give replacement, edits, or batch_edits, exactly one")
+	}
+	if len(in.BatchEdits) == 0 {
+		if in.File == "" {
+			return nil, nil, fmt.Errorf("replacement and edits need file")
+		}
+		if err := localPath("file", in.File); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		if in.File != "" {
+			return nil, nil, fmt.Errorf("batch_edits carries its own files; omit file")
+		}
+		for i, edit := range in.BatchEdits {
+			if err := localPath(fmt.Sprintf("batch_edits[%d].file", i), edit.File); err != nil {
+				return nil, nil, err
+			}
+		}
 	}
 	tree, err := gomutant.Load(s.dir)
 	if err != nil {
 		return nil, nil, err
 	}
 	timeout := time.Duration(in.TimeoutSec) * time.Second
+	if len(in.BatchEdits) > 0 {
+		res, err := tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, timeout)
+		return nil, res, err
+	}
 	if len(in.Edits) > 0 {
 		res, err := tree.EphemeralEdits(ctx, in.File, in.Edits, in.TestPkg, in.Run, timeout)
 		return nil, res, err

@@ -119,7 +119,7 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 }
 
 func resolveBatchFile(root, file string) (string, error) {
-	if file == "" || strings.Contains(file, `\`) || path.IsAbs(file) || path.Clean(file) != file || file == "." || strings.HasPrefix(file, "../") {
+	if file == "" || strings.Contains(file, `\`) || path.IsAbs(file) || driveQualified(file) || path.Clean(file) != file || file == "." || strings.HasPrefix(file, "../") {
 		return "", fmt.Errorf("invalid tree-relative file %q", file)
 	}
 	abs := filepath.Join(root, filepath.FromSlash(file))
@@ -139,4 +139,8 @@ func resolveBatchFile(root, file string) (string, error) {
 		return "", fmt.Errorf("file %q is not a regular file", file)
 	}
 	return resolved, nil
+}
+
+func driveQualified(file string) bool {
+	return len(file) >= 2 && file[1] == ':' && ((file[0] >= 'a' && file[0] <= 'z') || (file[0] >= 'A' && file[0] <= 'Z'))
 }

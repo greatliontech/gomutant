@@ -123,16 +123,41 @@ func TestToolEphemeralEdits(t *testing.T) {
 	if !res.Killed || res.Killer != "example.com/fixture/lib.TestAdd" {
 		t.Fatalf("edits mutant = %+v, want killed by TestAdd", res)
 	}
+	_, res, err = s.toolEphemeral(ctx, nil, ephemeralIn{
+		BatchEdits: []gomutant.BatchEdit{
+			{File: "lib/lib.go", OldString: "return a + b", NewString: "return a + b + manualDelta()"},
+			{File: "lib/doc.go", OldString: "package lib", NewString: "package lib\n\nfunc manualDelta() int { return 1 }"},
+		},
+		TestPkg: "example.com/fixture/lib",
+		Run:     "^TestAdd$",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Killed || len(res.Files) != 2 || res.Files[0] != "lib/doc.go" || res.Files[1] != "lib/lib.go" {
+		t.Fatalf("batch mutant = %+v, want two-file attributed kill", res)
+	}
 	if _, _, err := s.toolEphemeral(ctx, nil, ephemeralIn{File: "lib/lib.go", TestPkg: "p", Run: "^T$"}); err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("neither form refused: %v", err)
 	}
 	if _, _, err := s.toolEphemeral(ctx, nil, ephemeralIn{File: "lib/lib.go", Replacement: "x", Edits: []gomutant.Edit{{Old: "a", New: "b"}}, TestPkg: "p", Run: "^T$"}); err == nil || !strings.Contains(err.Error(), "exactly one") {
 		t.Fatalf("both forms refused: %v", err)
 	}
+	if _, _, err := s.toolEphemeral(ctx, nil, ephemeralIn{File: "lib/lib.go", BatchEdits: []gomutant.BatchEdit{{File: "lib/lib.go", OldString: "a", NewString: "b"}}, TestPkg: "p", Run: "^T$"}); err == nil || !strings.Contains(err.Error(), "omit file") {
+		t.Fatalf("batch with top-level file accepted: %v", err)
+	}
 	// The surface is dir-bound: a file escaping the tree would no-op in the
 	// overlay and read as a survivor — refused instead.
 	if _, _, err := s.toolEphemeral(ctx, nil, ephemeralIn{File: "../outside.go", Replacement: "x", TestPkg: "p", Run: "^T$"}); err == nil || !strings.Contains(err.Error(), "escapes the tree") {
 		t.Fatalf("escaping file accepted: %v", err)
+	}
+	if _, _, err := s.toolEphemeral(ctx, nil, ephemeralIn{BatchEdits: []gomutant.BatchEdit{{File: "../outside.go", OldString: "a", NewString: "b"}}, TestPkg: "p", Run: "^T$"}); err == nil || !strings.Contains(err.Error(), "escapes the tree") {
+		t.Fatalf("escaping batch file accepted: %v", err)
+	}
+	for _, file := range []string{"/outside.go", "C:/outside.go", `C:\outside.go`, `\\server\share.go`} {
+		if _, _, err := s.toolEphemeral(ctx, nil, ephemeralIn{BatchEdits: []gomutant.BatchEdit{{File: file, OldString: "a", NewString: "b"}}, TestPkg: "p", Run: "^T$"}); err == nil || !strings.Contains(err.Error(), "escapes the tree") {
+			t.Fatalf("platform-absolute batch file %q accepted: %v", file, err)
+		}
 	}
 }
 
