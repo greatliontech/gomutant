@@ -42,7 +42,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolRun)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "discover",
-		Description: "List the targets a run would measure — whole tree or changed-scope vs a git ref — plus, in changed scope, the residue: every changed-but-untargeted path with the reason it yields no target.",
+		Description: "List the effective targets a run would measure — symbols, explicit or derived oracles, and labels — plus changed-scope residue with the reason each path yields no target.",
 	}, s.toolDiscover)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "findings",
@@ -212,12 +212,14 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 }
 
 type discoverIn struct {
-	Changed string `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
+	TargetsPath string `json:"targets_path,omitempty" jsonschema:"path to a targets document; overrides discovery"`
+	TargetsJSON string `json:"targets_json,omitempty" jsonschema:"inline targets document; overrides discovery"`
+	Changed     string `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
 }
 
 type discoverOut struct {
-	Targets []gomutant.Target  `json:"targets"`
-	Residue []gomutant.Residue `json:"residue,omitempty"`
+	Targets []gomutant.TargetDescription `json:"targets"`
+	Residue []gomutant.Residue           `json:"residue,omitempty"`
 }
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
@@ -226,17 +228,53 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
-	if in.Changed == "" {
-		out.Targets = tree.Discover()
-		return nil, out, nil
+	forms := 0
+	if in.TargetsPath != "" {
+		forms++
 	}
-	paths, err := gitref.ChangedPaths(s.dir, in.Changed)
+	if in.TargetsJSON != "" {
+		forms++
+	}
+	if in.Changed != "" {
+		forms++
+	}
+	if forms > 1 {
+		return nil, out, fmt.Errorf("give targets_path, targets_json, or changed, at most one")
+	}
+	var targets []gomutant.Target
+	switch {
+	case in.TargetsPath != "":
+		if err := localPath("targets_path", in.TargetsPath); err != nil {
+			return nil, out, err
+		}
+		data, err := os.ReadFile(filepath.Join(s.dir, filepath.FromSlash(in.TargetsPath)))
+		if err != nil {
+			return nil, out, err
+		}
+		targets, err = gomutant.LoadTargets(data)
+		if err != nil {
+			return nil, out, err
+		}
+	case in.TargetsJSON != "":
+		targets, err = gomutant.LoadTargets([]byte(in.TargetsJSON))
+		if err != nil {
+			return nil, out, err
+		}
+	case in.Changed != "":
+		paths, err := gitref.ChangedPaths(s.dir, in.Changed)
+		if err != nil {
+			return nil, out, err
+		}
+		targets, out.Residue = tree.DiscoverChanged(paths, func(p string) ([]byte, bool) {
+			return gitref.Show(s.dir, in.Changed, p)
+		})
+	default:
+		targets = tree.Discover()
+	}
+	out.Targets, err = tree.DescribeTargets(targets)
 	if err != nil {
 		return nil, out, err
 	}
-	out.Targets, out.Residue = tree.DiscoverChanged(paths, func(p string) ([]byte, bool) {
-		return gitref.Show(s.dir, in.Changed, p)
-	})
 	return nil, out, nil
 }
 

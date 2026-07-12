@@ -22,8 +22,11 @@ gomutant run --changed HEAD --budget 5
 # Explicit targets (symbol + oracle + labels) from a JSON document.
 gomutant run --targets targets.json
 
-# Open findings, grouped by label.
+# Inspect current, stale, unverifiable, and detached findings.
 gomutant findings
+
+# Inspect effective symbols, derived or explicit oracles, labels, and residue.
+gomutant discover --changed HEAD
 
 # Disposition a survivor as equivalent, with the reasoning on record.
 gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \

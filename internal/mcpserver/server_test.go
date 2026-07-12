@@ -244,9 +244,22 @@ func TestToolDiscover(t *testing.T) {
 	got := map[string]bool{}
 	for _, tg := range out.Targets {
 		got[tg.Symbol] = true
+		if tg.Symbol == "example.com/fixture/lib.Add" && (tg.OracleExplicit || len(tg.Oracle) == 0) {
+			t.Fatalf("Add description = %+v", tg)
+		}
 	}
 	if !got["example.com/fixture/lib.Add"] || got["example.com/fixture/lib.TestAdd"] {
 		t.Fatalf("discover = %d targets, Add=%v TestAdd=%v", len(out.Targets), got["example.com/fixture/lib.Add"], got["example.com/fixture/lib.TestAdd"])
+	}
+	_, explicit, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestWeak","example.com/fixture/lib.TestAdd"],"labels":["z","a"]}]}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(explicit.Targets) != 1 || !explicit.Targets[0].OracleExplicit || explicit.Targets[0].Oracle[0] != "example.com/fixture/lib.TestAdd" || explicit.Targets[0].Labels[0] != "a" {
+		t.Fatalf("explicit discover = %+v", explicit)
+	}
+	if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"targets":[]}`, Changed: "HEAD"}); err == nil {
+		t.Fatal("multiple discovery forms accepted")
 	}
 }
 

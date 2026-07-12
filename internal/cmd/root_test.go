@@ -127,7 +127,7 @@ func TestCobraCommandTree(t *testing.T) {
 	if !strings.Contains(output.String(), "Usage:") {
 		t.Fatalf("root help missing usage:\n%s", output.String())
 	}
-	for _, command := range []string{"run", "findings", "attest", "ephemeral", "mcp"} {
+	for _, command := range []string{"run", "discover", "findings", "attest", "ephemeral", "mcp"} {
 		found := false
 		for _, child := range root.Commands() {
 			found = found || child.Name() == command

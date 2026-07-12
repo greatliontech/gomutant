@@ -159,6 +159,41 @@ func TestParseTargets(t *testing.T) {
 	}
 }
 
+func TestDescribeTargetsResolvesEffectiveOracles(t *testing.T) {
+	tr := fixtureTree(t)
+	descriptions, err := tr.DescribeTargets([]Target{
+		{Symbol: "example.com/fixture/lib.Weak", Labels: []string{"z", "a"}},
+		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestWeak", "example.com/fixture/lib.TestAdd"}},
+		{Symbol: "example.com/fixture/lib.Guarded", OracleExplicit: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(descriptions) != 3 || descriptions[0].Symbol != "example.com/fixture/lib.Add" || !descriptions[0].OracleExplicit || len(descriptions[0].Oracle) != 2 || descriptions[0].Oracle[0] != "example.com/fixture/lib.TestAdd" {
+		t.Fatalf("explicit description = %+v", descriptions)
+	}
+	if descriptions[1].Symbol != "example.com/fixture/lib.Guarded" || !descriptions[1].OracleExplicit || len(descriptions[1].Oracle) != 0 || descriptions[1].Skipped != "no oracle" {
+		t.Fatalf("explicit-empty description = %+v", descriptions[1])
+	}
+	weak := descriptions[2]
+	if weak.OracleExplicit || len(weak.Oracle) == 0 || len(weak.Labels) != 2 || weak.Labels[0] != "a" {
+		t.Fatalf("derived description = %+v", weak)
+	}
+	if _, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.Add"}, {Symbol: "example.com/fixture/lib.Add"}}); err == nil {
+		t.Fatal("duplicate target accepted")
+	}
+	if _, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestDeleted"}}}); err == nil {
+		t.Fatal("missing oracle accepted")
+	}
+	nonFunction, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.I", Oracle: []string{"example.com/fixture/lib.TestAdd"}}})
+	if err != nil || len(nonFunction) != 1 || nonFunction[0].Skipped != "not a function" {
+		t.Fatalf("non-function description = %+v, %v", nonFunction, err)
+	}
+	if _, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.Deleted", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}); err == nil {
+		t.Fatal("missing target accepted")
+	}
+}
+
 // TestResolveOracle pins oracle resolution (REQ-target-oracle,
 // REQ-target-default): explicit oracles pass through untouched; an empty
 // oracle derives the tests of the symbol's own package, both variants.

@@ -9,6 +9,7 @@ package gomutant
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -32,6 +33,55 @@ type Target struct {
 	// nothing: the target reports as measurable by nothing rather than
 	// inheriting package tests it never claimed (REQ-target-default).
 	OracleExplicit bool `json:"oracleExplicit,omitempty"`
+}
+
+// TargetDescription is one target with the effective oracle a run would use.
+type TargetDescription struct {
+	Symbol         string   `json:"symbol"`
+	Oracle         []string `json:"oracle"`
+	Labels         []string `json:"labels,omitempty"`
+	OracleExplicit bool     `json:"oracleExplicit"`
+	Skipped        string   `json:"skipped,omitempty"`
+}
+
+// DescribeTargets resolves and validates the effective oracle of every target
+// without running mutants (REQ-target-inspection).
+func (t *Tree) DescribeTargets(targets []Target) ([]TargetDescription, error) {
+	descriptions := make([]TargetDescription, 0, len(targets))
+	seen := map[string]bool{}
+	for _, target := range targets {
+		if seen[target.Symbol] {
+			return nil, fmt.Errorf("gomutant: duplicate target symbol %s", target.Symbol)
+		}
+		seen[target.Symbol] = true
+		oracle := append([]string{}, t.resolveOracle(target)...)
+		sort.Strings(oracle)
+		if len(oracle) != 0 {
+			if err := t.eng.ValidateOracle(oracle); err != nil {
+				return nil, fmt.Errorf("target %s: %w", target.Symbol, err)
+			}
+		}
+		labels := append([]string(nil), target.Labels...)
+		sort.Strings(labels)
+		description := TargetDescription{
+			Symbol: target.Symbol, Oracle: oracle, Labels: labels,
+			OracleExplicit: target.OracleExplicit || len(target.Oracle) != 0,
+		}
+		switch {
+		case len(oracle) == 0:
+			description.Skipped = "no oracle"
+		default:
+			_, err := t.eng.BodyHash(target.Symbol)
+			if errors.Is(err, engine.ErrNotFunction) {
+				description.Skipped = "not a function"
+			} else if err != nil {
+				return nil, fmt.Errorf("target %s: %w", target.Symbol, err)
+			}
+		}
+		descriptions = append(descriptions, description)
+	}
+	sort.Slice(descriptions, func(i, j int) bool { return descriptions[i].Symbol < descriptions[j].Symbol })
+	return descriptions, nil
 }
 
 // Residue is one changed-but-untargeted path from changed-scope discovery,

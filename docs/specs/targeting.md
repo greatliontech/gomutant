@@ -87,3 +87,11 @@ grouped by a caller's own vocabulary. gomutant reads no meaning from a label;
 a requirement identifier, a subsystem name, or a ticket number are all just
 strings it groups and prints by, which is what keeps the tool domain-agnostic
 while letting a spec-driven producer recover requirement-scoped findings.
+
+**REQ-target-inspection** (behavior): Target inspection MUST render the exact
+effective target set a run would consume without running mutants: each symbol,
+its sorted oracle identified as explicit or package-derived, its sorted opaque
+labels, and changed-scope residue with reasons. Duplicate symbols and invalid
+or ambiguous oracles are refused exactly as a run refuses them. Human and
+machine-readable CLI views and MCP discovery derive from the same target
+descriptions, so inspection cannot disagree with execution.
