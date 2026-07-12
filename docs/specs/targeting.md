@@ -41,6 +41,12 @@ REQ-core-attributed-kills). A test outside the oracle that happens to fail on
 the mutant never counts — the oracle scopes the measurement to the tests that
 claim to vouch for the symbol.
 
+An oracle is accepted only when every named test maps to one uniquely selectable
+and attributable event in the Go test binary. When in-package and external-test
+variants declare the same displayed top-level name, the Go backend rejects that
+oracle as ambiguous rather than deduplicating the declarations or guessing which
+variant produced an event.
+
 **REQ-target-default** (behavior): A target given no oracle MUST fall back to
 a derived one — the runnable tests of the symbol's own package: its Test
 functions and the seed-corpus runs of its Fuzz targets, both variants, and
@@ -63,7 +69,7 @@ none, a declaration absent at the ref (a new file or a new symbol) reads as
 changed, a symbol deleted since the ref yields no target (nothing remains to
 mutate), and an unparseable prior version conservatively reads as all
 changed. Test sources are oracles, never targets, and are excluded from the
-changed surface. The mode MUST also report the changed-but-untargeted
+changed surface. The mode also reports the changed-but-untargeted
 residue with the engine-level reason each path yielded no target — a test
 file, a generated file, a non-Go or data-only file, a changed file declaring
 no function body, a file whose declared bodies are all canonically unchanged

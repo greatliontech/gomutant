@@ -23,7 +23,7 @@ neither invalidates the other's dispositions.
 **REQ-mcp-ephemeral-edits** (behavior): The ephemeral tool MUST accept the
 mutant as either a whole replacement source or as exact-match edits applied
 to the file's current content (REQ-exec-ephemeral) — an agent hand-crafting
-a mutation states the change, not the file — and MUST return the applied
+a mutation states the change, not the file — and returns the applied
 result's evidence identically in both forms. Edits apply sequentially: each
 matches against the content the prior edits produced, exactly once, so a
 statement of changes reads top to bottom and an ambiguity introduced by an

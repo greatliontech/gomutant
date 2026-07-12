@@ -28,6 +28,16 @@ outside the oracle, output that does not parse — aborts without recording a
 finding, because a corrupted measurement read as a sound one inflates kills
 in the flattering direction.
 
+**REQ-exec-observation** (behavior): gomutant MUST capture one independent Go
+testlog observation for every mutant and package-baseline process it launches,
+finalize completed logs against that process's package working
+directory, and merge their states as a deterministic union. The merged state is
+attached conservatively to the target and every oracle subject in the finding.
+A process that times out, panics, exits before normal test-harness completion, or
+otherwise cannot prove its log complete contributes an explicit unverifiable
+observation rather than an empty observation assertion. A stale or unverifiable
+subject remeasures the finding; an incomplete log is never silently discarded.
+
 **REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant — a
 caller-supplied replacement of one source file, given whole or as exact-match
 edits applied to the file's current content, exercised through a build
@@ -35,7 +45,7 @@ overlay against a named oracle test, the tree never touched — for the manual
 mutations the operator set cannot generate (generated-data drift, resolver
 seams, caller mappings). An edit that matches nothing, or matches more than
 once, is refused rather than guessed: a mutation applied somewhere the
-caller did not mean is a measurement of the wrong mutant. Before running the mutant it MUST probe the named
+caller did not mean is a measurement of the wrong mutant. Before running the mutant gomutant probes the named
 test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
 and read as a fabricated kill — the flattering direction
