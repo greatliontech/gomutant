@@ -66,7 +66,7 @@ func (s *subjectView) valid(evidence SubjectEvidence) (bool, error) {
 }
 
 func sameAttestationPins(prior, current Finding) bool {
-	if prior.pinsIncomplete || current.pinsIncomplete || prior.OperatorSet != current.OperatorSet || prior.Budget != current.Budget ||
+	if prior.OperatorSet != current.OperatorSet || prior.Budget != current.Budget ||
 		prior.Timeout != current.Timeout || prior.TargetEvidence != current.TargetEvidence ||
 		len(prior.OracleEvidence) != len(current.OracleEvidence) {
 		return false
@@ -92,7 +92,7 @@ func sameAttestationPins(prior, current Finding) bool {
 }
 
 func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectView, operatorSet, timeout string) (bool, error) {
-	if prior.pinsIncomplete || prior.OperatorSet != operatorSet || prior.Timeout != timeout || len(prior.OracleEvidence) != len(oracle) {
+	if prior.OperatorSet != operatorSet || prior.Timeout != timeout || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
 	ok, err := target.valid(prior.TargetEvidence)

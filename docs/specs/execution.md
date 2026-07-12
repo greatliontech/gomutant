@@ -45,9 +45,10 @@ producer boundary, cannot prove that an external actor did not change and restor
 input while a compiler read it.
 
 **REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant — a
-caller-supplied replacement of one source file, given whole or as exact-match
-edits applied to the file's current content, exercised through a build
-overlay against a named oracle test, the tree never touched — for the manual
+caller-supplied replacement of one or more existing source files, given whole,
+as sequential exact-match edits to one file, or as an atomic batch of
+file-scoped exact-match edits applied to the files' current
+content, exercised through one build overlay against a named oracle test, the tree never touched — for the manual
 mutations the operator set cannot generate (generated-data drift, resolver
 seams, caller mappings). An edit that matches nothing, or matches more than
 once, is refused rather than guessed: a mutation applied somewhere the
@@ -59,6 +60,16 @@ REQ-core-attributed-kills refuses — so either probe result refuses the run
 rather than scoring it. The result reports whether the named test killed the
 mutant and the attributed failing test; it is evidence for the caller to act
 on, never persisted to a finding record (REQ-result-record).
+
+Each atomic batch entry carries a canonical tree-relative slash path, a
+non-empty old string, and its replacement. Every path resolves to an existing
+regular file within the tree, and every old string occurs exactly once in that
+file's original bytes. All entries resolve against the same pre-mutation file
+contents; text introduced by one entry cannot satisfy another. Entries whose
+ranges overlap, whose replacements are byte-identical, or whose combined
+result changes no file are refused before any test process starts. The whole
+batch becomes one overlay or none of it does; there is no fuzzy matching,
+partial application, or worktree write.
 
 Reproducibility across runs is bounded by the oracle's own determinism: a
 flaky oracle yields flaky kills, which is itself a finding about the tests.

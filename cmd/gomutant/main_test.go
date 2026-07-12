@@ -22,7 +22,11 @@ func TestFindingsAtAndUpdate(t *testing.T) {
 	if findingsAt(dir, abs) != abs {
 		t.Fatal("absolute findings path rewritten")
 	}
-	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", Mutants: 1, Killed: 1}}
+	evidence := func(symbol string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, Mutants: 1, Killed: 1}}
 	err := gomutant.UpdateDocument(path, func(prior []gomutant.Finding) ([]gomutant.Finding, error) {
 		return gomutant.MergeFindings(prior, fresh), nil
 	})
@@ -72,9 +76,7 @@ func TestCobraCommandTree(t *testing.T) {
 	if err := run(nil); err == nil || !strings.Contains(err.Error(), "command is required") {
 		t.Fatalf("empty invocation = %v", err)
 	}
-	got := normalizeLegacyFlags([]string{"attest", "--reason", "-force", "-symbol=x", "--", "-timeout"})
-	want := []string{"attest", "--reason", "-force", "--symbol=x", "--", "-timeout"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("legacy flags = %q, want %q", got, want)
+	if err := run([]string{"run", "-budget", "1"}); err == nil || !strings.Contains(err.Error(), "unknown shorthand") {
+		t.Fatalf("single-dash long flag accepted: %v", err)
 	}
 }

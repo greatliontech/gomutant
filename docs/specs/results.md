@@ -62,8 +62,8 @@ it does not understand. This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 stipulator recovering findings by label — consumes gomutant's contract, never
-its internal store. A clean break changes the version-1 shape directly; a legacy
-record missing a required pin remeasures under REQ-result-stale.
+its internal store. A clean break changes the version-1 shape directly;
+documents missing any required version-1 field are malformed and refused.
 
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among

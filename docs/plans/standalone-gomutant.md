@@ -1,8 +1,8 @@
 # Standalone gomutant
 
-- [ ] 1. Contract and parse strict apply-patch-style ephemeral mutants over one or more existing tree files, rejecting add/delete/move operations, path escapes, fuzzy or ambiguous hunks, overlaps, and no-op patches.
+- [ ] 1. Contract and resolve atomic multi-file exact-match edit batches against one original snapshot, rejecting invalid or escaping files, missing or ambiguous matches, overlaps, and no-op edits.
 - [ ] 2. Generalize ephemeral execution to an atomic multi-file Go overlay while preserving baseline probes, attributed outcomes, source-tree immutability, and incomplete-observation evidence.
-- [ ] 3. Expose patch mutations through the library, CLI file-or-stdin input, and MCP, retaining whole-replacement and exact-edit forms and returning every overlaid file consistently across surfaces.
+- [ ] 3. Expose multi-file edit batches through the library, CLI JSON file-or-stdin input, and MCP, retaining whole-replacement and single-file sequential-edit forms and returning every overlaid file consistently across surfaces.
 - [ ] 4. Define findings-document hygiene: whole-tree runs remove entries for symbols no longer present, scoped runs retain unmeasured entries, and findings inspection identifies detached entries before the next whole-tree run.
 - [ ] 5. Make findings inspection evaluate and report current, stale, unverifiable, detached, open, and attested states without serving stale measurements, with deterministic human and machine-readable views.
 - [ ] 6. Add a CLI target-inspection command equivalent to MCP discovery, rendering the exact symbols, explicit or derived oracles, labels, and changed-but-untargeted residue a subsequent run would use.

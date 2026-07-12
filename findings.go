@@ -90,7 +90,7 @@ type Finding struct {
 	OracleEvidence []SubjectEvidence `json:"oracleEvidence"`
 	Timeout        string            `json:"timeout"`
 	Commit         string            `json:"commit,omitempty"`
-	Dirty          bool              `json:"dirty,omitempty"`
+	Dirty          bool              `json:"dirty"`
 
 	Mutants   int           `json:"mutants"`
 	Killed    int           `json:"killed"`
@@ -101,17 +101,13 @@ type Finding struct {
 	// Run metadata, never persisted: a cached finding was served from the
 	// prior document under matching pins; a skipped one names why nothing
 	// was measured ("no oracle", "not a function").
-	Cached         bool   `json:"-"`
-	Skipped        string `json:"-"`
-	pinsIncomplete bool
+	Cached  bool   `json:"-"`
+	Skipped string `json:"-"`
 }
 
 // Open returns the finding's open survivors — survivors less attested
 // dispositions (REQ-attest-survivor, REQ-result-findings).
 func (f *Finding) Open() []Survivor {
-	if f.pinsIncomplete {
-		return append([]Survivor(nil), f.Survivors...)
-	}
 	attested := map[survivorKey]bool{}
 	for _, a := range f.Attested {
 		attested[survivorKey{a.Position, a.Operator}] = true
@@ -128,9 +124,6 @@ func (f *Finding) Open() []Survivor {
 // Attest records a survivor disposition on the finding, refused unless the
 // named mutant is among its current survivors (REQ-attest-survivor).
 func (f *Finding) Attest(position, operator, reason string) error {
-	if f.pinsIncomplete {
-		return fmt.Errorf("gomutant: finding pins are incomplete; remeasure before attesting")
-	}
 	if reason == "" {
 		return fmt.Errorf("gomutant: attestation needs a reason")
 	}
@@ -179,13 +172,19 @@ func Export(findings []Finding) ([]byte, error) {
 		kept = append(kept, f)
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Symbol < kept[j].Symbol })
-	return json.MarshalIndent(document{Version: DocumentVersion, Findings: kept}, "", "  ")
+	data, err := json.MarshalIndent(document{Version: DocumentVersion, Findings: kept}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ParseFindings(data); err != nil {
+		return nil, fmt.Errorf("gomutant: export invalid findings: %w", err)
+	}
+	return data, nil
 }
 
 // ParseFindings loads a finding document: an unknown version is refused
 // (REQ-result-export), an unknown field within a known version is discarded
-// (REQ-result-tolerant — encoding/json drops unknown fields, and a document
-// missing a pin re-stales at the next run).
+// (REQ-result-tolerant — encoding/json drops unknown fields).
 func ParseFindings(data []byte) ([]Finding, error) {
 	top, err := decodeKnownObject(data, map[string]bool{"version": true, "findings": true})
 	if err != nil {
@@ -211,7 +210,7 @@ func ParseFindings(data []byte) ([]Finding, error) {
 		"timeout": true, "commit": true, "dirty": true, "mutants": true,
 		"killed": true, "discarded": true, "survivors": true, "attested": true,
 	}
-	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "timeout", "mutants", "killed"}
+	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "timeout", "dirty", "mutants", "killed"}
 	findings := make([]Finding, len(rawFindings))
 	symbols := map[string]bool{}
 	for i, raw := range rawFindings {
@@ -251,7 +250,9 @@ func ParseFindings(data []byte) ([]Finding, error) {
 		if findings[i].Commit == "" && !findings[i].Dirty {
 			complete = false
 		}
-		findings[i].pinsIncomplete = !complete
+		if !complete {
+			return nil, fmt.Errorf("gomutant: finding %d is missing or has invalid required evidence", i)
+		}
 	}
 	return findings, nil
 }

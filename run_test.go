@@ -318,10 +318,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(`{"version": 99, "findings": []}`)); err == nil {
 		t.Fatal("unknown version accepted")
 	}
-	fs, err := ParseFindings([]byte(`{"version": 1, "findings": [
-		{"symbol": "p.F", "bodyHash": "h", "operatorSet": "go/2", "toolchain": "tc",
-		 "mutants": 3, "killed": 3, "futureField": {"nested": true}}
-	]}`))
+	fs, err := ParseFindings([]byte(`{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"timeout":"1m0s","dirty":true,"mutants":0,"killed":0,"futureField":{"nested":true}}]}`))
 	if err != nil || len(fs) != 1 || fs[0].Symbol != "p.F" {
 		t.Fatalf("tolerant parse failed: %v %+v", err, fs)
 	}
@@ -346,8 +343,13 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	}
 	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"timeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`
 	nonGitFindings, err := ParseFindings([]byte(nonGit))
-	if err != nil || len(nonGitFindings) != 1 || nonGitFindings[0].pinsIncomplete {
+	if err != nil || len(nonGitFindings) != 1 {
 		t.Fatalf("non-Git provenance rejected: %v %+v", err, nonGitFindings)
+	}
+	invalidExport := nonGitFindings[0]
+	invalidExport.Dirty = false
+	if _, err := Export([]Finding{invalidExport}); err == nil {
+		t.Fatal("export emitted commitless clean provenance")
 	}
 	digestAt := strings.LastIndex(nonGit, `"runtimeDigest":"d"`)
 	if digestAt < 0 {
@@ -358,47 +360,35 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 		t.Fatal("per-subject runtime evidence mismatch accepted")
 	}
 	partialRuntime := nonGit[:digestAt-1] + nonGit[digestAt+len(`"runtimeDigest":"d"`):]
-	partialFindings, err := ParseFindings([]byte(partialRuntime))
-	if err != nil || len(partialFindings) != 1 || !partialFindings[0].pinsIncomplete {
-		t.Fatalf("partial legacy runtime evidence not accepted for remeasurement: %v %+v", err, partialFindings)
+	if _, err := ParseFindings([]byte(partialRuntime)); err == nil {
+		t.Fatal("partial runtime evidence accepted")
 	}
 	impossibleRuntime := strings.ReplaceAll(nonGit, `"runtimeDigest":"d"`, `"runtimeUnverifiable":true,"runtimeDigest":"d"`)
-	impossibleFindings, err := ParseFindings([]byte(impossibleRuntime))
-	if err != nil || len(impossibleFindings) != 1 || !impossibleFindings[0].pinsIncomplete {
-		t.Fatalf("impossible runtime disposition retained authority: %v %+v", err, impossibleFindings)
+	if _, err := ParseFindings([]byte(impossibleRuntime)); err == nil {
+		t.Fatal("impossible runtime disposition accepted")
 	}
 	wrongTarget := strings.Replace(nonGit, `"targetEvidence":{"symbol":"p.F"`, `"targetEvidence":{"symbol":"p.G"`, 1)
-	wrongTargetFindings, err := ParseFindings([]byte(wrongTarget))
-	if err != nil || len(wrongTargetFindings) != 1 || !wrongTargetFindings[0].pinsIncomplete {
-		t.Fatalf("mismatched target evidence accepted: %v %+v", err, wrongTargetFindings)
+	if _, err := ParseFindings([]byte(wrongTarget)); err == nil {
+		t.Fatal("mismatched target evidence accepted")
 	}
 	emptyOracle := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"timeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`
-	emptyOracleFindings, err := ParseFindings([]byte(emptyOracle))
-	if err != nil || len(emptyOracleFindings) != 1 || !emptyOracleFindings[0].pinsIncomplete {
-		t.Fatalf("empty oracle evidence accepted: %v %+v", err, emptyOracleFindings)
+	if _, err := ParseFindings([]byte(emptyOracle)); err == nil {
+		t.Fatal("empty oracle evidence accepted")
 	}
 	withoutDirty := strings.Replace(nonGit, `,"dirty":true`, "", 1)
-	withoutDirtyFindings, err := ParseFindings([]byte(withoutDirty))
-	if err != nil || len(withoutDirtyFindings) != 1 || !withoutDirtyFindings[0].pinsIncomplete {
-		t.Fatalf("missing commit without dirty provenance accepted: %v %+v", err, withoutDirtyFindings)
+	if _, err := ParseFindings([]byte(withoutDirty)); err == nil {
+		t.Fatal("missing commit without dirty provenance accepted")
+	}
+	committedWithoutDirty := strings.Replace(withoutDirty, `"timeout":"1m0s"`, `"timeout":"1m0s","commit":"abc"`, 1)
+	if _, err := ParseFindings([]byte(committedWithoutDirty)); err == nil {
+		t.Fatal("committed finding without explicit dirty provenance accepted")
 	}
 	legacy := `{"version":1,"findings":[{"symbol":"p.F","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"legacy"}]}]}`
-	legacyFindings, err := ParseFindings([]byte(legacy))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(legacyFindings[0].Open()) != 1 {
-		t.Fatal("incomplete legacy pins retained attestation authority")
-	}
-	if err := legacyFindings[0].Attest("f.go:1:1", "op", "again"); err == nil {
-		t.Fatal("attested finding with incomplete pins")
+	if _, err := ParseFindings([]byte(legacy)); err == nil {
+		t.Fatal("legacy finding accepted")
 	}
 	emptyPins := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"","operatorSet":"","budget":1,"targetEvidence":{"symbol":"","maximalClosure":"","toolchain":"","buildConfig":"","runtimeInputs":"","runtimeDigest":""},"oracleEvidence":[],"timeout":"","dirty":true,"mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"unsupported"}]}]}`
-	emptyPinFindings, err := ParseFindings([]byte(emptyPins))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !emptyPinFindings[0].pinsIncomplete || len(emptyPinFindings[0].Open()) != 1 {
-		t.Fatal("empty required pins retained disposition authority")
+	if _, err := ParseFindings([]byte(emptyPins)); err == nil {
+		t.Fatal("empty required pins accepted")
 	}
 }

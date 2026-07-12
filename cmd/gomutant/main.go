@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
@@ -31,7 +30,7 @@ func main() {
 
 func run(args []string) error {
 	cmd := newRootCommand()
-	cmd.SetArgs(normalizeLegacyFlags(args))
+	cmd.SetArgs(args)
 	return cmd.Execute()
 }
 
@@ -47,40 +46,6 @@ func newRootCommand() *cobra.Command {
 	}
 	cmd.AddCommand(newRunCommand(), newFindingsCommand(), newAttestCommand(), newEphemeralCommand(), newMCPCommand())
 	return cmd
-}
-
-func normalizeLegacyFlags(args []string) []string {
-	long := map[string]bool{
-		"budget": true, "changed": true, "dir": true, "file": true, "findings": true,
-		"force": true, "jobs": true, "label": true, "operator": true, "position": true,
-		"reason": true, "replacement": true, "run": true, "symbol": true, "targets": true,
-		"test-pkg": true, "timeout": true,
-	}
-	normalized := append([]string(nil), args...)
-	for i := 0; i < len(normalized); i++ {
-		arg := normalized[i]
-		if arg == "--" {
-			break
-		}
-		if len(arg) < 3 || arg[0] != '-' {
-			continue
-		}
-		legacy := arg[1] != '-'
-		name := strings.TrimLeft(arg, "-")
-		before, _, hasValue := strings.Cut(name, "=")
-		if hasValue {
-			name = before
-		}
-		if long[name] {
-			if legacy {
-				normalized[i] = "-" + arg
-			}
-			if name != "force" && !hasValue {
-				i++
-			}
-		}
-	}
-	return normalized
 }
 
 type runOptions struct {

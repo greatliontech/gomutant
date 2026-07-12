@@ -78,12 +78,8 @@ func TestFresh(t *testing.T) {
 	if bytes.Equal(withoutBudget, doc) {
 		t.Fatal("exported finding did not carry an explicit budget pin")
 	}
-	missingBudget, err := ParseFindings(withoutBudget)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := tr.Fresh(missingBudget[0], tg, 0); err != nil || ok {
-		t.Fatalf("finding with missing budget covered exhaustive request: %v %v", ok, err)
+	if _, err := ParseFindings(withoutBudget); err == nil {
+		t.Fatal("finding with missing budget accepted")
 	}
 	if ok, err := tr.Fresh(f, tg, 1); err != nil || !ok {
 		t.Fatalf("just-measured finding not fresh: %v %v", ok, err)
