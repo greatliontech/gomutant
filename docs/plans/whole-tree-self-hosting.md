@@ -1,7 +1,7 @@
 # Whole-tree self-hosting
 
 - [x] 1. Separate fresh mutation outcomes from reusable evidence: runtime-observation disagreement or movement records canonical unverifiable evidence while baseline result instability still refuses measurement, with end-to-end regression coverage.
-- [ ] 2. Prove package-derived `t.TempDir` oracles and the explicit self-host matrix complete under serial and concurrent cold/warm-cache runs, with unstable evidence remeasured rather than cached.
+- [x] 2. Prove package-derived `t.TempDir` oracles and the explicit self-host matrix complete under serial and concurrent cold/warm-cache runs, with unstable evidence remeasured rather than cached.
 - [ ] 3. Emit deterministic preparation events for loading, target/oracle resolution, freshness, mutant generation, and baseline groups before ordered run decisions, with CLI and MCP parity.
 - [ ] 4. Replace per-subject singleton freshness construction with context-aware module-batched views and one post-execution validation boundary per module.
 - [ ] 5. Memoize run-local package-derived oracles, oracle validation, package contexts, rapid classification, and repeated runtime-manifest checks without changing target or cache semantics.
