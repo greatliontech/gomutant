@@ -107,6 +107,23 @@ func TestGeneratedFixture(t *testing.T) {
 	}
 }
 
+func TestDriftSource(t *testing.T) {
+	if Add(1, 2) == 3 {
+		return
+	}
+	path := os.Getenv("GOMUTANT_DRIFT_SOURCE")
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(data, []byte("\n// mutant drift\n")...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Fatal("sum")
+}
+
 func TestNamedPanic(t *testing.T) {
 	if PanicValue() != 1 {
 		panic("mutant changed value")

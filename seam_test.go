@@ -4,12 +4,94 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
+
+func TestSubjectViewsBatchByModule(t *testing.T) {
+	tr := fixtureTree(t)
+	symbols := []string{
+		"example.com/fixture/lib.Add",
+		"example.com/fixture/lib.Weak",
+		"example.com/fixture/lib.TestAdd",
+		"example.com/fixture/methods.Counter.Inc",
+	}
+	views, err := tr.newSubjectViews(context.Background(), symbols)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views.modules) != 1 || len(views.bySymbol) != len(symbols) {
+		t.Fatalf("batched views = %d modules, %d subjects", len(views.modules), len(views.bySymbol))
+	}
+	shared := views.bySymbol[symbols[0]].view
+	moduleDir := views.bySymbol[symbols[0]].moduleDir
+	engine, err := gofresh.New(gofresh.WithDir(moduleDir), gofresh.WithEnv(tr.eng.GoEnv()...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range symbols {
+		batched := views.bySymbol[symbol]
+		if batched.view != shared || batched.module != views.modules[0] {
+			t.Fatalf("%s does not share the module view", symbol)
+		}
+		singleton, err := engine.NewViewFor([]gofresh.Subject{batched.subject}, moduleDir, gofresh.CodeResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := singleton.Capture(batched.subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files, err := singleton.SourceFilesFor(batched.subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fingerprint != batched.fp || !slices.Equal(files, batched.sourceFiles) {
+			t.Fatalf("%s batch differs: fingerprint %+v != %+v, files %v != %v", symbol, batched.fp, fingerprint, batched.sourceFiles, files)
+		}
+	}
+	validations := 0
+	views.modules[0].producer = true
+	views.modules[0].validate = func(context.Context) error {
+		validations++
+		return nil
+	}
+	if err := views.validateProducers(context.Background()); err != nil || validations != 1 {
+		t.Fatalf("module validations = %d, error %v", validations, err)
+	}
+}
+
+func TestSubjectViewsPartitionWorkspaceModules(t *testing.T) {
+	tree, err := Load("internal/engine/testdata/workspacemod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbols := []string{
+		"example.com/ws.Root",
+		"example.com/ws.TestRoot",
+		"example.com/ws/sub.Nested",
+		"example.com/ws/sub.TestNested",
+	}
+	views, err := tree.newSubjectViews(context.Background(), symbols)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views.modules) != 2 {
+		t.Fatalf("workspace batch has %d modules, want 2", len(views.modules))
+	}
+	root := views.bySymbol[symbols[0]]
+	rootTest := views.bySymbol[symbols[1]]
+	sub := views.bySymbol[symbols[2]]
+	subTest := views.bySymbol[symbols[3]]
+	if root.view != rootTest.view || sub.view != subTest.view || root.view == sub.view || root.moduleDir == sub.moduleDir {
+		t.Fatalf("workspace partition = root %p/%s, sub %p/%s", root.view, root.moduleDir, sub.view, sub.moduleDir)
+	}
+}
 
 // TestParseStipulatorTargets pins the reference external producer's adapter
 // (REQ-target-producers): witnesses become the oracle, requirement ids ride
@@ -175,6 +257,28 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("current inspection = %+v, %v", inspection, err)
 	}
+	batched, err := tr.newSubjectViews(context.Background(), []string{
+		"example.com/fixture/lib.Add",
+		"example.com/fixture/lib.TestAdd",
+		"example.com/fixture/lib.TestWeak",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	multiTarget, multiOracle, err := attachEvidence(batched.bySymbol["example.com/fixture/lib.Add"], []*subjectView{
+		batched.bySymbol["example.com/fixture/lib.TestAdd"],
+		batched.bySymbol["example.com/fixture/lib.TestWeak"],
+	}, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	multi := finding
+	multi.TargetEvidence = multiTarget
+	multi.OracleEvidence = multiOracle
+	inspection, err = tr.InspectFinding(multi)
+	if err != nil || inspection.State != FindingCurrent {
+		t.Fatalf("multi-oracle current inspection = %+v, %v", inspection, err)
+	}
 	derived := finding
 	derived.OracleExplicit = false
 	inspection, err = tr.InspectFinding(derived)
@@ -226,6 +330,20 @@ func TestInspectFindingStates(t *testing.T) {
 	inspection, err = tr.InspectFinding(missingOracle)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "no longer resolves") {
 		t.Fatalf("missing oracle inspection = %+v, %v", inspection, err)
+	}
+	staleAndMissing := missingOracle
+	staleAndMissing.TargetEvidence.MaximalClosure = "moved"
+	inspection, err = tr.InspectFinding(staleAndMissing)
+	if err != nil || inspection.State != FindingStale || strings.Contains(inspection.Reason, "no longer resolves") {
+		t.Fatalf("target-first inspection = %+v, %v", inspection, err)
+	}
+	staleBeforeMissing := multi
+	staleBeforeMissing.OracleEvidence = append([]SubjectEvidence(nil), multi.OracleEvidence...)
+	staleBeforeMissing.OracleEvidence[0].MaximalClosure = "moved"
+	staleBeforeMissing.OracleEvidence[1].Symbol = "example.com/fixture/lib.TestZZZDeleted"
+	inspection, err = tr.InspectFinding(staleBeforeMissing)
+	if err != nil || inspection.State != FindingStale || strings.Contains(inspection.Reason, "TestZZZDeleted") {
+		t.Fatalf("canonical valid-oracle precedence = %+v, %v", inspection, err)
 	}
 	setOrder := finding
 	unverifiableOracle := finding.OracleEvidence[0]

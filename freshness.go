@@ -1,6 +1,7 @@
 package gomutant
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
@@ -28,41 +29,118 @@ type FindingInspection struct {
 }
 
 type subjectView struct {
-	symbol    string
-	subject   gofresh.Subject
-	moduleDir string
-	env       []string
-	view      *gofresh.View
-	fp        gofresh.Fingerprint
+	symbol      string
+	subject     gofresh.Subject
+	moduleDir   string
+	env         []string
+	view        *gofresh.View
+	fp          gofresh.Fingerprint
+	sourceFiles []string
+	module      *moduleSubjectView
+}
+
+type moduleSubjectView struct {
+	view     *gofresh.View
+	validate func(context.Context) error
+	producer bool
+}
+
+type subjectViewSet struct {
+	bySymbol map[string]*subjectView
+	modules  []*moduleSubjectView
+}
+
+func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectViewSet, error) {
+	type resolvedSubject struct {
+		symbol, moduleDir string
+		subject           gofresh.Subject
+	}
+	type moduleGroup struct {
+		dir      string
+		resolved []resolvedSubject
+		subjects []gofresh.Subject
+	}
+	groups := make([]moduleGroup, 0)
+	groupByDir := map[string]int{}
+	seen := map[string]bool{}
+	for _, symbol := range symbols {
+		if seen[symbol] {
+			continue
+		}
+		seen[symbol] = true
+		pkg, local := t.eng.PackageOf(symbol)
+		if pkg == "" || local == "" {
+			return nil, fmt.Errorf("subject %s does not resolve", symbol)
+		}
+		moduleDir, _, err := t.eng.PackageContext(pkg)
+		if err != nil {
+			return nil, err
+		}
+		resolved := resolvedSubject{symbol: symbol, moduleDir: moduleDir, subject: gofresh.Subject{Package: pkg, Symbol: local}}
+		index, ok := groupByDir[moduleDir]
+		if !ok {
+			index = len(groups)
+			groupByDir[moduleDir] = index
+			groups = append(groups, moduleGroup{dir: moduleDir})
+		}
+		groups[index].resolved = append(groups[index].resolved, resolved)
+		groups[index].subjects = append(groups[index].subjects, resolved.subject)
+	}
+	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(seen))}
+	env := t.eng.GoEnv()
+	for _, group := range groups {
+		engine, err := gofresh.New(gofresh.WithDir(group.dir), gofresh.WithEnv(env...))
+		if err != nil {
+			return nil, err
+		}
+		view, err := engine.NewViewForContext(ctx, group.subjects, group.dir, gofresh.CodeResult)
+		if err != nil {
+			return nil, err
+		}
+		module := &moduleSubjectView{view: view, validate: view.ValidateContext}
+		set.modules = append(set.modules, module)
+		for _, resolved := range group.resolved {
+			fp, err := view.Capture(resolved.subject)
+			if err != nil {
+				return nil, err
+			}
+			sourceFiles, err := view.SourceFilesFor(resolved.subject)
+			if err != nil {
+				return nil, err
+			}
+			set.bySymbol[resolved.symbol] = &subjectView{
+				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir,
+				env: env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
+			}
+		}
+	}
+	return set, nil
 }
 
 func (t *Tree) newSubjectView(symbol string) (*subjectView, error) {
-	pkg, local := t.eng.PackageOf(symbol)
-	if pkg == "" || local == "" {
-		return nil, fmt.Errorf("subject %s does not resolve", symbol)
-	}
-	moduleDir, _, err := t.eng.PackageContext(pkg)
+	views, err := t.newSubjectViews(context.Background(), []string{symbol})
 	if err != nil {
 		return nil, err
 	}
-	env := t.eng.GoEnv()
-	engine, err := gofresh.New(gofresh.WithDir(moduleDir), gofresh.WithEnv(env...))
-	if err != nil {
-		return nil, err
+	return views.bySymbol[symbol], nil
+}
+
+func (s *subjectViewSet) validateProducers(ctx context.Context) error {
+	for _, module := range s.modules {
+		if module.producer {
+			if err := module.validate(ctx); err != nil {
+				return err
+			}
+		}
 	}
-	subject := gofresh.Subject{Package: pkg, Symbol: local}
-	view, err := engine.NewViewFor([]gofresh.Subject{subject}, moduleDir, gofresh.CodeResult)
-	if err != nil {
-		return nil, err
-	}
-	fp, err := view.Capture(subject)
-	if err != nil {
-		return nil, err
-	}
-	return &subjectView{symbol: symbol, subject: subject, moduleDir: moduleDir, env: env, view: view, fp: fp}, nil
+	return nil
 }
 
 func (s *subjectView) valid(evidence SubjectEvidence) (bool, error) {
+	return s.validContext(context.Background(), evidence)
+}
+
+func (s *subjectView) validContext(ctx context.Context, evidence SubjectEvidence) (bool, error) {
 	if evidence.Symbol != s.symbol || evidence.RuntimeInputs == "" || evidence.RuntimeDigest == "" {
 		return false, nil
 	}
@@ -77,7 +155,7 @@ func (s *subjectView) valid(evidence SubjectEvidence) (bool, error) {
 	if evidence.PurityAssertion != s.fp.PurityAssertion {
 		return false, nil
 	}
-	verdict, err := s.view.Check(evidence.fingerprint(), s.subject)
+	verdict, err := s.view.CheckContext(ctx, evidence.fingerprint(), s.subject)
 	if err != nil {
 		return false, err
 	}
@@ -151,23 +229,29 @@ func (t *Tree) InspectFinding(f Finding) (FindingInspection, error) {
 			}
 		}
 	}
-	target, err := t.newSubjectView(f.Symbol)
+	oracle := sortedSubjectEvidence(f.OracleEvidence)
+	validOracle := make(map[string]bool, len(oracle))
+	symbols := []string{f.Symbol}
+	for _, evidence := range oracle {
+		if err := t.eng.ValidateOracle([]string{evidence.Symbol}); err == nil {
+			validOracle[evidence.Symbol] = true
+			symbols = append(symbols, evidence.Symbol)
+		}
+	}
+	views, err := t.newSubjectViews(context.Background(), symbols)
 	if err != nil {
 		return FindingInspection{}, err
 	}
+	target := views.bySymbol[f.Symbol]
 	inspection, err := target.inspect(f.TargetEvidence)
 	if err != nil || inspection.State != FindingCurrent {
 		return inspection, err
 	}
-	oracle := sortedSubjectEvidence(f.OracleEvidence)
 	for _, evidence := range oracle {
-		if err := t.eng.ValidateOracle([]string{evidence.Symbol}); err != nil {
+		if !validOracle[evidence.Symbol] {
 			return FindingInspection{State: FindingStale, Reason: "oracle " + evidence.Symbol + " no longer resolves"}, nil
 		}
-		view, err := t.newSubjectView(evidence.Symbol)
-		if err != nil {
-			return FindingInspection{}, err
-		}
+		view := views.bySymbol[evidence.Symbol]
 		inspection, err := view.inspect(evidence)
 		if err != nil {
 			return FindingInspection{}, err
@@ -212,11 +296,11 @@ func sameAttestationPins(prior, current Finding) bool {
 	return true
 }
 
-func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
+func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
 	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.Timeout != timeout || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
-	ok, err := target.valid(prior.TargetEvidence)
+	ok, err := target.validContext(ctx, prior.TargetEvidence)
 	if err != nil || !ok {
 		return ok, err
 	}
@@ -232,7 +316,7 @@ func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectVie
 		if !ok {
 			return false, nil
 		}
-		valid, err := subject.valid(evidence)
+		valid, err := subject.validContext(ctx, evidence)
 		if err != nil || !valid {
 			return valid, err
 		}
@@ -240,14 +324,15 @@ func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectVie
 	return true, nil
 }
 
+func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
+	return evidenceSetMatchesContext(context.Background(), prior, target, oracle, oracleExplicit, operatorSet, timeout)
+}
+
 func attachEvidence(target *subjectView, oracle []*subjectView, state runtimeinput.State) (SubjectEvidence, []SubjectEvidence, error) {
 	attach := func(subject *subjectView) (SubjectEvidence, error) {
 		fp := subject.fp
 		fp.RuntimeInputs = state.Manifest
 		fp.RuntimeDigest = state.Digest
-		if err := subject.view.Validate(); err != nil {
-			return SubjectEvidence{}, err
-		}
 		return evidenceFromFingerprint(subject.symbol, fp, state), nil
 	}
 	targetEvidence, err := attach(target)

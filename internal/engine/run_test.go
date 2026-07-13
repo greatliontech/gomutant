@@ -507,6 +507,43 @@ func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 	}
 }
 
+func TestAbsoluteRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "input")
+	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	absolute, err := absoluteRuntimeEvidence(state, root, env)
+	if err != nil || !absolute.OK || !absolute.Unverifiable || !strings.Contains(absolute.Reason, "could not be finalized for reuse") {
+		t.Fatalf("moved absolute observation = %+v, %v", absolute, err)
+	}
+	paths, err := runtimeinput.Paths(absolute.Manifest, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths, path) {
+		t.Fatalf("runtime paths = %v, missing %s", paths, path)
+	}
+	for name, malformed := range map[string]runtimeinput.State{
+		"empty":     {},
+		"malformed": {OK: true, Manifest: "malformed", Digest: "digest"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if state, err := absoluteRuntimeEvidence(malformed, root, env); err == nil || state.OK {
+				t.Fatalf("malformed absolute observation = %+v, %v", state, err)
+			}
+		})
+	}
+}
+
 func TestProbeBaselineRejectsTestCountDrift(t *testing.T) {
 	tr := fixtureTree(t)
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")

@@ -573,17 +573,15 @@ func (t *Tree) FreshFor(f Finding, tg Target, budget int, timeout time.Duration)
 	if err := t.eng.ValidateOracle(oracle); err != nil {
 		return false, err
 	}
-	targetView, err := t.newSubjectView(tg.Symbol)
+	symbols := append([]string{tg.Symbol}, oracle...)
+	views, err := t.newSubjectViews(context.Background(), symbols)
 	if err != nil {
 		return false, err
 	}
+	targetView := views.bySymbol[tg.Symbol]
 	oracleViews := make([]*subjectView, 0, len(oracle))
 	for _, symbol := range oracle {
-		view, err := t.newSubjectView(symbol)
-		if err != nil {
-			return false, err
-		}
-		oracleViews = append(oracleViews, view)
+		oracleViews = append(oracleViews, views.bySymbol[symbol])
 	}
 	if !budgetCovers(f.Budget, budget) {
 		return false, nil

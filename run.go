@@ -171,6 +171,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 
 	findings := make([]Finding, len(targets))
 	var pending []work
+	type resolvedTarget struct {
+		index  int
+		oracle []string
+	}
+	var resolvedTargets []resolvedTarget
+	var subjectSymbols []string
 	type baselineKey struct {
 		pkg, run, flags, moduleDir, packageDir string
 	}
@@ -207,19 +213,28 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		f.BodyHash = bodyHash
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationFreshness, Symbol: tg.Symbol})
-		targetView, err := t.newSubjectView(tg.Symbol)
+		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle})
+		subjectSymbols = append(subjectSymbols, tg.Symbol)
+		subjectSymbols = append(subjectSymbols, oracle...)
+	}
+	views := &subjectViewSet{bySymbol: map[string]*subjectView{}}
+	if len(subjectSymbols) != 0 {
+		var err error
+		views, err = t.newSubjectViews(ctx, subjectSymbols)
 		if err != nil {
-			return nil, fmt.Errorf("target %s freshness: %w", tg.Symbol, err)
+			return nil, fmt.Errorf("freshness: %w", err)
 		}
+	}
+	for _, resolved := range resolvedTargets {
+		i := resolved.index
+		tg := targets[i]
+		f := &findings[i]
+		oracle := resolved.oracle
+		targetView := views.bySymbol[tg.Symbol]
 		oracleViews := make([]*subjectView, 0, len(oracle))
 		for _, symbol := range oracle {
-			view, err := t.newSubjectView(symbol)
-			if err != nil {
-				return nil, fmt.Errorf("target %s oracle %s freshness: %w", tg.Symbol, symbol, err)
-			}
-			oracleViews = append(oracleViews, view)
+			oracleViews = append(oracleViews, views.bySymbol[symbol])
 		}
-
 		rec, hasPrior := prior[tg.Symbol]
 		reason := "no-prior"
 		if hasPrior {
@@ -233,7 +248,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 		if hasPrior && !opts.Force && budgetCovers(rec.Budget, opts.Budget) {
-			matches, err := evidenceSetMatches(*rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.Timeout.String())
+			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.Timeout.String())
 			if err != nil {
 				return nil, err
 			}
@@ -308,6 +323,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		oracleSet := make(map[string]bool, len(oracle))
 		for _, o := range oracle {
 			oracleSet[o] = true
+		}
+		targetView.module.producer = true
+		for _, oracleView := range oracleViews {
+			oracleView.module.producer = true
 		}
 		pending = append(pending, work{target: i, mutants: mutants, groups: groups, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, baselines: baselines})
 	}
@@ -392,6 +411,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := views.validateProducers(ctx); err != nil {
+		return nil, fmt.Errorf("validate freshness: %w", err)
+	}
 
 	// Phase three, sequential: aggregate in target and mutant order.
 	for wi, w := range pending {
@@ -409,9 +431,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		f.TargetEvidence = targetEvidence
 		f.OracleEvidence = oracleEvidence
 		f.Commit = repository.commit
-		sourceFiles := append([]string(nil), w.targetView.view.SourceFiles()...)
+		sourceFiles := append([]string(nil), w.targetView.sourceFiles...)
 		for _, oracleView := range w.oracleViews {
-			sourceFiles = append(sourceFiles, oracleView.view.SourceFiles()...)
+			sourceFiles = append(sourceFiles, oracleView.sourceFiles...)
 		}
 		sourceFiles = append(sourceFiles, repository.historicalPackageFiles(sourceFiles)...)
 		sourceFiles = withModuleSelectionPaths(sourceFiles)

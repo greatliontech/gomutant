@@ -355,7 +355,29 @@ func processObservation(path, moduleDir, packageDir, incompleteReason string, en
 	if err != nil {
 		return runtimeinput.State{}, err
 	}
-	return runtimeinput.AbsoluteEnv(state, moduleDir, env)
+	return absoluteRuntimeEvidence(state, moduleDir, env)
+}
+
+func absoluteRuntimeEvidence(state runtimeinput.State, moduleDir string, env []string) (runtimeinput.State, error) {
+	absolute, err := runtimeinput.AbsoluteEnv(state, moduleDir, env)
+	if err == nil {
+		return absolute, nil
+	}
+	if !state.OK || state.Manifest == "" || state.Digest == "" {
+		return runtimeinput.State{}, err
+	}
+	current, currentErr := runtimeinput.CurrentEnv(state.Manifest, moduleDir, env)
+	if currentErr != nil || !current.OK || current == state {
+		return runtimeinput.State{}, err
+	}
+	incomplete, incompleteErr := runtimeinput.IncompleteEnv(moduleDir, "runtime input observation could not be finalized for reuse: "+err.Error(), env)
+	if incompleteErr != nil {
+		return runtimeinput.State{}, incompleteErr
+	}
+	if merged, mergeErr := mergeRuntimeEvidence(moduleDir, env, current, incomplete); mergeErr == nil {
+		incomplete = merged
+	}
+	return runtimeinput.AbsoluteEnv(incomplete, moduleDir, env)
 }
 
 func mergeProcessObservations(root string, env []string, capture bool, states ...runtimeinput.State) (runtimeinput.State, error) {

@@ -259,6 +259,152 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 	}
 }
 
+func TestRunCancellationAtBatchedFreshness(t *testing.T) {
+	tr := fixtureTree(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var preparation []PreparationEvent
+	findings, err := tr.Run(ctx, []Target{{
+		Symbol: "example.com/fixture/lib.Add",
+		Oracle: []string{"example.com/fixture/lib.TestAdd"},
+	}}, Options{
+		Budget: 1,
+		Progress: func(event PreparationEvent) {
+			preparation = append(preparation, event)
+			if event.Stage == PreparationFreshness {
+				cancel()
+			}
+		},
+	})
+	want := []PreparationEvent{
+		{Stage: PreparationResolving, Symbol: "example.com/fixture/lib.Add"},
+		{Stage: PreparationFreshness, Symbol: "example.com/fixture/lib.Add"},
+	}
+	if !errors.Is(err, context.Canceled) || findings != nil || !slices.Equal(preparation, want) {
+		t.Fatalf("cancelled freshness = findings %+v, preparation %+v, error %v", findings, preparation, err)
+	}
+}
+
+func TestRunValidatesBatchedProducerBeforeFindings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drift := filepath.Join(tmp, "lib", "doc.go")
+	original, err := os.ReadFile(drift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := tr.Run(context.Background(), []Target{{
+		Symbol: "example.com/fixture/lib.Add",
+		Oracle: []string{"example.com/fixture/lib.TestAdd"},
+	}}, Options{
+		Budget: 1,
+		Decision: func(RunDecision) {
+			if writeErr := os.WriteFile(drift, append(original, []byte("\n// drift\n")...), 0o644); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
+		t.Fatalf("producer drift = findings %+v, error %v", findings, err)
+	}
+}
+
+func TestRunValidatesEveryProducerModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS("internal/engine/testdata/workspacemod")); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drift := filepath.Join(tmp, "sub", "sub.go")
+	original, err := os.ReadFile(drift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := tr.Run(context.Background(), []Target{{
+		Symbol: "example.com/ws.Root",
+		Oracle: []string{"example.com/ws/sub.TestNested"},
+	}}, Options{
+		Budget: 1,
+		Decision: func(RunDecision) {
+			if writeErr := os.WriteFile(drift, append(original, []byte("\n// oracle drift\n")...), 0o644); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
+		t.Fatalf("oracle-module drift = findings %+v, error %v", findings, err)
+	}
+}
+
+func TestRunValidatesAfterMutantProcesses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	drift := filepath.Join(tmp, "lib", "doc.go")
+	t.Setenv("GOMUTANT_DRIFT_SOURCE", drift)
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := tr.Run(context.Background(), []Target{{
+		Symbol: "example.com/fixture/lib.Add",
+		Oracle: []string{"example.com/fixture/lib.TestDriftSource"},
+	}}, Options{Budget: 1})
+	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
+		t.Fatalf("post-mutant drift = findings %+v, error %v", findings, err)
+	}
+}
+
+func TestRunValidatesZeroMutantProducer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("constructs freshness views")
+	}
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	drift := filepath.Join(tmp, "lib", "doc.go")
+	original, err := os.ReadFile(drift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := tr.Run(context.Background(), []Target{{
+		Symbol: "example.com/fixture/lib.F",
+		Oracle: []string{"example.com/fixture/lib.TestVacuous"},
+	}}, Options{
+		Decision: func(RunDecision) {
+			if writeErr := os.WriteFile(drift, append(original, []byte("\n// zero-mutant drift\n")...), 0o644); writeErr != nil {
+				t.Fatal(writeErr)
+			}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
+		t.Fatalf("zero-mutant drift = findings %+v, error %v", findings, err)
+	}
+}
+
 func TestSnapshotRunInputsPreservesEmptySlices(t *testing.T) {
 	target := snapshotTargets([]Target{{Oracle: []string{}, Labels: []string{}}})[0]
 	if target.Oracle == nil || target.Labels == nil {
@@ -300,6 +446,18 @@ func TestRunReportsSharedBaselineOnce(t *testing.T) {
 	}
 	if want := []PreparationEvent{{Stage: PreparationBaseline, Symbol: targets[0].Symbol, Package: "example.com/fixture/lib"}}; !slices.Equal(baselines, want) {
 		t.Fatalf("baseline preparation = %+v, want %+v", baselines, want)
+	}
+	wantStages := []PreparationEvent{
+		{Stage: PreparationResolving, Symbol: targets[0].Symbol},
+		{Stage: PreparationFreshness, Symbol: targets[0].Symbol},
+		{Stage: PreparationResolving, Symbol: targets[1].Symbol},
+		{Stage: PreparationFreshness, Symbol: targets[1].Symbol},
+		{Stage: PreparationMutants, Symbol: targets[0].Symbol},
+		{Stage: PreparationBaseline, Symbol: targets[0].Symbol, Package: "example.com/fixture/lib"},
+		{Stage: PreparationMutants, Symbol: targets[1].Symbol},
+	}
+	if !slices.Equal(preparation, wantStages) {
+		t.Fatalf("batched preparation = %+v, want %+v", preparation, wantStages)
 	}
 }
 

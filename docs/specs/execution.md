@@ -103,9 +103,10 @@ before tree loading; the shared runner reports `resolving` before each target's
 target and oracle resolution, `freshness` before constructing and checking that
 target's subject views, `mutants` before enumerating a target that requires
 measurement, and `baseline` before each package-scoped oracle group actually
-probed rather than reused within the run. Target-scoped events follow target
-order, baseline events follow canonical package-group order, and worker count
-cannot affect the sequence. The CLI streams these events as they occur; a
+probed rather than reused within the run. Resolution and freshness events
+follow target order before module-batched view construction; subsequent mutant
+and baseline events follow target order, with baseline events in canonical
+package-group order. Worker count cannot affect the sequence. The CLI streams these events as they occur; a
 successful MCP result returns the same sequence. Event data never enters a run
 decision or finding, and run inputs are snapshotted before delivery. Callbacks
 execute synchronously as trusted caller code and must return normally; their
