@@ -186,32 +186,120 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 	}
 	tr := fixtureTree(t)
 	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
-	collect := func(ctx context.Context, opts Options) ([]Finding, []RunDecision, error) {
-		var decisions []RunDecision
-		opts.Decision = func(decision RunDecision) { decisions = append(decisions, decision) }
-		findings, err := tr.Run(ctx, []Target{target}, opts)
-		return findings, decisions, err
+	type runStatus struct {
+		preparation []PreparationEvent
+		decisions   []RunDecision
+		timeline    []string
 	}
-	first, decisions, err := collect(context.Background(), Options{Budget: 1})
+	collect := func(ctx context.Context, opts Options) ([]Finding, runStatus, error) {
+		var status runStatus
+		opts.Progress = func(event PreparationEvent) {
+			status.preparation = append(status.preparation, event)
+			status.timeline = append(status.timeline, "prepare")
+		}
+		var decisions []RunDecision
+		opts.Decision = func(decision RunDecision) {
+			decisions = append(decisions, decision)
+			status.timeline = append(status.timeline, "decision")
+		}
+		findings, err := tr.Run(ctx, []Target{target}, opts)
+		status.decisions = decisions
+		return findings, status, err
+	}
+	first, firstStatus, err := collect(context.Background(), Options{Budget: 1, Jobs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
+	decisions := firstStatus.decisions
 	if want := (RunDecision{Symbol: target.Symbol, Action: "measure", Reason: "no-prior", Mutants: 1}); len(decisions) != 1 || decisions[0] != want {
 		t.Fatalf("first decisions = %+v, want %+v", decisions, want)
 	}
-	_, decisions, err = collect(context.Background(), Options{Budget: 1, Prior: first})
-	if err != nil || len(decisions) != 1 || decisions[0].Action != "cached" {
-		t.Fatalf("cached decisions = %+v, %v", decisions, err)
+	wantPreparation := []PreparationEvent{
+		{Stage: PreparationResolving, Symbol: target.Symbol},
+		{Stage: PreparationFreshness, Symbol: target.Symbol},
+		{Stage: PreparationMutants, Symbol: target.Symbol},
+		{Stage: PreparationBaseline, Symbol: target.Symbol, Package: "example.com/fixture/lib"},
 	}
-	_, decisions, err = collect(context.Background(), Options{Budget: 1, Prior: first, Force: true})
-	if err != nil || len(decisions) != 1 || decisions[0].Reason != "forced" {
-		t.Fatalf("forced decisions = %+v, %v", decisions, err)
+	if !slices.Equal(firstStatus.preparation, wantPreparation) || !slices.Equal(firstStatus.timeline, []string{"prepare", "prepare", "prepare", "prepare", "decision"}) {
+		t.Fatalf("first status = preparation %+v, timeline %v", firstStatus.preparation, firstStatus.timeline)
+	}
+	_, cachedStatus, err := collect(context.Background(), Options{Budget: 1, Prior: first})
+	if err != nil || len(cachedStatus.decisions) != 1 || cachedStatus.decisions[0].Action != "cached" {
+		t.Fatalf("cached status = %+v, %v", cachedStatus, err)
+	}
+	if want := wantPreparation[:2]; !slices.Equal(cachedStatus.preparation, want) || !slices.Equal(cachedStatus.timeline, []string{"prepare", "prepare", "decision"}) {
+		t.Fatalf("cached preparation = %+v, timeline %v", cachedStatus.preparation, cachedStatus.timeline)
+	}
+	_, forcedStatus, err := collect(context.Background(), Options{Budget: 1, Prior: first, Force: true, Jobs: 4})
+	if err != nil || len(forcedStatus.decisions) != 1 || forcedStatus.decisions[0].Reason != "forced" {
+		t.Fatalf("forced status = %+v, %v", forcedStatus, err)
+	}
+	if !slices.Equal(forcedStatus.preparation, firstStatus.preparation) {
+		t.Fatalf("worker count changed preparation: jobs 1 %+v, jobs 4 %+v", firstStatus.preparation, forcedStatus.preparation)
+	}
+	mutableTargets := []Target{{Symbol: target.Symbol, Oracle: []string{"example.com/fixture/lib.TestAdd"}}}
+	mutablePrior := append([]Finding(nil), first...)
+	snapshotted, err := tr.Run(context.Background(), mutableTargets, Options{
+		Budget: 1,
+		Prior:  mutablePrior,
+		Progress: func(PreparationEvent) {
+			mutableTargets[0].Symbol = "example.com/fixture/lib.Missing"
+			mutableTargets[0].Oracle[0] = "example.com/fixture/lib.TestMissing"
+			mutablePrior[0].TargetEvidence.MaximalClosure = "moved"
+		},
+	})
+	if err != nil || len(snapshotted) != 1 || !snapshotted[0].Cached || snapshotted[0].Symbol != target.Symbol {
+		t.Fatalf("callback mutated snapshotted inputs: findings %+v, error %v", snapshotted, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	findings, decisions, err := collect(ctx, Options{Budget: 1})
-	if !errors.Is(err, context.Canceled) || findings != nil || len(decisions) != 0 {
-		t.Fatalf("cancelled run = findings %+v, decisions %+v, error %v", findings, decisions, err)
+	findings, cancelledStatus, err := collect(ctx, Options{Budget: 1})
+	if !errors.Is(err, context.Canceled) || findings != nil || len(cancelledStatus.preparation) != 0 || len(cancelledStatus.decisions) != 0 {
+		t.Fatalf("cancelled run = findings %+v, status %+v, error %v", findings, cancelledStatus, err)
+	}
+}
+
+func TestSnapshotRunInputsPreservesEmptySlices(t *testing.T) {
+	target := snapshotTargets([]Target{{Oracle: []string{}, Labels: []string{}}})[0]
+	if target.Oracle == nil || target.Labels == nil {
+		t.Fatalf("target snapshot lost non-nil empties: %+v", target)
+	}
+	finding := snapshotFindings([]Finding{{
+		Labels:         []string{},
+		OracleEvidence: []SubjectEvidence{},
+		Operators:      []OperatorSummary{},
+		Survivors:      []Survivor{},
+		Attested:       []Attestation{},
+	}})[0]
+	if finding.Labels == nil || finding.OracleEvidence == nil || finding.Operators == nil || finding.Survivors == nil || finding.Attested == nil {
+		t.Fatalf("finding snapshot lost non-nil empties: %+v", finding)
+	}
+}
+
+func TestRunReportsSharedBaselineOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	targets := []Target{
+		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+		{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+	}
+	var preparation []PreparationEvent
+	if _, err := tr.Run(context.Background(), targets, Options{
+		Budget:   1,
+		Progress: func(event PreparationEvent) { preparation = append(preparation, event) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var baselines []PreparationEvent
+	for _, event := range preparation {
+		if event.Stage == PreparationBaseline {
+			baselines = append(baselines, event)
+		}
+	}
+	if want := []PreparationEvent{{Stage: PreparationBaseline, Symbol: targets[0].Symbol, Package: "example.com/fixture/lib"}}; !slices.Equal(baselines, want) {
+		t.Fatalf("baseline preparation = %+v, want %+v", baselines, want)
 	}
 }
 
@@ -452,23 +540,41 @@ func TestRunRejectsAmbiguousOracle(t *testing.T) {
 // derives an empty oracle and is reported, never measured, never dropped.
 func TestRunNoOracle(t *testing.T) {
 	tr := fixtureTree(t)
-	fs, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/methods.Counter.Inc"}}, Options{})
+	symbol := "example.com/fixture/methods.Counter.Inc"
+	var preparation []PreparationEvent
+	var decisions []RunDecision
+	fs, err := tr.Run(context.Background(), []Target{{Symbol: symbol}}, Options{
+		Progress: func(event PreparationEvent) { preparation = append(preparation, event) },
+		Decision: func(decision RunDecision) { decisions = append(decisions, decision) },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fs[0].Skipped != "no oracle" {
 		t.Fatalf("finding = %+v, want skipped with no oracle", fs[0])
 	}
+	if want := []PreparationEvent{{Stage: PreparationResolving, Symbol: symbol}}; !slices.Equal(preparation, want) || len(decisions) != 1 || decisions[0].Action != "skipped" {
+		t.Fatalf("no-oracle status = preparation %+v, decisions %+v", preparation, decisions)
+	}
 }
 
 func TestRunRejectsFailingOracleBaseline(t *testing.T) {
 	tr := fixtureTree(t)
+	var preparation []PreparationEvent
+	var decisions []RunDecision
 	findings, err := tr.Run(context.Background(), []Target{{
 		Symbol: "example.com/fixture/lib.Add",
 		Oracle: []string{"example.com/fixture/failing.TestAlwaysFails"},
-	}}, Options{Budget: 1})
+	}}, Options{
+		Budget:   1,
+		Progress: func(event PreparationEvent) { preparation = append(preparation, event) },
+		Decision: func(decision RunDecision) { decisions = append(decisions, decision) },
+	})
 	if err == nil || !strings.Contains(err.Error(), "oracle baseline does not pass") || findings != nil {
 		t.Fatalf("failing oracle baseline = findings %+v, error %v", findings, err)
+	}
+	if len(preparation) != 4 || preparation[3].Stage != PreparationBaseline || len(decisions) != 0 {
+		t.Fatalf("failing baseline status = preparation %+v, decisions %+v", preparation, decisions)
 	}
 }
 

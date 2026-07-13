@@ -176,14 +176,47 @@ func TestCobraCommandTree(t *testing.T) {
 
 func TestRenderRunStatus(t *testing.T) {
 	var output bytes.Buffer
+	renderPreparation(&output, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
+	renderPreparation(&output, gomutant.PreparationEvent{Stage: gomutant.PreparationResolving, Symbol: "p.F"})
+	renderPreparation(&output, gomutant.PreparationEvent{Stage: gomutant.PreparationBaseline, Symbol: "p.F", Package: "example.com/p"})
 	renderRunDecision(&output, gomutant.RunDecision{Symbol: "p.F", Action: "measure", Reason: "forced", Mutants: 3})
 	renderRunDecision(&output, gomutant.RunDecision{Symbol: "p.G", Action: "cached"})
 	renderRunSummary(&output, gomutant.RunSummary{Targets: 2, Measured: 1, Cached: 1, Generated: 3, Killed: 2, Survived: 1, Attested: 1, Open: 0})
-	want := "measure   p.F  3 mutants (forced)\n" +
+	want := "prepare   loading\n" +
+		"prepare   resolving p.F\n" +
+		"prepare   baseline p.F example.com/p\n" +
+		"measure   p.F  3 mutants (forced)\n" +
 		"cached    p.G\n" +
 		"summary   2 targets: 1 measured, 1 cached, 0 skipped; 3 generated, 2 killed, 1 survived, 0 discarded; 1 attested, 0 open\n"
 	if output.String() != want {
 		t.Fatalf("run status = %q, want %q", output.String(), want)
+	}
+}
+
+func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
+	tmp := t.TempDir()
+	targetsPath := filepath.Join(tmp, "targets.json")
+	if err := os.WriteFile(targetsPath, []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"]}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{
+		dir: fixtureDir, targetsFile: targetsPath, findingsFile: filepath.Join(tmp, "findings.json"), budget: 1, jobs: 4, output: &output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	positions := []int{
+		strings.Index(output.String(), "prepare   loading\n"),
+		strings.Index(output.String(), "prepare   resolving example.com/fixture/lib.Add\n"),
+		strings.Index(output.String(), "prepare   freshness example.com/fixture/lib.Add\n"),
+		strings.Index(output.String(), "prepare   mutants example.com/fixture/lib.Add\n"),
+		strings.Index(output.String(), "prepare   baseline example.com/fixture/lib.Add example.com/fixture/lib\n"),
+		strings.Index(output.String(), "measure   example.com/fixture/lib.Add"),
+	}
+	for i, position := range positions {
+		if position < 0 || i > 0 && position <= positions[i-1] {
+			t.Fatalf("run progress positions = %v\n%s", positions, output.String())
+		}
 	}
 }
 
@@ -209,9 +242,13 @@ func TestRunCommandCancellationLeavesFindingsUntouched(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err = runCommand(ctx, runOptions{dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: docPath, budget: 1})
+	var output bytes.Buffer
+	err = runCommand(ctx, runOptions{dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: docPath, budget: 1, output: &output})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled command = %v", err)
+	}
+	if output.String() != "prepare   loading\n" {
+		t.Fatalf("cancelled command progress = %q", output.String())
 	}
 	got, err := os.ReadFile(docPath)
 	if err != nil || !bytes.Equal(got, document) {

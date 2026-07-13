@@ -13,6 +13,10 @@
       "oracle": ["github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus"]
     },
     {
+      "symbol": "github.com/greatliontech/gomutant.reportPreparation",
+      "oracle": ["github.com/greatliontech/gomutant.TestRunDecisionsAndCancellation"]
+    },
+    {
       "symbol": "github.com/greatliontech/gomutant/internal/cmd.renderRunSummary",
       "oracle": ["github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus"]
     },

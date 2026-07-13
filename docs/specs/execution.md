@@ -98,8 +98,22 @@ gomutant does not promise identical survivors across runs — it promises that
 an outcome it cannot attribute is refused (REQ-exec-attribution), so noise
 aborts rather than scoring.
 
-**REQ-exec-run-status** (behavior): Before executing mutants, a run MUST report
-one target decision in target order: `cached` when reusable prior evidence is
+**REQ-exec-run-status** (behavior): CLI and MCP faces MUST report `loading`
+before tree loading; the shared runner reports `resolving` before each target's
+target and oracle resolution, `freshness` before constructing and checking that
+target's subject views, `mutants` before enumerating a target that requires
+measurement, and `baseline` before each package-scoped oracle group actually
+probed rather than reused within the run. Target-scoped events follow target
+order, baseline events follow canonical package-group order, and worker count
+cannot affect the sequence. The CLI streams these events as they occur; a
+successful MCP result returns the same sequence. Event data never enters a run
+decision or finding, and run inputs are snapshotted before delivery. Callbacks
+execute synchronously as trusted caller code and must return normally; their
+external side effects have ordinary process semantics. An error or cancellation
+may leave a rendered prefix, but never a partial finding or decision.
+
+Before executing mutants, a run MUST report one target decision in target
+order: `cached` when reusable prior evidence is
 served, `skipped` with the skip reason when no measurement can run, or
 `measure` with the generated mutant count and one reason from `no-prior`,
 `forced`, `budget`, or `stale`. Forced is reported when force overrides an
@@ -107,8 +121,9 @@ existing record; budget when the requested budget exceeds that record's
 coverage; stale when another reuse pin fails. Concurrent worker completion
 order never changes these decisions or the final per-target and aggregate
 summary. CLI progress renders the ordered decisions before mutant execution;
-CLI and MCP final results expose the same decisions and totals. Open survivors
-remain advisory and do not change successful exit semantics.
+all preparation events precede every decision. CLI and MCP final results expose
+the same preparation sequence, decisions, and totals. Open survivors remain
+advisory and do not change successful exit semantics.
 
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
 caller-context cancellation MUST cancel in-flight oracle processes, wait for

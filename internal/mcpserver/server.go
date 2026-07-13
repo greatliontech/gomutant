@@ -134,15 +134,17 @@ type findingOut struct {
 }
 
 type runOut struct {
-	Findings  []findingOut           `json:"findings"`
-	Residue   []gomutant.Residue     `json:"residue,omitempty"`
-	Decisions []gomutant.RunDecision `json:"decisions"`
-	Summary   gomutant.RunSummary    `json:"summary"`
-	Document  string                 `json:"document"`
+	Findings    []findingOut                `json:"findings"`
+	Residue     []gomutant.Residue          `json:"residue,omitempty"`
+	Preparation []gomutant.PreparationEvent `json:"preparation"`
+	Decisions   []gomutant.RunDecision      `json:"decisions"`
+	Summary     gomutant.RunSummary         `json:"summary"`
+	Document    string                      `json:"document"`
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (*mcp.CallToolResult, runOut, error) {
 	var out runOut
+	out.Preparation = append(out.Preparation, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.Load(s.dir)
 	if err != nil {
 		return nil, out, err
@@ -226,6 +228,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		Force:    in.Force,
 		Prior:    prior,
 		Decision: func(decision gomutant.RunDecision) { out.Decisions = append(out.Decisions, decision) },
+		Progress: func(event gomutant.PreparationEvent) { out.Preparation = append(out.Preparation, event) },
 	})
 	if err != nil {
 		return nil, out, err

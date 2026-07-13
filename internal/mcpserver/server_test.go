@@ -47,8 +47,10 @@ func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(dir)
-	if _, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{"targets":[]}`}); err != nil {
+	if _, out, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{"targets":[]}`}); err != nil {
 		t.Fatal(err)
+	} else if want := []gomutant.PreparationEvent{{Stage: gomutant.PreparationLoading}}; len(out.Preparation) != len(want) || out.Preparation[0] != want[0] {
+		t.Fatalf("empty run preparation = %+v, want %+v", out.Preparation, want)
 	}
 	retained, err := s.loadFindings("")
 	if err != nil || len(retained) != 1 {
@@ -129,6 +131,13 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if len(out.Decisions) != 1 || out.Decisions[0].Action != "measure" || out.Summary.Measured != 1 || out.Summary.Targets != 1 {
 		t.Fatalf("run status = decisions %+v, summary %+v", out.Decisions, out.Summary)
 	}
+	var stages []string
+	for _, event := range out.Preparation {
+		stages = append(stages, string(event.Stage))
+	}
+	if got, want := strings.Join(stages, ","), "loading,resolving,freshness,mutants,baseline"; got != want {
+		t.Fatalf("run preparation = %s, want %s: %+v", got, want, out.Preparation)
+	}
 	if _, err := os.Stat(filepath.Join(s.dir, defaultFindings)); err != nil {
 		t.Fatalf("findings document not written: %v", err)
 	}
@@ -170,6 +179,13 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 	if len(out2.Decisions) != 1 || out2.Decisions[0].Action != "cached" || out2.Summary.Cached != 1 {
 		t.Fatalf("cached run status = decisions %+v, summary %+v", out2.Decisions, out2.Summary)
+	}
+	stages = stages[:0]
+	for _, event := range out2.Preparation {
+		stages = append(stages, string(event.Stage))
+	}
+	if got, want := strings.Join(stages, ","), "loading,resolving,freshness"; got != want {
+		t.Fatalf("cached preparation = %s, want %s: %+v", got, want, out2.Preparation)
 	}
 
 	// A scoped run of a different symbol never drops the rest of the

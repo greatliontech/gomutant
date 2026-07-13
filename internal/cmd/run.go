@@ -45,6 +45,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if out == nil {
 		out = os.Stdout
 	}
+	renderPreparation(out, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.Load(o.dir)
 	if err != nil {
 		return err
@@ -105,6 +106,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 		Decision: func(decision gomutant.RunDecision) {
 			renderRunDecision(out, decision)
 		},
+		Progress: func(event gomutant.PreparationEvent) {
+			renderPreparation(out, event)
+		},
 	})
 	if err != nil {
 		return err
@@ -137,6 +141,17 @@ func runCommand(ctx context.Context, o runOptions) error {
 		}
 		return gomutant.MergeFindings(current, findings), nil
 	})
+}
+
+func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
+	switch event.Stage {
+	case gomutant.PreparationLoading:
+		fmt.Fprintln(w, "prepare   loading")
+	case gomutant.PreparationBaseline:
+		fmt.Fprintf(w, "prepare   %s %s %s\n", event.Stage, event.Symbol, event.Package)
+	default:
+		fmt.Fprintf(w, "prepare   %s %s\n", event.Stage, event.Symbol)
+	}
 }
 
 func renderRunDecision(w io.Writer, decision gomutant.RunDecision) {

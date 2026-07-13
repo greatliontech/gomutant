@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +35,29 @@ type Options struct {
 	// Decision receives each target's deterministic pre-execution disposition
 	// in target order (REQ-exec-run-status).
 	Decision func(RunDecision)
+	// Progress synchronously receives deterministic preparation events before
+	// terminal target decisions and mutant execution. It must return normally
+	// (REQ-exec-run-status).
+	Progress func(PreparationEvent)
+}
+
+// PreparationStage identifies one observable pre-execution operation.
+type PreparationStage string
+
+const (
+	PreparationLoading   PreparationStage = "loading"
+	PreparationResolving PreparationStage = "resolving"
+	PreparationFreshness PreparationStage = "freshness"
+	PreparationMutants   PreparationStage = "mutants"
+	PreparationBaseline  PreparationStage = "baseline"
+)
+
+// PreparationEvent reports one operation before it begins. Symbol is set for
+// target-scoped operations; Package is additionally set for baseline probes.
+type PreparationEvent struct {
+	Stage   PreparationStage `json:"stage"`
+	Symbol  string           `json:"symbol,omitempty"`
+	Package string           `json:"package,omitempty"`
 }
 
 // RunDecision explains whether one target is cached, skipped, or measured.
@@ -105,6 +129,8 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if opts.Timeout <= 0 {
 		opts.Timeout = 60 * time.Second
 	}
+	targets = snapshotTargets(targets)
+	opts.Prior = snapshotFindings(opts.Prior)
 	repository := captureRepositoryState(t.dir)
 	runEnv := t.eng.GoEnv()
 	jobs := opts.Jobs
@@ -154,6 +180,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationResolving, Symbol: tg.Symbol})
 		f := &findings[i]
 		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, Timeout: opts.Timeout.String()}
 		oracle := t.resolveOracle(tg)
@@ -179,6 +206,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
 		f.BodyHash = bodyHash
+		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationFreshness, Symbol: tg.Symbol})
 		targetView, err := t.newSubjectView(tg.Symbol)
 		if err != nil {
 			return nil, fmt.Errorf("target %s freshness: %w", tg.Symbol, err)
@@ -219,6 +247,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 
+		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
 		mutants, err := t.eng.Mutants(tg.Symbol, opts.Budget)
 		if err != nil {
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
@@ -260,6 +289,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			key := baselineKey{pkg: group.pkgs[0], run: group.runRegex, flags: strings.Join(group.flags, "\x00"), moduleDir: group.moduleDir, packageDir: group.packageDir}
 			state, ok := baselineCache[key]
 			if !ok {
+				reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0]})
 				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.Timeout, group.flags, group.moduleDir, group.packageDir, runEnv)
 				if err != nil {
 					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
@@ -421,6 +451,33 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
 	}
 	return findings, nil
+}
+
+func snapshotTargets(targets []Target) []Target {
+	snapshot := slices.Clone(targets)
+	for i := range snapshot {
+		snapshot[i].Oracle = slices.Clone(snapshot[i].Oracle)
+		snapshot[i].Labels = slices.Clone(snapshot[i].Labels)
+	}
+	return snapshot
+}
+
+func snapshotFindings(findings []Finding) []Finding {
+	snapshot := slices.Clone(findings)
+	for i := range snapshot {
+		snapshot[i].Labels = slices.Clone(snapshot[i].Labels)
+		snapshot[i].OracleEvidence = slices.Clone(snapshot[i].OracleEvidence)
+		snapshot[i].Operators = slices.Clone(snapshot[i].Operators)
+		snapshot[i].Survivors = slices.Clone(snapshot[i].Survivors)
+		snapshot[i].Attested = slices.Clone(snapshot[i].Attested)
+	}
+	return snapshot
+}
+
+func reportPreparation(callback func(PreparationEvent), event PreparationEvent) {
+	if callback != nil {
+		callback(event)
+	}
 }
 
 func mergeFindingObservations(root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {

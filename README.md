@@ -71,9 +71,11 @@ gomutant discover --targets testdata/self-host-targets.json
 gomutant run --targets testdata/self-host-targets.json --jobs 1
 ```
 
-A run reports every ordered target decision before launching mutants:
-`cached`, `skipped`, or `measure` with `no-prior`, `forced`, `budget`, or
-`stale`. It finishes with deterministic per-target findings and aggregate
+A run streams deterministic preparation for loading, target resolution,
+freshness, mutant generation, and baseline probes, then reports every ordered
+target decision before launching mutants: `cached`, `skipped`, or `measure`
+with `no-prior`, `forced`, `budget`, or `stale`. It finishes with deterministic
+per-target findings and aggregate
 generated, discarded, killed, survived, attested, and open totals. Repeating
 the same run serves findings whose pins still hold; `--force` deliberately
 remeasures them. Package- and symbol-filtered runs are scoped and never delete

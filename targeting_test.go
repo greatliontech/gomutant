@@ -117,12 +117,13 @@ func TestSelfHostTargetsResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(targets) != 5 {
-		t.Fatalf("self-host target count = %d, want 5", len(targets))
+	if len(targets) != 6 {
+		t.Fatalf("self-host target count = %d, want 6", len(targets))
 	}
 	want := map[string]string{
 		"github.com/greatliontech/gomutant.Tree.FilterTargets":               "github.com/greatliontech/gomutant.TestFilterTargets",
 		"github.com/greatliontech/gomutant.SummarizeRun":                     "github.com/greatliontech/gomutant.TestSummarizeRun",
+		"github.com/greatliontech/gomutant.reportPreparation":                "github.com/greatliontech/gomutant.TestRunDecisionsAndCancellation",
 		"github.com/greatliontech/gomutant/internal/cmd.renderRunDecision":   "github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus",
 		"github.com/greatliontech/gomutant/internal/cmd.renderRunSummary":    "github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus",
 		"github.com/greatliontech/gomutant/internal/engine.Tree.PackagePath": "github.com/greatliontech/gomutant.TestFilterTargets",
