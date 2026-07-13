@@ -21,7 +21,7 @@ applied syntactically where the replacement compiles without new imports or
 type context — a site with no such counterpart (a return of a named or
 struct type with no zero literal, the modulus operator with no swap partner)
 yields no mutant there, a narrowing that can only miss kills, never
-fabricate one. A mutant that fails to compile, does not differ from
+fabricate one. The identifier for this operator set is `go/3`. A mutant that fails to compile, does not differ from
 the baseline, or renders identically to an earlier mutant is discarded (a
 timed-out run is a kill — REQ-exec-attribution). The set carries a version
 identifier so a finding records which operators generated it.

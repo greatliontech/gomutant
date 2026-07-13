@@ -26,8 +26,9 @@ import (
 // Tree is a loaded Go tree: a single module, or a workspace whose go.work
 // members are all in scope.
 type Tree struct {
-	pkgs []*packages.Package
-	env  []string
+	pkgs            []*packages.Package
+	env             []string
+	importProcessor importProcessor
 	// dir is the absolute tree root Load resolved, kept to reconcile
 	// Fset-absolute file paths back to the tree-relative paths callers speak.
 	dir string

@@ -405,7 +405,7 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	finding := Finding{Symbol: "example.com/fixture/lib.Add", OperatorSet: "go/2", OracleExplicit: true, Timeout: "1m0s", TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence}
+	finding := Finding{Symbol: "example.com/fixture/lib.Add", OperatorSet: engine.OperatorSet, OracleExplicit: true, Timeout: "1m0s", TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence}
 	inspection, err := tr.InspectFinding(finding)
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("current inspection = %+v, %v", inspection, err)

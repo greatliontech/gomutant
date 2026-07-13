@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -9,6 +10,9 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
+	if OperatorSet != "go/3" {
+		t.Fatalf("operator set = %q, want go/3", OperatorSet)
+	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
 	if err != nil {
@@ -178,5 +182,92 @@ func TestMutantsBodyless(t *testing.T) {
 	ms, err := tr.Mutants("example.com/fixture/bodyless.Ext", 0)
 	if err != nil || len(ms) != 0 {
 		t.Fatalf("bodyless: %d mutants, err %v", len(ms), err)
+	}
+}
+
+func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
+	tr := fixtureTree(t)
+	processed := map[string]string{}
+	tr.importProcessor = func(filename string, source []byte) ([]byte, error) {
+		processed[string(source)] = filename
+		return source, nil
+	}
+	var mutants []Mutant
+	for _, symbol := range []string{"example.com/fixture/lib.Mixed", "example.com/fixture/lib.Logs"} {
+		generated, err := tr.Mutants(symbol, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutants = append(mutants, generated...)
+	}
+	removal := map[string]bool{
+		"force false": true, "force true": true, "delete statement": true,
+		"drop assignment": true, "zero return": true,
+	}
+	seenRemoval := map[string]bool{}
+	for _, mutant := range mutants {
+		processedFile, wasProcessed := processed[string(mutant.Replacements[0].Source)]
+		if removal[mutant.Operator] {
+			seenRemoval[mutant.Operator] = true
+			if !wasProcessed {
+				t.Fatalf("removal-capable %q skipped import processing", mutant.Operator)
+			}
+			if processedFile != mutant.Replacements[0].File {
+				t.Fatalf("removal-capable %q processed as %q, want %q", mutant.Operator, processedFile, mutant.Replacements[0].File)
+			}
+		} else if wasProcessed {
+			t.Fatalf("reference-preserving %q processed imports", mutant.Operator)
+		}
+	}
+	for operator := range removal {
+		if !seenRemoval[operator] {
+			t.Fatalf("removal-capable operator %q not exercised", operator)
+		}
+	}
+}
+
+func TestMutantsRetainImportProcessingFallback(t *testing.T) {
+	tr := fixtureTree(t)
+	calls := 0
+	tr.importProcessor = func(_ string, _ []byte) ([]byte, error) {
+		calls++
+		return nil, errors.New("cannot process imports")
+	}
+	mutants, err := tr.Mutants("example.com/fixture/lib.Logs", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, mutant := range mutants {
+		if mutant.Operator == "delete statement" {
+			found = true
+			if !strings.Contains(string(mutant.Replacements[0].Source), `"fmt"`) {
+				t.Fatal("failed processing did not retain rendered source")
+			}
+		}
+	}
+	if !found || calls != 1 {
+		t.Fatalf("delete fallback = found %v, processing calls %d", found, calls)
+	}
+}
+
+func TestMutantsDeduplicateEffectiveSourceBeforeBudget(t *testing.T) {
+	tr := fixtureTree(t)
+	tr.importProcessor = func(_ string, _ []byte) ([]byte, error) {
+		return []byte("package lib\n"), nil
+	}
+	mutants, err := tr.Mutants("example.com/fixture/lib.PruneCollision", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mutants) != 2 || mutants[0].Operator != "delete statement" || mutants[1].Operator != "increment literal" {
+		t.Fatalf("capped effective mutants = %+v", mutants)
+	}
+	if string(mutants[0].Replacements[0].Source) != "package lib\n" || string(mutants[1].Replacements[0].Source) == "package lib\n" {
+		t.Fatalf("effective sources = %q, %q", mutants[0].Replacements[0].Source, mutants[1].Replacements[0].Source)
+	}
+	exhaustive, err := tr.Mutants("example.com/fixture/lib.PruneCollision", 0)
+	if err != nil || len(exhaustive) != 2 {
+		t.Fatalf("exhaustive effective mutants = %d, %v", len(exhaustive), err)
 	}
 }

@@ -33,7 +33,9 @@ type Mutant struct {
 // it, so extending the operator set re-stales every record — an old record
 // must never claim coverage of mutants it never generated
 // (REQ-mut-operators, REQ-result-stale).
-const OperatorSet = "go/2"
+const OperatorSet = "go/3"
+
+type importProcessor func(filename string, source []byte) ([]byte, error)
 
 var comparisonSwap = map[token.Token]token.Token{
 	token.EQL: token.NEQ, token.NEQ: token.EQL,
@@ -74,10 +76,11 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 	}
 
 	type site struct {
-		op     string
-		pos    token.Pos
-		apply  func()
-		revert func()
+		op                        string
+		pos                       token.Pos
+		preservesImportReferences bool
+		apply                     func()
+		revert                    func()
 	}
 	var sites []site
 
@@ -95,17 +98,17 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 			if swapped, ok := comparisonSwap[v.Op]; ok {
 				orig := v.Op
 				sites = append(sites, site{
-					op:    fmt.Sprintf("%s -> %s", orig, swapped),
-					pos:   v.OpPos,
-					apply: func() { v.Op = swapped }, revert: func() { v.Op = orig },
+					op: fmt.Sprintf("%s -> %s", orig, swapped), pos: v.OpPos,
+					preservesImportReferences: true,
+					apply:                     func() { v.Op = swapped }, revert: func() { v.Op = orig },
 				})
 			}
 			if swapped, ok := arithmeticSwap[v.Op]; ok && numeric(v.X) {
 				orig := v.Op
 				sites = append(sites, site{
-					op:    fmt.Sprintf("%s -> %s", orig, swapped),
-					pos:   v.OpPos,
-					apply: func() { v.Op = swapped }, revert: func() { v.Op = orig },
+					op: fmt.Sprintf("%s -> %s", orig, swapped), pos: v.OpPos,
+					preservesImportReferences: true,
+					apply:                     func() { v.Op = swapped }, revert: func() { v.Op = orig },
 				})
 			}
 			// Forcing one operand of a logical pair to its identity makes the
@@ -129,9 +132,9 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 			if v.Kind == token.INT {
 				orig := v.Value
 				sites = append(sites, site{
-					op:    "increment literal",
-					pos:   v.Pos(),
-					apply: func() { v.Value = incrementInt(orig) }, revert: func() { v.Value = orig },
+					op: "increment literal", pos: v.Pos(),
+					preservesImportReferences: true,
+					apply:                     func() { v.Value = incrementInt(orig) }, revert: func() { v.Value = orig },
 				})
 			}
 		case *ast.BranchStmt:
@@ -141,9 +144,9 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 					swapped = token.BREAK
 				}
 				sites = append(sites, site{
-					op:    fmt.Sprintf("%s -> %s", orig, swapped),
-					pos:   v.Pos(),
-					apply: func() { v.Tok = swapped }, revert: func() { v.Tok = orig },
+					op: fmt.Sprintf("%s -> %s", orig, swapped), pos: v.Pos(),
+					preservesImportReferences: true,
+					apply:                     func() { v.Tok = swapped }, revert: func() { v.Tok = orig },
 				})
 			}
 		case *ast.IncDecStmt:
@@ -152,24 +155,24 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 				swapped = token.INC
 			}
 			sites = append(sites, site{
-				op:    fmt.Sprintf("%s -> %s", orig, swapped),
-				pos:   v.TokPos,
-				apply: func() { v.Tok = swapped }, revert: func() { v.Tok = orig },
+				op: fmt.Sprintf("%s -> %s", orig, swapped), pos: v.TokPos,
+				preservesImportReferences: true,
+				apply:                     func() { v.Tok = swapped }, revert: func() { v.Tok = orig },
 			})
 		case *ast.AssignStmt:
 			if swapped, ok := assignArithmeticSwap[v.Tok]; ok && numeric(v.Lhs[0]) {
 				orig := v.Tok
 				sites = append(sites, site{
-					op:    fmt.Sprintf("%s -> %s", orig, swapped),
-					pos:   v.TokPos,
-					apply: func() { v.Tok = swapped }, revert: func() { v.Tok = orig },
+					op: fmt.Sprintf("%s -> %s", orig, swapped), pos: v.TokPos,
+					preservesImportReferences: true,
+					apply:                     func() { v.Tok = swapped }, revert: func() { v.Tok = orig },
 				})
 			}
 		case *ast.IfStmt:
 			orig := v.Cond
 			sites = append(sites, site{
-				op:  "negate condition",
-				pos: v.Cond.Pos(),
+				op: "negate condition", pos: v.Cond.Pos(),
+				preservesImportReferences: true,
 				apply: func() {
 					v.Cond = &ast.UnaryExpr{Op: token.NOT, X: &ast.ParenExpr{X: orig}}
 				},
@@ -181,8 +184,8 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 			}
 			orig := v.Cond
 			sites = append(sites, site{
-				op:  "negate condition",
-				pos: v.Cond.Pos(),
+				op: "negate condition", pos: v.Cond.Pos(),
+				preservesImportReferences: true,
 				apply: func() {
 					v.Cond = &ast.UnaryExpr{Op: token.NOT, X: &ast.ParenExpr{X: orig}}
 				},
@@ -246,8 +249,15 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 	})
 
 	var out []Mutant
-	seen := map[string]bool{}
+	renderedSeen := map[string]bool{}
+	effectiveSeen := map[string]bool{}
 	identities := map[string]int{}
+	processImports := t.importProcessor
+	if processImports == nil {
+		processImports = func(filename string, source []byte) ([]byte, error) {
+			return imports.Process(filename, source, nil)
+		}
+	}
 	for _, s := range sites {
 		if budget > 0 && len(out) >= budget {
 			break
@@ -260,17 +270,23 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 		}
 		// Two operators occasionally render the same source; running the
 		// duplicate would double-count one effective mutant.
-		if key := string(mutated); seen[key] {
+		if key := string(mutated); renderedSeen[key] {
 			continue
 		} else {
-			seen[key] = true
+			renderedSeen[key] = true
 		}
-		// A mutation that orphans an import must not die as a build failure:
-		// prune imports so the mutant gets its day in court. Process only
-		// formats and prunes here — it must never gain an add-import mode,
-		// which would resolve against the inherited (unpinned) workspace.
-		if fixed, err := imports.Process("mutant.go", mutated, nil); err == nil {
-			mutated = fixed
+		if !s.preservesImportReferences {
+			// Subtree replacement may orphan an import. The fixed operator set
+			// introduces no identifiers, so processing only needs to remove
+			// imports; on failure the compiler remains the conservative judge.
+			if fixed, err := processImports(path, mutated); err == nil {
+				mutated = fixed
+			}
+		}
+		if key := string(mutated); effectiveSeen[key] {
+			continue
+		} else {
+			effectiveSeen[key] = true
 		}
 		p := pkg.Fset.Position(s.pos)
 		position := fmt.Sprintf("%s:%d:%d", filepath.Base(p.Filename), p.Line, p.Column)
