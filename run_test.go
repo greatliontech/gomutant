@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -211,6 +212,82 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 	findings, decisions, err := collect(ctx, Options{Budget: 1})
 	if !errors.Is(err, context.Canceled) || findings != nil || len(decisions) != 0 {
 		t.Fatalf("cancelled run = findings %+v, decisions %+v, error %v", findings, decisions, err)
+	}
+}
+
+func TestRunRemeasuresGeneratedFixtureEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestGeneratedFixture"}}
+	first, err := tr.Run(context.Background(), []Target{target}, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || !first[0].TargetEvidence.RuntimeUnverifiable || first[0].TargetEvidence.RuntimeReason == "" {
+		t.Fatalf("generated-fixture finding = %+v", first)
+	}
+	data, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prior) != 1 || !prior[0].TargetEvidence.RuntimeUnverifiable || prior[0].TargetEvidence.RuntimeReason != first[0].TargetEvidence.RuntimeReason ||
+		len(prior[0].OracleEvidence) != 1 || !prior[0].OracleEvidence[0].RuntimeUnverifiable || prior[0].OracleEvidence[0].RuntimeReason != first[0].OracleEvidence[0].RuntimeReason {
+		t.Fatalf("round-tripped generated-fixture finding = %+v", prior)
+	}
+	var decisions []RunDecision
+	second, err := tr.Run(context.Background(), []Target{target}, Options{
+		Budget: 1,
+		Prior:  prior,
+		Decision: func(decision RunDecision) {
+			decisions = append(decisions, decision)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 1 || len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != "stale" || second[0].Cached {
+		t.Fatalf("remeasure = findings %+v, decisions %+v", second, decisions)
+	}
+}
+
+func TestMergeFindingObservationsMakesMovementNonReusable(t *testing.T) {
+	root := t.TempDir()
+	stable := filepath.Join(root, "stable")
+	moving := filepath.Join(root, "moving")
+	if err := os.WriteFile(stable, []byte("stable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moving, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moving, []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := mergeFindingObservations(root, env, stableState, movingState)
+	if err != nil || !merged.OK || !merged.Unverifiable || !strings.Contains(merged.Reason, "could not be merged for reuse") {
+		t.Fatalf("moved observation = %+v, %v", merged, err)
+	}
+	paths, err := runtimeinput.Paths(merged.Manifest, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths, stable) {
+		t.Fatalf("runtime paths = %v, missing stable input %s", paths, stable)
 	}
 }
 

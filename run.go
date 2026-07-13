@@ -333,7 +333,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					}
 					outcome = out
 				}
-				state, err := runtimeinput.MergeEnv(t.dir, runEnv, processStates...)
+				state, err := mergeFindingObservations(t.dir, runEnv, processStates...)
 				if err != nil {
 					errOnce.Do(func() {
 						poolErr = fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
@@ -368,7 +368,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		f := &findings[w.target]
 		states := append([]runtimeinput.State(nil), w.baselines...)
 		states = append(states, observations[wi]...)
-		state, err := runtimeinput.MergeEnv(t.dir, runEnv, states...)
+		state, err := mergeFindingObservations(t.dir, runEnv, states...)
 		if err != nil {
 			return nil, err
 		}
@@ -421,6 +421,31 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
 	}
 	return findings, nil
+}
+
+func mergeFindingObservations(root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {
+	state, err := runtimeinput.MergeEnv(root, env, states...)
+	if err == nil {
+		return state, nil
+	}
+	result, incompleteErr := runtimeinput.IncompleteEnv(root, "runtime input observations could not be merged for reuse: "+err.Error(), env)
+	if incompleteErr != nil {
+		return runtimeinput.State{}, incompleteErr
+	}
+	for _, input := range states {
+		if input.Manifest == "" {
+			continue
+		}
+		current, currentErr := runtimeinput.CurrentEnv(input.Manifest, root, env)
+		if currentErr != nil || !current.OK {
+			continue
+		}
+		merged, mergeErr := runtimeinput.MergeEnv(root, env, result, current)
+		if mergeErr == nil {
+			result = merged
+		}
+	}
+	return result, nil
 }
 
 func summarizeOperators(mutants []engine.Mutant, outcomes []engine.MutantOutcome) []OperatorSummary {

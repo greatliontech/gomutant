@@ -1,8 +1,9 @@
 # Results
 
-A finding is only as trustworthy as its provenance. gomutant records every
-input that shaped a result and treats the record as valid only while those
-inputs still hold, so a stale finding re-measures rather than misleads.
+A finding reports a completed mutation measurement. gomutant also records the
+available provenance for deciding whether that measurement can be reused: a
+record is served without execution only while every required input still holds,
+while stale or unverifiable evidence re-measures rather than misleads.
 
 **body hash** (term): a hash of a body's canonical text, ignoring formatting
 churn. It identifies mutant positions and changed-scope candidates; it is not
@@ -15,7 +16,7 @@ finding's merged runtime-input manifest, digest, and explicit unverifiable
 disposition, including incomplete-process reasons.
 
 **REQ-result-record** (behavior): A finding record MUST be keyed by the
-mutated symbol and pin the inputs that produced it — target subject evidence,
+mutated symbol and record the available inputs that produced it — target subject evidence,
 the oracle as a set of distinct subject evidence records, the operator version,
 whether the oracle was explicit or package-derived, the mutant budget, and the exact effective per-mutant timeout encoded as a
 canonical Go duration string — carrying the capture commit and dirty provenance,

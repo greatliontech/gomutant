@@ -80,8 +80,9 @@ remeasures them. Package- and symbol-filtered runs are scoped and never delete
 findings outside their selected surface. An interrupt cancels the full oracle
 process tree and leaves the findings document unchanged.
 Before fresh mutant execution, each distinct oracle group must pass on the
-unmutated tree with stable runtime-input evidence; an already-failing or
-moving baseline refuses the measurement rather than fabricating kills.
+unmutated tree with a stable test count and result. Runtime-input movement makes
+the completed finding unverifiable and therefore ineligible for reuse; an
+already-failing or structurally unstable baseline refuses the measurement.
 Mutation execution is supported on Unix and Windows hosts; other hosts are
 refused during tree loading rather than run with weaker cleanup guarantees.
 

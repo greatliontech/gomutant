@@ -21,10 +21,12 @@ Non-normative orientation; each property is specified in its own document.
 3. **Mutate, run, attribute.** A symbol's body is mutated through build
    overlays in isolation; its oracle tests run per mutant; a kill is
    attributed to a named event ([mutation.md](mutation.md), [execution.md](execution.md)).
-4. **Advisory, pinned.** Findings are records pinned to the exact inputs that
-   produced them — target and oracle source closures, build and runtime guards,
-   observed runtime inputs, operators, budget, and timeout — so a record re-stales
-   the moment any input moves ([results.md](results.md)).
+4. **Advisory, pinned.** Findings record the measured outcomes and the evidence
+   available to reuse them — target and oracle source closures, build and runtime
+   guards, observed runtime inputs, operators, budget, and timeout. Only findings
+   whose pins prove reusable may be served without measurement; an unverifiable
+   finding remains a report of its completed run and remeasures on the next request
+   ([results.md](results.md)).
 
 ## The keystone
 

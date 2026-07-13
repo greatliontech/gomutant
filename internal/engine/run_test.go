@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -430,7 +431,7 @@ func TestProbeBaseline(t *testing.T) {
 }
 
 //gofresh:pure
-func TestProbeBaselineRejectsRuntimeInputDrift(t *testing.T) {
+func TestProbeBaselineRecordsRuntimeInputDriftAsUnverifiable(t *testing.T) {
 	tr := fixtureTree(t)
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
 	if err != nil {
@@ -441,9 +442,82 @@ func TestProbeBaselineRejectsRuntimeInputDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_INPUT="+input)
-	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableInput$", time.Minute, nil, moduleDir, packageDir, env)
-	if err == nil || (!strings.Contains(err.Error(), "changed between discovery and measurement") && !strings.Contains(err.Error(), "moved")) {
-		t.Fatalf("unstable baseline = %v", err)
+	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableInput$", time.Minute, nil, moduleDir, packageDir, env)
+	if err != nil || ran != 1 || !passed || !state.OK || !state.Unverifiable || !strings.Contains(state.Reason, "repeated baseline executions") {
+		t.Fatalf("unstable baseline = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
+	}
+}
+
+func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
+	moduleDir, err := filepath.Abs("testdata/fixturemod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packageDir := filepath.Join(moduleDir, "lib")
+	stable := filepath.Join(t.TempDir(), "stable-input")
+	if err := os.WriteFile(stable, []byte("stable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_STABLE_INPUT="+stable)
+	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, env)
+	if err != nil || ran != 1 || !passed || !state.OK || !state.Unverifiable || !strings.Contains(state.Reason, "repeated baseline executions") {
+		t.Fatalf("changing identities = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
+	}
+	paths, err := runtimeinput.Paths(state.Manifest, moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths, stable) {
+		t.Fatalf("runtime paths = %v, missing stable input %s", paths, stable)
+	}
+}
+
+func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
+	root := t.TempDir()
+	stable := filepath.Join(root, "stable")
+	moving := filepath.Join(root, "moving")
+	if err := os.WriteFile(stable, []byte("stable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moving, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moving, []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := mergeRuntimeEvidence(root, env, stableState, movingState)
+	if err != nil || !merged.OK || !merged.Unverifiable || !strings.Contains(merged.Reason, "could not be merged for reuse") {
+		t.Fatalf("moved observation = %+v, %v", merged, err)
+	}
+	paths, err := runtimeinput.Paths(merged.Manifest, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths, stable) {
+		t.Fatalf("runtime paths = %v, missing stable input %s", paths, stable)
+	}
+}
+
+func TestProbeBaselineRejectsTestCountDrift(t *testing.T) {
+	tr := fixtureTree(t)
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "baseline-count")
+	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_COUNT="+marker)
+	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", time.Minute, nil, moduleDir, packageDir, env)
+	if err == nil || !strings.Contains(err.Error(), "baseline test count changed") {
+		t.Fatalf("unstable baseline count = %v", err)
 	}
 }
 

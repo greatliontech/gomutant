@@ -1,8 +1,10 @@
 package lib
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -62,6 +64,46 @@ func TestUnstableBaselineResult(t *testing.T) {
 	}
 	if err := os.WriteFile(path, []byte("seen"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestChangingIdentity(t *testing.T) {
+	stable := os.Getenv("GOMUTANT_STABLE_INPUT")
+	if stable == "" {
+		t.Skip("baseline-run fixture")
+	}
+	if _, err := os.ReadFile(stable); err != nil {
+		t.Fatal(err)
+	}
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(".", fmt.Sprintf(".changing-identity-%x", nonce))
+	defer os.Remove(path)
+	if err := os.WriteFile(path, []byte("generated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGeneratedFixture(t *testing.T) {
+	dir, err := os.MkdirTemp(".", ".generated-fixture-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "input")
+	if err := os.WriteFile(path, []byte("fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if Add(1, 2) != 3 {
+		t.Fatal("sum")
 	}
 }
 

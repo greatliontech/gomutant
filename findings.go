@@ -85,8 +85,8 @@ type survivorKey struct {
 }
 
 // Finding is one target's measurement, keyed by the mutated symbol and
-// pinned to the exact inputs that produced it (REQ-result-record). Open
-// findings are Survivors less Attested.
+// carrying the available evidence for deciding reuse (REQ-result-record).
+// Open findings are Survivors less Attested.
 type Finding struct {
 	Symbol string   `json:"symbol"`
 	Labels []string `json:"labels,omitempty"`

@@ -138,13 +138,13 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 	}
 
 	// The first run discovers runtime identities. The second is the scored
-	// measurement: requiring the complete state to match before and after it
-	// prevents a test from consuming one value and pinning a later value.
+	// measurement; disagreement makes its evidence non-reusable without
+	// suppressing the attributed outcome.
 	secondOutcome, secondKiller, secondState, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, env)
 	if err != nil {
 		return secondOutcome, secondKiller, secondState, err
 	}
-	combined, err := runtimeinput.MergeEnv(dir, env, firstState, secondState)
+	combined, err := mergeRuntimeEvidence(dir, env, firstState, secondState)
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
@@ -152,7 +152,10 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 		return secondOutcome, secondKiller, combined, nil
 	}
 	if firstState != secondState {
-		return MutantDiscarded, "", runtimeinput.State{}, fmt.Errorf("runtime inputs changed between discovery and measurement")
+		combined, err = addRuntimeEvidenceReason(dir, env, combined, "runtime input observations changed between repeated mutant executions")
+		if err != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, err
+		}
 	}
 	return secondOutcome, secondKiller, combined, nil
 }
@@ -359,7 +362,40 @@ func mergeProcessObservations(root string, env []string, capture bool, states ..
 	if !capture {
 		return runtimeinput.State{}, nil
 	}
-	return runtimeinput.MergeEnv(root, env, states...)
+	return mergeRuntimeEvidence(root, env, states...)
+}
+
+func mergeRuntimeEvidence(root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {
+	state, err := runtimeinput.MergeEnv(root, env, states...)
+	if err == nil {
+		return state, nil
+	}
+	result, incompleteErr := runtimeinput.IncompleteEnv(root, "runtime input observations could not be merged for reuse: "+err.Error(), env)
+	if incompleteErr != nil {
+		return runtimeinput.State{}, incompleteErr
+	}
+	for _, input := range states {
+		if input.Manifest == "" {
+			continue
+		}
+		current, currentErr := runtimeinput.CurrentEnv(input.Manifest, root, env)
+		if currentErr != nil || !current.OK {
+			continue
+		}
+		merged, mergeErr := runtimeinput.MergeEnv(root, env, result, current)
+		if mergeErr == nil {
+			result = merged
+		}
+	}
+	return result, nil
+}
+
+func addRuntimeEvidenceReason(root string, env []string, state runtimeinput.State, reason string) (runtimeinput.State, error) {
+	incomplete, err := runtimeinput.IncompleteEnv(root, reason, env)
+	if err != nil {
+		return runtimeinput.State{}, err
+	}
+	return mergeRuntimeEvidence(root, env, state, incomplete)
 }
 
 // TestProbe runs the named test on the unmutated tree and reports how many
@@ -408,12 +444,9 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if err != nil {
 		return secondRan, secondPassed, second, err
 	}
-	combined, err := runtimeinput.MergeEnv(dir, env, first, second)
+	combined, err := mergeRuntimeEvidence(dir, env, first, second)
 	if err != nil {
 		return 0, false, runtimeinput.State{}, err
-	}
-	if second.Unverifiable {
-		return secondRan, secondPassed, combined, nil
 	}
 	if secondRan != ran {
 		return secondRan, secondPassed, runtimeinput.State{}, fmt.Errorf("baseline test count changed between discovery and measurement")
@@ -421,8 +454,14 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if !secondPassed {
 		return secondRan, false, runtimeinput.State{}, fmt.Errorf("baseline result changed between discovery and measurement")
 	}
+	if second.Unverifiable {
+		return secondRan, secondPassed, combined, nil
+	}
 	if first != second {
-		return secondRan, secondPassed, runtimeinput.State{}, fmt.Errorf("baseline runtime inputs or result changed between discovery and measurement")
+		combined, err = addRuntimeEvidenceReason(dir, env, combined, "runtime input observations changed between repeated baseline executions")
+		if err != nil {
+			return 0, false, runtimeinput.State{}, err
+		}
 	}
 	return secondRan, secondPassed, combined, nil
 }

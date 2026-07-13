@@ -6,4 +6,5 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [whole-tree-self-hosting](whole-tree-self-hosting.md) | Stabilize package-derived evidence for all-symbol self-hosting | Uncapped whole-tree and concurrent selected runs complete with stable evidence, every survivor dispositioned, and target preparation progress visible |
+| [runtime-input-provenance](runtime-input-provenance.md) | Prove reusable runtime evidence across producer-created outputs | Observation-time object provenance distinguishes produced outputs from external inputs on every supported host |
+| [whole-tree-self-hosting](whole-tree-self-hosting.md) | Complete all-symbol self-hosting with package-derived oracles | Uncapped whole-tree and concurrent selected runs complete, unstable evidence remeasures, every survivor is dispositioned, and preparation progress is visible |

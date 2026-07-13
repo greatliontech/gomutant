@@ -31,16 +31,28 @@ in the flattering direction.
 Each distinct package-scoped oracle group needed by fresh targets is probed
 once per run before mutant execution. A group that matches no tests or does
 not pass unmutated refuses the measurement; cached findings launch no probe.
+When repeated clean probes disagree on the test count or pass/fail result, the
+measurement is likewise refused. Disagreement or movement confined to runtime-
+input observations does not change that passing baseline result: it makes the
+eventual finding explicitly unverifiable for reuse instead of suppressing the
+fresh measurement.
 
 **REQ-exec-observation** (behavior): gomutant MUST capture one independent Go
-testlog observation for every mutant and oracle-baseline process it launches,
-finalize completed logs against that process's package working
-directory, and merge their states as a deterministic union. The merged state is
-attached conservatively to the target and every oracle subject in the finding.
-A process that times out, panics, exits before normal test-harness completion, or
-otherwise cannot prove its log complete contributes an explicit unverifiable
+testlog observation for every mutant and oracle-baseline process it launches and
+finalize completed logs against that process's package working directory. When
+the completed states agree with one coherent current view, their deterministic
+union is attached conservatively to the target and every oracle subject in the
+finding. If runtime identities differ between repeated observations or the
+completed states move before union, gomutant MUST preserve the attributed fresh
+mutation outcomes, retain every observed identity whose manifest remains
+evaluable under the aggregation view, and attach canonical explicit
+unverifiable evidence instead; that finding is reportable and persistable but
+never reusable. A process that
+times out, panics, exits before normal test-harness completion, or otherwise
+cannot prove its log complete likewise contributes an explicit unverifiable
 observation rather than an empty observation assertion. A stale or unverifiable
-subject remeasures the finding; an incomplete log is never silently discarded.
+subject remeasures the finding; incomplete or incoherent observation is never
+silently represented as reusable evidence.
 
 **REQ-exec-quiescence** (behavior): The caller MUST exclude source and build-input
 mutation from target loading through run completion. gomutant validates captured
