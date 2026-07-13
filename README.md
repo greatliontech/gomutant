@@ -68,7 +68,7 @@ dogfoods that path with:
 
 ```
 gomutant discover --targets testdata/self-host-targets.json
-gomutant run --targets testdata/self-host-targets.json
+gomutant run --targets testdata/self-host-targets.json --jobs 1
 ```
 
 A run reports every ordered target decision before launching mutants:
