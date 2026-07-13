@@ -14,6 +14,7 @@ import (
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -561,20 +562,36 @@ func budgetCovers(recorded, req int) bool {
 // about unhardened or stale-measured symbols asks this instead of
 // re-deriving pin arithmetic.
 func (t *Tree) Fresh(f Finding, tg Target, budget int) (bool, error) {
-	return t.FreshFor(f, tg, budget, 60*time.Second)
+	return t.FreshForContext(context.Background(), f, tg, budget, 60*time.Second)
+}
+
+// FreshContext is Fresh with caller-owned cancellation.
+func (t *Tree) FreshContext(ctx context.Context, f Finding, tg Target, budget int) (bool, error) {
+	return t.FreshForContext(ctx, f, tg, budget, 60*time.Second)
 }
 
 // FreshFor is Fresh under an explicit effective per-mutant timeout.
 func (t *Tree) FreshFor(f Finding, tg Target, budget int, timeout time.Duration) (bool, error) {
+	return t.FreshForContext(context.Background(), f, tg, budget, timeout)
+}
+
+// FreshForContext is FreshFor with caller-owned cancellation.
+func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget int, timeout time.Duration) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if f.Symbol != tg.Symbol {
 		return false, fmt.Errorf("gomutant: finding %s checked against target %s", f.Symbol, tg.Symbol)
 	}
-	oracle := t.resolveOracle(tg)
-	if err := t.eng.ValidateOracle(oracle); err != nil {
+	oracle, err := t.resolveOracleContext(ctx, tg)
+	if err != nil {
+		return false, err
+	}
+	if err := t.eng.ValidateOracleContext(ctx, oracle); err != nil {
 		return false, err
 	}
 	symbols := append([]string{tg.Symbol}, oracle...)
-	views, err := t.newSubjectViews(context.Background(), symbols)
+	views, err := t.newSubjectViews(ctx, symbols)
 	if err != nil {
 		return false, err
 	}
@@ -586,7 +603,7 @@ func (t *Tree) FreshFor(f Finding, tg Target, budget int, timeout time.Duration)
 	if !budgetCovers(f.Budget, budget) {
 		return false, nil
 	}
-	return evidenceSetMatches(f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String())
+	return evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String())
 }
 
 // MergeFindings merges a run's findings over a prior document by symbol — a
@@ -684,15 +701,13 @@ func UpdateDocumentContext(ctx context.Context, path string, update func(prior [
 	defer os.Remove(lock)
 
 	var prior []Finding
-	existed := false
 	mode := os.FileMode(0o644)
-	data, err := os.ReadFile(path)
+	data, err := contextio.ReadFile(ctx, path)
 	switch {
 	case os.IsNotExist(err):
 	case err != nil:
 		return err
 	default:
-		existed = true
 		if info, statErr := os.Stat(path); statErr != nil {
 			return statErr
 		} else {
@@ -716,10 +731,25 @@ func UpdateDocumentContext(ctx context.Context, path string, update func(prior [
 			return "", err
 		}
 		tmpPath := tmp.Name()
-		if _, err := tmp.Write(contents); err != nil {
-			tmp.Close()
-			os.Remove(tmpPath)
-			return "", err
+		for len(contents) > 0 {
+			if err := ctx.Err(); err != nil {
+				tmp.Close()
+				os.Remove(tmpPath)
+				return "", err
+			}
+			chunk := min(len(contents), 32*1024)
+			n, err := tmp.Write(contents[:chunk])
+			if err != nil {
+				tmp.Close()
+				os.Remove(tmpPath)
+				return "", err
+			}
+			if n == 0 {
+				tmp.Close()
+				os.Remove(tmpPath)
+				return "", io.ErrShortWrite
+			}
+			contents = contents[n:]
 		}
 		if err := tmp.Chmod(mode); err != nil {
 			tmp.Close()
@@ -741,21 +771,6 @@ func UpdateDocumentContext(ctx context.Context, path string, update func(prior [
 		return ctx.Err()
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		if existed {
-			rollback, rollbackErr := writeTemp(data, mode)
-			if rollbackErr == nil {
-				rollbackErr = os.Rename(rollback, path)
-				os.Remove(rollback)
-			}
-			if rollbackErr != nil {
-				return fmt.Errorf("%w (restore prior findings: %v)", err, rollbackErr)
-			}
-		} else if removeErr := os.Remove(path); removeErr != nil && !os.IsNotExist(removeErr) {
-			return fmt.Errorf("%w (remove cancelled findings: %v)", err, removeErr)
-		}
 		return err
 	}
 	return nil

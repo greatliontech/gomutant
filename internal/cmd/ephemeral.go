@@ -3,12 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/spf13/cobra"
 )
 
@@ -19,8 +18,8 @@ type ephemeralOptions struct {
 
 func newEphemeralCommand() *cobra.Command {
 	o := ephemeralOptions{}
-	cmd := &cobra.Command{Use: "ephemeral", Short: "Run one manual mutant", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
-		return ephemeralCommand(o)
+	cmd := &cobra.Command{Use: "ephemeral", Short: "Run one manual mutant", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return ephemeralCommand(cmd.Context(), o)
 	}}
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
@@ -33,7 +32,7 @@ func newEphemeralCommand() *cobra.Command {
 	return cmd
 }
 
-func ephemeralCommand(o ephemeralOptions) error {
+func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	if o.testPkg == "" || o.runPat == "" {
 		return fmt.Errorf("ephemeral needs --test-pkg and --run")
 	}
@@ -55,7 +54,10 @@ func ephemeralCommand(o ephemeralOptions) error {
 	}
 	var batchEdits []gomutant.BatchEdit
 	if o.batch != "" {
-		data, err := readInput(o.batch)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		data, err := readInputContext(ctx, o.batch)
 		if err != nil {
 			return err
 		}
@@ -63,23 +65,32 @@ func ephemeralCommand(o ephemeralOptions) error {
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 	}
-	tree, err := gomutant.Load(o.dir)
+	tree, err := gomutant.LoadContext(ctx, o.dir)
 	if err != nil {
 		return err
 	}
 	var res *gomutant.EphemeralResult
 	if o.batch != "" {
-		res, err = tree.EphemeralBatch(context.Background(), batchEdits, o.testPkg, o.runPat, o.timeout)
+		res, err = tree.EphemeralBatch(ctx, batchEdits, o.testPkg, o.runPat, o.timeout)
 		if err != nil {
 			return err
 		}
 	} else {
-		mutant, err := os.ReadFile(o.replacement)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		mutant, err := readFileContext(ctx, o.replacement)
 		if err != nil {
 			return err
 		}
-		res, err = tree.Ephemeral(context.Background(), o.file, mutant, o.testPkg, o.runPat, o.timeout)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		res, err = tree.Ephemeral(ctx, o.file, mutant, o.testPkg, o.runPat, o.timeout)
 		if err != nil {
 			return err
 		}
@@ -93,8 +104,19 @@ func ephemeralCommand(o ephemeralOptions) error {
 }
 
 func readInput(path string) ([]byte, error) {
-	if path == "-" {
-		return io.ReadAll(os.Stdin)
+	return readInputContext(context.Background(), path)
+}
+
+func readInputContext(ctx context.Context, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	return os.ReadFile(path)
+	if path == "-" {
+		return readStdinContext(ctx)
+	}
+	return readFileContext(ctx, path)
+}
+
+func readFileContext(ctx context.Context, path string) ([]byte, error) {
+	return contextio.ReadFile(ctx, path)
 }

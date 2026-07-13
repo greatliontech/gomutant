@@ -51,10 +51,10 @@ type subjectViewSet struct {
 }
 
 func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectViewSet, error) {
-	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContext)
+	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext)
 }
 
-func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []string, packageContext func(string) (string, string, error)) (*subjectViewSet, error) {
+func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error)) (*subjectViewSet, error) {
 	type resolvedSubject struct {
 		symbol, moduleDir string
 		subject           gofresh.Subject
@@ -68,15 +68,21 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 	groupByDir := map[string]int{}
 	seen := map[string]bool{}
 	for _, symbol := range symbols {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if seen[symbol] {
 			continue
 		}
 		seen[symbol] = true
-		pkg, local := t.eng.PackageOf(symbol)
+		pkg, local, err := t.eng.PackageOfContext(ctx, symbol)
+		if err != nil {
+			return nil, err
+		}
 		if pkg == "" || local == "" {
 			return nil, fmt.Errorf("subject %s does not resolve", symbol)
 		}
-		moduleDir, _, err := packageContext(pkg)
+		moduleDir, _, err := packageContext(ctx, pkg)
 		if err != nil {
 			return nil, err
 		}
@@ -93,6 +99,9 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(seen))}
 	env := t.eng.GoEnv()
 	for _, group := range groups {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		engine, err := gofresh.New(gofresh.WithDir(group.dir), gofresh.WithEnv(env...))
 		if err != nil {
 			return nil, err
@@ -104,6 +113,9 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 		module := &moduleSubjectView{view: view, validate: view.ValidateContext}
 		set.modules = append(set.modules, module)
 		for _, resolved := range group.resolved {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			fp, err := view.Capture(resolved.subject)
 			if err != nil {
 				return nil, err
@@ -118,6 +130,9 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 			}
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return set, nil
 }
 
@@ -131,6 +146,9 @@ func (t *Tree) newSubjectView(symbol string) (*subjectView, error) {
 
 func (s *subjectViewSet) validateProducers(ctx context.Context) error {
 	for _, module := range s.modules {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if module.producer {
 			if err := module.validate(ctx); err != nil {
 				return err
@@ -145,14 +163,17 @@ func (s *subjectView) valid(evidence SubjectEvidence) (bool, error) {
 }
 
 func (s *subjectView) validContext(ctx context.Context, evidence SubjectEvidence) (bool, error) {
-	return s.validContextWithCurrent(ctx, evidence, runtimeinput.CurrentEnv)
+	return s.validContextWithCurrent(ctx, evidence, runtimeinput.CurrentEnvContext)
 }
 
-func (s *subjectView) validContextWithCurrent(ctx context.Context, evidence SubjectEvidence, current func(string, string, []string) (runtimeinput.State, error)) (bool, error) {
+func (s *subjectView) validContextWithCurrent(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
 	if evidence.Symbol != s.symbol || evidence.RuntimeInputs == "" || evidence.RuntimeDigest == "" {
 		return false, nil
 	}
-	state, err := current(evidence.RuntimeInputs, s.moduleDir, s.env)
+	state, err := current(ctx, evidence.RuntimeInputs, s.moduleDir, s.env)
+	if err != nil && ctx.Err() != nil {
+		return false, ctx.Err()
+	}
 	if err != nil || !state.OK || state.Digest != evidence.RuntimeDigest ||
 		state.Unverifiable != evidence.RuntimeUnverifiable || state.Reason != evidence.RuntimeReason {
 		return false, nil
@@ -171,14 +192,21 @@ func (s *subjectView) validContextWithCurrent(ctx context.Context, evidence Subj
 }
 
 func (s *subjectView) inspect(evidence SubjectEvidence) (FindingInspection, error) {
+	return s.inspectContext(context.Background(), evidence)
+}
+
+func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEvidence) (FindingInspection, error) {
 	if evidence.Symbol != s.symbol {
 		return FindingInspection{State: FindingStale, Reason: "subject identity changed"}, nil
 	}
 	if evidence.RuntimeUnverifiable {
 		return FindingInspection{State: FindingUnverifiable, Reason: evidence.RuntimeReason}, nil
 	}
-	state, err := runtimeinput.CurrentEnv(evidence.RuntimeInputs, s.moduleDir, s.env)
+	state, err := runtimeinput.CurrentEnvContext(ctx, evidence.RuntimeInputs, s.moduleDir, s.env)
 	if err != nil || !state.OK {
+		if ctx.Err() != nil {
+			return FindingInspection{}, ctx.Err()
+		}
 		if err != nil {
 			return FindingInspection{State: FindingUnverifiable, Reason: err.Error()}, nil
 		}
@@ -193,7 +221,7 @@ func (s *subjectView) inspect(evidence SubjectEvidence) (FindingInspection, erro
 	if evidence.PurityAssertion != s.fp.PurityAssertion {
 		return FindingInspection{State: FindingStale, Reason: "purity assertion changed"}, nil
 	}
-	verdict, err := s.view.Check(evidence.fingerprint(), s.subject)
+	verdict, err := s.view.CheckContext(ctx, evidence.fingerprint(), s.subject)
 	if err != nil {
 		return FindingInspection{}, err
 	}
@@ -210,7 +238,18 @@ func (s *subjectView) inspect(evidence SubjectEvidence) (FindingInspection, erro
 // InspectFinding classifies a parsed finding against the current tree without
 // running tests (REQ-result-inspection).
 func (t *Tree) InspectFinding(f Finding) (FindingInspection, error) {
-	declared := t.eng.DeclaredSymbols()
+	return t.InspectFindingContext(context.Background(), f)
+}
+
+// InspectFindingContext is InspectFinding with caller-owned cancellation.
+func (t *Tree) InspectFindingContext(ctx context.Context, f Finding) (FindingInspection, error) {
+	if err := ctx.Err(); err != nil {
+		return FindingInspection{}, err
+	}
+	declared, err := t.eng.DeclaredSymbolsContext(ctx)
+	if err != nil {
+		return FindingInspection{}, err
+	}
 	i := sort.SearchStrings(declared, f.Symbol)
 	if i == len(declared) || declared[i] != f.Symbol {
 		return FindingInspection{State: FindingDetached, Reason: "mutated symbol no longer resolves"}, nil
@@ -222,7 +261,10 @@ func (t *Tree) InspectFinding(f Finding) (FindingInspection, error) {
 		return FindingInspection{}, fmt.Errorf("finding %s has invalid timeout: %w", f.Symbol, err)
 	}
 	if !f.OracleExplicit {
-		currentOracle := t.resolveOracle(Target{Symbol: f.Symbol})
+		currentOracle, err := t.resolveOracleContext(ctx, Target{Symbol: f.Symbol})
+		if err != nil {
+			return FindingInspection{}, err
+		}
 		recordedOracle := make([]string, len(f.OracleEvidence))
 		for i, evidence := range f.OracleEvidence {
 			recordedOracle[i] = evidence.Symbol
@@ -241,26 +283,29 @@ func (t *Tree) InspectFinding(f Finding) (FindingInspection, error) {
 	validOracle := make(map[string]bool, len(oracle))
 	symbols := []string{f.Symbol}
 	for _, evidence := range oracle {
-		if err := t.eng.ValidateOracle([]string{evidence.Symbol}); err == nil {
+		if err := t.eng.ValidateOracleContext(ctx, []string{evidence.Symbol}); err == nil {
 			validOracle[evidence.Symbol] = true
 			symbols = append(symbols, evidence.Symbol)
 		}
 	}
-	views, err := t.newSubjectViews(context.Background(), symbols)
+	views, err := t.newSubjectViews(ctx, symbols)
 	if err != nil {
 		return FindingInspection{}, err
 	}
 	target := views.bySymbol[f.Symbol]
-	inspection, err := target.inspect(f.TargetEvidence)
+	inspection, err := target.inspectContext(ctx, f.TargetEvidence)
 	if err != nil || inspection.State != FindingCurrent {
 		return inspection, err
 	}
 	for _, evidence := range oracle {
+		if err := ctx.Err(); err != nil {
+			return FindingInspection{}, err
+		}
 		if !validOracle[evidence.Symbol] {
 			return FindingInspection{State: FindingStale, Reason: "oracle " + evidence.Symbol + " no longer resolves"}, nil
 		}
 		view := views.bySymbol[evidence.Symbol]
-		inspection, err := view.inspect(evidence)
+		inspection, err := view.inspectContext(ctx, evidence)
 		if err != nil {
 			return FindingInspection{}, err
 		}
@@ -305,10 +350,10 @@ func sameAttestationPins(prior, current Finding) bool {
 }
 
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
-	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, runtimeinput.CurrentEnv)
+	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, runtimeinput.CurrentEnvContext)
 }
 
-func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, current func(string, string, []string) (runtimeinput.State, error)) (bool, error) {
+func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
 	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.Timeout != timeout || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
@@ -323,13 +368,13 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 	}
 	runtimeResults := map[runtimeKey]*runtimeResult{}
 	var runtimeOrder []runtimeKey
-	currentOnce := func(manifest, moduleDir string, env []string) (runtimeinput.State, error) {
+	currentOnce := func(ctx context.Context, manifest, moduleDir string, env []string) (runtimeinput.State, error) {
 		key := runtimeKey{manifest: manifest, moduleDir: moduleDir, environment: sequenceKey(env)}
 		if result, ok := runtimeResults[key]; ok {
 			result.uses++
 			return result.state, result.err
 		}
-		state, err := current(manifest, moduleDir, env)
+		state, err := current(ctx, manifest, moduleDir, env)
 		runtimeResults[key] = &runtimeResult{state: state, err: err, env: append([]string(nil), env...), uses: 1}
 		runtimeOrder = append(runtimeOrder, key)
 		return state, err
@@ -363,7 +408,10 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-		state, err := current(key.manifest, key.moduleDir, result.env)
+		state, err := current(ctx, key.manifest, key.moduleDir, result.env)
+		if err != nil && ctx.Err() != nil {
+			return false, ctx.Err()
+		}
 		if err != nil || state != result.state {
 			return false, nil
 		}

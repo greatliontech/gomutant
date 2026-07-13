@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -37,6 +37,9 @@ type EphemeralResult struct {
 // testPkg is a go package path; run is a -run pattern. A mutant that fails
 // to compile is an error, not a survivor: nothing was measured.
 func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, timeout time.Duration) (*EphemeralResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
@@ -47,9 +50,12 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 	// The overlay silently no-ops if abs is not a real source file, and an
 	// identical replacement measures nothing — both would read as a false
 	// survivor. Resolve and compare against the original first.
-	orig, err := os.ReadFile(abs)
+	orig, err := readFileContext(ctx, abs)
 	if err != nil {
 		return nil, fmt.Errorf("reading source %s: %w", file, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if bytes.Equal(orig, mutant) {
 		return nil, fmt.Errorf("mutant is identical to %s: nothing to measure", file)
@@ -59,11 +65,17 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 }
 
 func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, timeout time.Duration) (*EphemeralResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(replacements) == 0 {
 		return nil, fmt.Errorf("manual mutant has no file replacements")
 	}
 	seen := map[string]bool{}
 	for i, replacement := range replacements {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if replacement.File == "" || replacement.Abs == "" || replacement.Source == nil {
 			return nil, fmt.Errorf("manual mutant replacement %d is incomplete", i+1)
 		}
@@ -78,7 +90,11 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	// A rapid property failing on the baseline or against the mutant must
 	// never write a reproducer into the tree (REQ-mut-overlay).
 	var binFlags []string
-	if rapid, _ := t.eng.SplitRapidPkgs([]string{testPkg}); len(rapid) > 0 {
+	rapid, _, err := t.eng.SplitRapidPkgsContext(ctx, []string{testPkg})
+	if err != nil {
+		return nil, err
+	}
+	if len(rapid) > 0 {
 		binFlags = []string{"-rapid.nofailfile"}
 	}
 
@@ -97,6 +113,9 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	files := make([]string, len(replacements))
 	engineReplacements := make([]engine.Replacement, len(replacements))
 	for i, replacement := range replacements {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		files[i] = replacement.File
 		engineReplacements[i] = engine.Replacement{File: replacement.Abs, Source: replacement.Source}
 	}
@@ -121,7 +140,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 // mutant. Every edit resolves against the original files before one overlay
 // exposes all effective replacements to the named test.
 func (t *Tree) EphemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, timeout time.Duration) (*EphemeralResult, error) {
-	replacements, err := prepareEditBatch(t.dir, edits)
+	replacements, err := prepareEditBatchContext(ctx, t.dir, edits)
 	if err != nil {
 		return nil, err
 	}
@@ -142,11 +161,22 @@ type Edit struct {
 // mutated content — the edits form of an ephemeral mutant's replacement
 // source (REQ-exec-ephemeral).
 func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
+	return ApplyEditsContext(context.Background(), src, edits)
+}
+
+// ApplyEditsContext is ApplyEdits with cooperative cancellation.
+func ApplyEditsContext(ctx context.Context, src []byte, edits []Edit) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(edits) == 0 {
 		return nil, fmt.Errorf("gomutant: no edits given")
 	}
 	out := string(src)
 	for i, e := range edits {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if e.Old == "" {
 			return nil, fmt.Errorf("gomutant: edit %d has an empty match", i+1)
 		}
@@ -159,6 +189,9 @@ func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
 			return nil, fmt.Errorf("gomutant: edit %d is ambiguous (%d matches): %q", i+1, n, e.Old)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return []byte(out), nil
 }
 
@@ -166,17 +199,27 @@ func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
 // the file's current content (REQ-exec-ephemeral): the edits are applied and
 // the result runs exactly as a whole replacement would.
 func (t *Tree) EphemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, timeout time.Duration) (*EphemeralResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	abs, err := resolveTreeFile(t.dir, file)
 	if err != nil {
 		return nil, err
 	}
-	orig, err := os.ReadFile(abs)
+	orig, err := readFileContext(ctx, abs)
 	if err != nil {
 		return nil, fmt.Errorf("reading source %s: %w", file, err)
 	}
-	mutant, err := ApplyEdits(orig, edits)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	mutant, err := ApplyEditsContext(ctx, orig, edits)
 	if err != nil {
 		return nil, err
 	}
 	return t.Ephemeral(ctx, file, mutant, testPkg, run, timeout)
+}
+
+func readFileContext(ctx context.Context, path string) ([]byte, error) {
+	return contextio.ReadFile(ctx, path)
 }

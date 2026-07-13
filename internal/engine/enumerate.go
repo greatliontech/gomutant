@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"go/types"
@@ -18,10 +19,22 @@ import (
 // files are oracles, never targets; generated bodies have nothing
 // hand-written to strengthen a test against, so neither yields a target.
 func (t *Tree) DeclaredSymbols() []string {
+	symbols, _ := t.DeclaredSymbolsContext(context.Background())
+	return symbols
+}
+
+// DeclaredSymbolsContext is DeclaredSymbols with cooperative cancellation.
+func (t *Tree) DeclaredSymbolsContext(ctx context.Context) ([]string, error) {
 	seen := map[string]bool{}
 	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		pkgPath := basePackagePath(pkg)
 		for _, f := range pkg.Syntax {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			name := pkg.Fset.Position(f.Pos()).Filename
 			if strings.HasSuffix(name, "_test.go") || ast.IsGenerated(f) {
 				continue
@@ -42,19 +55,31 @@ func (t *Tree) DeclaredSymbols() []string {
 		out = append(out, s)
 	}
 	sort.Strings(out)
-	return out
+	return out, ctx.Err()
 }
 
 // TestsOf returns the symbols of pkgPath's top-level Test functions — its
 // in-package and external test variants together — sorted: the derived
 // default oracle of a target in that package (REQ-target-default).
 func (t *Tree) TestsOf(pkgPath string) []string {
+	tests, _ := t.TestsOfContext(context.Background(), pkgPath)
+	return tests
+}
+
+// TestsOfContext is TestsOf with cooperative cancellation.
+func (t *Tree) TestsOfContext(ctx context.Context, pkgPath string) ([]string, error) {
 	seen := map[string]bool{}
 	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if basePackagePath(pkg) != pkgPath {
 			continue
 		}
 		for _, f := range pkg.Syntax {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			name := pkg.Fset.Position(f.Pos()).Filename
 			if !strings.HasSuffix(name, "_test.go") {
 				continue
@@ -75,24 +100,39 @@ func (t *Tree) TestsOf(pkgPath string) []string {
 		out = append(out, s)
 	}
 	sort.Strings(out)
-	return out
+	return out, ctx.Err()
 }
 
 // ValidateOracle rejects symbols that are not runnable tests or that name more
 // than one source declaration across in-package and external test variants.
 func (t *Tree) ValidateOracle(symbols []string) error {
+	return t.ValidateOracleContext(context.Background(), symbols)
+}
+
+// ValidateOracleContext is ValidateOracle with cooperative cancellation.
+func (t *Tree) ValidateOracleContext(ctx context.Context, symbols []string) error {
 	seen := map[string]bool{}
 	for _, symbol := range symbols {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if seen[symbol] {
 			return fmt.Errorf("oracle repeats test identity %s", symbol)
 		}
 		seen[symbol] = true
-		pkgPath, name := t.PackageOf(symbol)
+		pkgPath, name, err := t.PackageOfContext(ctx, symbol)
+		if err != nil {
+			return err
+		}
 		if pkgPath == "" || name == "" || strings.Contains(name, ".") {
 			return fmt.Errorf("oracle %s does not name a top-level test", symbol)
 		}
 		runnable := false
-		for _, candidate := range t.TestsOf(pkgPath) {
+		candidates, err := t.TestsOfContext(ctx, pkgPath)
+		if err != nil {
+			return err
+		}
+		for _, candidate := range candidates {
 			if candidate == symbol {
 				runnable = true
 				break
@@ -103,10 +143,16 @@ func (t *Tree) ValidateOracle(symbols []string) error {
 		}
 		declarations := map[string]bool{}
 		for _, pkg := range t.pkgs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if basePackagePath(pkg) != pkgPath {
 				continue
 			}
 			for _, file := range pkg.Syntax {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				for _, decl := range file.Decls {
 					fn, ok := decl.(*ast.FuncDecl)
 					if !ok || fn.Recv != nil || fn.Name.Name != name || !runnableTest(pkg, fn) {
@@ -129,6 +175,15 @@ func (t *Tree) ValidateOracle(symbols []string) error {
 // match) — "" when no loaded package matches.
 func (t *Tree) PackageOf(symbol string) (pkg, rest string) {
 	return t.splitSymbol(symbol)
+}
+
+// PackageOfContext is PackageOf with cancellation around package resolution.
+func (t *Tree) PackageOfContext(ctx context.Context, symbol string) (pkg, rest string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", "", err
+	}
+	pkg, rest = t.splitSymbol(symbol)
+	return pkg, rest, ctx.Err()
 }
 
 // runnableTest reports whether fn is a test go test would run in an ordinary

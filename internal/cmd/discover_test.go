@@ -1,13 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestDiscoverTargetsResolvesEffectiveOracle(t *testing.T) {
-	view, err := discoverTargets(discoverOptions{dir: fixtureDir})
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,20 +29,20 @@ func TestDiscoverTargetsLoadsExplicitDocument(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	view, err := discoverTargets(discoverOptions{dir: fixtureDir, targetsFile: path})
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, targetsFile: path})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(view.Targets) != 1 || !view.Targets[0].OracleExplicit || view.Targets[0].Oracle[0] != "example.com/fixture/lib.TestAdd" || view.Targets[0].Labels[0] != "a" {
 		t.Fatalf("explicit discovery = %+v", view)
 	}
-	if _, err := discoverTargets(discoverOptions{dir: fixtureDir, targetsFile: path, changed: "HEAD"}); err == nil {
+	if _, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, targetsFile: path, changed: "HEAD"}); err == nil {
 		t.Fatal("targets and changed accepted together")
 	}
 }
 
 func TestDiscoverTargetsFiltersEveryProducer(t *testing.T) {
-	view, err := discoverTargets(discoverOptions{
+	view, err := discoverTargets(context.Background(), discoverOptions{
 		dir: fixtureDir, packages: []string{"example.com/fixture/methods"}, symbols: []string{"example.com/fixture/methods.Counter.*"},
 	})
 	if err != nil {
@@ -50,7 +51,7 @@ func TestDiscoverTargetsFiltersEveryProducer(t *testing.T) {
 	if len(view.Targets) != 2 || view.Targets[0].Symbol != "example.com/fixture/methods.Counter.Inc" || view.Targets[1].Symbol != "example.com/fixture/methods.Counter.Value" {
 		t.Fatalf("filtered discovery = %+v", view.Targets)
 	}
-	if _, err := discoverTargets(discoverOptions{dir: fixtureDir, symbols: []string{"example.com/fixture/lib.Absent"}}); err == nil {
+	if _, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, symbols: []string{"example.com/fixture/lib.Absent"}}); err == nil {
 		t.Fatal("empty filtered discovery succeeded")
 	}
 }

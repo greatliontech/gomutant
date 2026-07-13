@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,8 +30,8 @@ type findingView struct {
 
 func newFindingsCommand() *cobra.Command {
 	o := findingsOptions{}
-	cmd := &cobra.Command{Use: "findings", Short: "List open mutation findings", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
-		return findingsCommand(o)
+	cmd := &cobra.Command{Use: "findings", Short: "List open mutation findings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return findingsCommand(cmd.Context(), o)
 	}}
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
@@ -40,9 +41,12 @@ func newFindingsCommand() *cobra.Command {
 	return cmd
 }
 
-func findingsCommand(o findingsOptions) error {
-	all, err := loadFindings(findingsAt(o.dir, o.findingsFile))
+func findingsCommand(ctx context.Context, o findingsOptions) error {
+	all, err := loadFindingsContext(ctx, findingsAt(o.dir, o.findingsFile))
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if len(all) == 0 {
@@ -52,11 +56,11 @@ func findingsCommand(o findingsOptions) error {
 		fmt.Println("no findings")
 		return nil
 	}
-	tree, err := gomutant.Load(o.dir)
+	tree, err := gomutant.LoadContext(ctx, o.dir)
 	if err != nil {
 		return err
 	}
-	views, err := inspectFindings(tree, all, o.label)
+	views, err := inspectFindings(ctx, tree, all, o.label)
 	if err != nil {
 		return err
 	}
@@ -96,13 +100,16 @@ func renderFindingsJSON(w io.Writer, views []findingView) error {
 	return json.NewEncoder(w).Encode(views)
 }
 
-func inspectFindings(tree *gomutant.Tree, all []gomutant.Finding, label string) ([]findingView, error) {
+func inspectFindings(ctx context.Context, tree *gomutant.Tree, all []gomutant.Finding, label string) ([]findingView, error) {
 	views := make([]findingView, 0, len(all))
 	for _, finding := range all {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if label != "" && !contains(finding.Labels, label) {
 			continue
 		}
-		inspection, err := tree.InspectFinding(finding)
+		inspection, err := tree.InspectFindingContext(ctx, finding)
 		if err != nil {
 			return nil, err
 		}

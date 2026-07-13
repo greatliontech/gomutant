@@ -38,7 +38,9 @@ type Options struct {
 	// Progress synchronously receives deterministic preparation events before
 	// terminal target decisions and mutant execution. It must return normally
 	// (REQ-exec-run-status).
-	Progress func(PreparationEvent)
+	Progress       func(PreparationEvent)
+	afterExecution func()
+	aggregate      func()
 }
 
 // PreparationStage identifies one observable pre-execution operation.
@@ -123,11 +125,11 @@ type oracleValidationResult struct {
 }
 
 type runPreparation struct {
-	packageOf      func(string) (string, string)
-	testsOf        func(string) []string
-	validate       func([]string) error
-	contextFor     func(string) (string, string, error)
-	splitRapidPkgs func([]string) ([]string, []string)
+	packageOf      func(context.Context, string) (string, string, error)
+	testsOf        func(context.Context, string) ([]string, error)
+	validate       func(context.Context, []string) error
+	contextFor     func(context.Context, string) (string, string, error)
+	splitRapidPkgs func(context.Context, []string) ([]string, []string, error)
 
 	derivedOracles map[string][]string
 	validations    map[string]oracleValidationResult
@@ -137,62 +139,89 @@ type runPreparation struct {
 
 func newRunPreparation(t *Tree) *runPreparation {
 	return &runPreparation{
-		packageOf:      t.eng.PackageOf,
-		testsOf:        t.eng.TestsOf,
-		validate:       t.eng.ValidateOracle,
-		contextFor:     t.eng.PackageContext,
-		splitRapidPkgs: t.eng.SplitRapidPkgs,
+		packageOf:      t.eng.PackageOfContext,
+		testsOf:        t.eng.TestsOfContext,
+		validate:       t.eng.ValidateOracleContext,
+		contextFor:     t.eng.PackageContextContext,
+		splitRapidPkgs: t.eng.SplitRapidPkgsContext,
 		derivedOracles: map[string][]string{},
 		validations:    map[string]oracleValidationResult{},
 		contexts:       map[string]packageContextResult{},
 	}
 }
 
-func (p *runPreparation) oracle(target Target) []string {
+func (p *runPreparation) oracle(ctx context.Context, target Target) ([]string, error) {
 	if len(target.Oracle) > 0 || target.OracleExplicit {
-		return slices.Clone(target.Oracle)
+		return slices.Clone(target.Oracle), ctx.Err()
 	}
-	pkg, _ := p.packageOf(target.Symbol)
+	pkg, _, err := p.packageOf(ctx, target.Symbol)
+	if err != nil {
+		return nil, err
+	}
 	if pkg == "" {
-		return nil
+		return nil, nil
 	}
 	if oracle, ok := p.derivedOracles[pkg]; ok {
-		return slices.Clone(oracle)
+		return slices.Clone(oracle), ctx.Err()
 	}
-	oracle := p.testsOf(pkg)
+	oracle, err := p.testsOf(ctx, pkg)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	p.derivedOracles[pkg] = slices.Clone(oracle)
-	return oracle
+	return oracle, nil
 }
 
-func (p *runPreparation) validateOracle(oracle []string) error {
+func (p *runPreparation) validateOracle(ctx context.Context, oracle []string) error {
 	key := sequenceKey(oracle)
 	if result, ok := p.validations[key]; ok {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		return result.err
 	}
-	err := p.validate(oracle)
+	err := p.validate(ctx, oracle)
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		return cancelErr
+	}
 	p.validations[key] = oracleValidationResult{err: err}
 	return err
 }
 
-func (p *runPreparation) packageContext(pkg string) (string, string, error) {
+func (p *runPreparation) packageContext(ctx context.Context, pkg string) (string, string, error) {
 	if result, ok := p.contexts[pkg]; ok {
+		if err := ctx.Err(); err != nil {
+			return "", "", err
+		}
 		return result.moduleDir, result.packageDir, result.err
 	}
-	moduleDir, packageDir, err := p.contextFor(pkg)
+	moduleDir, packageDir, err := p.contextFor(ctx, pkg)
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		return "", "", cancelErr
+	}
 	p.contexts[pkg] = packageContextResult{moduleDir: moduleDir, packageDir: packageDir, err: err}
 	return moduleDir, packageDir, err
 }
 
-func (p *runPreparation) rapidPackages(candidates []string) map[string]bool {
+func (p *runPreparation) rapidPackages(ctx context.Context, candidates []string) (map[string]bool, error) {
 	if p.rapid != nil {
-		return p.rapid
+		return p.rapid, ctx.Err()
+	}
+	rapid, _, err := p.splitRapidPkgs(ctx, candidates)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	p.rapid = map[string]bool{}
-	rapid, _ := p.splitRapidPkgs(candidates)
 	for _, pkg := range rapid {
 		p.rapid[pkg] = true
 	}
-	return p.rapid
+	return p.rapid, nil
 }
 
 func sequenceKey(values []string) string {
@@ -222,7 +251,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 	targets = snapshotTargets(targets)
 	opts.Prior = snapshotFindings(opts.Prior)
-	repository := captureRepositoryState(t.dir)
+	repository, err := captureRepositoryStateContext(ctx, t.dir)
+	if err != nil {
+		return nil, err
+	}
 	runEnv := t.eng.GoEnv()
 	preparation := newRunPreparation(t)
 	jobs := opts.Jobs
@@ -279,9 +311,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, err
 		}
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationResolving, Symbol: tg.Symbol})
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		f := &findings[i]
 		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, Timeout: opts.Timeout.String()}
-		oracle := preparation.oracle(tg)
+		oracle, err := preparation.oracle(ctx, tg)
+		if err != nil {
+			return nil, err
+		}
 		if len(oracle) == 0 {
 			// Nothing can kill: the caller sees it and decides
 			// (REQ-target-default).
@@ -289,10 +327,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
 			continue
 		}
-		if err := preparation.validateOracle(oracle); err != nil {
+		if err := preparation.validateOracle(ctx, oracle); err != nil {
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
-		bodyHash, err := t.eng.BodyHash(tg.Symbol)
+		bodyHash, err := t.eng.BodyHashContext(ctx, tg.Symbol)
 		if errors.Is(err, engine.ErrNotFunction) {
 			// A type or variable target is a legitimate reference with no
 			// body to mutate: reported, never fatal, never silently dropped.
@@ -305,6 +343,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		f.BodyHash = bodyHash
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationFreshness, Symbol: tg.Symbol})
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle})
 		subjectSymbols = append(subjectSymbols, tg.Symbol)
 		subjectSymbols = append(subjectSymbols, oracle...)
@@ -320,6 +361,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	var oraclePackages []string
 	seenOraclePackage := map[string]bool{}
 	for _, resolved := range resolvedTargets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		for _, run := range pkgRuns(resolved.oracle) {
 			if !seenOraclePackage[run.pkg] {
 				seenOraclePackage[run.pkg] = true
@@ -328,6 +372,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 	}
 	for _, resolved := range resolvedTargets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		i := resolved.index
 		tg := targets[i]
 		f := &findings[i]
@@ -365,7 +412,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
-		mutants, err := t.eng.Mutants(tg.Symbol, opts.Budget)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		mutants, err := t.eng.MutantsContext(ctx, tg.Symbol, opts.Budget)
 		if err != nil {
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
@@ -384,14 +434,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for _, pr := range runs {
 			pkgs = append(pkgs, pr.pkg)
 		}
-		rapid := preparation.rapidPackages(oraclePackages)
+		rapid, err := preparation.rapidPackages(ctx, oraclePackages)
+		if err != nil {
+			return nil, err
+		}
 		var groups []group
 		for _, pr := range runs {
 			var flags []string
 			if rapid[pr.pkg] {
 				flags = []string{"-rapid.nofailfile"}
 			}
-			moduleDir, packageDir, err := preparation.packageContext(pr.pkg)
+			moduleDir, packageDir, err := preparation.packageContext(ctx, pr.pkg)
 			if err != nil {
 				return nil, err
 			}
@@ -403,6 +456,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			state, ok := baselineCache[key]
 			if !ok {
 				reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0]})
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.Timeout, group.flags, group.moduleDir, group.packageDir, runEnv)
 				if err != nil {
 					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
@@ -414,6 +470,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					return nil, fmt.Errorf("target %s oracle baseline does not pass in %s", tg.Symbol, group.pkgs[0])
 				}
 				state = observed
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				baselineCache[key] = state
 			}
 			baselines = append(baselines, state)
@@ -433,7 +492,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 	if opts.Decision != nil {
 		for _, decision := range decisions {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			opts.Decision(decision)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 	}
 
@@ -454,15 +519,24 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	var errOnce sync.Once
 	var poolErr error
 	for range jobs {
+		if err := poolCtx.Err(); err != nil {
+			break
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := range jobCh {
+				if poolCtx.Err() != nil {
+					return
+				}
 				w := pending[j.wi]
 				m := w.mutants[j.mi]
 				outcome := engine.MutantSurvived
 				var processStates []runtimeinput.State
 				for _, g := range w.groups {
+					if poolCtx.Err() != nil {
+						return
+					}
 					if outcome != engine.MutantSurvived {
 						break
 					}
@@ -480,7 +554,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					}
 					outcome = out
 				}
-				state, err := mergeFindingObservations(t.dir, runEnv, processStates...)
+				if poolCtx.Err() != nil {
+					return
+				}
+				state, err := mergeFindingObservationsContext(poolCtx, t.dir, runEnv, processStates...)
 				if err != nil {
 					errOnce.Do(func() {
 						poolErr = fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
@@ -493,11 +570,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}()
 	}
+dispatching:
 	for wi := range pending {
 		for mi := range pending[wi].mutants {
 			select {
 			case jobCh <- job{wi, mi}:
 			case <-poolCtx.Done():
+				break dispatching
 			}
 		}
 	}
@@ -512,14 +591,29 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if err := views.validateProducers(ctx); err != nil {
 		return nil, fmt.Errorf("validate freshness: %w", err)
 	}
+	if opts.afterExecution != nil {
+		opts.afterExecution()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// Phase three, sequential: aggregate in target and mutant order.
 	for wi, w := range pending {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if opts.aggregate != nil {
+			opts.aggregate()
+		}
 		f := &findings[w.target]
 		states := append([]runtimeinput.State(nil), w.baselines...)
 		states = append(states, observations[wi]...)
-		state, err := mergeFindingObservations(t.dir, runEnv, states...)
+		state, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, states...)
 		if err != nil {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, state)
@@ -531,19 +625,38 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		f.Commit = repository.commit
 		sourceFiles := append([]string(nil), w.targetView.sourceFiles...)
 		for _, oracleView := range w.oracleViews {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			sourceFiles = append(sourceFiles, oracleView.sourceFiles...)
 		}
-		sourceFiles = append(sourceFiles, repository.historicalPackageFiles(sourceFiles)...)
+		historical, err := repository.historicalPackageFilesContext(ctx, sourceFiles)
+		if err != nil {
+			return nil, err
+		}
+		sourceFiles = append(sourceFiles, historical...)
 		sourceFiles = withModuleSelectionPaths(sourceFiles)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		sourceFiles = append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum"))
-		f.Dirty = repository.pathsDirty(sourceFiles, state)
+		f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, state)
+		if err != nil {
+			return nil, err
+		}
 		f.Operators = summarizeOperators(w.mutants, outcomes[wi])
 		for _, summary := range f.Operators {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			f.Discarded += summary.Discarded
 			f.Mutants += summary.Killed + summary.Survived
 			f.Killed += summary.Killed
 		}
 		for mi, m := range w.mutants {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			switch outcomes[wi][mi] {
 			case engine.MutantSurvived:
 				f.Survivors = append(f.Survivors, Survivor{Position: m.Position, Operator: m.Operator})
@@ -561,14 +674,24 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				open[survivorKey{s.Position, s.Operator}] = true
 			}
 			for _, a := range rec.Attested {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if open[survivorKey{a.Position, a.Operator}] {
 					f.Attested = append(f.Attested, a)
 				}
 			}
 		}
 	}
-	if repository.headMoved() {
+	moved, err := repository.headMovedContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if moved {
 		return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return findings, nil
 }
@@ -601,7 +724,17 @@ func reportPreparation(callback func(PreparationEvent), event PreparationEvent) 
 }
 
 func mergeFindingObservations(root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {
+	return mergeFindingObservationsContext(context.Background(), root, env, states...)
+}
+
+func mergeFindingObservationsContext(ctx context.Context, root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimeinput.State{}, err
+	}
 	state, err := runtimeinput.MergeEnv(root, env, states...)
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		return runtimeinput.State{}, cancelErr
+	}
 	if err == nil {
 		return state, nil
 	}
@@ -610,14 +743,23 @@ func mergeFindingObservations(root string, env []string, states ...runtimeinput.
 		return runtimeinput.State{}, incompleteErr
 	}
 	for _, input := range states {
+		if err := ctx.Err(); err != nil {
+			return runtimeinput.State{}, err
+		}
 		if input.Manifest == "" {
 			continue
 		}
-		current, currentErr := runtimeinput.CurrentEnv(input.Manifest, root, env)
+		current, currentErr := runtimeinput.CurrentEnvContext(ctx, input.Manifest, root, env)
+		if currentErr != nil && ctx.Err() != nil {
+			return runtimeinput.State{}, ctx.Err()
+		}
 		if currentErr != nil || !current.OK {
 			continue
 		}
 		merged, mergeErr := runtimeinput.MergeEnv(root, env, result, current)
+		if err := ctx.Err(); err != nil {
+			return runtimeinput.State{}, err
+		}
 		if mergeErr == nil {
 			result = merged
 		}

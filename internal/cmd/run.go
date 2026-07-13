@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/spf13/cobra"
 )
@@ -45,8 +47,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if out == nil {
 		out = os.Stdout
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	renderPreparation(out, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
-	tree, err := gomutant.Load(o.dir)
+	tree, err := gomutant.LoadContext(ctx, o.dir)
 	if err != nil {
 		return err
 	}
@@ -54,30 +59,40 @@ func runCommand(ctx context.Context, o runOptions) error {
 	var residue []gomutant.Residue
 	switch {
 	case o.targetsFile != "":
-		data, err := os.ReadFile(o.targetsFile)
+		data, err := contextio.ReadFile(ctx, o.targetsFile)
 		if err != nil {
 			return err
 		}
-		if targets, err = gomutant.LoadTargets(data); err != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if targets, err = gomutant.LoadTargetsContext(ctx, data); err != nil {
 			return err
 		}
 	case o.changed != "":
-		paths, err := gitref.ChangedPaths(o.dir, o.changed)
+		paths, err := gitref.ChangedPathsContext(ctx, o.dir, o.changed)
 		if err != nil {
 			return err
 		}
-		targets, residue = tree.DiscoverChanged(paths, func(p string) ([]byte, bool) {
-			return gitref.Show(o.dir, o.changed, p)
+		targets, residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
+			return gitref.ShowContext(ctx, o.dir, o.changed, p)
 		})
+		if err != nil {
+			return err
+		}
 	default:
-		targets = tree.Discover()
+		targets, err = tree.DiscoverContext(ctx)
+		if err != nil {
+			return err
+		}
 	}
-	targets, err = tree.FilterTargets(targets, o.packages, o.symbols)
+	targets, err = tree.FilterTargetsContext(ctx, targets, o.packages, o.symbols)
 	if err != nil {
 		return err
 	}
+	var terminal bytes.Buffer
 	for _, r := range residue {
-		fmt.Fprintf(out, "changed, untargeted  %s  (%s)\n", r.Path, r.Reason)
+		fmt.Fprintf(&terminal, "changed, untargeted  %s  (%s)\n", r.Path, r.Reason)
 	}
 	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
 	docPath := findingsAt(o.dir, o.findingsFile)
@@ -85,20 +100,26 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		fmt.Fprintln(out, "no targets")
-		renderRunSummary(out, gomutant.RunSummary{})
+		fmt.Fprintln(&terminal, "no targets")
+		renderRunSummary(&terminal, gomutant.RunSummary{})
 		if wholeTree {
-			return gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			if err := gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
 				return gomutant.MergeWholeFindings(current, nil, nil), nil
-			})
+			}); err != nil {
+				return err
+			}
 		}
-		return nil
+		_, err := io.Copy(out, &terminal)
+		return err
 	}
-	prior, err := loadFindings(docPath)
+	prior, err := loadFindingsContext(ctx, docPath)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
@@ -114,25 +135,28 @@ func runCommand(ctx context.Context, o runOptions) error {
 		return err
 	}
 	for _, f := range findings {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		switch {
 		case f.Skipped != "":
-			fmt.Fprintf(out, "skipped   %s  (%s)\n", f.Symbol, f.Skipped)
+			fmt.Fprintf(&terminal, "skipped   %s  (%s)\n", f.Symbol, f.Skipped)
 		case f.Cached:
-			fmt.Fprintf(out, "cached    %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
+			fmt.Fprintf(&terminal, "cached    %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
 		default:
-			fmt.Fprintf(out, "measured  %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
+			fmt.Fprintf(&terminal, "measured  %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
 		}
 		for _, s := range f.Open() {
-			fmt.Fprintf(out, "          survivor %s %s\n", s.Position, s.Operator)
+			fmt.Fprintf(&terminal, "          survivor %s %s\n", s.Position, s.Operator)
 		}
 		for _, summary := range f.Operators {
-			fmt.Fprintf(out, "          operator %s: %d generated, %d killed, %d survived, %d discarded\n",
+			fmt.Fprintf(&terminal, "          operator %s: %d generated, %d killed, %d survived, %d discarded\n",
 				summary.Operator, summary.Generated, summary.Killed, summary.Survived, summary.Discarded)
 		}
 	}
 	summary := gomutant.SummarizeRun(findings)
-	renderRunSummary(out, summary)
-	return gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+	renderRunSummary(&terminal, summary)
+	if err := gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -140,7 +164,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 			return gomutant.MergeWholeFindings(current, findings, targets), nil
 		}
 		return gomutant.MergeFindings(current, findings), nil
-	})
+	}); err != nil {
+		return err
+	}
+	_, err = io.Copy(out, &terminal)
+	return err
 }
 
 func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {

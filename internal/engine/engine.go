@@ -11,6 +11,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,6 +20,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/tools/go/packages"
 )
@@ -43,17 +45,37 @@ func Load(dir string) (*Tree, error) {
 }
 
 func load(dir string, executionSupported bool) (*Tree, error) {
+	return loadContext(context.Background(), dir, executionSupported)
+}
+
+// LoadContext is Load with caller-owned cancellation.
+func LoadContext(ctx context.Context, dir string) (*Tree, error) {
+	return loadContext(ctx, dir, processExecutionSupported)
+}
+
+func loadContext(ctx context.Context, dir string, executionSupported bool) (*Tree, error) {
+	return loadContextWith(ctx, dir, executionSupported, packages.Load)
+}
+
+func loadContextWith(ctx context.Context, dir string, executionSupported bool, loadPackages func(*packages.Config, ...string) ([]*packages.Package, error)) (*Tree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if !executionSupported {
 		return nil, fmt.Errorf("gomutant: mutation execution supports Unix and Windows hosts")
 	}
-	members, err := workspaceMembers(dir)
+	members, err := workspaceMembersContext(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
 	env := GoEnv(dir)
 	var pkgs []*packages.Package
 	for _, m := range members {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		cfg := &packages.Config{
+			Context: ctx,
 			Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 				packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule |
 				packages.NeedForTest,
@@ -61,11 +83,14 @@ func load(dir string, executionSupported bool) (*Tree, error) {
 			Env:   env,
 			Tests: true,
 		}
-		loaded, err := packages.Load(cfg, "./...")
+		loaded, err := loadPackages(cfg, "./...")
 		if err != nil {
 			return nil, fmt.Errorf("loading Go packages in %s: %w", m, err)
 		}
 		pkgs = append(pkgs, loaded...)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	// Deterministic candidate order regardless of load order.
 	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].ID < pkgs[j].ID })
@@ -86,8 +111,16 @@ func basePackagePath(pkg *packages.Package) string {
 // PackageContext returns the module and package directories used by a test
 // binary for pkgPath.
 func (t *Tree) PackageContext(pkgPath string) (moduleDir, packageDir string, err error) {
+	return t.PackageContextContext(context.Background(), pkgPath)
+}
+
+// PackageContextContext is PackageContext with cancellation while scanning loaded packages.
+func (t *Tree) PackageContextContext(ctx context.Context, pkgPath string) (moduleDir, packageDir string, err error) {
 	var fallback *packages.Package
 	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return "", "", err
+		}
 		if basePackagePath(pkg) != pkgPath || pkg.Module == nil || len(pkg.GoFiles) == 0 {
 			continue
 		}
@@ -110,7 +143,11 @@ func (t *Tree) PackageContext(pkgPath string) (moduleDir, packageDir string, err
 // every surface that walks "./..." must iterate the members itself or nested
 // modules silently vanish.
 func workspaceMembers(dir string) ([]string, error) {
-	b, err := os.ReadFile(filepath.Join(dir, "go.work"))
+	return workspaceMembersContext(context.Background(), dir)
+}
+
+func workspaceMembersContext(ctx context.Context, dir string) ([]string, error) {
+	b, err := contextio.ReadFile(ctx, filepath.Join(dir, "go.work"))
 	if errors.Is(err, fs.ErrNotExist) {
 		return []string{"."}, nil
 	}

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -35,7 +36,7 @@ type Mutant struct {
 // (REQ-mut-operators, REQ-result-stale).
 const OperatorSet = "go/3"
 
-type importProcessor func(filename string, source []byte) ([]byte, error)
+type importProcessor func(context.Context, string, []byte) ([]byte, error)
 
 var comparisonSwap = map[token.Token]token.Token{
 	token.EQL: token.NEQ, token.NEQ: token.EQL,
@@ -59,7 +60,15 @@ var assignArithmeticSwap = map[token.Token]token.Token{
 // Mutants that render identically to the baseline are dropped here; ones
 // that fail to compile are discarded by the runner.
 func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
-	fd, pkg, err := t.funcDecl(symbol)
+	return t.MutantsContext(context.Background(), symbol, budget)
+}
+
+// MutantsContext is Mutants with cooperative cancellation through enumeration and rendering.
+func (t *Tree) MutantsContext(ctx context.Context, symbol string, budget int) ([]Mutant, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	fd, pkg, err := t.funcDeclContext(ctx, symbol)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +81,9 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 	}
 	baseline, err := renderFile(pkg.Fset, file)
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -93,6 +105,9 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 	boolTrue, boolFalse := ast.NewIdent("true"), ast.NewIdent("false")
 
 	ast.Inspect(fd.Body, func(n ast.Node) bool {
+		if ctx.Err() != nil {
+			return false
+		}
 		switch v := n.(type) {
 		case *ast.BinaryExpr:
 			if swapped, ok := comparisonSwap[v.Op]; ok {
@@ -247,6 +262,9 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 		}
 		return true
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	var out []Mutant
 	renderedSeen := map[string]bool{}
@@ -254,17 +272,23 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 	identities := map[string]int{}
 	processImports := t.importProcessor
 	if processImports == nil {
-		processImports = func(filename string, source []byte) ([]byte, error) {
+		processImports = func(_ context.Context, filename string, source []byte) ([]byte, error) {
 			return imports.Process(filename, source, nil)
 		}
 	}
 	for _, s := range sites {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if budget > 0 && len(out) >= budget {
 			break
 		}
 		s.apply()
 		mutated, err := renderFile(pkg.Fset, file)
 		s.revert()
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return nil, cancelErr
+		}
 		if err != nil || bytes.Equal(mutated, baseline) {
 			continue
 		}
@@ -279,7 +303,11 @@ func (t *Tree) Mutants(symbol string, budget int) ([]Mutant, error) {
 			// Subtree replacement may orphan an import. The fixed operator set
 			// introduces no identifiers, so processing only needs to remove
 			// imports; on failure the compiler remains the conservative judge.
-			if fixed, err := processImports(path, mutated); err == nil {
+			fixed, err := processImports(ctx, path, mutated)
+			if cancelErr := ctx.Err(); cancelErr != nil {
+				return nil, cancelErr
+			}
+			if err == nil {
 				mutated = fixed
 			}
 		}

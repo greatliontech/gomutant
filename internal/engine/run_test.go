@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"golang.org/x/tools/go/packages"
 )
 
 // TestRunMutantOutcomes pins the overlay runner end to end
@@ -576,6 +577,22 @@ func TestProbeBaselineRejectsResultDrift(t *testing.T) {
 func TestLoadRefusesUnsupportedProcessExecution(t *testing.T) {
 	if _, err := load(t.TempDir(), false); err == nil || !strings.Contains(err.Error(), "supports Unix and Windows hosts") {
 		t.Fatalf("unsupported process execution = %v", err)
+	}
+}
+
+func TestLoadContextCancelsPackageLoading(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	loaded := false
+	tree, err := loadContextWith(ctx, t.TempDir(), true, func(cfg *packages.Config, _ ...string) ([]*packages.Package, error) {
+		loaded = true
+		if cfg.Context != ctx {
+			t.Fatal("package loader did not receive caller context")
+		}
+		cancel()
+		return nil, nil
+	})
+	if !loaded || !errors.Is(err, context.Canceled) || tree != nil {
+		t.Fatalf("cancelled load = loaded %v, tree %v, error %v", loaded, tree, err)
 	}
 }
 

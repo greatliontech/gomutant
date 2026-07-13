@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -188,7 +189,7 @@ func TestMutantsBodyless(t *testing.T) {
 func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
 	tr := fixtureTree(t)
 	processed := map[string]string{}
-	tr.importProcessor = func(filename string, source []byte) ([]byte, error) {
+	tr.importProcessor = func(_ context.Context, filename string, source []byte) ([]byte, error) {
 		processed[string(source)] = filename
 		return source, nil
 	}
@@ -229,7 +230,7 @@ func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
 func TestMutantsRetainImportProcessingFallback(t *testing.T) {
 	tr := fixtureTree(t)
 	calls := 0
-	tr.importProcessor = func(_ string, _ []byte) ([]byte, error) {
+	tr.importProcessor = func(context.Context, string, []byte) ([]byte, error) {
 		calls++
 		return nil, errors.New("cannot process imports")
 	}
@@ -253,7 +254,7 @@ func TestMutantsRetainImportProcessingFallback(t *testing.T) {
 
 func TestMutantsDeduplicateEffectiveSourceBeforeBudget(t *testing.T) {
 	tr := fixtureTree(t)
-	tr.importProcessor = func(_ string, _ []byte) ([]byte, error) {
+	tr.importProcessor = func(context.Context, string, []byte) ([]byte, error) {
 		return []byte("package lib\n"), nil
 	}
 	mutants, err := tr.Mutants("example.com/fixture/lib.PruneCollision", 2)
@@ -270,4 +271,28 @@ func TestMutantsDeduplicateEffectiveSourceBeforeBudget(t *testing.T) {
 	if err != nil || len(exhaustive) != 2 {
 		t.Fatalf("exhaustive effective mutants = %d, %v", len(exhaustive), err)
 	}
+}
+
+func TestMutantsContextCancellationRestoresSyntax(t *testing.T) {
+	tr := fixtureTree(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	tr.importProcessor = func(_ context.Context, _ string, source []byte) ([]byte, error) {
+		cancel()
+		return source, nil
+	}
+	mutants, err := tr.MutantsContext(ctx, "example.com/fixture/lib.Logs", 0)
+	if !errors.Is(err, context.Canceled) || mutants != nil {
+		t.Fatalf("cancelled mutants = %+v, %v", mutants, err)
+	}
+	tr.importProcessor = nil
+	mutants, err = tr.Mutants("example.com/fixture/lib.Logs", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutant := range mutants {
+		if mutant.Operator == "delete statement" && !strings.Contains(string(mutant.Replacements[0].Source), `"fmt"`) {
+			return
+		}
+	}
+	t.Fatal("syntax was not restored after cancelled import processing")
 }

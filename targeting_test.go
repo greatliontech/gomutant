@@ -1,14 +1,48 @@
 package gomutant
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 const fixtureDir = "internal/engine/testdata/fixturemod"
+
+type cancelAfterChecks struct {
+	context.Context
+	remaining int
+}
+
+type cancelInFunctionContext struct {
+	context.Context
+	function string
+}
+
+func (c cancelInFunctionContext) Err() error {
+	callers := make([]uintptr, 32)
+	for frames := runtime.CallersFrames(callers[:runtime.Callers(2, callers)]); ; {
+		frame, more := frames.Next()
+		if strings.Contains(frame.Function, c.function) {
+			return context.Canceled
+		}
+		if !more {
+			return nil
+		}
+	}
+}
+
+func (c *cancelAfterChecks) Err() error {
+	if c.remaining == 0 {
+		return context.Canceled
+	}
+	c.remaining--
+	return nil
+}
 
 func fixtureTree(t *testing.T) *Tree {
 	t.Helper()
@@ -17,6 +51,57 @@ func fixtureTree(t *testing.T) *Tree {
 		t.Fatal(err)
 	}
 	return tr
+}
+
+func TestTargetPreparationContextCancellation(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if tree, err := LoadContext(cancelled, fixtureDir); !errors.Is(err, context.Canceled) || tree != nil {
+		t.Fatalf("cancelled load = tree %v, error %v", tree, err)
+	}
+
+	tree := fixtureTree(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	surface, err := tree.eng.SurfaceContext(ctx, []string{"lib/lib.go"}, func(string) ([]byte, bool) {
+		cancel()
+		return []byte("package lib"), true
+	})
+	if !errors.Is(err, context.Canceled) || surface != nil {
+		t.Fatalf("cancelled changed surface = surface %v, error %v", surface, err)
+	}
+	ctx, cancel = context.WithCancel(context.Background())
+	targets, residue, err := tree.DiscoverChangedContext(ctx, []string{"lib/lib.go"}, func(string) ([]byte, bool) {
+		cancel()
+		return []byte("package lib"), true
+	})
+	if !errors.Is(err, context.Canceled) || targets != nil || residue != nil {
+		t.Fatalf("cancelled changed discovery = targets %v, residue %v, error %v", targets, residue, err)
+	}
+	if targets, err := tree.DiscoverContext(cancelled); !errors.Is(err, context.Canceled) || targets != nil {
+		t.Fatalf("cancelled discovery = targets %v, error %v", targets, err)
+	}
+	if selected, err := tree.FilterTargetsContext(cancelled, []Target{{Symbol: "missing"}}, nil, nil); !errors.Is(err, context.Canceled) || selected != nil {
+		t.Fatalf("cancelled filtering = targets %v, error %v", selected, err)
+	}
+	filterCtx := &cancelAfterChecks{Context: context.Background(), remaining: 2}
+	if selected, err := tree.FilterTargetsContext(filterCtx, []Target{{Symbol: "example.com/fixture/lib.Add"}}, []string{"example.com/*"}, nil); !errors.Is(err, context.Canceled) || selected != nil {
+		t.Fatalf("mid-filter cancellation = targets %v, error %v", selected, err)
+	}
+	compileCtx := &cancelAfterChecks{Context: context.Background(), remaining: 2}
+	if _, err := tree.FilterTargetsContext(compileCtx, nil, []string{"example.com/*", "["}, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("filter compilation cancellation lost precedence: %v", err)
+	}
+	if pkg, err := tree.eng.PackagePathContext(cancelled, "missing"); !errors.Is(err, context.Canceled) || pkg != "" {
+		t.Fatalf("cancelled package path = %q, %v", pkg, err)
+	}
+	packageCtx := &cancelAfterChecks{Context: context.Background(), remaining: 1}
+	if pkg, err := tree.eng.PackagePathContext(packageCtx, "example.com/fixture/lib.Add"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("post-resolution package cancellation = %q, %v", pkg, err)
+	}
+	describeCtx := cancelInFunctionContext{Context: context.Background(), function: "BodyHashContext"}
+	if descriptions, err := tree.DescribeTargetsContext(describeCtx, []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}); !errors.Is(err, context.Canceled) || descriptions != nil {
+		t.Fatalf("body-hash cancellation = descriptions %+v, error %v", descriptions, err)
+	}
 }
 
 // TestDiscover pins whole-tree discovery (REQ-target-producers): every
@@ -120,17 +205,23 @@ func TestSelfHostTargetsResolve(t *testing.T) {
 	if len(targets) != 6 {
 		t.Fatalf("self-host target count = %d, want 6", len(targets))
 	}
-	want := map[string]string{
-		"github.com/greatliontech/gomutant.Tree.FilterTargets":               "github.com/greatliontech/gomutant.TestFilterTargets",
-		"github.com/greatliontech/gomutant.SummarizeRun":                     "github.com/greatliontech/gomutant.TestSummarizeRun",
-		"github.com/greatliontech/gomutant.reportPreparation":                "github.com/greatliontech/gomutant.TestRunDecisionsAndCancellation",
-		"github.com/greatliontech/gomutant/internal/cmd.renderRunDecision":   "github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus",
-		"github.com/greatliontech/gomutant/internal/cmd.renderRunSummary":    "github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus",
-		"github.com/greatliontech/gomutant/internal/engine.Tree.PackagePath": "github.com/greatliontech/gomutant.TestFilterTargets",
+	want := map[string][]string{
+		"github.com/greatliontech/gomutant.Tree.FilterTargetsContext": {
+			"github.com/greatliontech/gomutant.TestFilterTargets",
+			"github.com/greatliontech/gomutant.TestTargetPreparationContextCancellation",
+		},
+		"github.com/greatliontech/gomutant.SummarizeRun":                   {"github.com/greatliontech/gomutant.TestSummarizeRun"},
+		"github.com/greatliontech/gomutant.reportPreparation":              {"github.com/greatliontech/gomutant.TestRunDecisionsAndCancellation"},
+		"github.com/greatliontech/gomutant/internal/cmd.renderRunDecision": {"github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus"},
+		"github.com/greatliontech/gomutant/internal/cmd.renderRunSummary":  {"github.com/greatliontech/gomutant/internal/cmd.TestRenderRunStatus"},
+		"github.com/greatliontech/gomutant/internal/engine.Tree.PackagePathContext": {
+			"github.com/greatliontech/gomutant.TestFilterTargets",
+			"github.com/greatliontech/gomutant.TestTargetPreparationContextCancellation",
+		},
 	}
 	for _, target := range targets {
 		oracle, ok := want[target.Symbol]
-		if !ok || len(target.Oracle) != 1 || target.Oracle[0] != oracle {
+		if !ok || !reflect.DeepEqual(target.Oracle, oracle) {
 			t.Fatalf("unexpected self-host target: %+v", target)
 		}
 		delete(want, target.Symbol)
@@ -147,7 +238,7 @@ func TestSelfHostTargetsResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, description := range descriptions {
-		if !description.OracleExplicit || len(description.Oracle) != 1 || description.Skipped != "" {
+		if !description.OracleExplicit || len(description.Oracle) == 0 || description.Skipped != "" {
 			t.Fatalf("self-host target is not directly measurable: %+v", description)
 		}
 	}

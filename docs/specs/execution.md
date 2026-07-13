@@ -127,10 +127,12 @@ the same preparation sequence, decisions, and totals. Open survivors remain
 advisory and do not change successful exit semantics.
 
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
-caller-context cancellation MUST cancel in-flight oracle processes, wait for
-their cleanup, return an operational cancellation error, and leave the
-findings document unchanged. A cancelled run never reports or persists a
-partial measurement.
+caller-context cancellation MUST stop package loading and every subsequent
+preparation or aggregation boundary, cancel in-flight oracle processes, wait
+for their cleanup, return an operational cancellation error, and leave the
+findings document unchanged. Preparation progress and ordered decisions may
+contain only the prefix delivered before cancellation became observable. A
+cancelled run never reports or persists a partial measurement.
 
 Mutation execution is supported on Unix and Windows hosts, where gomutant can
 own and terminate a process group or Job Object. Other host operating systems

@@ -2,12 +2,31 @@ package gomutant
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestEphemeralPreparationCancellation(t *testing.T) {
+	tree := fixtureTree(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if result, err := tree.Ephemeral(ctx, "missing.go", nil, "p", "T", time.Minute); !errors.Is(err, context.Canceled) || result != nil {
+		t.Fatalf("cancelled replacement = %+v, %v", result, err)
+	}
+	if result, err := tree.EphemeralBatch(ctx, []BatchEdit{{File: "missing.go"}}, "p", "T", time.Minute); !errors.Is(err, context.Canceled) || result != nil {
+		t.Fatalf("cancelled batch = %+v, %v", result, err)
+	}
+	if result, err := tree.EphemeralEdits(ctx, "missing.go", []Edit{{Old: "x", New: "y"}}, "p", "T", time.Minute); !errors.Is(err, context.Canceled) || result != nil {
+		t.Fatalf("cancelled edits = %+v, %v", result, err)
+	}
+	if result, err := ApplyEditsContext(ctx, []byte("x"), []Edit{{Old: "x", New: "y"}}); !errors.Is(err, context.Canceled) || result != nil {
+		t.Fatalf("cancelled apply = %q, %v", result, err)
+	}
+}
 
 // TestEphemeral pins the manual-mutant runner (REQ-exec-ephemeral): a
 // behavior-breaking replacement is killed with an attributed killer, a

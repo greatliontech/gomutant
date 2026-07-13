@@ -1,15 +1,16 @@
 package engine
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"go/ast"
 	"go/types"
-	"os"
 	"strings"
 
+	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/text/unicode/norm"
 	"golang.org/x/tools/go/packages"
 )
@@ -24,7 +25,12 @@ var ErrNotFunction = errors.New("is not a function or method")
 // (REQ-result-record). It moves when behavior-bearing code moves and ignores
 // formatting churn.
 func (t *Tree) BodyHash(symbol string) (string, error) {
-	fd, pkg, err := t.funcDecl(symbol)
+	return t.BodyHashContext(context.Background(), symbol)
+}
+
+// BodyHashContext is BodyHash with cooperative cancellation.
+func (t *Tree) BodyHashContext(ctx context.Context, symbol string) (string, error) {
+	fd, pkg, err := t.funcDeclContext(ctx, symbol)
 	if err != nil {
 		return "", err
 	}
@@ -32,11 +38,14 @@ func (t *Tree) BodyHash(symbol string) (string, error) {
 	if fd.Body != nil {
 		node = fd.Body
 	}
-	src, err := t.sourceOf(pkg, node)
+	src, err := t.sourceOfContext(ctx, pkg, node)
 	if err != nil {
 		return "", err
 	}
-	return canonHash(string(src)), nil
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return canonHash(string(src)), ctx.Err()
 }
 
 // canonText is the canonical form hashes are computed over: Unicode NFC,
@@ -57,12 +66,22 @@ func canonHash(s string) string {
 
 // funcDecl resolves a symbol to its declaring FuncDecl and package.
 func (t *Tree) funcDecl(symbol string) (*ast.FuncDecl, *packages.Package, error) {
-	obj, err := t.object(symbol)
+	return t.funcDeclContext(context.Background(), symbol)
+}
+
+func (t *Tree) funcDeclContext(ctx context.Context, symbol string) (*ast.FuncDecl, *packages.Package, error) {
+	obj, err := t.objectContext(ctx, symbol)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		for _, f := range pkg.Syntax {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
 			for _, decl := range f.Decls {
 				fd, ok := decl.(*ast.FuncDecl)
 				if !ok {
@@ -81,6 +100,13 @@ func (t *Tree) funcDecl(symbol string) (*ast.FuncDecl, *packages.Package, error)
 // failed: an unmatched import path, a load-broken package, or a missing
 // identifier.
 func (t *Tree) object(symbol string) (types.Object, error) {
+	return t.objectContext(context.Background(), symbol)
+}
+
+func (t *Tree) objectContext(ctx context.Context, symbol string) (types.Object, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	pkgPath, rest := t.splitSymbol(symbol)
 	if pkgPath == "" {
 		return nil, fmt.Errorf("symbol %s: no loaded package matches its import path", symbol)
@@ -90,6 +116,9 @@ func (t *Tree) object(symbol string) (types.Object, error) {
 		return nil, fmt.Errorf("symbol %s: want <pkg>.<Ident> or <pkg>.<Receiver>.<Method>", symbol)
 	}
 	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if pkg.PkgPath != pkgPath && pkg.PkgPath != pkgPath+"_test" {
 			continue
 		}
@@ -121,11 +150,19 @@ func (t *Tree) splitSymbol(symbol string) (string, string) {
 
 // PackagePath returns the loaded Go import path that owns symbol.
 func (t *Tree) PackagePath(symbol string) (string, error) {
+	return t.PackagePathContext(context.Background(), symbol)
+}
+
+// PackagePathContext is PackagePath with caller-owned cancellation.
+func (t *Tree) PackagePathContext(ctx context.Context, symbol string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	pkgPath, _ := t.splitSymbol(symbol)
 	if pkgPath == "" {
 		return "", fmt.Errorf("symbol %s: no loaded package matches its import path", symbol)
 	}
-	return pkgPath, nil
+	return pkgPath, ctx.Err()
 }
 
 // lookup finds a package-scope object, or a method through its receiver type
@@ -160,9 +197,13 @@ func lookup(pkg *types.Package, parts []string) types.Object {
 
 // sourceOf reads the original source bytes spanned by node.
 func (t *Tree) sourceOf(pkg *packages.Package, node ast.Node) ([]byte, error) {
+	return t.sourceOfContext(context.Background(), pkg, node)
+}
+
+func (t *Tree) sourceOfContext(ctx context.Context, pkg *packages.Package, node ast.Node) ([]byte, error) {
 	start := pkg.Fset.Position(node.Pos())
 	end := pkg.Fset.Position(node.End())
-	data, err := os.ReadFile(start.Filename)
+	data, err := contextio.ReadFile(ctx, start.Filename)
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ package gitref
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -16,17 +17,25 @@ import (
 // surface, never silently absent (REQ-target-changed). quotepath is off so a
 // non-ASCII path arrives as bytes, not an escaped quoted string.
 func ChangedPaths(dir, ref string) ([]string, error) {
-	tracked, err := output(dir, "-c", "core.quotepath=off", "diff", "--name-only", "--relative", ref)
+	return ChangedPathsContext(context.Background(), dir, ref)
+}
+
+// ChangedPathsContext is ChangedPaths with caller-owned cancellation.
+func ChangedPathsContext(ctx context.Context, dir, ref string) ([]string, error) {
+	tracked, err := outputContext(ctx, dir, "-c", "core.quotepath=off", "diff", "--name-only", "--relative", ref)
 	if err != nil {
 		return nil, err
 	}
-	untracked, err := output(dir, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard")
+	untracked, err := outputContext(ctx, dir, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
 	var paths []string
 	for _, out := range [][]byte{tracked, untracked} {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			if line != "" && !seen[line] {
 				seen[line] = true
@@ -42,7 +51,12 @@ func ChangedPaths(dir, ref string) ([]string, error) {
 // resolves against the command's directory, so it stays correct when the
 // tree is not the repo root.
 func Show(dir, ref, path string) ([]byte, bool) {
-	out, err := output(dir, "show", ref+":./"+path)
+	return ShowContext(context.Background(), dir, ref, path)
+}
+
+// ShowContext is Show with caller-owned cancellation.
+func ShowContext(ctx context.Context, dir, ref, path string) ([]byte, bool) {
+	out, err := outputContext(ctx, dir, "show", ref+":./"+path)
 	if err != nil {
 		return nil, false
 	}
@@ -50,11 +64,18 @@ func Show(dir, ref, path string) ([]byte, bool) {
 }
 
 func output(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+	return outputContext(context.Background(), dir, args...)
+}
+
+func outputContext(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil

@@ -13,6 +13,14 @@ import (
 	gomutant "github.com/greatliontech/gomutant"
 )
 
+func TestExecuteContextCancellationStopsBeforeLoading(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := ExecuteContext(ctx, []string{"discover", "--dir", fixtureDir}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled discover = %v", err)
+	}
+}
+
 type cancellingWriter struct{ cancel context.CancelFunc }
 
 func (w cancellingWriter) Write(p []byte) (int, error) {
@@ -119,14 +127,14 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, Mutants: 1,
 		Survivors: []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}},
 		Attested:  []gomutant.Attestation{{Position: "old.go:1:1", Operator: "zero return", Reason: "equivalent"}}}
-	views, err := inspectFindings(tree, []gomutant.Finding{finding}, "REQ-A")
+	views, err := inspectFindings(context.Background(), tree, []gomutant.Finding{finding}, "REQ-A")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(views) != 1 || views[0].State != gomutant.FindingDetached || len(views[0].Open) != 0 || len(views[0].Attested) != 1 || views[0].Labels[0] != "REQ-A" {
 		t.Fatalf("detached attested view = %+v", views)
 	}
-	views, err = inspectFindings(tree, []gomutant.Finding{finding}, "REQ-other")
+	views, err = inspectFindings(context.Background(), tree, []gomutant.Finding{finding}, "REQ-other")
 	if err != nil || len(views) != 0 {
 		t.Fatalf("label filter = %+v, %v", views, err)
 	}
@@ -247,7 +255,7 @@ func TestRunCommandCancellationLeavesFindingsUntouched(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled command = %v", err)
 	}
-	if output.String() != "prepare   loading\n" {
+	if output.String() != "" {
 		t.Fatalf("cancelled command progress = %q", output.String())
 	}
 	got, err := os.ReadFile(docPath)
@@ -262,11 +270,14 @@ func TestRunCommandCancellationLeavesFindingsUntouched(t *testing.T) {
 		dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: docPath,
 		output: cancellingWriter{cancel: cancel},
 	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancellation at update = %v", err)
+	if err != nil {
+		t.Fatalf("post-commit output cancellation changed the result: %v", err)
 	}
 	got, err = os.ReadFile(docPath)
-	if err != nil || !bytes.Equal(got, document) {
-		t.Fatalf("findings changed by cancellation at update: %v\n%s", err, got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gomutant.ParseFindings(got); err != nil {
+		t.Fatalf("post-commit document is invalid: %v\n%s", err, got)
 	}
 }

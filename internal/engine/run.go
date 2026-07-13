@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/contextio"
 )
 
 // MutantOutcome classifies one overlay run.
@@ -45,12 +46,24 @@ const rapidPkg = "pgregory.net/rapid"
 // helper package escapes the guard; the failure mode there is visible
 // failfile litter, never a false kill.
 func (t *Tree) SplitRapidPkgs(testPkgs []string) (rapid, plain []string) {
+	rapid, plain, _ = t.SplitRapidPkgsContext(context.Background(), testPkgs)
+	return rapid, plain
+}
+
+// SplitRapidPkgsContext is SplitRapidPkgs with cooperative cancellation.
+func (t *Tree) SplitRapidPkgsContext(ctx context.Context, testPkgs []string) (rapid, plain []string, err error) {
 	byPath := map[string]bool{}
 	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		if byPath[pkg.PkgPath] {
 			continue
 		}
 		for _, f := range pkg.Syntax {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
 			for _, imp := range f.Imports {
 				if strings.Trim(imp.Path.Value, `"`) == rapidPkg {
 					byPath[pkg.PkgPath] = true
@@ -59,13 +72,16 @@ func (t *Tree) SplitRapidPkgs(testPkgs []string) (rapid, plain []string) {
 		}
 	}
 	for _, p := range testPkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		if byPath[p] || byPath[p+"_test"] {
 			rapid = append(rapid, p)
 		} else {
 			plain = append(plain, p)
 		}
 	}
-	return rapid, plain
+	return rapid, plain, nil
 }
 
 // TimeoutKiller is the killer attribution of a timed-out mutant run: the
@@ -129,8 +145,14 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
 	empty, err = runtimeinput.AbsoluteEnv(empty, moduleDir, env)
 	if err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
 	if firstState == empty {
@@ -144,7 +166,7 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 	if err != nil {
 		return secondOutcome, secondKiller, secondState, err
 	}
-	combined, err := mergeRuntimeEvidence(dir, env, firstState, secondState)
+	combined, err := mergeRuntimeEvidenceContext(ctx, dir, env, firstState, secondState)
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
@@ -152,7 +174,7 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 		return secondOutcome, secondKiller, combined, nil
 	}
 	if firstState != secondState {
-		combined, err = addRuntimeEvidenceReason(dir, env, combined, "runtime input observations changed between repeated mutant executions")
+		combined, err = addRuntimeEvidenceReasonContext(ctx, dir, env, combined, "runtime input observations changed between repeated mutant executions")
 		if err != nil {
 			return MutantDiscarded, "", runtimeinput.State{}, err
 		}
@@ -161,6 +183,9 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 }
 
 func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (MutantOutcome, string, runtimeinput.State, error) {
+	if err := ctx.Err(); err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
 	capture := moduleDir != "" && packageDir != ""
 	tmp, err := os.MkdirTemp("", "gomutant-*")
 	if err != nil {
@@ -172,6 +197,9 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	}
 	replace := make(map[string]string, len(m.Replacements))
 	for i, replacement := range m.Replacements {
+		if err := ctx.Err(); err != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, err
+		}
 		if replacement.File == "" || replacement.Source == nil {
 			return MutantDiscarded, "", runtimeinput.State{}, fmt.Errorf("mutant replacement %d is incomplete", i+1)
 		}
@@ -179,7 +207,10 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 			return MutantDiscarded, "", runtimeinput.State{}, fmt.Errorf("mutant replaces %s more than once", replacement.File)
 		}
 		mutFile := filepath.Join(tmp, fmt.Sprintf("replacement-%d%s", i, filepath.Ext(replacement.File)))
-		if err := os.WriteFile(mutFile, replacement.Source, 0o644); err != nil {
+		if err := contextio.WriteFile(ctx, mutFile, replacement.Source, 0o644); err != nil {
+			return MutantDiscarded, "", runtimeinput.State{}, err
+		}
+		if err := ctx.Err(); err != nil {
 			return MutantDiscarded, "", runtimeinput.State{}, err
 		}
 		replace[replacement.File] = mutFile
@@ -191,7 +222,13 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
-	if err := os.WriteFile(overlay, oj, 0o644); err != nil {
+	if err := ctx.Err(); err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
+	if err := contextio.WriteFile(ctx, overlay, oj, 0o644); err != nil {
+		return MutantDiscarded, "", runtimeinput.State{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return MutantDiscarded, "", runtimeinput.State{}, err
 	}
 
@@ -219,11 +256,11 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	runErr := cmd.Run()
 
 	if runCtx.Err() == context.DeadlineExceeded {
-		state, err := processObservation(testlog, moduleDir, packageDir, "mutant test process timed out", env, capture)
+		state, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process timed out", env, capture)
 		return MutantKilled, TimeoutKiller, state, err
 	}
 	if runCtx.Err() != nil {
-		state, observationErr := processObservation(testlog, moduleDir, packageDir, "mutant test process was cancelled", env, capture)
+		state, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process was cancelled", env, capture)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.State{}, observationErr
 		}
@@ -231,7 +268,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	}
 	killer, parseErr := firstFailingTest(stdout.Bytes())
 	if parseErr != nil {
-		state, observationErr := processObservation(testlog, moduleDir, packageDir, "go test output was malformed before observation finalization", env, capture)
+		state, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "go test output was malformed before observation finalization", env, capture)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.State{}, observationErr
 		}
@@ -239,10 +276,10 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	}
 	switch {
 	case runErr == nil:
-		state, err := processObservation(testlog, moduleDir, packageDir, "", env, capture)
+		state, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "", env, capture)
 		return MutantSurvived, "", state, err
 	case strings.Contains(stdout.String(), "[build failed]"):
-		state, err := processObservation(testlog, moduleDir, packageDir, "mutant test process did not start because the mutant failed to build", env, capture)
+		state, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process did not start because the mutant failed to build", env, capture)
 		return MutantDiscarded, "", state, err
 	case killer != "":
 		reason := ""
@@ -252,7 +289,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 				reason = "mutant test process exited before observation finalization"
 			}
 		}
-		state, err := processObservation(testlog, moduleDir, packageDir, reason, env, capture)
+		state, err := processObservationContext(ctx, testlog, moduleDir, packageDir, reason, env, capture)
 		return MutantKilled, killer, state, err
 	}
 
@@ -270,40 +307,40 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		base.Dir = dir
 		base.Env = env
 		baseErr := base.Run()
-		mutantState, err := processObservation(testlog, moduleDir, packageDir, "mutant test process exited before observation finalization", env, capture)
+		mutantState, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process exited before observation finalization", env, capture)
 		if err != nil {
 			return MutantDiscarded, "", runtimeinput.State{}, err
 		}
 		if baseCtx.Err() != nil {
-			baselineState, observationErr := processObservation(baseTestlog, moduleDir, packageDir, "baseline test process did not complete", env, capture)
+			baselineState, observationErr := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "baseline test process did not complete", env, capture)
 			if observationErr != nil {
 				return MutantDiscarded, "", runtimeinput.State{}, observationErr
 			}
-			state, mergeErr := mergeProcessObservations(dir, env, capture, mutantState, baselineState)
+			state, mergeErr := mergeProcessObservationsContext(ctx, dir, env, capture, mutantState, baselineState)
 			if mergeErr != nil {
 				return MutantDiscarded, "", runtimeinput.State{}, mergeErr
 			}
 			return MutantDiscarded, "", state, baseCtx.Err()
 		}
 		if baseErr == nil {
-			baselineState, err := processObservation(baseTestlog, moduleDir, packageDir, "", env, capture)
+			baselineState, err := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "", env, capture)
 			if err != nil {
 				return MutantDiscarded, "", runtimeinput.State{}, err
 			}
-			state, err := mergeProcessObservations(dir, env, capture, mutantState, baselineState)
+			state, err := mergeProcessObservationsContext(ctx, dir, env, capture, mutantState, baselineState)
 			return MutantKilled, PackageKillerPrefix + pkg + ")", state, err
 		}
-		baselineState, observationErr := processObservation(baseTestlog, moduleDir, packageDir, "baseline test process failed before observation finalization", env, capture)
+		baselineState, observationErr := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "baseline test process failed before observation finalization", env, capture)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.State{}, observationErr
 		}
-		state, mergeErr := mergeProcessObservations(dir, env, capture, mutantState, baselineState)
+		state, mergeErr := mergeProcessObservationsContext(ctx, dir, env, capture, mutantState, baselineState)
 		if mergeErr != nil {
 			return MutantDiscarded, "", runtimeinput.State{}, mergeErr
 		}
 		return MutantDiscarded, "", state, fmt.Errorf("mutant run failed with no test-attributed kill (environmental noise, not a kill; baseline probe did not clear it): %v: %s", runErr, tail(stderr.String()+stdout.String(), 400))
 	}
-	state, observationErr := processObservation(testlog, moduleDir, packageDir, "mutant test process failed before attributable completion", env, capture)
+	state, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process failed before attributable completion", env, capture)
 	if observationErr != nil {
 		return MutantDiscarded, "", runtimeinput.State{}, observationErr
 	}
@@ -311,6 +348,13 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 }
 
 func processObservation(path, moduleDir, packageDir, incompleteReason string, env []string, capture bool) (runtimeinput.State, error) {
+	return processObservationContext(context.Background(), path, moduleDir, packageDir, incompleteReason, env, capture)
+}
+
+func processObservationContext(ctx context.Context, path, moduleDir, packageDir, incompleteReason string, env []string, capture bool) (runtimeinput.State, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimeinput.State{}, err
+	}
 	if !capture {
 		return runtimeinput.State{}, nil
 	}
@@ -321,7 +365,7 @@ func processObservation(path, moduleDir, packageDir, incompleteReason string, en
 		if incompleteErr != nil {
 			return runtimeinput.State{}, incompleteErr
 		}
-		data, readErr := os.ReadFile(path)
+		data, readErr := contextio.ReadFile(ctx, path)
 		if os.IsNotExist(readErr) {
 			state = incomplete
 		} else if readErr != nil {
@@ -343,7 +387,7 @@ func processObservation(path, moduleDir, packageDir, incompleteReason string, en
 			state, err = runtimeinput.MergeEnv(moduleDir, env, partial, incomplete)
 		}
 	} else {
-		data, readErr := os.ReadFile(path)
+		data, readErr := contextio.ReadFile(ctx, path)
 		if os.IsNotExist(readErr) {
 			state, err = runtimeinput.IncompleteEnv(moduleDir, "test process produced no runtime-input log", env)
 		} else if readErr != nil {
@@ -355,18 +399,34 @@ func processObservation(path, moduleDir, packageDir, incompleteReason string, en
 	if err != nil {
 		return runtimeinput.State{}, err
 	}
-	return absoluteRuntimeEvidence(state, moduleDir, env)
+	if err := ctx.Err(); err != nil {
+		return runtimeinput.State{}, err
+	}
+	return absoluteRuntimeEvidenceContext(ctx, state, moduleDir, env)
 }
 
 func absoluteRuntimeEvidence(state runtimeinput.State, moduleDir string, env []string) (runtimeinput.State, error) {
+	return absoluteRuntimeEvidenceContext(context.Background(), state, moduleDir, env)
+}
+
+func absoluteRuntimeEvidenceContext(ctx context.Context, state runtimeinput.State, moduleDir string, env []string) (runtimeinput.State, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimeinput.State{}, err
+	}
 	absolute, err := runtimeinput.AbsoluteEnv(state, moduleDir, env)
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		return runtimeinput.State{}, cancelErr
+	}
 	if err == nil {
 		return absolute, nil
 	}
 	if !state.OK || state.Manifest == "" || state.Digest == "" {
 		return runtimeinput.State{}, err
 	}
-	current, currentErr := runtimeinput.CurrentEnv(state.Manifest, moduleDir, env)
+	current, currentErr := runtimeinput.CurrentEnvContext(ctx, state.Manifest, moduleDir, env)
+	if currentErr != nil && ctx.Err() != nil {
+		return runtimeinput.State{}, ctx.Err()
+	}
 	if currentErr != nil || !current.OK || current == state {
 		return runtimeinput.State{}, err
 	}
@@ -374,21 +434,39 @@ func absoluteRuntimeEvidence(state runtimeinput.State, moduleDir string, env []s
 	if incompleteErr != nil {
 		return runtimeinput.State{}, incompleteErr
 	}
-	if merged, mergeErr := mergeRuntimeEvidence(moduleDir, env, current, incomplete); mergeErr == nil {
+	if merged, mergeErr := mergeRuntimeEvidenceContext(ctx, moduleDir, env, current, incomplete); mergeErr == nil {
 		incomplete = merged
 	}
-	return runtimeinput.AbsoluteEnv(incomplete, moduleDir, env)
+	absolute, err = runtimeinput.AbsoluteEnv(incomplete, moduleDir, env)
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		return runtimeinput.State{}, cancelErr
+	}
+	return absolute, err
 }
 
 func mergeProcessObservations(root string, env []string, capture bool, states ...runtimeinput.State) (runtimeinput.State, error) {
+	return mergeProcessObservationsContext(context.Background(), root, env, capture, states...)
+}
+
+func mergeProcessObservationsContext(ctx context.Context, root string, env []string, capture bool, states ...runtimeinput.State) (runtimeinput.State, error) {
 	if !capture {
 		return runtimeinput.State{}, nil
 	}
-	return mergeRuntimeEvidence(root, env, states...)
+	return mergeRuntimeEvidenceContext(ctx, root, env, states...)
 }
 
 func mergeRuntimeEvidence(root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {
+	return mergeRuntimeEvidenceContext(context.Background(), root, env, states...)
+}
+
+func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {
+	if err := ctx.Err(); err != nil {
+		return runtimeinput.State{}, err
+	}
 	state, err := runtimeinput.MergeEnv(root, env, states...)
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		return runtimeinput.State{}, cancelErr
+	}
 	if err == nil {
 		return state, nil
 	}
@@ -397,14 +475,23 @@ func mergeRuntimeEvidence(root string, env []string, states ...runtimeinput.Stat
 		return runtimeinput.State{}, incompleteErr
 	}
 	for _, input := range states {
+		if err := ctx.Err(); err != nil {
+			return runtimeinput.State{}, err
+		}
 		if input.Manifest == "" {
 			continue
 		}
-		current, currentErr := runtimeinput.CurrentEnv(input.Manifest, root, env)
+		current, currentErr := runtimeinput.CurrentEnvContext(ctx, input.Manifest, root, env)
+		if currentErr != nil && ctx.Err() != nil {
+			return runtimeinput.State{}, ctx.Err()
+		}
 		if currentErr != nil || !current.OK {
 			continue
 		}
 		merged, mergeErr := runtimeinput.MergeEnv(root, env, result, current)
+		if err := ctx.Err(); err != nil {
+			return runtimeinput.State{}, err
+		}
 		if mergeErr == nil {
 			result = merged
 		}
@@ -413,11 +500,15 @@ func mergeRuntimeEvidence(root string, env []string, states ...runtimeinput.Stat
 }
 
 func addRuntimeEvidenceReason(root string, env []string, state runtimeinput.State, reason string) (runtimeinput.State, error) {
+	return addRuntimeEvidenceReasonContext(context.Background(), root, env, state, reason)
+}
+
+func addRuntimeEvidenceReasonContext(ctx context.Context, root string, env []string, state runtimeinput.State, reason string) (runtimeinput.State, error) {
 	incomplete, err := runtimeinput.IncompleteEnv(root, reason, env)
 	if err != nil {
 		return runtimeinput.State{}, err
 	}
-	return mergeRuntimeEvidence(root, env, state, incomplete)
+	return mergeRuntimeEvidenceContext(ctx, root, env, state, incomplete)
 }
 
 // TestProbe runs the named test on the unmutated tree and reports how many
@@ -455,8 +546,14 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if err != nil {
 		return 0, false, runtimeinput.State{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, false, runtimeinput.State{}, err
+	}
 	empty, err = runtimeinput.AbsoluteEnv(empty, moduleDir, env)
 	if err != nil {
+		return 0, false, runtimeinput.State{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return 0, false, runtimeinput.State{}, err
 	}
 	if first == empty {
@@ -466,7 +563,7 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if err != nil {
 		return secondRan, secondPassed, second, err
 	}
-	combined, err := mergeRuntimeEvidence(dir, env, first, second)
+	combined, err := mergeRuntimeEvidenceContext(ctx, dir, env, first, second)
 	if err != nil {
 		return 0, false, runtimeinput.State{}, err
 	}
@@ -480,7 +577,7 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 		return secondRan, secondPassed, combined, nil
 	}
 	if first != second {
-		combined, err = addRuntimeEvidenceReason(dir, env, combined, "runtime input observations changed between repeated baseline executions")
+		combined, err = addRuntimeEvidenceReasonContext(ctx, dir, env, combined, "runtime input observations changed between repeated baseline executions")
 		if err != nil {
 			return 0, false, runtimeinput.State{}, err
 		}
@@ -514,14 +611,14 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	cmd.Stderr = &buf
 	runErr := cmd.Run()
 	if ctx2.Err() == context.DeadlineExceeded {
-		state, observationErr := processObservation(testlog, moduleDir, packageDir, "baseline test process timed out", env, capture)
+		state, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process timed out", env, capture)
 		if observationErr != nil {
 			return 0, false, runtimeinput.State{}, observationErr
 		}
 		return 0, false, state, fmt.Errorf("baseline test timed out")
 	}
 	if err := ctx2.Err(); err != nil {
-		state, observationErr := processObservation(testlog, moduleDir, packageDir, "baseline test process was cancelled", env, capture)
+		state, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process was cancelled", env, capture)
 		if observationErr != nil {
 			return 0, false, runtimeinput.State{}, observationErr
 		}
@@ -534,7 +631,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if err != nil {
 		return 0, false, runtimeinput.State{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
-	state, err = processObservation(testlog, moduleDir, packageDir, "", env, capture)
+	state, err = processObservationContext(ctx, testlog, moduleDir, packageDir, "", env, capture)
 	if err != nil {
 		return 0, false, runtimeinput.State{}, err
 	}

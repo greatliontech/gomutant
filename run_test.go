@@ -284,6 +284,72 @@ func TestRunCancellationAtBatchedFreshness(t *testing.T) {
 	}
 }
 
+func TestRunCancellationAtMutantPreparation(t *testing.T) {
+	tr := fixtureTree(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var preparation []PreparationEvent
+	var decisions []RunDecision
+	findings, err := tr.Run(ctx, []Target{{
+		Symbol: "example.com/fixture/lib.Add",
+		Oracle: []string{"example.com/fixture/lib.TestAdd"},
+	}}, Options{
+		Budget:   1,
+		Decision: func(decision RunDecision) { decisions = append(decisions, decision) },
+		Progress: func(event PreparationEvent) {
+			preparation = append(preparation, event)
+			if event.Stage == PreparationMutants {
+				cancel()
+			}
+		},
+	})
+	want := []PreparationEvent{
+		{Stage: PreparationResolving, Symbol: "example.com/fixture/lib.Add"},
+		{Stage: PreparationFreshness, Symbol: "example.com/fixture/lib.Add"},
+		{Stage: PreparationMutants, Symbol: "example.com/fixture/lib.Add"},
+	}
+	if !errors.Is(err, context.Canceled) || findings != nil || len(decisions) != 0 || !slices.Equal(preparation, want) {
+		t.Fatalf("cancelled mutants = findings %+v, preparation %+v, decisions %+v, error %v", findings, preparation, decisions, err)
+	}
+}
+
+func TestRunCancellationDuringDecisionsPublishesNoFindings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs oracle baseline")
+	}
+	tr := fixtureTree(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var decisions []RunDecision
+	findings, err := tr.Run(ctx, []Target{
+		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+		{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+	}, Options{
+		Budget: 1,
+		Decision: func(decision RunDecision) {
+			decisions = append(decisions, decision)
+			cancel()
+		},
+	})
+	if !errors.Is(err, context.Canceled) || findings != nil || len(decisions) != 1 {
+		t.Fatalf("cancelled decisions = findings %+v, decisions %+v, error %v", findings, decisions, err)
+	}
+}
+
+func TestRunCancellationBeforeAggregationPublishesNoFindings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs one mutant")
+	}
+	tr := fixtureTree(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	aggregated := 0
+	findings, err := tr.Run(ctx, []Target{{
+		Symbol: "example.com/fixture/lib.Add",
+		Oracle: []string{"example.com/fixture/lib.TestAdd"},
+	}}, Options{Budget: 1, afterExecution: cancel, aggregate: func() { aggregated++ }})
+	if !errors.Is(err, context.Canceled) || findings != nil || aggregated != 0 {
+		t.Fatalf("cancelled aggregation = findings %+v, aggregation calls %d, error %v", findings, aggregated, err)
+	}
+}
+
 func TestRunValidatesBatchedProducerBeforeFindings(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")

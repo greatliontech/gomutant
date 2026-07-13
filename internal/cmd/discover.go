@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/spf13/cobra"
 )
@@ -24,8 +26,8 @@ type discoveryView struct {
 
 func newDiscoverCommand() *cobra.Command {
 	o := discoverOptions{}
-	cmd := &cobra.Command{Use: "discover", Short: "Inspect effective mutation targets", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
-		return discoverCommand(o)
+	cmd := &cobra.Command{Use: "discover", Short: "Inspect effective mutation targets", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return discoverCommand(cmd.Context(), o)
 	}}
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
@@ -37,8 +39,8 @@ func newDiscoverCommand() *cobra.Command {
 	return cmd
 }
 
-func discoverCommand(o discoverOptions) error {
-	view, err := discoverTargets(o)
+func discoverCommand(ctx context.Context, o discoverOptions) error {
+	view, err := discoverTargets(ctx, o)
 	if err != nil {
 		return err
 	}
@@ -68,9 +70,9 @@ func discoverCommand(o discoverOptions) error {
 	return nil
 }
 
-func discoverTargets(o discoverOptions) (discoveryView, error) {
+func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, error) {
 	view := discoveryView{Targets: []gomutant.TargetDescription{}, Residue: []gomutant.Residue{}}
-	tree, err := gomutant.Load(o.dir)
+	tree, err := gomutant.LoadContext(ctx, o.dir)
 	if err != nil {
 		return view, err
 	}
@@ -79,29 +81,38 @@ func discoverTargets(o discoverOptions) (discoveryView, error) {
 	case o.targetsFile != "" && o.changed != "":
 		return view, fmt.Errorf("give --targets or --changed, not both")
 	case o.targetsFile != "":
-		data, err := os.ReadFile(o.targetsFile)
+		data, err := contextio.ReadFile(ctx, o.targetsFile)
 		if err != nil {
 			return view, err
 		}
-		targets, err = gomutant.LoadTargets(data)
+		if err := ctx.Err(); err != nil {
+			return view, err
+		}
+		targets, err = gomutant.LoadTargetsContext(ctx, data)
 		if err != nil {
 			return view, err
 		}
 	case o.changed == "":
-		targets = tree.Discover()
-	default:
-		paths, err := gitref.ChangedPaths(o.dir, o.changed)
+		targets, err = tree.DiscoverContext(ctx)
 		if err != nil {
 			return view, err
 		}
-		targets, view.Residue = tree.DiscoverChanged(paths, func(p string) ([]byte, bool) {
-			return gitref.Show(o.dir, o.changed, p)
+	default:
+		paths, err := gitref.ChangedPathsContext(ctx, o.dir, o.changed)
+		if err != nil {
+			return view, err
+		}
+		targets, view.Residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
+			return gitref.ShowContext(ctx, o.dir, o.changed, p)
 		})
+		if err != nil {
+			return view, err
+		}
 	}
-	targets, err = tree.FilterTargets(targets, o.packages, o.symbols)
+	targets, err = tree.FilterTargetsContext(ctx, targets, o.packages, o.symbols)
 	if err != nil {
 		return view, err
 	}
-	view.Targets, err = tree.DescribeTargets(targets)
+	view.Targets, err = tree.DescribeTargetsContext(ctx, targets)
 	return view, err
 }

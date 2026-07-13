@@ -3,6 +3,7 @@ package gomutant
 import (
 	"bytes"
 	"context"
+	"errors"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -67,6 +68,22 @@ func TestSubjectViewsBatchByModule(t *testing.T) {
 	}
 }
 
+func TestMutantsContextEnumeratesMethods(t *testing.T) {
+	tree, err := Load(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, symbol := range []string{
+		"github.com/greatliontech/gomutant.Tree.FilterTargetsContext",
+		"github.com/greatliontech/gomutant/internal/engine.Tree.PackagePathContext",
+	} {
+		mutants, err := tree.eng.MutantsContext(context.Background(), symbol, 0)
+		if err != nil || len(mutants) == 0 {
+			t.Fatalf("%s mutants = %d, %v", symbol, len(mutants), err)
+		}
+	}
+}
+
 func TestSubjectViewsPartitionWorkspaceModules(t *testing.T) {
 	tree, err := Load("internal/engine/testdata/workspacemod")
 	if err != nil {
@@ -97,48 +114,54 @@ func TestSubjectViewsPartitionWorkspaceModules(t *testing.T) {
 func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
 	var testsCalls, validationCalls, contextCalls, rapidCalls int
 	preparation := &runPreparation{
-		packageOf: func(symbol string) (string, string) {
-			return "example.com/p", strings.TrimPrefix(symbol, "example.com/p.")
+		packageOf: func(_ context.Context, symbol string) (string, string, error) {
+			return "example.com/p", strings.TrimPrefix(symbol, "example.com/p."), nil
 		},
-		testsOf: func(string) []string {
+		testsOf: func(context.Context, string) ([]string, error) {
 			testsCalls++
-			return []string{"example.com/p.TestP"}
+			return []string{"example.com/p.TestP"}, nil
 		},
-		validate: func([]string) error {
+		validate: func(context.Context, []string) error {
 			validationCalls++
 			return nil
 		},
-		contextFor: func(string) (string, string, error) {
+		contextFor: func(context.Context, string) (string, string, error) {
 			contextCalls++
 			return "/module", "/module/p", nil
 		},
-		splitRapidPkgs: func(packages []string) ([]string, []string) {
+		splitRapidPkgs: func(_ context.Context, packages []string) ([]string, []string, error) {
 			rapidCalls++
-			return []string{packages[0]}, packages[1:]
+			return []string{packages[0]}, packages[1:], nil
 		},
 		derivedOracles: map[string][]string{},
 		validations:    map[string]oracleValidationResult{},
 		contexts:       map[string]packageContextResult{},
 	}
 
-	first := preparation.oracle(Target{Symbol: "example.com/p.F"})
+	first, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.F"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	first[0] = "changed by caller"
-	second := preparation.oracle(Target{Symbol: "example.com/p.G"})
+	second, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.G"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if testsCalls != 1 || !slices.Equal(second, []string{"example.com/p.TestP"}) {
 		t.Fatalf("derived oracle calls = %d, second = %v", testsCalls, second)
 	}
-	if explicit := preparation.oracle(Target{Symbol: "example.com/p.H", Oracle: []string{"example.com/q.TestQ"}}); !slices.Equal(explicit, []string{"example.com/q.TestQ"}) || testsCalls != 1 {
+	if explicit, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.H", Oracle: []string{"example.com/q.TestQ"}}); err != nil || !slices.Equal(explicit, []string{"example.com/q.TestQ"}) || testsCalls != 1 {
 		t.Fatalf("explicit oracle = %v, derived calls = %d", explicit, testsCalls)
 	}
 
 	oracle := []string{"example.com/p.TestP", "example.com/q.TestQ"}
-	if err := preparation.validateOracle(oracle); err != nil {
+	if err := preparation.validateOracle(context.Background(), oracle); err != nil {
 		t.Fatal(err)
 	}
-	if err := preparation.validateOracle(slices.Clone(oracle)); err != nil {
+	if err := preparation.validateOracle(context.Background(), slices.Clone(oracle)); err != nil {
 		t.Fatal(err)
 	}
-	if err := preparation.validateOracle([]string{oracle[1], oracle[0]}); err != nil {
+	if err := preparation.validateOracle(context.Background(), []string{oracle[1], oracle[0]}); err != nil {
 		t.Fatal(err)
 	}
 	if validationCalls != 2 {
@@ -146,7 +169,7 @@ func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
 	}
 
 	for range 2 {
-		moduleDir, packageDir, err := preparation.packageContext("example.com/p")
+		moduleDir, packageDir, err := preparation.packageContext(context.Background(), "example.com/p")
 		if err != nil || moduleDir != "/module" || packageDir != "/module/p" {
 			t.Fatalf("package context = %q, %q, %v", moduleDir, packageDir, err)
 		}
@@ -155,11 +178,35 @@ func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
 		t.Fatalf("package context calls = %d", contextCalls)
 	}
 
-	if !preparation.rapidPackages([]string{"example.com/p", "example.com/q"})["example.com/p"] {
+	rapid, err := preparation.rapidPackages(context.Background(), []string{"example.com/p", "example.com/q"})
+	if err != nil || !rapid["example.com/p"] {
 		t.Fatal("rapid package not classified")
 	}
-	if !preparation.rapidPackages([]string{"ignored after first scan"})["example.com/p"] || rapidCalls != 1 {
+	rapid, err = preparation.rapidPackages(context.Background(), []string{"ignored after first scan"})
+	if err != nil || !rapid["example.com/p"] || rapidCalls != 1 {
 		t.Fatalf("rapid scan calls = %d", rapidCalls)
+	}
+}
+
+func TestRunPreparationDoesNotMemoizeCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	preparation := &runPreparation{
+		validate: func(context.Context, []string) error {
+			calls++
+			cancel()
+			return nil
+		},
+		validations: map[string]oracleValidationResult{},
+	}
+	if err := preparation.validateOracle(ctx, []string{"p.TestP"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled validation = %v", err)
+	}
+	if err := preparation.validateOracle(context.Background(), []string{"p.TestP"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("validation calls = %d, cancellation was memoized", calls)
 	}
 }
 
@@ -191,7 +238,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence,
 	}
 	calls := 0
-	current := func(string, string, []string) (runtimeinput.State, error) {
+	current := func(context.Context, string, string, []string) (runtimeinput.State, error) {
 		calls++
 		return state, nil
 	}
@@ -202,7 +249,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	movementCalls := 0
 	moved := state
 	moved.Digest = "moved"
-	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), func(string, string, []string) (runtimeinput.State, error) {
+	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), func(context.Context, string, string, []string) (runtimeinput.State, error) {
 		movementCalls++
 		if movementCalls == 1 {
 			return state, nil
@@ -236,13 +283,39 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		TargetEvidence: workspaceTargetEvidence, OracleEvidence: workspaceOracleEvidence,
 	}
 	calls = 0
-	current = func(string, string, []string) (runtimeinput.State, error) {
+	current = func(context.Context, string, string, []string) (runtimeinput.State, error) {
 		calls++
 		return workspaceState, nil
 	}
 	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), workspacePrior, workspaceTarget, workspaceOracle, true, engine.OperatorSet, time.Minute.String(), current)
 	if err != nil || !matches || calls != 2 {
 		t.Fatalf("cross-module matches = %v, calls = %d, error = %v", matches, calls, err)
+	}
+}
+
+func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
+	tree := fixtureTree(t)
+	views, err := tree.newSubjectViews(context.Background(), []string{"example.com/fixture/lib.Add"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := views.bySymbol["example.com/fixture/lib.Add"]
+	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, _, err := attachEvidence(target, nil, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	prior := Finding{OperatorSet: engine.OperatorSet, OracleExplicit: true, Timeout: time.Minute.String(), TargetEvidence: evidence}
+	matches, err := evidenceSetMatchesContextWithCurrent(ctx, prior, target, nil, true, engine.OperatorSet, time.Minute.String(), func(ctx context.Context, _, _ string, _ []string) (runtimeinput.State, error) {
+		cancel()
+		return runtimeinput.State{}, ctx.Err()
+	})
+	if !errors.Is(err, context.Canceled) || matches {
+		t.Fatalf("cancelled runtime check = %v, %v", matches, err)
 	}
 }
 

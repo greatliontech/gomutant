@@ -10,6 +10,30 @@ import (
 	"testing"
 )
 
+type cancelWhenTempWrittenContext struct {
+	context.Context
+	dir    string
+	cancel context.CancelFunc
+}
+
+func (c cancelWhenTempWrittenContext) Err() error {
+	if err := c.Context.Err(); err != nil {
+		return err
+	}
+	entries, _ := os.ReadDir(c.dir)
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".gomutant-findings-") {
+			continue
+		}
+		info, err := entry.Info()
+		if err == nil && info.Size() > 0 {
+			c.cancel()
+			break
+		}
+	}
+	return c.Context.Err()
+}
+
 // TestApplyEdits pins the edits form of an ephemeral replacement
 // (REQ-exec-ephemeral): sequential exact-match application; zero matches,
 // ambiguity, and empty matches are refused rather than guessed.
@@ -164,6 +188,18 @@ func TestUpdateDocument(t *testing.T) {
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode()&modeMask != wantMode {
 		t.Fatalf("document mode = %v, %v; want %v", info, err, wantMode)
+	}
+	base, cancelBeforeCommit := context.WithCancel(context.Background())
+	ctx = cancelWhenTempWrittenContext{Context: base, dir: filepath.Dir(path), cancel: cancelBeforeCommit}
+	err = UpdateDocumentContext(ctx, path, func(current []Finding) ([]Finding, error) {
+		return current[:1], nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-commit cancellation = %v", err)
+	}
+	after, err = os.ReadFile(path)
+	if err != nil || string(after) != before {
+		t.Fatalf("pre-commit cancellation changed document: %v\n%s", err, after)
 	}
 
 	// A held lock is surfaced, never bypassed.

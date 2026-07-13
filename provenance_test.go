@@ -1,6 +1,8 @@
 package gomutant
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +10,24 @@ import (
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
+
+func TestRepositoryContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if state, err := captureRepositoryStateContext(ctx, t.TempDir()); !errors.Is(err, context.Canceled) || state.available {
+		t.Fatalf("cancelled capture = %+v, %v", state, err)
+	}
+	repository := repositoryState{root: t.TempDir(), commit: "commit", available: true}
+	if _, err := repository.pathsDirtyContext(ctx, []string{"source.go"}, runtimeinput.State{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled dirty check = %v", err)
+	}
+	if _, err := repository.historicalPackageFilesContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled history check = %v", err)
+	}
+	if _, err := repository.headMovedContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled head check = %v", err)
+	}
+}
 
 func TestModuleSelectionPathsIncludeNestedModuleMetadata(t *testing.T) {
 	root := t.TempDir()

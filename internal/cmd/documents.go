@@ -1,21 +1,31 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/contextio"
 )
 
 func loadFindings(path string) ([]gomutant.Finding, error) {
-	data, err := os.ReadFile(path)
+	return loadFindingsContext(context.Background(), path)
+}
+
+func loadFindingsContext(ctx context.Context, path string) ([]gomutant.Finding, error) {
+	data, err := contextio.ReadFile(ctx, path)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return gomutant.ParseFindings(data)
+	findings, err := gomutant.ParseFindings(data)
+	if err != nil {
+		return nil, err
+	}
+	return findings, ctx.Err()
 }
 
 func findingsAt(dir, path string) string {

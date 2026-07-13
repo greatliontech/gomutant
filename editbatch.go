@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -76,6 +77,13 @@ type resolvedEdit struct {
 // never writes the tree; the returned full-file replacements are ready for a
 // later overlay run.
 func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error) {
+	return prepareEditBatchContext(context.Background(), root, edits)
+}
+
+func prepareEditBatchContext(ctx context.Context, root string, edits []BatchEdit) ([]fileReplacement, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(edits) == 0 {
 		return nil, fmt.Errorf("gomutant: edit batch is empty")
 	}
@@ -87,6 +95,9 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 	}
 	byAbs := map[string]*fileEdits{}
 	for i, edit := range edits {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if edit.OldString == "" {
 			return nil, fmt.Errorf("gomutant: batch edit %d has an empty match", i+1)
 		}
@@ -99,9 +110,12 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 		}
 		group := byAbs[abs]
 		if group == nil {
-			source, err := os.ReadFile(abs)
+			source, err := readFileContext(ctx, abs)
 			if err != nil {
 				return nil, fmt.Errorf("gomutant: read %s: %w", edit.File, err)
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
 			group = &fileEdits{file: edit.File, abs: abs, source: source}
 			byAbs[abs] = group
@@ -123,10 +137,16 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 
 	replacements := make([]fileReplacement, 0, len(byAbs))
 	for _, group := range byAbs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		sort.Slice(group.entries, func(i, j int) bool { return group.entries[i].start < group.entries[j].start })
 		var out bytes.Buffer
 		cursor := 0
 		for _, edit := range group.entries {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if edit.start < cursor {
 				return nil, fmt.Errorf("gomutant: batch edit %d overlaps another edit in %s", edit.index, group.file)
 			}
@@ -146,7 +166,7 @@ func prepareEditBatch(root string, edits []BatchEdit) ([]fileReplacement, error)
 		return nil, fmt.Errorf("gomutant: edit batch changes no files")
 	}
 	sort.Slice(replacements, func(i, j int) bool { return replacements[i].File < replacements[j].File })
-	return replacements, nil
+	return replacements, ctx.Err()
 }
 
 func resolveTreeFile(root, file string) (string, error) {

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -49,6 +50,12 @@ type FileSurface struct {
 // than vanishing. Test files carry IsTest and no symbols — test sources are
 // oracles, never targets.
 func (t *Tree) Surface(paths []string, ref func(path string) ([]byte, bool)) []FileSurface {
+	surface, _ := t.SurfaceContext(context.Background(), paths, ref)
+	return surface
+}
+
+// SurfaceContext is Surface with cooperative cancellation.
+func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path string) ([]byte, bool)) ([]FileSurface, error) {
 	// Working-side declarations per tree-relative path: each declaration's
 	// full resolver symbol and its body hash, keyed by short name so the
 	// reference comparison matches within the file.
@@ -62,8 +69,14 @@ func (t *Tree) Surface(paths []string, ref func(path string) ([]byte, bool)) []F
 	}
 	byPath := map[string]*fileDecls{}
 	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		pkgPath := basePackagePath(pkg)
 		for _, f := range pkg.Syntax {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			abs := pkg.Fset.Position(f.Pos()).Filename
 			rel, err := filepath.Rel(t.dir, abs)
 			if err != nil || strings.HasPrefix(rel, "..") {
@@ -87,7 +100,7 @@ func (t *Tree) Surface(paths []string, ref func(path string) ([]byte, bool)) []F
 				if sym == "" {
 					continue
 				}
-				src, err := t.sourceOf(pkg, bodyNode(fn))
+				src, err := t.sourceOfContext(ctx, pkg, bodyNode(fn))
 				if err != nil {
 					continue
 				}
@@ -97,6 +110,9 @@ func (t *Tree) Surface(paths []string, ref func(path string) ([]byte, bool)) []F
 	}
 	out := make([]FileSurface, 0, len(paths))
 	for _, p := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		fs := FileSurface{Path: p, IsGo: strings.HasSuffix(p, ".go"), IsTest: strings.HasSuffix(p, "_test.go")}
 		// Test files are oracles, never mutation targets: classified, no
 		// symbols surfaced (REQ-target-changed).
@@ -110,6 +126,9 @@ func (t *Tree) Surface(paths []string, ref func(path string) ([]byte, bool)) []F
 			fs.DeclaredBodies = len(d.byKey)
 			var old map[string]string
 			if rb, ok := ref(p); ok {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				old = refDeclHashes(rb)
 			}
 			for key, wd := range d.byKey {
@@ -127,7 +146,7 @@ func (t *Tree) Surface(paths []string, ref func(path string) ([]byte, bool)) []F
 		}
 		out = append(out, fs)
 	}
-	return out
+	return out, ctx.Err()
 }
 
 // refDeclHashes parses reference file bytes and returns each top-level

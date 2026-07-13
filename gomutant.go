@@ -8,6 +8,7 @@
 package gomutant
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,9 +42,20 @@ type Target struct {
 // within one kind are alternatives; package and symbol filters both constrain
 // the result when supplied.
 func (t *Tree) FilterTargets(targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
+	return t.FilterTargetsContext(context.Background(), targets, packagePatterns, symbolPatterns)
+}
+
+// FilterTargetsContext is FilterTargets with cooperative cancellation.
+func (t *Tree) FilterTargetsContext(ctx context.Context, targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	compile := func(kind string, sources []string) ([]*glob.Pattern, error) {
 		patterns := make([]*glob.Pattern, 0, len(sources))
 		for _, source := range sources {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			pattern, err := glob.Compile(source)
 			if err != nil {
 				return nil, fmt.Errorf("gomutant: invalid %s filter %q: %w", kind, source, err)
@@ -76,11 +88,14 @@ func (t *Tree) FilterTargets(targets []Target, packagePatterns, symbolPatterns [
 	}
 	selected := make([]Target, 0, len(targets))
 	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !matches(symbols, target.Symbol) {
 			continue
 		}
 		if len(packages) != 0 {
-			pkgPath, err := t.eng.PackagePath(target.Symbol)
+			pkgPath, err := t.eng.PackagePathContext(ctx, target.Symbol)
 			if err != nil {
 				return nil, err
 			}
@@ -108,17 +123,29 @@ type TargetDescription struct {
 // DescribeTargets resolves and validates the effective oracle of every target
 // without running mutants (REQ-target-inspection).
 func (t *Tree) DescribeTargets(targets []Target) ([]TargetDescription, error) {
+	return t.DescribeTargetsContext(context.Background(), targets)
+}
+
+// DescribeTargetsContext is DescribeTargets with cooperative cancellation.
+func (t *Tree) DescribeTargetsContext(ctx context.Context, targets []Target) ([]TargetDescription, error) {
 	descriptions := make([]TargetDescription, 0, len(targets))
 	seen := map[string]bool{}
 	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if seen[target.Symbol] {
 			return nil, fmt.Errorf("gomutant: duplicate target symbol %s", target.Symbol)
 		}
 		seen[target.Symbol] = true
-		oracle := append([]string{}, t.resolveOracle(target)...)
+		oracle, err := t.resolveOracleContext(ctx, target)
+		if err != nil {
+			return nil, err
+		}
+		oracle = append([]string{}, oracle...)
 		sort.Strings(oracle)
 		if len(oracle) != 0 {
-			if err := t.eng.ValidateOracle(oracle); err != nil {
+			if err := t.eng.ValidateOracleContext(ctx, oracle); err != nil {
 				return nil, fmt.Errorf("target %s: %w", target.Symbol, err)
 			}
 		}
@@ -132,7 +159,7 @@ func (t *Tree) DescribeTargets(targets []Target) ([]TargetDescription, error) {
 		case len(oracle) == 0:
 			description.Skipped = "no oracle"
 		default:
-			_, err := t.eng.BodyHash(target.Symbol)
+			_, err := t.eng.BodyHashContext(ctx, target.Symbol)
 			if errors.Is(err, engine.ErrNotFunction) {
 				description.Skipped = "not a function"
 			} else if err != nil {
@@ -142,7 +169,7 @@ func (t *Tree) DescribeTargets(targets []Target) ([]TargetDescription, error) {
 		descriptions = append(descriptions, description)
 	}
 	sort.Slice(descriptions, func(i, j int) bool { return descriptions[i].Symbol < descriptions[j].Symbol })
-	return descriptions, nil
+	return descriptions, ctx.Err()
 }
 
 // Residue is one changed-but-untargeted path from changed-scope discovery,
@@ -161,11 +188,19 @@ type Tree struct {
 // Load loads the Go tree rooted at dir: a module, or a workspace whose
 // go.work members are all in scope.
 func Load(dir string) (*Tree, error) {
+	return LoadContext(context.Background(), dir)
+}
+
+// LoadContext is Load with caller-owned cancellation.
+func LoadContext(ctx context.Context, dir string) (*Tree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
 	}
-	e, err := engine.Load(abs)
+	e, err := engine.LoadContext(ctx, abs)
 	if err != nil {
 		return nil, err
 	}
@@ -177,12 +212,24 @@ func Load(dir string) (*Tree, error) {
 // (REQ-target-producers): whole-package discovery is a usable run without a
 // caller enumerating anything.
 func (t *Tree) Discover() []Target {
-	syms := t.eng.DeclaredSymbols()
+	targets, _ := t.DiscoverContext(context.Background())
+	return targets
+}
+
+// DiscoverContext is Discover with cooperative cancellation.
+func (t *Tree) DiscoverContext(ctx context.Context) ([]Target, error) {
+	syms, err := t.eng.DeclaredSymbolsContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Target, 0, len(syms))
 	for _, s := range syms {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		out = append(out, Target{Symbol: s})
 	}
-	return out
+	return out, nil
 }
 
 // DiscoverChanged targets only the symbols whose bodies differ from a
@@ -193,9 +240,22 @@ func (t *Tree) Discover() []Target {
 // engine-level reason each path yielded no target, so the caller sees the
 // whole changed surface, never a silently narrowed one.
 func (t *Tree) DiscoverChanged(paths []string, ref func(path string) ([]byte, bool)) ([]Target, []Residue) {
+	targets, residue, _ := t.DiscoverChangedContext(context.Background(), paths, ref)
+	return targets, residue
+}
+
+// DiscoverChangedContext is DiscoverChanged with cooperative cancellation.
+func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref func(path string) ([]byte, bool)) ([]Target, []Residue, error) {
 	var targets []Target
 	var residue []Residue
-	for _, fs := range t.eng.Surface(paths, ref) {
+	surface, err := t.eng.SurfaceContext(ctx, paths, ref)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, fs := range surface {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		switch {
 		case fs.IsTest:
 			residue = append(residue, Residue{Path: fs.Path, Reason: "test file: tests are oracles, never targets"})
@@ -220,7 +280,7 @@ func (t *Tree) DiscoverChanged(paths []string, ref func(path string) ([]byte, bo
 			residue = append(residue, Residue{Path: fs.Path, Reason: "formatting-only churn: every body is canonically unchanged"})
 		}
 	}
-	return targets, residue
+	return targets, residue, nil
 }
 
 // targetsDocument is the config-file form of a target set
@@ -251,14 +311,22 @@ func ParseTargets(data []byte) ([]Target, error) {
 // (REQ-target-oracle, REQ-target-default). A target whose effective oracle
 // is empty has nothing that can kill — the caller sees it and decides.
 func (t *Tree) resolveOracle(tg Target) []string {
+	oracle, _ := t.resolveOracleContext(context.Background(), tg)
+	return oracle
+}
+
+func (t *Tree) resolveOracleContext(ctx context.Context, tg Target) ([]string, error) {
 	if len(tg.Oracle) > 0 || tg.OracleExplicit {
-		return tg.Oracle
+		return tg.Oracle, ctx.Err()
 	}
-	pkg, _ := t.eng.PackageOf(tg.Symbol)
+	pkg, _, err := t.eng.PackageOfContext(ctx, tg.Symbol)
+	if err != nil {
+		return nil, err
+	}
 	if pkg == "" {
-		return nil
+		return nil, nil
 	}
-	return t.eng.TestsOf(pkg)
+	return t.eng.TestsOfContext(ctx, pkg)
 }
 
 // pkgRun is one package's oracle execution: the package and the -run
@@ -354,4 +422,19 @@ func LoadTargets(data []byte) ([]Target, error) {
 		return ParseStipulatorTargets(data)
 	}
 	return ParseTargets(data)
+}
+
+// LoadTargetsContext is LoadTargets with cancellation before and after decoding.
+func LoadTargetsContext(ctx context.Context, data []byte) ([]Target, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	targets, err := LoadTargets(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return targets, nil
 }

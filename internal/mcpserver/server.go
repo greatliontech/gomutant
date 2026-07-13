@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/gitref"
 )
 
@@ -97,14 +98,22 @@ func localPath(name, p string) error {
 }
 
 func (s *Server) loadFindings(override string) ([]gomutant.Finding, error) {
-	data, err := os.ReadFile(s.findingsPath(override))
+	return s.loadFindingsContext(context.Background(), override)
+}
+
+func (s *Server) loadFindingsContext(ctx context.Context, override string) ([]gomutant.Finding, error) {
+	data, err := contextio.ReadFile(ctx, s.findingsPath(override))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return gomutant.ParseFindings(data)
+	findings, err := gomutant.ParseFindings(data)
+	if err != nil {
+		return nil, err
+	}
+	return findings, ctx.Err()
 }
 
 type runIn struct {
@@ -144,8 +153,11 @@ type runOut struct {
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (*mcp.CallToolResult, runOut, error) {
 	var out runOut
+	if err := ctx.Err(); err != nil {
+		return nil, out, err
+	}
 	out.Preparation = append(out.Preparation, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
-	tree, err := gomutant.Load(s.dir)
+	tree, err := gomutant.LoadContext(ctx, s.dir)
 	if err != nil {
 		return nil, out, err
 	}
@@ -169,30 +181,39 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		if err := localPath("targets_path", in.TargetsPath); err != nil {
 			return nil, out, err
 		}
-		data, err := os.ReadFile(filepath.Join(s.dir, filepath.FromSlash(in.TargetsPath)))
+		data, err := contextio.ReadFile(ctx, filepath.Join(s.dir, filepath.FromSlash(in.TargetsPath)))
 		if err != nil {
 			return nil, out, err
 		}
-		if targets, err = gomutant.LoadTargets(data); err != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, out, err
+		}
+		if targets, err = gomutant.LoadTargetsContext(ctx, data); err != nil {
 			return nil, out, err
 		}
 	case in.TargetsJSON != "":
-		if targets, err = gomutant.LoadTargets([]byte(in.TargetsJSON)); err != nil {
+		if targets, err = gomutant.LoadTargetsContext(ctx, []byte(in.TargetsJSON)); err != nil {
 			return nil, out, err
 		}
 	case in.Changed != "":
-		paths, err := gitref.ChangedPaths(s.dir, in.Changed)
+		paths, err := gitref.ChangedPathsContext(ctx, s.dir, in.Changed)
 		if err != nil {
 			return nil, out, err
 		}
-		targets, out.Residue = tree.DiscoverChanged(paths, func(p string) ([]byte, bool) {
-			return gitref.Show(s.dir, in.Changed, p)
+		targets, out.Residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
+			return gitref.ShowContext(ctx, s.dir, in.Changed, p)
 		})
+		if err != nil {
+			return nil, out, err
+		}
 	default:
-		targets = tree.Discover()
+		targets, err = tree.DiscoverContext(ctx)
+		if err != nil {
+			return nil, out, err
+		}
 		wholeTree = true
 	}
-	targets, err = tree.FilterTargets(targets, in.Packages, in.Symbols)
+	targets, err = tree.FilterTargetsContext(ctx, targets, in.Packages, in.Symbols)
 	if err != nil {
 		return nil, out, err
 	}
@@ -217,8 +238,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 		return nil, out, nil
 	}
-	prior, err := s.loadFindings(in.Findings)
+	prior, err := s.loadFindingsContext(ctx, in.Findings)
 	if err != nil {
+		return nil, out, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
@@ -235,6 +259,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	out.Summary = gomutant.SummarizeRun(findings)
 	for _, f := range findings {
+		if err := ctx.Err(); err != nil {
+			return nil, out, err
+		}
 		out.Findings = append(out.Findings, findingOut{
 			Symbol: f.Symbol, Labels: f.Labels,
 			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
@@ -273,7 +300,7 @@ type discoverOut struct {
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
 	var out discoverOut
-	tree, err := gomutant.Load(s.dir)
+	tree, err := gomutant.LoadContext(ctx, s.dir)
 	if err != nil {
 		return nil, out, err
 	}
@@ -296,35 +323,44 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 		if err := localPath("targets_path", in.TargetsPath); err != nil {
 			return nil, out, err
 		}
-		data, err := os.ReadFile(filepath.Join(s.dir, filepath.FromSlash(in.TargetsPath)))
+		data, err := contextio.ReadFile(ctx, filepath.Join(s.dir, filepath.FromSlash(in.TargetsPath)))
 		if err != nil {
 			return nil, out, err
 		}
-		targets, err = gomutant.LoadTargets(data)
+		if err := ctx.Err(); err != nil {
+			return nil, out, err
+		}
+		targets, err = gomutant.LoadTargetsContext(ctx, data)
 		if err != nil {
 			return nil, out, err
 		}
 	case in.TargetsJSON != "":
-		targets, err = gomutant.LoadTargets([]byte(in.TargetsJSON))
+		targets, err = gomutant.LoadTargetsContext(ctx, []byte(in.TargetsJSON))
 		if err != nil {
 			return nil, out, err
 		}
 	case in.Changed != "":
-		paths, err := gitref.ChangedPaths(s.dir, in.Changed)
+		paths, err := gitref.ChangedPathsContext(ctx, s.dir, in.Changed)
 		if err != nil {
 			return nil, out, err
 		}
-		targets, out.Residue = tree.DiscoverChanged(paths, func(p string) ([]byte, bool) {
-			return gitref.Show(s.dir, in.Changed, p)
+		targets, out.Residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
+			return gitref.ShowContext(ctx, s.dir, in.Changed, p)
 		})
+		if err != nil {
+			return nil, out, err
+		}
 	default:
-		targets = tree.Discover()
+		targets, err = tree.DiscoverContext(ctx)
+		if err != nil {
+			return nil, out, err
+		}
 	}
-	targets, err = tree.FilterTargets(targets, in.Packages, in.Symbols)
+	targets, err = tree.FilterTargetsContext(ctx, targets, in.Packages, in.Symbols)
 	if err != nil {
 		return nil, out, err
 	}
-	out.Targets, err = tree.DescribeTargets(targets)
+	out.Targets, err = tree.DescribeTargetsContext(ctx, targets)
 	if err != nil {
 		return nil, out, err
 	}
@@ -352,22 +388,28 @@ type findingsOut struct {
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
 	out := findingsOut{Findings: []inspectedFinding{}}
-	all, err := s.loadFindings(in.Findings)
+	all, err := s.loadFindingsContext(ctx, in.Findings)
 	if err != nil {
+		return nil, out, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
 	if len(all) == 0 {
 		return nil, out, nil
 	}
-	tree, err := gomutant.Load(s.dir)
+	tree, err := gomutant.LoadContext(ctx, s.dir)
 	if err != nil {
 		return nil, out, err
 	}
 	for _, finding := range all {
+		if err := ctx.Err(); err != nil {
+			return nil, out, err
+		}
 		if in.Label != "" && !containsLabel(finding.Labels, in.Label) {
 			continue
 		}
-		inspection, err := tree.InspectFinding(finding)
+		inspection, err := tree.InspectFindingContext(ctx, finding)
 		if err != nil {
 			return nil, out, err
 		}
@@ -470,7 +512,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 			}
 		}
 	}
-	tree, err := gomutant.Load(s.dir)
+	tree, err := gomutant.LoadContext(ctx, s.dir)
 	if err != nil {
 		return nil, nil, err
 	}
