@@ -199,10 +199,10 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	// remaining tests in it prove nothing further about this mutant.
 	testlog := filepath.Join(tmp, "mutant.testlog")
 	baseTestlog := filepath.Join(tmp, "baseline.testlog")
-	baseArgs := append([]string{"test", "-json", "-count=1", "-failfast", "-run", runRegex}, testPkgs...)
-	baseArgs = append(baseArgs, binFlags...)
-	args := append([]string{"test", "-json", "-overlay", overlay, "-count=1", "-failfast", "-run", runRegex}, testPkgs...)
-	args = append(args, binFlags...)
+	baseTail := append([]string{"-count=1", "-failfast", "-run", runRegex}, testPkgs...)
+	baseArgs := goTestArgs(timeout, append(baseTail, binFlags...)...)
+	mutantTail := append([]string{"-overlay", overlay, "-count=1", "-failfast", "-run", runRegex}, testPkgs...)
+	args := goTestArgs(timeout, append(mutantTail, binFlags...)...)
 	if capture {
 		args = append(args, "-test.testlogfile="+testlog)
 		baseArgs = append(baseArgs, "-test.testlogfile="+baseTestlog)
@@ -433,7 +433,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
 	// fails on the clean baseline would otherwise write a reproducer into
 	// the tree, the very invariant the runner protects (REQ-mut-overlay).
-	args := append([]string{"test", "-json", "-count=1", "-run", run, testPkg}, binFlags...)
+	args := goTestArgs(timeout, append([]string{"-count=1", "-run", run, testPkg}, binFlags...)...)
 	capture := moduleDir != "" && packageDir != ""
 	var testlog string
 	if capture {
@@ -478,6 +478,15 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		return 0, false, runtimeinput.State{}, err
 	}
 	return ran, runErr == nil, state, nil
+}
+
+func goTestArgs(timeout time.Duration, tail ...string) []string {
+	testTimeout := timeout
+	if timeout <= time.Duration(1<<63-1)-time.Second {
+		testTimeout += time.Second
+	}
+	args := []string{"test", "-json", "-timeout", testTimeout.String()}
+	return append(args, tail...)
 }
 
 // failedPackage scans a go test -json stream for a package-level fail event,

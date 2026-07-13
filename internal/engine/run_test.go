@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -428,6 +429,7 @@ func TestProbeBaseline(t *testing.T) {
 	}
 }
 
+//gofresh:pure
 func TestProbeBaselineRejectsRuntimeInputDrift(t *testing.T) {
 	tr := fixtureTree(t)
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
@@ -445,6 +447,7 @@ func TestProbeBaselineRejectsRuntimeInputDrift(t *testing.T) {
 	}
 }
 
+//gofresh:pure
 func TestProbeBaselineRejectsResultDrift(t *testing.T) {
 	tr := fixtureTree(t)
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
@@ -462,5 +465,18 @@ func TestProbeBaselineRejectsResultDrift(t *testing.T) {
 func TestLoadRefusesUnsupportedProcessExecution(t *testing.T) {
 	if _, err := load(t.TempDir(), false); err == nil || !strings.Contains(err.Error(), "supports Unix and Windows hosts") {
 		t.Fatalf("unsupported process execution = %v", err)
+	}
+}
+
+func TestGoTestArgs(t *testing.T) {
+	got := goTestArgs(11*time.Minute, "-run", "^TestF$", "example.com/p")
+	want := []string{"test", "-json", "-timeout", "11m1s", "-run", "^TestF$", "example.com/p"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("go test args = %v, want %v", got, want)
+	}
+	max := time.Duration(1<<63 - 1)
+	got = goTestArgs(max)
+	if got[3] != max.String() {
+		t.Fatalf("maximum timeout wrapped to %q", got[3])
 	}
 }
