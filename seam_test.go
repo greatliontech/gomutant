@@ -11,6 +11,7 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 func TestSubjectViewsBatchByModule(t *testing.T) {
@@ -90,6 +91,158 @@ func TestSubjectViewsPartitionWorkspaceModules(t *testing.T) {
 	subTest := views.bySymbol[symbols[3]]
 	if root.view != rootTest.view || sub.view != subTest.view || root.view == sub.view || root.moduleDir == sub.moduleDir {
 		t.Fatalf("workspace partition = root %p/%s, sub %p/%s", root.view, root.moduleDir, sub.view, sub.moduleDir)
+	}
+}
+
+func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
+	var testsCalls, validationCalls, contextCalls, rapidCalls int
+	preparation := &runPreparation{
+		packageOf: func(symbol string) (string, string) {
+			return "example.com/p", strings.TrimPrefix(symbol, "example.com/p.")
+		},
+		testsOf: func(string) []string {
+			testsCalls++
+			return []string{"example.com/p.TestP"}
+		},
+		validate: func([]string) error {
+			validationCalls++
+			return nil
+		},
+		contextFor: func(string) (string, string, error) {
+			contextCalls++
+			return "/module", "/module/p", nil
+		},
+		splitRapidPkgs: func(packages []string) ([]string, []string) {
+			rapidCalls++
+			return []string{packages[0]}, packages[1:]
+		},
+		derivedOracles: map[string][]string{},
+		validations:    map[string]oracleValidationResult{},
+		contexts:       map[string]packageContextResult{},
+	}
+
+	first := preparation.oracle(Target{Symbol: "example.com/p.F"})
+	first[0] = "changed by caller"
+	second := preparation.oracle(Target{Symbol: "example.com/p.G"})
+	if testsCalls != 1 || !slices.Equal(second, []string{"example.com/p.TestP"}) {
+		t.Fatalf("derived oracle calls = %d, second = %v", testsCalls, second)
+	}
+	if explicit := preparation.oracle(Target{Symbol: "example.com/p.H", Oracle: []string{"example.com/q.TestQ"}}); !slices.Equal(explicit, []string{"example.com/q.TestQ"}) || testsCalls != 1 {
+		t.Fatalf("explicit oracle = %v, derived calls = %d", explicit, testsCalls)
+	}
+
+	oracle := []string{"example.com/p.TestP", "example.com/q.TestQ"}
+	if err := preparation.validateOracle(oracle); err != nil {
+		t.Fatal(err)
+	}
+	if err := preparation.validateOracle(slices.Clone(oracle)); err != nil {
+		t.Fatal(err)
+	}
+	if err := preparation.validateOracle([]string{oracle[1], oracle[0]}); err != nil {
+		t.Fatal(err)
+	}
+	if validationCalls != 2 {
+		t.Fatalf("validation calls = %d, want exact ordered sequences once", validationCalls)
+	}
+
+	for range 2 {
+		moduleDir, packageDir, err := preparation.packageContext("example.com/p")
+		if err != nil || moduleDir != "/module" || packageDir != "/module/p" {
+			t.Fatalf("package context = %q, %q, %v", moduleDir, packageDir, err)
+		}
+	}
+	if contextCalls != 1 {
+		t.Fatalf("package context calls = %d", contextCalls)
+	}
+
+	if !preparation.rapidPackages([]string{"example.com/p", "example.com/q"})["example.com/p"] {
+		t.Fatal("rapid package not classified")
+	}
+	if !preparation.rapidPackages([]string{"ignored after first scan"})["example.com/p"] || rapidCalls != 1 {
+		t.Fatalf("rapid scan calls = %d", rapidCalls)
+	}
+}
+
+func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
+	tree := fixtureTree(t)
+	views, err := tree.newSubjectViews(context.Background(), []string{
+		"example.com/fixture/lib.Add",
+		"example.com/fixture/lib.TestAdd",
+		"example.com/fixture/lib.TestWeak",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := views.bySymbol["example.com/fixture/lib.Add"]
+	oracle := []*subjectView{
+		views.bySymbol["example.com/fixture/lib.TestAdd"],
+		views.bySymbol["example.com/fixture/lib.TestWeak"],
+	}
+	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetEvidence, oracleEvidence, err := attachEvidence(target, oracle, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := Finding{
+		OperatorSet: engine.OperatorSet, OracleExplicit: true, Timeout: time.Minute.String(),
+		TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence,
+	}
+	calls := 0
+	current := func(string, string, []string) (runtimeinput.State, error) {
+		calls++
+		return state, nil
+	}
+	matches, err := evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), current)
+	if err != nil || !matches || calls != 2 {
+		t.Fatalf("matches = %v, calls = %d, error = %v", matches, calls, err)
+	}
+	movementCalls := 0
+	moved := state
+	moved.Digest = "moved"
+	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), func(string, string, []string) (runtimeinput.State, error) {
+		movementCalls++
+		if movementCalls == 1 {
+			return state, nil
+		}
+		return moved, nil
+	})
+	if err != nil || matches || movementCalls != 2 {
+		t.Fatalf("moving manifest matches = %v, calls = %d, error = %v", matches, movementCalls, err)
+	}
+
+	workspace, err := Load("internal/engine/testdata/workspacemod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceViews, err := workspace.newSubjectViews(context.Background(), []string{"example.com/ws.Root", "example.com/ws/sub.TestNested"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceTarget := workspaceViews.bySymbol["example.com/ws.Root"]
+	workspaceOracle := []*subjectView{workspaceViews.bySymbol["example.com/ws/sub.TestNested"]}
+	workspaceState, err := runtimeinput.FromTestLogEnv(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceTargetEvidence, workspaceOracleEvidence, err := attachEvidence(workspaceTarget, workspaceOracle, workspaceState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspacePrior := Finding{
+		OperatorSet: engine.OperatorSet, OracleExplicit: true, Timeout: time.Minute.String(),
+		TargetEvidence: workspaceTargetEvidence, OracleEvidence: workspaceOracleEvidence,
+	}
+	calls = 0
+	current = func(string, string, []string) (runtimeinput.State, error) {
+		calls++
+		return workspaceState, nil
+	}
+	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), workspacePrior, workspaceTarget, workspaceOracle, true, engine.OperatorSet, time.Minute.String(), current)
+	if err != nil || !matches || calls != 2 {
+		t.Fatalf("cross-module matches = %v, calls = %d, error = %v", matches, calls, err)
 	}
 }
 

@@ -113,6 +113,97 @@ type group struct {
 	moduleDir, packageDir string
 }
 
+type packageContextResult struct {
+	moduleDir, packageDir string
+	err                   error
+}
+
+type oracleValidationResult struct {
+	err error
+}
+
+type runPreparation struct {
+	packageOf      func(string) (string, string)
+	testsOf        func(string) []string
+	validate       func([]string) error
+	contextFor     func(string) (string, string, error)
+	splitRapidPkgs func([]string) ([]string, []string)
+
+	derivedOracles map[string][]string
+	validations    map[string]oracleValidationResult
+	contexts       map[string]packageContextResult
+	rapid          map[string]bool
+}
+
+func newRunPreparation(t *Tree) *runPreparation {
+	return &runPreparation{
+		packageOf:      t.eng.PackageOf,
+		testsOf:        t.eng.TestsOf,
+		validate:       t.eng.ValidateOracle,
+		contextFor:     t.eng.PackageContext,
+		splitRapidPkgs: t.eng.SplitRapidPkgs,
+		derivedOracles: map[string][]string{},
+		validations:    map[string]oracleValidationResult{},
+		contexts:       map[string]packageContextResult{},
+	}
+}
+
+func (p *runPreparation) oracle(target Target) []string {
+	if len(target.Oracle) > 0 || target.OracleExplicit {
+		return slices.Clone(target.Oracle)
+	}
+	pkg, _ := p.packageOf(target.Symbol)
+	if pkg == "" {
+		return nil
+	}
+	if oracle, ok := p.derivedOracles[pkg]; ok {
+		return slices.Clone(oracle)
+	}
+	oracle := p.testsOf(pkg)
+	p.derivedOracles[pkg] = slices.Clone(oracle)
+	return oracle
+}
+
+func (p *runPreparation) validateOracle(oracle []string) error {
+	key := sequenceKey(oracle)
+	if result, ok := p.validations[key]; ok {
+		return result.err
+	}
+	err := p.validate(oracle)
+	p.validations[key] = oracleValidationResult{err: err}
+	return err
+}
+
+func (p *runPreparation) packageContext(pkg string) (string, string, error) {
+	if result, ok := p.contexts[pkg]; ok {
+		return result.moduleDir, result.packageDir, result.err
+	}
+	moduleDir, packageDir, err := p.contextFor(pkg)
+	p.contexts[pkg] = packageContextResult{moduleDir: moduleDir, packageDir: packageDir, err: err}
+	return moduleDir, packageDir, err
+}
+
+func (p *runPreparation) rapidPackages(candidates []string) map[string]bool {
+	if p.rapid != nil {
+		return p.rapid
+	}
+	p.rapid = map[string]bool{}
+	rapid, _ := p.splitRapidPkgs(candidates)
+	for _, pkg := range rapid {
+		p.rapid[pkg] = true
+	}
+	return p.rapid
+}
+
+func sequenceKey(values []string) string {
+	var key strings.Builder
+	for _, value := range values {
+		fmt.Fprintf(&key, "%d:", len(value))
+		key.WriteString(value)
+	}
+	return key.String()
+}
+
 // Run mutates each target and executes its oracle per mutant, fanning
 // mutant runs across a worker pool (REQ-exec-oracle-run). Prior findings
 // are served only when every target and oracle evidence record, operator,
@@ -133,6 +224,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	opts.Prior = snapshotFindings(opts.Prior)
 	repository := captureRepositoryState(t.dir)
 	runEnv := t.eng.GoEnv()
+	preparation := newRunPreparation(t)
 	jobs := opts.Jobs
 	if jobs <= 0 {
 		jobs = max(1, runtime.NumCPU()/2)
@@ -189,7 +281,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationResolving, Symbol: tg.Symbol})
 		f := &findings[i]
 		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, Timeout: opts.Timeout.String()}
-		oracle := t.resolveOracle(tg)
+		oracle := preparation.oracle(tg)
 		if len(oracle) == 0 {
 			// Nothing can kill: the caller sees it and decides
 			// (REQ-target-default).
@@ -197,7 +289,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
 			continue
 		}
-		if err := t.eng.ValidateOracle(oracle); err != nil {
+		if err := preparation.validateOracle(oracle); err != nil {
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
 		bodyHash, err := t.eng.BodyHash(tg.Symbol)
@@ -220,9 +312,19 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	views := &subjectViewSet{bySymbol: map[string]*subjectView{}}
 	if len(subjectSymbols) != 0 {
 		var err error
-		views, err = t.newSubjectViews(ctx, subjectSymbols)
+		views, err = t.newSubjectViewsWithPackageContext(ctx, subjectSymbols, preparation.packageContext)
 		if err != nil {
 			return nil, fmt.Errorf("freshness: %w", err)
+		}
+	}
+	var oraclePackages []string
+	seenOraclePackage := map[string]bool{}
+	for _, resolved := range resolvedTargets {
+		for _, run := range pkgRuns(resolved.oracle) {
+			if !seenOraclePackage[run.pkg] {
+				seenOraclePackage[run.pkg] = true
+				oraclePackages = append(oraclePackages, run.pkg)
+			}
 		}
 	}
 	for _, resolved := range resolvedTargets {
@@ -282,18 +384,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for _, pr := range runs {
 			pkgs = append(pkgs, pr.pkg)
 		}
-		rapidPkgs, _ := t.eng.SplitRapidPkgs(pkgs)
-		rapid := make(map[string]bool, len(rapidPkgs))
-		for _, p := range rapidPkgs {
-			rapid[p] = true
-		}
+		rapid := preparation.rapidPackages(oraclePackages)
 		var groups []group
 		for _, pr := range runs {
 			var flags []string
 			if rapid[pr.pkg] {
 				flags = []string{"-rapid.nofailfile"}
 			}
-			moduleDir, packageDir, err := t.eng.PackageContext(pr.pkg)
+			moduleDir, packageDir, err := preparation.packageContext(pr.pkg)
 			if err != nil {
 				return nil, err
 			}

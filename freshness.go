@@ -51,6 +51,10 @@ type subjectViewSet struct {
 }
 
 func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectViewSet, error) {
+	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContext)
+}
+
+func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []string, packageContext func(string) (string, string, error)) (*subjectViewSet, error) {
 	type resolvedSubject struct {
 		symbol, moduleDir string
 		subject           gofresh.Subject
@@ -72,7 +76,7 @@ func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectV
 		if pkg == "" || local == "" {
 			return nil, fmt.Errorf("subject %s does not resolve", symbol)
 		}
-		moduleDir, _, err := t.eng.PackageContext(pkg)
+		moduleDir, _, err := packageContext(pkg)
 		if err != nil {
 			return nil, err
 		}
@@ -141,10 +145,14 @@ func (s *subjectView) valid(evidence SubjectEvidence) (bool, error) {
 }
 
 func (s *subjectView) validContext(ctx context.Context, evidence SubjectEvidence) (bool, error) {
+	return s.validContextWithCurrent(ctx, evidence, runtimeinput.CurrentEnv)
+}
+
+func (s *subjectView) validContextWithCurrent(ctx context.Context, evidence SubjectEvidence, current func(string, string, []string) (runtimeinput.State, error)) (bool, error) {
 	if evidence.Symbol != s.symbol || evidence.RuntimeInputs == "" || evidence.RuntimeDigest == "" {
 		return false, nil
 	}
-	state, err := runtimeinput.CurrentEnv(evidence.RuntimeInputs, s.moduleDir, s.env)
+	state, err := current(evidence.RuntimeInputs, s.moduleDir, s.env)
 	if err != nil || !state.OK || state.Digest != evidence.RuntimeDigest ||
 		state.Unverifiable != evidence.RuntimeUnverifiable || state.Reason != evidence.RuntimeReason {
 		return false, nil
@@ -297,10 +305,36 @@ func sameAttestationPins(prior, current Finding) bool {
 }
 
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
+	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, runtimeinput.CurrentEnv)
+}
+
+func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, current func(string, string, []string) (runtimeinput.State, error)) (bool, error) {
 	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.Timeout != timeout || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
-	ok, err := target.validContext(ctx, prior.TargetEvidence)
+	type runtimeKey struct {
+		manifest, moduleDir, environment string
+	}
+	type runtimeResult struct {
+		state runtimeinput.State
+		err   error
+		env   []string
+		uses  int
+	}
+	runtimeResults := map[runtimeKey]*runtimeResult{}
+	var runtimeOrder []runtimeKey
+	currentOnce := func(manifest, moduleDir string, env []string) (runtimeinput.State, error) {
+		key := runtimeKey{manifest: manifest, moduleDir: moduleDir, environment: sequenceKey(env)}
+		if result, ok := runtimeResults[key]; ok {
+			result.uses++
+			return result.state, result.err
+		}
+		state, err := current(manifest, moduleDir, env)
+		runtimeResults[key] = &runtimeResult{state: state, err: err, env: append([]string(nil), env...), uses: 1}
+		runtimeOrder = append(runtimeOrder, key)
+		return state, err
+	}
+	ok, err := target.validContextWithCurrent(ctx, prior.TargetEvidence, currentOnce)
 	if err != nil || !ok {
 		return ok, err
 	}
@@ -316,9 +350,22 @@ func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subje
 		if !ok {
 			return false, nil
 		}
-		valid, err := subject.validContext(ctx, evidence)
+		valid, err := subject.validContextWithCurrent(ctx, evidence, currentOnce)
 		if err != nil || !valid {
 			return valid, err
+		}
+	}
+	for _, key := range runtimeOrder {
+		result := runtimeResults[key]
+		if result.uses < 2 {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		state, err := current(key.manifest, key.moduleDir, result.env)
+		if err != nil || state != result.state {
+			return false, nil
 		}
 	}
 	return true, nil

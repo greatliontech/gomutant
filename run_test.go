@@ -461,6 +461,25 @@ func TestRunReportsSharedBaselineOnce(t *testing.T) {
 	}
 }
 
+func TestRunRapidClassificationIncludesLaterTargets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	t.Setenv("GOMUTANT_REQUIRE_RAPID_FLAG", "1")
+	tree := fixtureTree(t)
+	targets := []Target{
+		{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}},
+		{Symbol: "example.com/fixture/extprop.Ok", Oracle: []string{"example.com/fixture/extprop.TestExtProp"}},
+	}
+	findings, err := tree.Run(context.Background(), targets, Options{Budget: 1, Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 2 || findings[0].Mutants != 1 || findings[1].Mutants != 1 {
+		t.Fatalf("findings = %+v", findings)
+	}
+}
+
 func TestRunRemeasuresGeneratedFixtureEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
