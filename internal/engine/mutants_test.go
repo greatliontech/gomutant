@@ -12,8 +12,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/10" {
-		t.Fatalf("operator set = %q, want go/10", OperatorSet)
+	if OperatorSet != "go/11" {
+		t.Fatalf("operator set = %q, want go/11", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
@@ -27,7 +27,7 @@ func TestMutants(t *testing.T) {
 			t.Fatalf("incomplete mutant: %+v", m)
 		}
 	}
-	for _, want := range []string{"equality: == -> !=", "condition: negate", "zero return"} {
+	for _, want := range []string{"equality: == -> !=", "condition: negate", "return: zero"} {
 		if !ops[want] {
 			t.Fatalf("operator %q missing: %v", want, ops)
 		}
@@ -142,8 +142,8 @@ func TestMutants(t *testing.T) {
 	if !bigOps["integer literal: magnitude +1"] {
 		t.Fatal("large literal did not produce an arbitrary-precision mutant")
 	}
-	if !bigOps["zero return"] {
-		t.Fatalf("BigLit ops = %v, want zero return present", bigOps)
+	if !bigOps["return: zero"] {
+		t.Fatalf("BigLit ops = %v, want return: zero present", bigOps)
 	}
 
 	// Deleting the statement that alone references an import prunes the
@@ -314,7 +314,7 @@ func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
 	removal := map[string]bool{
 		"boolean operand: -> false": true, "boolean operand: -> true": true, "delete statement": true,
 		"condition: force false": true, "condition: force true": true,
-		"drop assignment": true, "zero return": true,
+		"drop assignment": true, "return: zero": true,
 	}
 	seenRemoval := map[string]bool{}
 	for _, mutant := range mutants {

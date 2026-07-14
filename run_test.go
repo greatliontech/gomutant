@@ -578,6 +578,61 @@ func TestRunAccountsForScalarLiteralFamilies(t *testing.T) {
 	}
 }
 
+func TestRunAccountsForReturnSubstitutions(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	oracle := []string{"example.com/fixture/lib.TestVacuous"}
+	symbols := []string{
+		"ReturnBoolean", "ReturnNumber", "ReturnString", "ReturnPointer",
+		"ReturnDefined", "ReturnAliases", "ReturnNilDomains", "ReturnDefinedNilDomains", "ReturnDeclaredInterface",
+		"ReturnFalseLiteral", "ReturnTrueLiteral", "ReturnZeroLiteral", "ReturnEmptyLiteral", "ReturnNilLiteral",
+	}
+	targets := make([]Target, 0, len(symbols))
+	for _, symbol := range symbols {
+		targets = append(targets, Target{Symbol: "example.com/fixture/lib." + symbol, Oracle: oracle})
+	}
+	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != len(targets) {
+		t.Fatalf("return findings = %d, want %d", len(findings), len(targets))
+	}
+	operators := map[string]OperatorSummary{}
+	for _, finding := range findings {
+		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+			t.Fatalf("return finding = %+v", finding)
+		}
+		for _, summary := range finding.Operators {
+			total := operators[summary.Operator]
+			total.Operator = summary.Operator
+			total.Generated += summary.Generated
+			total.Discarded += summary.Discarded
+			total.Killed += summary.Killed
+			total.Survived += summary.Survived
+			operators[summary.Operator] = total
+		}
+	}
+	for operator, want := range map[string]OperatorSummary{
+		"return: false": {Generated: 4, Discarded: 2, Survived: 2},
+		"return: true":  {Generated: 4, Discarded: 2, Survived: 2},
+		"return: zero":  {Generated: 9, Discarded: 2, Survived: 7},
+		"return: nil":   {Generated: 18, Discarded: 1, Survived: 17},
+	} {
+		summary := operators[operator]
+		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+		}
+	}
+	oldBasis := findings[0]
+	oldBasis.OperatorSet = "go/10"
+	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+		t.Fatalf("go/10 finding under go/11 = fresh %v, err %v", fresh, err)
+	}
+}
+
 func TestRunDecisionsAndCancellation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")

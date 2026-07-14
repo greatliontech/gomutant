@@ -40,7 +40,7 @@ gomutant run --package 'example.com/project/**' \
 
 # Disposition a survivor as equivalent, with the reasoning on record.
 gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \
-    --operator "zero return" --reason "result unused on this path"
+    --operator "return: zero" --reason "result unused on this path"
 
 # Run an atomic agent-authored edit batch without touching the tree.
 gomutant ephemeral --batch edits.json --test-pkg example.com/pkg \
@@ -104,7 +104,7 @@ Review survivors independently of process success:
 ```
 gomutant findings
 gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \
-    --operator 'zero return' --reason 'result unused on this path'
+    --operator 'return: zero' --reason 'result unused on this path'
 ```
 
 Strengthen a test for every non-equivalent survivor and rerun its target. Use

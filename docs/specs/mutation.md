@@ -12,7 +12,7 @@ of behavior a finding is measured against.
 is run and either killed or reported as a survivor.
 
 **REQ-mut-operators** (behavior): gomutant MUST identify the exact active
-operator basis in every finding. The current active `go/10` basis comprises
+operator basis in every finding. The current active `go/11` basis comprises
 the equality, relational-boundary, relational-negation, and logical families
 exactly as cataloged below; the boolean-operand, condition, range-suppression,
 and loop-control families exactly as cataloged below; the arithmetic, bitwise,
@@ -20,11 +20,12 @@ and shift families exactly as cataloged below; the unary, compound arithmetic,
 compound bitwise, compound shift, compound store, and increment/decrement
 families exactly as cataloged below; the integer, rune, floating-point,
 imaginary, boolean, and string literal families exactly as cataloged below;
-statement deletion, with assignment stores dropped while right-hand
-sides still evaluate; and zero-value return substitution, each emitted where
+the return-substitution families exactly as cataloged below; and statement
+deletion, with assignment stores dropped while right-hand
+sides still evaluate, each emitted where
 the replacement can be formed without a new import or named type expression. A
 site with no such counterpart, including a result type with no context-free
-zero expression, yields no `go/10` candidate. A selected candidate
+zero expression, yields no `go/11` candidate. A selected candidate
 that fails to compile, does not differ from the baseline, or renders identically
 to an earlier selected candidate is discarded; a timed-out oracle run is a kill under
 REQ-exec-attribution. When INV-MUT-COMPREHENSIVE lands, its catalog supersedes
@@ -34,8 +35,8 @@ and membership, lands complete catalog families rather than partial mappings,
 and satisfies the candidate, accounting, stale-pin, and grammar contracts for
 every active family.
 
-The completed `go/10` families use their catalog labels. Its remaining labels
-are exactly `delete statement`, `drop assignment`, and `zero return`.
+The completed `go/11` families use their catalog labels. Its remaining labels
+are exactly `delete statement` and `drop assignment`.
 
 **INV-MUT-COMPREHENSIVE** (project invariant): The comprehensive automatic
 basis MUST be the finite first-order catalog below. Every mapping applies once

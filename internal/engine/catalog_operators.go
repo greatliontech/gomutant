@@ -3,7 +3,6 @@ package engine
 import (
 	"go/ast"
 	"go/token"
-	"go/types"
 	"strings"
 )
 
@@ -20,7 +19,7 @@ var activeCandidateEmitters = []candidateEmitter{
 	emitConditions,
 	emitRangeSuppression,
 	emitBlockMutations,
-	emitZeroReturn,
+	emitReturnSubstitution,
 }
 
 func emitBlockMutations(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
@@ -44,46 +43,4 @@ func emitBlockMutations(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec
 		}
 	}
 	return specs
-}
-
-func emitZeroReturn(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
-	statement, ok := node.(*ast.ReturnStmt)
-	if !ok {
-		return nil
-	}
-	var specs []candidateSpec
-	for i, result := range statement.Results {
-		replacement := zeroReplacement(c.pkg.TypesInfo.TypeOf(result))
-		if replacement == nil {
-			continue
-		}
-		specs = append(specs, candidateSpec{operator: "zero return", start: result.Pos(), end: result.End(), family: 32, variant: 1, index: i, edits: []sourceEdit{c.edit(result.Pos(), result.End(), replacement)}})
-	}
-	return specs
-}
-
-func numeric(c *catalog, expression ast.Expr) bool {
-	basic, ok := c.pkg.TypesInfo.TypeOf(expression).(*types.Basic)
-	return ok && basic.Info()&types.IsNumeric != 0
-}
-
-func zeroReplacement(typ types.Type) []byte {
-	switch value := typ.(type) {
-	case *types.Basic:
-		switch info := value.Info(); {
-		case info&types.IsBoolean != 0:
-			return []byte("false")
-		case info&types.IsNumeric != 0:
-			return []byte("0")
-		case info&types.IsString != 0:
-			return []byte(`""`)
-		}
-	case *types.Pointer, *types.Slice, *types.Map, *types.Chan, *types.Signature, *types.Interface:
-		return []byte("nil")
-	case *types.Named:
-		if _, ok := value.Underlying().(*types.Interface); ok {
-			return []byte("nil")
-		}
-	}
-	return nil
 }
