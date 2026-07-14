@@ -12,8 +12,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/6" {
-		t.Fatalf("operator set = %q, want go/6", OperatorSet)
+	if OperatorSet != "go/7" {
+		t.Fatalf("operator set = %q, want go/7", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
@@ -45,7 +45,7 @@ func TestMutants(t *testing.T) {
 		mixedOps[m.Operator]++
 	}
 	for _, want := range []string{
-		"drop assignment", "+= -> -=", "* -> /", "+ -> -",
+		"drop assignment", "+= -> -=", "arithmetic: * -> /", "arithmetic: + -> -",
 		"increment literal", "loop control: continue -> break", "boolean operand: -> false",
 		"logical: || -> &&", "logical: && -> ||", "boolean operand: -> true", "++ -> --",
 	} {
@@ -118,13 +118,13 @@ func TestMutants(t *testing.T) {
 	}
 
 	// The arithmetic swap must skip non-numeric operands: string
-	// concatenation yields no "+ -> -" mutant.
+	// concatenation yields no arithmetic subtraction mutant.
 	concat, err := tr.Mutants("example.com/fixture/lib.Concat", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range concat {
-		if m.Operator == "+ -> -" {
+		if m.Operator == "arithmetic: + -> -" {
 			t.Fatalf("string concatenation mutated arithmetically: %+v", m)
 		}
 	}

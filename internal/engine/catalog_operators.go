@@ -23,26 +23,9 @@ var activeCandidateEmitters = []candidateEmitter{
 	emitZeroReturn,
 }
 
-var arithmeticSwap = map[token.Token]token.Token{
-	token.ADD: token.SUB, token.SUB: token.ADD,
-	token.MUL: token.QUO, token.QUO: token.MUL,
-}
-
 var assignArithmeticSwap = map[token.Token]token.Token{
 	token.ADD_ASSIGN: token.SUB_ASSIGN, token.SUB_ASSIGN: token.ADD_ASSIGN,
 	token.MUL_ASSIGN: token.QUO_ASSIGN, token.QUO_ASSIGN: token.MUL_ASSIGN,
-}
-
-func emitArithmeticBinary(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
-	expression, ok := node.(*ast.BinaryExpr)
-	if !ok {
-		return nil
-	}
-	if swapped, ok := arithmeticSwap[expression.Op]; ok && numeric(c, expression.X) {
-		end := expression.OpPos + token.Pos(len(expression.Op.String()))
-		return []candidateSpec{{operator: fmt.Sprintf("%s -> %s", expression.Op, swapped), start: expression.OpPos, end: end, family: 5, variant: 1, edits: []sourceEdit{c.edit(expression.OpPos, end, []byte(swapped.String()))}, preservesImportReferences: true}}
-	}
-	return nil
 }
 
 func emitIntegerLiteral(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {

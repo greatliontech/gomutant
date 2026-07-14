@@ -266,7 +266,7 @@ func TestRunAccountsForComparisonFamilies(t *testing.T) {
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/5"
 	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/5 finding under go/6 = fresh %v, err %v", fresh, err)
+		t.Fatalf("go/5 finding under current basis = fresh %v, err %v", fresh, err)
 	}
 }
 
@@ -324,9 +324,69 @@ func TestRunAccountsForControlFamilies(t *testing.T) {
 		}
 	}
 	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/5"
+	oldBasis.OperatorSet = "go/6"
 	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/5 finding under go/6 = fresh %v, err %v", fresh, err)
+		t.Fatalf("go/6 finding under go/7 = fresh %v, err %v", fresh, err)
+	}
+}
+
+func TestRunAccountsForArithmeticFamilies(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	oracle := []string{"example.com/fixture/lib.TestVacuous"}
+	targets := []Target{
+		{Symbol: "example.com/fixture/lib.ArithmeticDefined", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticFloat", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticComplex", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticGeneric", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.RemainderGeneric", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticMulZero", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticAlias", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticIntersected", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticUntyped", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticIota", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ArithmeticImaginary", Oracle: oracle},
+	}
+	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != len(targets) {
+		t.Fatalf("arithmetic findings = %d, want %d", len(findings), len(targets))
+	}
+	operators := map[string]OperatorSummary{}
+	for _, finding := range findings {
+		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+			t.Fatalf("arithmetic finding = %+v", finding)
+		}
+		for _, summary := range finding.Operators {
+			total := operators[summary.Operator]
+			total.Operator = summary.Operator
+			total.Generated += summary.Generated
+			total.Discarded += summary.Discarded
+			total.Killed += summary.Killed
+			total.Survived += summary.Survived
+			operators[summary.Operator] = total
+		}
+	}
+	for operator, want := range map[string]OperatorSummary{
+		"arithmetic: + -> -": {Generated: 9, Survived: 9},
+		"arithmetic: - -> +": {Generated: 5, Survived: 5},
+		"arithmetic: * -> /": {Generated: 6, Discarded: 1, Survived: 5},
+		"arithmetic: / -> *": {Generated: 5, Survived: 5},
+		"arithmetic: % -> *": {Generated: 2, Survived: 2},
+	} {
+		summary := operators[operator]
+		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+		}
+	}
+	oldBasis := findings[0]
+	oldBasis.OperatorSet = "go/6"
+	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+		t.Fatalf("go/6 finding under go/7 = fresh %v, err %v", fresh, err)
 	}
 }
 
