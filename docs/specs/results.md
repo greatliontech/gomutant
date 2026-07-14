@@ -18,7 +18,7 @@ disposition, including incomplete-process reasons.
 **REQ-result-record** (behavior): A finding record MUST be keyed by the
 mutated symbol and record the available inputs that produced it — target subject evidence,
 the oracle as a set of distinct subject evidence records, the operator version,
-whether the oracle was explicit or package-derived, the mutant budget, and the exact effective oracle timeout in the `oracleTimeout` field encoded as a
+whether the oracle was explicit or package-derived, the candidate budget, and the exact effective oracle timeout in the `oracleTimeout` field encoded as a
 canonical Go duration string — carrying the capture commit and dirty provenance,
 the mutant count, the kill count, each survivor's position
 and operator, plus per-operator generated, discarded, killed, and survived
@@ -46,8 +46,8 @@ record MUST have `generated == candidateCount` when budget is zero or `generated
 min(budget, candidateCount)` when budget is positive. A document violating a
 count equation or budget relation is malformed and refused.
 
-Lands: when the first transitional or comprehensive active basis implements
-candidate-level accounting; remains required for every later basis.
+INV-RESULT-CANDIDATE-CONSERVATION: enforced by
+`TestRunConservesCandidateDiscards`.
 
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
@@ -67,11 +67,11 @@ structural boundary and is rejected per REQ-result-export's version tag.
 than serve a record whose pins no longer cover the request — an edit to the
 target or any target/oracle dependency, a changed runtime input, purity,
 toolchain, or build configuration, an added or removed oracle identity, a new
-oracle selection mode or operator version, a different effective oracle timeout, or a request for more mutants
+oracle selection mode or operator version, a different effective oracle timeout, or a request for more candidates
 than a capped record generated each invalidates the record. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures. A record
 is never partially trusted: any moved pin remeasures the whole target. When
-INV-RESULT-CANDIDATE-CONSERVATION becomes active, a zero-budget request requires
+INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
 serve a weaker request without remeasurement.

@@ -12,23 +12,31 @@ of behavior a finding is measured against.
 is run and either killed or reported as a survivor.
 
 **REQ-mut-operators** (behavior): gomutant MUST identify the exact active
-operator basis in every finding. The current active `go/3` basis comprises
+operator basis in every finding. The current active `go/4` basis comprises
 condition negation; comparison, logical, and arithmetic
 operator swaps, including their compound-assignment and increment/decrement
 forms; boolean-operand forcing; integer-literal increments; break/continue
 swaps; statement deletion, with assignment stores dropped while right-hand
-sides still evaluate; and zero-value return substitution, each applied where
-the replacement compiles without a new import or named type expression. A site
-with no such counterpart, including modulus and a result type with no
-context-free zero expression, yields no `go/3` mutant. A mutant that fails to
-compile, does not differ from the baseline, or renders identically to an
-earlier mutant is discarded; a timed-out oracle run is a kill under
+sides still evaluate; and zero-value return substitution, each emitted where
+the replacement can be formed without a new import or named type expression. A
+site with no such counterpart, including modulus and a result type with no
+context-free zero expression, yields no `go/4` candidate. A selected candidate
+that fails to compile, does not differ from the baseline, or renders identically
+to an earlier selected candidate is discarded; a timed-out oracle run is a kill under
 REQ-exec-attribution. When INV-MUT-COMPREHENSIVE lands, its catalog supersedes
 the active list under a new identifier. Before then, a transitional basis may
 activate only when the same change updates this clause with its exact identifier
 and membership, lands complete catalog families rather than partial mappings,
 and satisfies the candidate, accounting, stale-pin, and grammar contracts for
 every active family.
+
+The `go/4` labels are exactly the token mappings `<old> -> <new>` for its
+comparison, logical, arithmetic, compound-assignment, increment/decrement, and
+break/continue swaps, plus `force true`, `force false`, `increment literal`,
+`negate condition`, `delete statement`, `drop assignment`, and `zero return`.
+It differs from `go/3` only by candidate-before-render ordering, budget
+selection, occurrence identity, discard conservation, and finding accounting;
+its operator sites and replacements are otherwise unchanged.
 
 **INV-MUT-COMPREHENSIVE** (project invariant): The comprehensive automatic
 basis MUST be the finite first-order catalog below. Every mapping applies once
@@ -211,13 +219,13 @@ for range suppression. Existing source-order occurrence
 suffixes disambiguate a repeated position and operator. Worker count cannot
 change candidate selection, identities, summaries, or findings.
 
-**REQ-mut-budget** (behavior): A run MUST accept a per-symbol mutant budget,
-bounding how many mutants a target generates so an incremental run completes
+**REQ-mut-budget** (behavior): A run MUST accept a per-symbol candidate budget,
+bounding how many candidates a target selects so an incremental run completes
 quickly, with the exhaustive run — every operator at every applicable site —
 available when the budget is unset. A finding records the budget it ran
-under: a capped finding never answers a request for more mutants than it
-generated. When INV-RESULT-CANDIDATE-CONSERVATION becomes active, zero is the
-exhaustive request and positive `N` requests the first
+under: a capped finding never answers a request for more candidates than it
+generated. Under INV-RESULT-CANDIDATE-CONSERVATION, zero is the exhaustive
+request and positive `N` requests the first
 `min(N, candidateCount)` candidates. The budget component of coverage holds
 when either the prior finding's `generated` equals `candidateCount`, or its
 `generated` is at least that request's selected candidate count; every other

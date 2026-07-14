@@ -167,9 +167,9 @@ func TestRunEndToEnd(t *testing.T) {
 
 func TestSummarizeRun(t *testing.T) {
 	findings := []Finding{
-		{Symbol: "p.Measured", Mutants: 3, Killed: 2, Discarded: 1,
+		{Symbol: "p.Measured", Generated: 4, Mutants: 3, Killed: 2, Discarded: 1,
 			Survivors: []Survivor{{Position: "p.go:1:1", Operator: "x"}}},
-		{Symbol: "p.Cached", Cached: true, Mutants: 2, Killed: 1,
+		{Symbol: "p.Cached", Cached: true, Generated: 2, Mutants: 2, Killed: 1,
 			Survivors: []Survivor{{Position: "p.go:2:1", Operator: "x"}},
 			Attested:  []Attestation{{Position: "p.go:2:1", Operator: "x", Reason: "same"}}},
 		{Symbol: "p.Skipped", Skipped: "no oracle"},
@@ -177,6 +177,47 @@ func TestSummarizeRun(t *testing.T) {
 	want := RunSummary{Targets: 3, Measured: 1, Cached: 1, Skipped: 1, Generated: 6, Discarded: 1, Killed: 3, Survived: 2, Attested: 1, Open: 1}
 	if got := SummarizeRun(findings); got != want {
 		t.Fatalf("summary = %+v, want %+v", got, want)
+	}
+}
+
+func TestRunConservesCandidateDiscards(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	oracle := []string{"example.com/fixture/lib.TestAdd"}
+	findings, err := tr.Run(context.Background(), []Target{
+		{Symbol: "example.com/fixture/lib.BigLit", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.Dup", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.Idx", Oracle: oracle},
+	}, Options{Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 3 {
+		t.Fatalf("findings = %d", len(findings))
+	}
+	for _, finding := range findings {
+		if finding.Generated != finding.Mutants+finding.Discarded || finding.Mutants != finding.Killed+len(finding.Survivors) || finding.Generated != finding.CandidateCount {
+			t.Fatalf("%s counts do not reconcile: %+v", finding.Symbol, finding)
+		}
+		generated, discarded := 0, 0
+		for _, summary := range finding.Operators {
+			generated += summary.Generated
+			discarded += summary.Discarded
+		}
+		if generated != finding.Generated || discarded != finding.Discarded {
+			t.Fatalf("%s operator totals do not reconcile: %+v", finding.Symbol, finding.Operators)
+		}
+	}
+	if big := findings[0]; big.Generated < 1 || big.Discarded < 1 || big.Mutants != big.Generated-big.Discarded {
+		t.Fatalf("no-op candidate was not conserved: %+v", big)
+	}
+	if dup := findings[1]; dup.Discarded < 1 {
+		t.Fatalf("duplicate candidate was not conserved: %+v", dup)
+	}
+	if idx := findings[2]; idx.Discarded < 1 {
+		t.Fatalf("compile-rejected candidate was not conserved: %+v", idx)
 	}
 }
 
@@ -211,7 +252,7 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	decisions := firstStatus.decisions
-	if want := (RunDecision{Symbol: target.Symbol, Action: "measure", Reason: "no-prior", Mutants: 1}); len(decisions) != 1 || decisions[0] != want {
+	if want := (RunDecision{Symbol: target.Symbol, Action: "measure", Reason: "no-prior", Candidates: 1}); len(decisions) != 1 || decisions[0] != want {
 		t.Fatalf("first decisions = %+v, want %+v", decisions, want)
 	}
 	wantPreparation := []PreparationEvent{
@@ -828,7 +869,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(`{"version": 99, "findings": []}`)); err == nil {
 		t.Fatal("unknown version accepted")
 	}
-	fs, err := ParseFindings([]byte(`{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"mutants":0,"killed":0,"operators":[],"futureField":{"nested":true}}]}`))
+	fs, err := ParseFindings([]byte(`{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[],"futureField":{"nested":true}}]}`))
 	if err != nil || len(fs) != 1 || fs[0].Symbol != "p.F" {
 		t.Fatalf("tolerant parse failed: %v %+v", err, fs)
 	}
@@ -851,10 +892,32 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 			}
 		})
 	}
-	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"mutants":0,"killed":0,"operators":[]}]}`
+	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
 	nonGitFindings, err := ParseFindings([]byte(nonGit))
 	if err != nil || len(nonGitFindings) != 1 {
 		t.Fatalf("non-Git provenance rejected: %v %+v", err, nonGitFindings)
+	}
+	for _, field := range []string{`,"candidateCount":0`, `,"generated":0`, `,"discarded":0`} {
+		if _, err := ParseFindings([]byte(strings.Replace(nonGit, field, "", 1))); err == nil {
+			t.Fatalf("finding without required count %s accepted", field)
+		}
+	}
+	for name, malformed := range map[string]string{
+		"generated equation":  strings.Replace(nonGit, `"generated":0`, `"generated":1`, 1),
+		"negative candidates": strings.Replace(nonGit, `"candidateCount":0`, `"candidateCount":-1`, 1),
+		"budget relation": strings.Replace(
+			strings.Replace(
+				strings.Replace(
+					strings.Replace(
+						strings.Replace(nonGit, `"budget":0`, `"budget":2`, 1),
+						`"candidateCount":0`, `"candidateCount":2`, 1),
+					`"generated":0`, `"generated":1`, 1),
+				`"mutants":0,"killed":0`, `"mutants":1,"killed":1`, 1),
+			`"operators":[]`, `"operators":[{"operator":"op","generated":1,"discarded":0,"killed":1,"survived":0}]`, 1),
+	} {
+		if _, err := ParseFindings([]byte(malformed)); err == nil {
+			t.Fatalf("%s accepted", name)
+		}
 	}
 	legacyTimeout := strings.Replace(nonGit, `"oracleTimeout":"1m0s"`, `"timeout":"1m0s"`, 1)
 	if _, err := ParseFindings([]byte(legacyTimeout)); err == nil {
@@ -883,22 +946,23 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 		}
 	}
 	base := nonGitFindings[0]
-	base.Mutants, base.Killed = 2, 2
+	base.CandidateCount, base.Generated, base.Mutants, base.Killed = 2, 2, 2, 2
 	base.Operators = []OperatorSummary{{Operator: "z", Generated: 1, Killed: 1}, {Operator: "a", Generated: 1, Killed: 1}}
 	expectInvalidExport("unsorted", base)
 	base.Operators = []OperatorSummary{{Operator: "a", Generated: 1, Killed: 1}, {Operator: "a", Generated: 1, Killed: 1}}
 	expectInvalidExport("duplicate", base)
-	base.Mutants, base.Killed = 1, 0
+	base.CandidateCount, base.Generated, base.Mutants, base.Killed = 1, 1, 1, 0
 	base.Survivors = []Survivor{{Position: "f.go:1:1", Operator: "b"}}
 	base.Operators = []OperatorSummary{{Operator: "a", Generated: 1, Survived: 1}}
 	expectInvalidExport("survivor mismatch", base)
-	base.Mutants, base.Killed, base.Discarded, base.Survivors = 0, 0, 0, nil
+	base.CandidateCount, base.Generated, base.Mutants, base.Killed, base.Discarded, base.Survivors = 0, 0, 0, 0, 0, nil
 	base.Operators = []OperatorSummary{{Operator: "a"}}
 	expectInvalidExport("zero generated", base)
+	base.CandidateCount, base.Generated = int(^uint(0)>>1), int(^uint(0)>>1)
 	base.Mutants, base.Killed, base.Discarded = int(^uint(0)>>1), int(^uint(0)>>1), 1
 	base.Operators = []OperatorSummary{{Operator: "a", Generated: int(^uint(0) >> 1), Killed: int(^uint(0) >> 1)}}
 	expectInvalidExport("overflow", base)
-	base.Mutants, base.Killed, base.Discarded = 1, 1, 0
+	base.CandidateCount, base.Generated, base.Mutants, base.Killed, base.Discarded = 1, 1, 1, 1, 0
 	base.Operators = []OperatorSummary{{Operator: "a", Generated: 1, Discarded: -1, Killed: 1, Survived: 1}}
 	expectInvalidExport("negative", base)
 	invalidExport := nonGitFindings[0]
@@ -926,7 +990,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(wrongTarget)); err == nil {
 		t.Fatal("mismatched target evidence accepted")
 	}
-	emptyOracle := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"mutants":0,"killed":0,"operators":[]}]}`
+	emptyOracle := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
 	if _, err := ParseFindings([]byte(emptyOracle)); err == nil {
 		t.Fatal("empty oracle evidence accepted")
 	}
@@ -949,7 +1013,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 }
 
 func TestSummarizeOperators(t *testing.T) {
-	mutants := []engine.Mutant{{Operator: "zero return"}, {Operator: "swap"}, {Operator: "zero return"}, {Operator: "swap"}}
+	mutants := []engine.Candidate{{Operator: "zero return"}, {Operator: "swap"}, {Operator: "zero return"}, {Operator: "swap"}}
 	outcomes := []engine.MutantOutcome{engine.MutantKilled, engine.MutantSurvived, engine.MutantDiscarded, engine.MutantKilled}
 	got := summarizeOperators(mutants, outcomes)
 	if len(got) != 2 || got[0] != (OperatorSummary{Operator: "swap", Generated: 2, Killed: 1, Survived: 1}) ||

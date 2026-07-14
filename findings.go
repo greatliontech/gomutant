@@ -71,7 +71,7 @@ type Attestation struct {
 	Reason   string `json:"reason"`
 }
 
-// OperatorSummary accounts for every generated mutant of one operator.
+// OperatorSummary accounts for every selected candidate of one operator.
 type OperatorSummary struct {
 	Operator  string `json:"operator"`
 	Generated int    `json:"generated"`
@@ -104,12 +104,14 @@ type Finding struct {
 	Commit         string            `json:"commit,omitempty"`
 	Dirty          bool              `json:"dirty"`
 
-	Mutants   int               `json:"mutants"`
-	Killed    int               `json:"killed"`
-	Discarded int               `json:"discarded,omitempty"`
-	Operators []OperatorSummary `json:"operators"`
-	Survivors []Survivor        `json:"survivors,omitempty"`
-	Attested  []Attestation     `json:"attested,omitempty"`
+	CandidateCount int               `json:"candidateCount"`
+	Generated      int               `json:"generated"`
+	Mutants        int               `json:"mutants"`
+	Killed         int               `json:"killed"`
+	Discarded      int               `json:"discarded"`
+	Operators      []OperatorSummary `json:"operators"`
+	Survivors      []Survivor        `json:"survivors,omitempty"`
+	Attested       []Attestation     `json:"attested,omitempty"`
 
 	// Run metadata, never persisted: a cached finding was served from the
 	// prior document under matching pins; a skipped one names why nothing
@@ -245,10 +247,11 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	known := map[string]bool{
 		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
 		"budget": true, "targetEvidence": true, "oracleEvidence": true,
-		"oracleExplicit": true, "oracleTimeout": true, "commit": true, "dirty": true, "mutants": true,
-		"killed": true, "discarded": true, "operators": true, "survivors": true, "attested": true,
+		"oracleExplicit": true, "oracleTimeout": true, "commit": true, "dirty": true,
+		"candidateCount": true, "generated": true, "mutants": true, "killed": true,
+		"discarded": true, "operators": true, "survivors": true, "attested": true,
 	}
-	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "oracleTimeout", "dirty", "mutants", "killed", "operators"}
+	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "oracleTimeout", "dirty", "candidateCount", "generated", "mutants", "killed", "discarded", "operators"}
 	findings := make([]Finding, len(rawFindings))
 	symbols := map[string]bool{}
 	for i, raw := range rawFindings {
@@ -343,13 +346,17 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 			}
 		}
 	}
-	if finding.Mutants < 0 || finding.Killed < 0 || finding.Discarded < 0 ||
+	if finding.CandidateCount < 0 || finding.Generated < 0 || finding.Mutants < 0 || finding.Killed < 0 || finding.Discarded < 0 ||
 		finding.Killed > finding.Mutants || len(finding.Survivors) != finding.Mutants-finding.Killed {
 		return false, fmt.Errorf("mutant counts do not match killed and survivor records")
 	}
 	generatedTotal, countsSafe := addNonnegative(finding.Mutants, finding.Discarded)
-	if !countsSafe || finding.Budget < 0 || finding.Budget > 0 && finding.Budget != generatedTotal {
-		return false, fmt.Errorf("budget does not match generated mutant count")
+	expectedGenerated := finding.CandidateCount
+	if finding.Budget > 0 {
+		expectedGenerated = min(finding.Budget, finding.CandidateCount)
+	}
+	if !countsSafe || finding.Budget < 0 || finding.Generated != generatedTotal || finding.Generated != expectedGenerated {
+		return false, fmt.Errorf("candidate, budget, and mutant counts do not reconcile")
 	}
 	survivors := make(map[survivorKey]bool, len(finding.Survivors))
 	survivorsByOperator := map[string]int{}
@@ -381,7 +388,7 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 			return false, fmt.Errorf("operators: %w", err)
 		}
 		previous := ""
-		remainingGenerated, remainingDiscarded := generatedTotal, finding.Discarded
+		remainingGenerated, remainingDiscarded := finding.Generated, finding.Discarded
 		remainingKilled, remainingSurvived := finding.Killed, len(finding.Survivors)
 		for i, record := range records {
 			if _, err := validateRequiredObject(record,
@@ -545,15 +552,14 @@ func isJSONNull(value json.RawMessage) bool {
 	return len(value) == 0 || bytes.Equal(bytes.TrimSpace(value), []byte("null"))
 }
 
-// budgetCovers reports whether a finding measured under the recorded cap
-// answers a request for req mutants per symbol (0 = exhaustive): a capped
-// finding never answers a request for more mutants than it generated
-// (REQ-mut-budget, REQ-result-stale).
-func budgetCovers(recorded, req int) bool {
-	if recorded == 0 {
-		return true
+// budgetCovers reports whether a finding's selected candidate prefix covers a
+// request (0 = exhaustive) under the same complete candidate set.
+func budgetCovers(f Finding, req int) bool {
+	needed := f.CandidateCount
+	if req > 0 {
+		needed = min(req, f.CandidateCount)
 	}
-	return req > 0 && req <= recorded
+	return f.Generated >= needed
 }
 
 // Fresh reports whether a prior finding still covers the target at the
@@ -600,7 +606,7 @@ func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget
 	for _, symbol := range oracle {
 		oracleViews = append(oracleViews, views.bySymbol[symbol])
 	}
-	if !budgetCovers(f.Budget, budget) {
+	if !budgetCovers(f, budget) {
 		return false, nil
 	}
 	return evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String())

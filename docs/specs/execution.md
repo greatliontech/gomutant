@@ -27,8 +27,8 @@ goroutine-panic-class kill from environmental noise. A run that fails in any
 other way — a build error the overlay should have prevented, a killer test
 outside the oracle, output that does not parse — aborts without recording a
 finding, because a corrupted measurement read as a sound one inflates kills
-in the flattering direction. When INV-RESULT-CANDIDATE-CONSERVATION in
-[results.md](results.md) becomes active, compiler rejection of a selected
+in the flattering direction. Under INV-RESULT-CANDIDATE-CONSERVATION in
+[results.md](results.md), compiler rejection of a selected
 candidate before any oracle test runs is instead a discard only after the same
 package-scoped baseline passed and source/build inputs remained coherent;
 generator, overlay, environment, movement, unrelated-package, and malformed
@@ -121,7 +121,7 @@ may leave a rendered prefix, but never a partial finding or decision.
 Before executing mutants, a run MUST report one target decision in target
 order: `cached` when reusable prior evidence is
 served, `skipped` with the skip reason when no measurement can run, or
-`measure` with the generated mutant count and one reason from `no-prior`,
+`measure` with the selected candidate count and one reason from `no-prior`,
 `forced`, `budget`, or `stale`. Forced is reported when force overrides an
 existing record; budget when the requested budget exceeds that record's
 coverage; stale when another reuse pin fails. Concurrent worker completion
@@ -131,8 +131,8 @@ all preparation events precede every decision. CLI and MCP final results expose
 the same preparation sequence, decisions, and totals. Open survivors remain
 advisory and do not change successful exit semantics.
 
-When INV-RESULT-CANDIDATE-CONSERVATION in [results.md](results.md) becomes
-active, a measure decision reports its selected candidate count as
+Under INV-RESULT-CANDIDATE-CONSERVATION in [results.md](results.md), a measure
+decision reports its selected candidate count as
 `candidates`, including candidates later discarded; `budget` means the current
 request needs a longer candidate prefix than the prior finding records.
 

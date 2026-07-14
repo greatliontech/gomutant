@@ -30,7 +30,7 @@ func newRunCommand() *cobra.Command {
 	}}
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
-	f.IntVar(&o.budget, "budget", 0, "mutants per symbol; 0 = exhaustive")
+	f.IntVar(&o.budget, "budget", 0, "candidates per symbol; 0 = exhaustive")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result commit after this duration; 0 = unlimited")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
 	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
@@ -154,9 +154,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 		case f.Skipped != "":
 			fmt.Fprintf(&terminal, "skipped   %s  (%s)\n", f.Symbol, f.Skipped)
 		case f.Cached:
-			fmt.Fprintf(&terminal, "cached    %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
+			fmt.Fprintf(&terminal, "cached    %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
 		default:
-			fmt.Fprintf(&terminal, "measured  %s  %d/%d killed, %d open\n", f.Symbol, f.Killed, f.Mutants, len(f.Open()))
+			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
 		}
 		for _, s := range f.Open() {
 			fmt.Fprintf(&terminal, "          survivor %s %s\n", s.Position, s.Operator)
@@ -197,7 +197,7 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 func renderRunDecision(w io.Writer, decision gomutant.RunDecision) {
 	switch {
 	case decision.Action == "measure":
-		fmt.Fprintf(w, "measure   %s  %d mutants (%s)\n", decision.Symbol, decision.Mutants, decision.Reason)
+		fmt.Fprintf(w, "measure   %s  %d candidates (%s)\n", decision.Symbol, decision.Candidates, decision.Reason)
 	case decision.Reason != "":
 		fmt.Fprintf(w, "%-9s %s  (%s)\n", decision.Action, decision.Symbol, decision.Reason)
 	default:

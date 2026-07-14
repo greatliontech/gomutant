@@ -11,8 +11,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/3" {
-		t.Fatalf("operator set = %q, want go/3", OperatorSet)
+	if OperatorSet != "go/4" {
+		t.Fatalf("operator set = %q, want go/4", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
@@ -227,49 +227,95 @@ func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
 	}
 }
 
-func TestMutantsRetainImportProcessingFallback(t *testing.T) {
+func TestCandidatesRejectImportProcessingFailure(t *testing.T) {
 	tr := fixtureTree(t)
 	calls := 0
 	tr.importProcessor = func(context.Context, string, []byte) ([]byte, error) {
 		calls++
 		return nil, errors.New("cannot process imports")
 	}
-	mutants, err := tr.Mutants("example.com/fixture/lib.Logs", 0)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Logs", 0); err == nil || !strings.Contains(err.Error(), "normalize candidate") {
+		t.Fatalf("normalization error = %v", err)
 	}
-	found := false
-	for _, mutant := range mutants {
-		if mutant.Operator == "delete statement" {
-			found = true
-			if !strings.Contains(string(mutant.Replacements[0].Source), `"fmt"`) {
-				t.Fatal("failed processing did not retain rendered source")
-			}
-		}
-	}
-	if !found || calls != 1 {
-		t.Fatalf("delete fallback = found %v, processing calls %d", found, calls)
+	if calls != 1 {
+		t.Fatalf("processing calls = %d, want 1", calls)
 	}
 }
 
-func TestMutantsDeduplicateEffectiveSourceBeforeBudget(t *testing.T) {
+func TestCandidatesSelectBeforeEffectiveSourceDeduplication(t *testing.T) {
 	tr := fixtureTree(t)
 	tr.importProcessor = func(context.Context, string, []byte) ([]byte, error) {
 		return []byte("package lib\n"), nil
 	}
-	mutants, err := tr.Mutants("example.com/fixture/lib.PruneCollision", 2)
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.PruneCollision", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(mutants) != 2 || mutants[0].Operator != "delete statement" || mutants[1].Operator != "increment literal" {
-		t.Fatalf("capped effective mutants = %+v", mutants)
+	if generation.CandidateCount <= 2 || len(generation.Candidates) != 2 {
+		t.Fatalf("generation = %+v", generation)
 	}
-	if string(mutants[0].Replacements[0].Source) != "package lib\n" || string(mutants[1].Replacements[0].Source) == "package lib\n" {
-		t.Fatalf("effective sources = %q, %q", mutants[0].Replacements[0].Source, mutants[1].Replacements[0].Source)
+	if generation.Candidates[0].Operator != "delete statement" || len(generation.Candidates[0].Replacements) != 1 ||
+		generation.Candidates[1].Operator != "delete statement" || len(generation.Candidates[1].Replacements) != 0 {
+		t.Fatalf("selected candidates = %+v", generation.Candidates)
 	}
-	exhaustive, err := tr.Mutants("example.com/fixture/lib.PruneCollision", 0)
-	if err != nil || len(exhaustive) != 2 {
-		t.Fatalf("exhaustive effective mutants = %d, %v", len(exhaustive), err)
+	if got := string(generation.Candidates[0].Replacements[0].Source); got != "package lib\n" {
+		t.Fatalf("first exact source = %q", got)
+	}
+}
+
+func TestCandidatesRenderExactSource(t *testing.T) {
+	tr := fixtureTree(t)
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Exact", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generation.CandidateCount < 1 || len(generation.Candidates) != 1 || len(generation.Candidates[0].Replacements) != 1 {
+		t.Fatalf("generation = %+v", generation)
+	}
+	want := "package lib\n\nfunc Exact(a int) int {\n\tif !(a == 0) {\n\t\treturn 1\n\t}\n\treturn a\n}\n"
+	if got := string(generation.Candidates[0].Replacements[0].Source); got != want {
+		t.Fatalf("generated source:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestApplySourceEditsRejectsOverlap(t *testing.T) {
+	if _, err := applySourceEdits([]byte("abcdef"), nil); err == nil || !strings.Contains(err.Error(), "no source edits") {
+		t.Fatalf("empty edit error = %v", err)
+	}
+	_, err := applySourceEdits([]byte("abcdef"), []sourceEdit{{start: 1, end: 4}, {start: 3, end: 5}})
+	if err == nil || !strings.Contains(err.Error(), "overlaps") {
+		t.Fatalf("overlap error = %v", err)
+	}
+	got, err := applySourceEdits([]byte("abcd"), []sourceEdit{
+		{start: 1, end: 1, replacement: []byte("X")},
+		{start: 1, end: 1, replacement: []byte("Y")},
+		{start: 2, end: 3, replacement: []byte("Z")},
+	})
+	if err != nil || string(got) != "aXYbZd" {
+		t.Fatalf("ordered edits = %q, %v", got, err)
+	}
+	for _, edits := range [][]sourceEdit{
+		{{start: 1, end: 1, replacement: []byte("X")}, {start: 1, end: 2, replacement: []byte("R")}},
+		{{start: 1, end: 2, replacement: []byte("R")}, {start: 1, end: 1, replacement: []byte("X")}},
+	} {
+		got, err := applySourceEdits([]byte("ab"), edits)
+		if err != nil || string(got) != "aXR" {
+			t.Fatalf("boundary edits = %q, %v", got, err)
+		}
+	}
+}
+
+func TestDiscardedCandidateReservesOccurrenceIdentity(t *testing.T) {
+	tr := fixtureTree(t)
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Reserved", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(generation.Candidates) != 2 || generation.Candidates[0].Operator != "force true" || len(generation.Candidates[0].Replacements) != 0 {
+		t.Fatalf("first candidate = %+v", generation.Candidates)
+	}
+	if second := generation.Candidates[1]; second.Operator != "force true" || !strings.HasSuffix(second.Position, "#2") || len(second.Replacements) != 1 {
+		t.Fatalf("second candidate = %+v", second)
 	}
 }
 

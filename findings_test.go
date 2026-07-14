@@ -19,6 +19,8 @@ func TestSameAttestationPins(t *testing.T) {
 		{"operator set", func(f *Finding) { f.OperatorSet = "go/3" }},
 		{"oracle selection", func(f *Finding) { f.OracleExplicit = !f.OracleExplicit }},
 		{"budget", func(f *Finding) { f.Budget = 2 }},
+		{"candidate count", func(f *Finding) { f.CandidateCount = 1 }},
+		{"generated candidates", func(f *Finding) { f.Generated = 1 }},
 		{"oracle timeout", func(f *Finding) { f.OracleTimeout = "2m0s" }},
 		{"target evidence", func(f *Finding) { f.TargetEvidence.RuntimeDigest = "moved" }},
 		{"oracle evidence", func(f *Finding) { f.OracleEvidence[0].RuntimeDigest = "moved" }},
@@ -68,17 +70,20 @@ func TestFindingDispositionViewsAreCanonical(t *testing.T) {
 // exhaustive or larger request.
 func TestBudgetCovers(t *testing.T) {
 	cases := []struct {
-		recorded, req int
-		want          bool
+		finding Finding
+		req     int
+		want    bool
 	}{
-		{0, 0, true}, {0, 5, true}, // exhaustive answers anything
-		{5, 0, false},              // capped never answers exhaustive
-		{5, 5, true}, {5, 3, true}, // covers equal or smaller
-		{5, 6, false}, // never more than it generated
+		{Finding{CandidateCount: 5, Generated: 5}, 0, true},
+		{Finding{CandidateCount: 5, Generated: 5}, 9, true},
+		{Finding{CandidateCount: 9, Generated: 5}, 0, false},
+		{Finding{CandidateCount: 9, Generated: 5}, 5, true},
+		{Finding{CandidateCount: 9, Generated: 5}, 3, true},
+		{Finding{CandidateCount: 9, Generated: 5}, 6, false},
 	}
 	for _, c := range cases {
-		if got := budgetCovers(c.recorded, c.req); got != c.want {
-			t.Errorf("budgetCovers(%d, %d) = %v, want %v", c.recorded, c.req, got, c.want)
+		if got := budgetCovers(c.finding, c.req); got != c.want {
+			t.Errorf("budgetCovers(%+v, %d) = %v, want %v", c.finding, c.req, got, c.want)
 		}
 	}
 }

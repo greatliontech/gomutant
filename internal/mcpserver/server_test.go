@@ -29,6 +29,7 @@ func seededFinding(symbol string) gomutant.Finding {
 		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
 	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
+		CandidateCount: 0, Generated: 0,
 		TargetEvidence: evidence(symbol), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
 }
 
@@ -175,7 +176,10 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if len(out.Findings[0].Operators) == 0 {
 		t.Fatal("run omitted operator summaries")
 	}
-	if len(out.Decisions) != 1 || out.Decisions[0].Action != "measure" || out.Summary.Measured != 1 || out.Summary.Targets != 1 {
+	if finding := out.Findings[0]; finding.CandidateCount < finding.Generated || finding.Generated != finding.Mutants+finding.Discarded || finding.Generated == 0 {
+		t.Fatalf("run candidate accounting = %+v", finding)
+	}
+	if len(out.Decisions) != 1 || out.Decisions[0].Action != "measure" || out.Decisions[0].Candidates != out.Findings[0].Generated || out.Summary.Measured != 1 || out.Summary.Targets != 1 {
 		t.Fatalf("run status = decisions %+v, summary %+v", out.Decisions, out.Summary)
 	}
 	var stages []string
@@ -197,7 +201,9 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fOut.Findings) != 1 || fOut.Findings[0].State != gomutant.FindingCurrent || len(fOut.Findings[0].Open) != len(out.Findings[0].Open) {
+	if len(fOut.Findings) != 1 || fOut.Findings[0].State != gomutant.FindingCurrent || len(fOut.Findings[0].Open) != len(out.Findings[0].Open) ||
+		fOut.Findings[0].CandidateCount != out.Findings[0].CandidateCount || fOut.Findings[0].Generated != out.Findings[0].Generated ||
+		fOut.Findings[0].Mutants != out.Findings[0].Mutants || fOut.Findings[0].Discarded != out.Findings[0].Discarded {
 		t.Fatalf("findings = %+v", fOut.Findings)
 	}
 	_, filtered, err := s.toolFindings(ctx, nil, findingsIn{Label: "REQ-other"})
@@ -271,6 +277,32 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 	if !syms["example.com/fixture/lib.Weak"] || !syms["example.com/fixture/lib.Add"] {
 		t.Fatalf("filtered whole-tree run dropped document entries: %v", syms)
+	}
+}
+
+func TestToolCandidateDiscardAccounting(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs an oracle baseline")
+	}
+	s := serverAt(t)
+	_, out, err := s.toolRun(context.Background(), nil, runIn{
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.BigLit","oracle":["example.com/fixture/lib.TestAdd"]}]}`,
+		Budget:      1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Findings) != 1 || out.Findings[0].CandidateCount < 1 || out.Findings[0].Generated != 1 || out.Findings[0].Mutants != 0 || out.Findings[0].Discarded != 1 ||
+		len(out.Decisions) != 1 || out.Decisions[0].Candidates != 1 {
+		t.Fatalf("run discard accounting = %+v", out)
+	}
+	_, inspected, err := s.toolFindings(context.Background(), nil, findingsIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inspected.Findings) != 1 || inspected.Findings[0].CandidateCount != out.Findings[0].CandidateCount || inspected.Findings[0].Generated != 1 ||
+		inspected.Findings[0].Mutants != 0 || inspected.Findings[0].Discarded != 1 {
+		t.Fatalf("inspection discard accounting = %+v", inspected.Findings)
 	}
 }
 

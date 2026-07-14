@@ -18,7 +18,7 @@ import (
 
 // Options bound a run.
 type Options struct {
-	// Budget caps mutants per symbol; 0 means all (REQ-mut-budget).
+	// Budget caps selected candidates per symbol; 0 means all (REQ-mut-budget).
 	Budget int
 	// OracleTimeout bounds each oracle process; 0 means 60s.
 	OracleTimeout time.Duration
@@ -64,10 +64,10 @@ type PreparationEvent struct {
 
 // RunDecision explains whether one target is cached, skipped, or measured.
 type RunDecision struct {
-	Symbol  string `json:"symbol"`
-	Action  string `json:"action"`
-	Reason  string `json:"reason,omitempty"`
-	Mutants int    `json:"mutants,omitempty"`
+	Symbol     string `json:"symbol"`
+	Action     string `json:"action"`
+	Reason     string `json:"reason,omitempty"`
+	Candidates int    `json:"candidates,omitempty"`
 }
 
 // RunSummary is the aggregate final disposition of one selected target set.
@@ -96,7 +96,7 @@ func SummarizeRun(findings []Finding) RunSummary {
 		default:
 			summary.Measured++
 		}
-		summary.Generated += finding.Mutants + finding.Discarded
+		summary.Generated += finding.Generated
 		summary.Discarded += finding.Discarded
 		summary.Killed += finding.Killed
 		summary.Survived += finding.Mutants - finding.Killed
@@ -278,7 +278,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// (skipped, cached) or to a mutant work list.
 	type work struct {
 		target      int
-		mutants     []engine.Mutant
+		candidates  []engine.Candidate
 		groups      []group
 		oracleSet   map[string]bool
 		targetView  *subjectView
@@ -393,13 +393,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			switch {
 			case opts.Force:
 				reason = "forced"
-			case !budgetCovers(rec.Budget, opts.Budget):
+			case !budgetCovers(*rec, opts.Budget):
 				reason = "budget"
 			default:
 				reason = "stale"
 			}
 		}
-		if hasPrior && !opts.Force && budgetCovers(rec.Budget, opts.Budget) {
+		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
 			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String())
 			if err != nil {
 				return nil, err
@@ -418,17 +418,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		mutants, err := t.eng.MutantsContext(ctx, tg.Symbol, opts.Budget)
+		generation, err := t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
 		if err != nil {
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
-		decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Mutants: len(mutants)}
+		decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Candidates: len(generation.Candidates)}
 		f.Budget = opts.Budget
-		if opts.Budget > 0 && len(mutants) < opts.Budget {
-			// The cap did not bind: the run is exhaustive, and the finding
-			// should answer exhaustive requests from cache.
-			f.Budget = 0
-		}
+		f.CandidateCount = generation.CandidateCount
+		f.Generated = len(generation.Candidates)
 		// Per-package oracle scoping (REQ-exec-oracle-run), with the rapid
 		// failfile flag only in front of binaries that register it
 		// (REQ-mut-overlay).
@@ -488,7 +485,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for _, oracleView := range oracleViews {
 			oracleView.module.producer = true
 		}
-		pending = append(pending, work{target: i, mutants: mutants, groups: groups, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, baselines: baselines})
+		pending = append(pending, work{target: i, candidates: generation.Candidates, groups: groups, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, baselines: baselines})
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -511,8 +508,8 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	outcomes := make([][]engine.MutantOutcome, len(pending))
 	observations := make([][]runtimeinput.State, len(pending))
 	for wi := range pending {
-		outcomes[wi] = make([]engine.MutantOutcome, len(pending[wi].mutants))
-		observations[wi] = make([]runtimeinput.State, len(pending[wi].mutants))
+		outcomes[wi] = make([]engine.MutantOutcome, len(pending[wi].candidates))
+		observations[wi] = make([]runtimeinput.State, len(pending[wi].candidates))
 	}
 	type job struct{ wi, mi int }
 	jobCh := make(chan job)
@@ -533,7 +530,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					return
 				}
 				w := pending[j.wi]
-				m := w.mutants[j.mi]
+				m, runnable := w.candidates[j.mi].Mutant()
+				if !runnable {
+					continue
+				}
 				outcome := engine.MutantSurvived
 				var processStates []runtimeinput.State
 				for _, g := range w.groups {
@@ -575,7 +575,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 dispatching:
 	for wi := range pending {
-		for mi := range pending[wi].mutants {
+		for mi, candidate := range pending[wi].candidates {
+			if _, runnable := candidate.Mutant(); !runnable {
+				continue
+			}
 			select {
 			case jobCh <- job{wi, mi}:
 			case <-poolCtx.Done():
@@ -611,7 +614,11 @@ dispatching:
 		}
 		f := &findings[w.target]
 		states := append([]runtimeinput.State(nil), w.baselines...)
-		states = append(states, observations[wi]...)
+		for mi, candidate := range w.candidates {
+			if _, runnable := candidate.Mutant(); runnable {
+				states = append(states, observations[wi][mi])
+			}
+		}
 		state, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, states...)
 		if err != nil {
 			return nil, err
@@ -647,7 +654,7 @@ dispatching:
 		if err != nil {
 			return nil, err
 		}
-		f.Operators = summarizeOperators(w.mutants, outcomes[wi])
+		f.Operators = summarizeOperators(w.candidates, outcomes[wi])
 		for _, summary := range f.Operators {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -656,13 +663,13 @@ dispatching:
 			f.Mutants += summary.Killed + summary.Survived
 			f.Killed += summary.Killed
 		}
-		for mi, m := range w.mutants {
+		for mi, candidate := range w.candidates {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			switch outcomes[wi][mi] {
 			case engine.MutantSurvived:
-				f.Survivors = append(f.Survivors, Survivor{Position: m.Position, Operator: m.Operator})
+				f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator})
 			}
 		}
 		// A re-measure with unchanged pins keeps prior attestations that
@@ -770,15 +777,15 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 	return result, nil
 }
 
-func summarizeOperators(mutants []engine.Mutant, outcomes []engine.MutantOutcome) []OperatorSummary {
+func summarizeOperators(candidates []engine.Candidate, outcomes []engine.MutantOutcome) []OperatorSummary {
 	byOperator := map[string]*OperatorSummary{}
 	operators := make([]string, 0)
-	for i, mutant := range mutants {
-		summary := byOperator[mutant.Operator]
+	for i, candidate := range candidates {
+		summary := byOperator[candidate.Operator]
 		if summary == nil {
-			summary = &OperatorSummary{Operator: mutant.Operator}
-			byOperator[mutant.Operator] = summary
-			operators = append(operators, mutant.Operator)
+			summary = &OperatorSummary{Operator: candidate.Operator}
+			byOperator[candidate.Operator] = summary
+			operators = append(operators, candidate.Operator)
 		}
 		summary.Generated++
 		switch outcomes[i] {

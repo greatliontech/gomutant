@@ -325,6 +325,7 @@ func sortedSubjectEvidence(evidence []SubjectEvidence) []SubjectEvidence {
 
 func sameAttestationPins(prior, current Finding) bool {
 	if prior.OperatorSet != current.OperatorSet || prior.OracleExplicit != current.OracleExplicit || prior.Budget != current.Budget ||
+		prior.CandidateCount != current.CandidateCount || prior.Generated != current.Generated ||
 		prior.OracleTimeout != current.OracleTimeout || prior.TargetEvidence != current.TargetEvidence ||
 		len(prior.OracleEvidence) != len(current.OracleEvidence) {
 		return false

@@ -76,7 +76,7 @@ func TestFindingsAtAndUpdate(t *testing.T) {
 		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
 	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
-		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, Mutants: 1, Killed: 1,
+		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}}
 	err := gomutant.UpdateDocument(path, func(prior []gomutant.Finding) ([]gomutant.Finding, error) {
 		return gomutant.MergeFindings(prior, fresh), nil
@@ -156,7 +156,7 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
 	finding := gomutant.Finding{Symbol: "example.com/empty.Deleted", Labels: []string{"REQ-Z", "REQ-A"}, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
-		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, Mutants: 1,
+		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, CandidateCount: 1, Generated: 1, Mutants: 1,
 		Survivors: []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}},
 		Attested:  []gomutant.Attestation{{Position: "old.go:1:1", Operator: "zero return", Reason: "equivalent"}}}
 	views, err := inspectFindings(context.Background(), tree, []gomutant.Finding{finding}, "REQ-A")
@@ -219,13 +219,13 @@ func TestRenderRunStatus(t *testing.T) {
 	renderPreparation(&output, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	renderPreparation(&output, gomutant.PreparationEvent{Stage: gomutant.PreparationResolving, Symbol: "p.F"})
 	renderPreparation(&output, gomutant.PreparationEvent{Stage: gomutant.PreparationBaseline, Symbol: "p.F", Package: "example.com/p"})
-	renderRunDecision(&output, gomutant.RunDecision{Symbol: "p.F", Action: "measure", Reason: "forced", Mutants: 3})
+	renderRunDecision(&output, gomutant.RunDecision{Symbol: "p.F", Action: "measure", Reason: "forced", Candidates: 3})
 	renderRunDecision(&output, gomutant.RunDecision{Symbol: "p.G", Action: "cached"})
 	renderRunSummary(&output, gomutant.RunSummary{Targets: 2, Measured: 1, Cached: 1, Generated: 3, Killed: 2, Survived: 1, Attested: 1, Open: 0})
 	want := "prepare   loading\n" +
 		"prepare   resolving p.F\n" +
 		"prepare   baseline p.F example.com/p\n" +
-		"measure   p.F  3 mutants (forced)\n" +
+		"measure   p.F  3 candidates (forced)\n" +
 		"cached    p.G\n" +
 		"summary   2 targets: 1 measured, 1 cached, 0 skipped; 3 generated, 2 killed, 1 survived, 0 discarded; 1 attested, 0 open\n"
 	if output.String() != want {
@@ -237,7 +237,7 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 	tmp := t.TempDir()
 	targetsPath := filepath.Join(tmp, "targets.json")
 	findingsPath := filepath.Join(tmp, "findings.json")
-	if err := os.WriteFile(targetsPath, []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"]}]}`), 0o644); err != nil {
+	if err := os.WriteFile(targetsPath, []byte(`{"targets":[{"symbol":"example.com/fixture/lib.BigLit","oracle":["example.com/fixture/lib.TestAdd"]}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
@@ -251,21 +251,27 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	findings, err := gomutant.ParseFindings(data)
-	if err != nil || len(findings) != 1 || findings[0].OracleTimeout != "2m0s" {
+	if err != nil || len(findings) != 1 || findings[0].OracleTimeout != "2m0s" || findings[0].CandidateCount < findings[0].Generated ||
+		findings[0].Generated != 1 || findings[0].Mutants != 0 || findings[0].Discarded != 1 {
 		t.Fatalf("oracle timeout pin = %+v, %v", findings, err)
 	}
 	positions := []int{
 		strings.Index(output.String(), "prepare   loading\n"),
-		strings.Index(output.String(), "prepare   resolving example.com/fixture/lib.Add\n"),
-		strings.Index(output.String(), "prepare   freshness example.com/fixture/lib.Add\n"),
-		strings.Index(output.String(), "prepare   mutants example.com/fixture/lib.Add\n"),
-		strings.Index(output.String(), "prepare   baseline example.com/fixture/lib.Add example.com/fixture/lib\n"),
-		strings.Index(output.String(), "measure   example.com/fixture/lib.Add"),
+		strings.Index(output.String(), "prepare   resolving example.com/fixture/lib.BigLit\n"),
+		strings.Index(output.String(), "prepare   freshness example.com/fixture/lib.BigLit\n"),
+		strings.Index(output.String(), "prepare   mutants example.com/fixture/lib.BigLit\n"),
+		strings.Index(output.String(), "prepare   baseline example.com/fixture/lib.BigLit example.com/fixture/lib\n"),
+		strings.Index(output.String(), "measure   example.com/fixture/lib.BigLit"),
 	}
 	for i, position := range positions {
 		if position < 0 || i > 0 && position <= positions[i-1] {
 			t.Fatalf("run progress positions = %v\n%s", positions, output.String())
 		}
+	}
+	if !strings.Contains(output.String(), "measure   example.com/fixture/lib.BigLit  1 candidates") ||
+		!strings.Contains(output.String(), "measured  example.com/fixture/lib.BigLit  1/") ||
+		!strings.Contains(output.String(), "0 mutants, 0 killed, 1 discarded") {
+		t.Fatalf("candidate counts missing from output:\n%s", output.String())
 	}
 }
 

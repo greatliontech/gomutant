@@ -19,13 +19,18 @@ type findingsOptions struct {
 }
 
 type findingView struct {
-	Symbol    string                     `json:"symbol"`
-	Labels    []string                   `json:"labels,omitempty"`
-	State     gomutant.FindingState      `json:"state"`
-	Reason    string                     `json:"reason,omitempty"`
-	Operators []gomutant.OperatorSummary `json:"operators"`
-	Open      []gomutant.Survivor        `json:"open"`
-	Attested  []gomutant.Attestation     `json:"attested"`
+	Symbol         string                     `json:"symbol"`
+	Labels         []string                   `json:"labels,omitempty"`
+	State          gomutant.FindingState      `json:"state"`
+	Reason         string                     `json:"reason,omitempty"`
+	CandidateCount int                        `json:"candidateCount"`
+	Generated      int                        `json:"generated"`
+	Mutants        int                        `json:"mutants"`
+	Killed         int                        `json:"killed"`
+	Discarded      int                        `json:"discarded"`
+	Operators      []gomutant.OperatorSummary `json:"operators"`
+	Open           []gomutant.Survivor        `json:"open"`
+	Attested       []gomutant.Attestation     `json:"attested"`
 }
 
 func newFindingsCommand() *cobra.Command {
@@ -81,7 +86,8 @@ func findingsCommand(ctx context.Context, o findingsOptions) error {
 		if view.Reason != "" {
 			fmt.Printf("  (%s)", view.Reason)
 		}
-		fmt.Printf("  %d open, %d attested\n", len(view.Open), len(view.Attested))
+		fmt.Printf("  %d/%d candidates, %d mutants, %d killed, %d discarded; %d open, %d attested\n",
+			view.Generated, view.CandidateCount, view.Mutants, view.Killed, view.Discarded, len(view.Open), len(view.Attested))
 		for _, survivor := range view.Open {
 			fmt.Printf("    survivor %s %s\n", survivor.Position, survivor.Operator)
 		}
@@ -117,6 +123,8 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, all []gomutant.Fi
 		sort.Strings(labels)
 		views = append(views, findingView{
 			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
+			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
+			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
 			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
 		})
