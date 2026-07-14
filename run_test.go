@@ -518,6 +518,66 @@ func TestRunAccountsForUnaryAssignmentFamilies(t *testing.T) {
 	}
 }
 
+func TestRunAccountsForScalarLiteralFamilies(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	oracle := []string{"example.com/fixture/lib.TestVacuous"}
+	symbols := []string{
+		"LiteralInteger", "LiteralRune", "LiteralFloat", "LiteralImaginary",
+		"LiteralTrue", "LiteralFalse", "LiteralNonempty", "LiteralEmpty",
+		"IntegerLiteralOverflow", "IntegerLiteralDuplicate", "RuneLiteralDuplicate",
+		"FloatLiteralDuplicate", "ImaginaryLiteralCases", "BooleanLiteralCases", "StringLiteralDuplicate",
+	}
+	targets := make([]Target, 0, len(symbols))
+	for _, symbol := range symbols {
+		targets = append(targets, Target{Symbol: "example.com/fixture/lib." + symbol, Oracle: oracle})
+	}
+	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != len(targets) {
+		t.Fatalf("scalar literal findings = %d, want %d", len(findings), len(targets))
+	}
+	operators := map[string]OperatorSummary{}
+	for _, finding := range findings {
+		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+			t.Fatalf("scalar literal finding = %+v", finding)
+		}
+		for _, summary := range finding.Operators {
+			total := operators[summary.Operator]
+			total.Operator = summary.Operator
+			total.Generated += summary.Generated
+			total.Discarded += summary.Discarded
+			total.Killed += summary.Killed
+			total.Survived += summary.Survived
+			operators[summary.Operator] = total
+		}
+	}
+	for operator, want := range map[string]OperatorSummary{
+		"integer literal: magnitude +1":     {Generated: 4, Discarded: 2, Survived: 2},
+		"rune literal: value +1":            {Generated: 3, Discarded: 1, Survived: 2},
+		"float literal: value +1":           {Generated: 3, Discarded: 1, Survived: 2},
+		"imaginary literal: value +1":       {Generated: 3, Survived: 3},
+		"boolean literal: true -> false":    {Generated: 2, Survived: 2},
+		"boolean literal: false -> true":    {Generated: 2, Survived: 2},
+		"string literal: nonempty -> empty": {Generated: 2, Discarded: 1, Survived: 1},
+		"string literal: empty -> nonempty": {Generated: 2, Discarded: 1, Survived: 1},
+	} {
+		summary := operators[operator]
+		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+		}
+	}
+	oldBasis := findings[0]
+	oldBasis.OperatorSet = "go/9"
+	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+		t.Fatalf("go/9 finding under go/10 = fresh %v, err %v", fresh, err)
+	}
+}
+
 func TestRunDecisionsAndCancellation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")

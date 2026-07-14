@@ -14,8 +14,7 @@ func Concat(a, b string) string {
 	return a + b
 }
 
-// BigLit returns a literal that does not fit ParseUint's 63 bits: the
-// increment renders identically and the site is dropped as a no-op.
+// BigLit exercises arbitrary-precision integer-literal mutation.
 func BigLit() uint64 {
 	return 0xFFFFFFFFFFFFFFFF
 }

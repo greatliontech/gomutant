@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"strconv"
 	"strings"
 )
 
@@ -15,21 +14,13 @@ var activeCandidateEmitters = []candidateEmitter{
 	emitUnary,
 	emitCompoundAssignment,
 	emitBooleanOperand,
-	emitIntegerLiteral,
+	emitScalarValue,
 	emitLoopControl,
 	emitIncDec,
 	emitConditions,
 	emitRangeSuppression,
 	emitBlockMutations,
 	emitZeroReturn,
-}
-
-func emitIntegerLiteral(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
-	literal, ok := node.(*ast.BasicLit)
-	if !ok || literal.Kind != token.INT {
-		return nil
-	}
-	return []candidateSpec{{operator: "increment literal", start: literal.Pos(), end: literal.End(), family: 15, variant: 1, edits: []sourceEdit{c.edit(literal.Pos(), literal.End(), []byte(incrementInt(literal.Value)))}, preservesImportReferences: true}}
 }
 
 func emitBlockMutations(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
@@ -74,14 +65,6 @@ func emitZeroReturn(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
 func numeric(c *catalog, expression ast.Expr) bool {
 	basic, ok := c.pkg.TypesInfo.TypeOf(expression).(*types.Basic)
 	return ok && basic.Info()&types.IsNumeric != 0
-}
-
-func incrementInt(literal string) string {
-	n, err := strconv.ParseUint(literal, 0, 63)
-	if err != nil {
-		return literal
-	}
-	return strconv.FormatUint(n+1, 10)
 }
 
 func zeroReplacement(typ types.Type) []byte {

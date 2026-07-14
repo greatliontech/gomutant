@@ -12,8 +12,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/9" {
-		t.Fatalf("operator set = %q, want go/9", OperatorSet)
+	if OperatorSet != "go/10" {
+		t.Fatalf("operator set = %q, want go/10", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
@@ -46,7 +46,7 @@ func TestMutants(t *testing.T) {
 	}
 	for _, want := range []string{
 		"drop assignment", "compound arithmetic: += -> -=", "arithmetic: * -> /", "arithmetic: + -> -",
-		"increment literal", "loop control: continue -> break", "boolean operand: -> false",
+		"integer literal: magnitude +1", "loop control: continue -> break", "boolean operand: -> false",
 		"logical: || -> &&", "logical: && -> ||", "boolean operand: -> true", "increment/decrement: ++ -> --",
 	} {
 		if mixedOps[want] == 0 {
@@ -129,8 +129,8 @@ func TestMutants(t *testing.T) {
 		}
 	}
 
-	// A literal the increment cannot parse renders identically and is
-	// dropped as a no-op site; the return still yields its zero mutant.
+	// Integer mutation is arbitrary precision: a literal beyond uint64 still
+	// yields its canonical decimal successor.
 	big, err := tr.Mutants("example.com/fixture/lib.BigLit", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -139,8 +139,8 @@ func TestMutants(t *testing.T) {
 	for _, m := range big {
 		bigOps[m.Operator] = true
 	}
-	if bigOps["increment literal"] {
-		t.Fatal("unparseable literal produced an increment mutant")
+	if !bigOps["integer literal: magnitude +1"] {
+		t.Fatal("large literal did not produce an arbitrary-precision mutant")
 	}
 	if !bigOps["zero return"] {
 		t.Fatalf("BigLit ops = %v, want zero return present", bigOps)
@@ -358,15 +358,16 @@ func TestCandidatesSelectBeforeEffectiveSourceDeduplication(t *testing.T) {
 	tr.importProcessor = func(context.Context, string, []byte) ([]byte, error) {
 		return []byte("package lib\n"), nil
 	}
-	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.PruneCollision", 2)
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.PruneCollision", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if generation.CandidateCount <= 2 || len(generation.Candidates) != 2 {
+	if generation.CandidateCount <= 3 || len(generation.Candidates) != 3 {
 		t.Fatalf("generation = %+v", generation)
 	}
 	if generation.Candidates[0].Operator != "delete statement" || len(generation.Candidates[0].Replacements) != 1 ||
-		generation.Candidates[1].Operator != "delete statement" || len(generation.Candidates[1].Replacements) != 0 {
+		generation.Candidates[1].Operator != "string literal: nonempty -> empty" || len(generation.Candidates[1].Replacements) != 1 ||
+		generation.Candidates[2].Operator != "delete statement" || len(generation.Candidates[2].Replacements) != 0 {
 		t.Fatalf("selected candidates = %+v", generation.Candidates)
 	}
 	if got := string(generation.Candidates[0].Replacements[0].Source); got != "package lib\n" {
@@ -418,15 +419,16 @@ func TestApplySourceEditsRejectsOverlap(t *testing.T) {
 
 func TestDiscardedCandidateReservesOccurrenceIdentity(t *testing.T) {
 	tr := fixtureTree(t)
-	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Reserved", 2)
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Reserved", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(generation.Candidates) != 2 || generation.Candidates[0].Operator != "boolean operand: -> true" || len(generation.Candidates[0].Replacements) != 0 {
-		t.Fatalf("first candidate = %+v", generation.Candidates)
+	if len(generation.Candidates) != 3 || generation.Candidates[0].Operator != "boolean literal: true -> false" || len(generation.Candidates[0].Replacements) != 1 ||
+		generation.Candidates[1].Operator != "boolean operand: -> true" || len(generation.Candidates[1].Replacements) != 0 {
+		t.Fatalf("leading candidates = %+v", generation.Candidates)
 	}
-	if second := generation.Candidates[1]; second.Operator != "boolean operand: -> true" || !strings.HasSuffix(second.Position, "#2") || len(second.Replacements) != 1 {
-		t.Fatalf("second candidate = %+v", second)
+	if third := generation.Candidates[2]; third.Operator != "boolean operand: -> true" || !strings.HasSuffix(third.Position, "#2") || len(third.Replacements) != 1 {
+		t.Fatalf("third candidate = %+v", third)
 	}
 }
 

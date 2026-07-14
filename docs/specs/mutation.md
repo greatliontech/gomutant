@@ -12,18 +12,19 @@ of behavior a finding is measured against.
 is run and either killed or reported as a survivor.
 
 **REQ-mut-operators** (behavior): gomutant MUST identify the exact active
-operator basis in every finding. The current active `go/9` basis comprises
+operator basis in every finding. The current active `go/10` basis comprises
 the equality, relational-boundary, relational-negation, and logical families
 exactly as cataloged below; the boolean-operand, condition, range-suppression,
 and loop-control families exactly as cataloged below; the arithmetic, bitwise,
 and shift families exactly as cataloged below; the unary, compound arithmetic,
 compound bitwise, compound shift, compound store, and increment/decrement
-families exactly as cataloged below;
-integer-literal increments; statement deletion, with assignment stores dropped while right-hand
+families exactly as cataloged below; the integer, rune, floating-point,
+imaginary, boolean, and string literal families exactly as cataloged below;
+statement deletion, with assignment stores dropped while right-hand
 sides still evaluate; and zero-value return substitution, each emitted where
 the replacement can be formed without a new import or named type expression. A
 site with no such counterpart, including a result type with no context-free
-zero expression, yields no `go/9` candidate. A selected candidate
+zero expression, yields no `go/10` candidate. A selected candidate
 that fails to compile, does not differ from the baseline, or renders identically
 to an earlier selected candidate is discarded; a timed-out oracle run is a kill under
 REQ-exec-attribution. When INV-MUT-COMPREHENSIVE lands, its catalog supersedes
@@ -33,13 +34,8 @@ and membership, lands complete catalog families rather than partial mappings,
 and satisfies the candidate, accounting, stale-pin, and grammar contracts for
 every active family.
 
-The completed `go/9` families use their catalog labels. Its remaining labels
-are exactly `increment literal`,
-`delete statement`, `drop assignment`, and `zero return`. It differs from
-`go/8` only by completing the unary, compound-assignment, and
-increment/decrement families named
-above; all other operator sites, replacements, candidate ordering, and
-accounting are unchanged.
+The completed `go/10` families use their catalog labels. Its remaining labels
+are exactly `delete statement`, `drop assignment`, and `zero return`.
 
 **INV-MUT-COMPREHENSIVE** (project invariant): The comprehensive automatic
 basis MUST be the finite first-order catalog below. Every mapping applies once
@@ -51,8 +47,7 @@ normalization, not additional mutation sites. Any change to catalog membership,
 mapping, applicability, ordering, or deduplication receives a new operator-set
 identifier before its findings can be reused.
 
-Lands: when the automatic generator and finding accounting implement this
-catalog under an operator-set identifier distinct from `go/3`.
+Lands: when the active operator basis implements every catalog row below.
 
 The token-replacement families and their ordered variants are:
 
@@ -94,7 +89,7 @@ The ordered scalar-value families are:
 | Family and operator label | Applicable site | Replacement |
 |---|---|---|
 | `integer literal: magnitude +1` | integer literal | arbitrary-precision magnitude plus one, rendered as canonical decimal |
-| `rune literal: value +1` | rune literal | decoded rune value plus one, rendered by Go's `strconv.QuoteRune` canonical spelling |
+| `rune literal: value +1` | rune literal whose decoded value plus one is a valid Unicode rune | decoded rune value plus one, rendered by Go's `strconv.QuoteRune` canonical spelling |
 | `float literal: value +1` | floating-point literal | `(<original literal> + 1.0)` |
 | `imaginary literal: value +1` | imaginary literal | `(<original literal> + 1i)` |
 | `boolean literal: true -> false` | universe `true` identifier | `false` |
@@ -104,8 +99,9 @@ The ordered scalar-value families are:
 
 Literal mutation follows the lexical literal, not a surrounding unary sign, so
 mutating `-1` yields `-2`. Shadowed identifiers named `true` or `false` are not
-boolean literals. Invalid rune values, overflow, duplicate cases, invalid array
-lengths, and other context failures are discarded by compilation.
+boolean literals. A rune increment outside the Unicode rune domain has no
+candidate. Overflow, duplicate cases, invalid array lengths, and other context
+failures are discarded by compilation.
 The scalar-value rows have global family ranks 15 through 22 in table order.
 
 The ordered boolean and control-flow families are:
