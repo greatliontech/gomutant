@@ -31,6 +31,24 @@ more narrowly. Dirty provenance bars a finding from explicit committed-baseline 
 but does not prevent reuse in the unchanged working tree. The commit is omitted only
 when no repository HEAD exists; that unavailable provenance carries `dirty=true`.
 
+**INV-RESULT-CANDIDATE-CONSERVATION** (project invariant): Every finding
+produced by a candidate-accounted active basis MUST carry required `candidateCount` and
+`generated` fields. `candidateCount` is the total applicable catalog candidates
+before a budget; `generated` is the selected exhaustive set or positive-budget
+prefix. The existing `mutants` field is the measured count after discards.
+Finding and per-operator totals MUST satisfy `generated = discarded + killed +
+survived`, `mutants = killed + survived`, and `generated = mutants +
+discarded`. Run decisions expose selected candidates as `candidates`, not as
+measured mutants. `candidateCount` makes exact-budget exhaustion representable
+without an additional exhaustive flag; every REQ-result-stale pin still applies.
+All counts and `budget` are nonnegative, `generated <= candidateCount`, and the
+record MUST have `generated == candidateCount` when budget is zero or `generated ==
+min(budget, candidateCount)` when budget is positive. A document violating a
+count equation or budget relation is malformed and refused.
+
+Lands: when the first transitional or comprehensive active basis implements
+candidate-level accounting; remains required for every later basis.
+
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
 tolerance is safe because its direction is anti-flattering: every open
@@ -52,7 +70,11 @@ toolchain, or build configuration, an added or removed oracle identity, a new
 oracle selection mode or operator version, a different effective oracle timeout, or a request for more mutants
 than a capped record generated each invalidates the record. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures. A record
-is never partially trusted: any moved pin remeasures the whole target.
+is never partially trusted: any moved pin remeasures the whole target. When
+INV-RESULT-CANDIDATE-CONSERVATION becomes active, a zero-budget request requires
+`generated == candidateCount`; a positive request `N` requires `generated >=
+min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
+serve a weaker request without remeasurement.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
 portable version-1 document that gomutant owns — carrying, per mutated
@@ -72,6 +94,9 @@ share that position and operator, the second and later identities append
 `#<source-order occurrence>`. The discriminator is part of the survivor and
 attestation identity so overlapping syntax-tree mutation sites cannot collapse
 into one disposition.
+Under INV-RESULT-CANDIDATE-CONSERVATION, occurrence suffixes are assigned over
+the complete globally ordered candidate set before budget selection or discard;
+an earlier discarded candidate can therefore reserve an occurrence number.
 
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among

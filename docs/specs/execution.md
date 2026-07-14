@@ -27,7 +27,12 @@ goroutine-panic-class kill from environmental noise. A run that fails in any
 other way — a build error the overlay should have prevented, a killer test
 outside the oracle, output that does not parse — aborts without recording a
 finding, because a corrupted measurement read as a sound one inflates kills
-in the flattering direction.
+in the flattering direction. When INV-RESULT-CANDIDATE-CONSERVATION in
+[results.md](results.md) becomes active, compiler rejection of a selected
+candidate before any oracle test runs is instead a discard only after the same
+package-scoped baseline passed and source/build inputs remained coherent;
+generator, overlay, environment, movement, unrelated-package, and malformed
+output failures still abort.
 Each distinct package-scoped oracle group needed by fresh targets is probed
 once per run before mutant execution. A group that matches no tests or does
 not pass unmutated refuses the measurement; cached findings launch no probe.
@@ -125,6 +130,11 @@ summary. CLI progress renders the ordered decisions before mutant execution;
 all preparation events precede every decision. CLI and MCP final results expose
 the same preparation sequence, decisions, and totals. Open survivors remain
 advisory and do not change successful exit semantics.
+
+When INV-RESULT-CANDIDATE-CONSERVATION in [results.md](results.md) becomes
+active, a measure decision reports its selected candidate count as
+`candidates`, including candidates later discarded; `budget` means the current
+request needs a longer candidate prefix than the prior finding records.
 
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
 caller-context cancellation, including expiry of an operator-supplied command

@@ -13,8 +13,10 @@ be demonstrated. Weakening runtime-input identity or
 marking fixture-driven tests pure would hide real dependencies, so neither is
 an acceptable route to reusable evidence.
 
-Lands: when an overnight execution window is available and an uncapped
-whole-tree run over every auto-discovered target
+Lands: when the comprehensive automatic operator basis is implemented and
+finalized by its Go-syntax, fixture-grammar, and bounded self-host audit, and an
+overnight execution window is available for an uncapped whole-tree run over
+every auto-discovered target
 completes with package-derived oracle findings, every survivor is
 strengthened or attested with a recorded reason, selected targets produce
 complete findings with concurrent workers as well as one worker, unverifiable
