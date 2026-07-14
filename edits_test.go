@@ -116,7 +116,7 @@ func TestUpdateDocument(t *testing.T) {
 	evidence := func(symbol string) SubjectEvidence {
 		return SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
-	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, Mutants: 1,
 		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "zero return"}}}}
@@ -136,7 +136,7 @@ func TestUpdateDocument(t *testing.T) {
 
 	// The long session writes its (stale-snapshot-independent) merge: the
 	// update sees the re-read document, disposition intact.
-	fresh := []Finding{{Symbol: "p.B", BodyHash: "h2", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+	fresh := []Finding{{Symbol: "p.B", BodyHash: "h2", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.B"), OracleEvidence: []SubjectEvidence{evidence("p.TestB")}, Mutants: 1, Killed: 1,
 		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}}
 	if err := UpdateDocument(path, func(current []Finding) ([]Finding, error) {

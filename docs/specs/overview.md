@@ -23,7 +23,7 @@ Non-normative orientation; each property is specified in its own document.
    attributed to a named event ([mutation.md](mutation.md), [execution.md](execution.md)).
 4. **Advisory, pinned.** Findings record the measured outcomes and the evidence
    available to reuse them — target and oracle source closures, build and runtime
-   guards, observed runtime inputs, operators, budget, and timeout. Only findings
+   guards, observed runtime inputs, operators, budget, and oracle timeout. Only findings
    whose pins prove reusable may be served without measurement; an unverifiable
    finding remains a report of its completed run and remeasures on the next request
    ([results.md](results.md)).

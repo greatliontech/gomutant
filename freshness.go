@@ -257,8 +257,8 @@ func (t *Tree) InspectFindingContext(ctx context.Context, f Finding) (FindingIns
 	if f.OperatorSet != engine.OperatorSet {
 		return FindingInspection{State: FindingStale, Reason: "operator set changed"}, nil
 	}
-	if _, err := time.ParseDuration(f.Timeout); err != nil {
-		return FindingInspection{}, fmt.Errorf("finding %s has invalid timeout: %w", f.Symbol, err)
+	if _, err := time.ParseDuration(f.OracleTimeout); err != nil {
+		return FindingInspection{}, fmt.Errorf("finding %s has invalid oracle timeout: %w", f.Symbol, err)
 	}
 	if !f.OracleExplicit {
 		currentOracle, err := t.resolveOracleContext(ctx, Target{Symbol: f.Symbol})
@@ -325,7 +325,7 @@ func sortedSubjectEvidence(evidence []SubjectEvidence) []SubjectEvidence {
 
 func sameAttestationPins(prior, current Finding) bool {
 	if prior.OperatorSet != current.OperatorSet || prior.OracleExplicit != current.OracleExplicit || prior.Budget != current.Budget ||
-		prior.Timeout != current.Timeout || prior.TargetEvidence != current.TargetEvidence ||
+		prior.OracleTimeout != current.OracleTimeout || prior.TargetEvidence != current.TargetEvidence ||
 		len(prior.OracleEvidence) != len(current.OracleEvidence) {
 		return false
 	}
@@ -354,7 +354,7 @@ func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subje
 }
 
 func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
-	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.Timeout != timeout || len(prior.OracleEvidence) != len(oracle) {
+	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.OracleTimeout != timeout || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
 	type runtimeKey struct {

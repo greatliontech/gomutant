@@ -72,6 +72,14 @@ func (s *Server) MCP() *mcp.Server {
 
 const defaultFindings = ".gomutant/findings.json"
 
+func secondsDuration(name string, seconds int) (time.Duration, error) {
+	const maxSeconds = int64((1<<63 - 1) / int64(time.Second))
+	if seconds < 0 || int64(seconds) > maxSeconds {
+		return 0, fmt.Errorf("%s is outside the supported duration range", name)
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
+
 func (s *Server) findingsPath(override string) string {
 	p := override
 	if p == "" {
@@ -117,16 +125,17 @@ func (s *Server) loadFindingsContext(ctx context.Context, override string) ([]go
 }
 
 type runIn struct {
-	TargetsPath string   `json:"targets_path,omitempty" jsonschema:"path to a targets document (gomutant's format or stipulator's export); overrides discovery"`
-	TargetsJSON string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
-	Changed     string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
-	Budget      int      `json:"budget,omitempty" jsonschema:"mutants per symbol; 0 means exhaustive"`
-	TimeoutSec  int      `json:"timeout_sec,omitempty" jsonschema:"one mutant's oracle-run budget in seconds; 0 means 60"`
-	Jobs        int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
-	Force       bool     `json:"force,omitempty" jsonschema:"re-measure targets whose prior finding still covers"`
-	Findings    string   `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
-	Packages    []string `json:"packages,omitempty" jsonschema:"package import-path glob filters; alternatives"`
-	Symbols     []string `json:"symbols,omitempty" jsonschema:"fully qualified symbol glob filters; alternatives"`
+	TargetsPath      string   `json:"targets_path,omitempty" jsonschema:"path to a targets document (gomutant's format or stipulator's export); overrides discovery"`
+	TargetsJSON      string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
+	Changed          string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
+	Budget           int      `json:"budget,omitempty" jsonschema:"mutants per symbol; 0 means exhaustive"`
+	TimeoutSec       int      `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before findings commit after this many seconds; 0 means unlimited"`
+	OracleTimeoutSec int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
+	Jobs             int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
+	Force            bool     `json:"force,omitempty" jsonschema:"re-measure targets whose prior finding still covers"`
+	Findings         string   `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
+	Packages         []string `json:"packages,omitempty" jsonschema:"package import-path glob filters; alternatives"`
+	Symbols          []string `json:"symbols,omitempty" jsonschema:"fully qualified symbol glob filters; alternatives"`
 }
 
 type findingOut struct {
@@ -153,6 +162,19 @@ type runOut struct {
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (*mcp.CallToolResult, runOut, error) {
 	var out runOut
+	commandTimeout, err := secondsDuration("timeout_sec", in.TimeoutSec)
+	if err != nil {
+		return nil, out, err
+	}
+	oracleTimeout, err := secondsDuration("oracle_timeout_sec", in.OracleTimeoutSec)
+	if err != nil {
+		return nil, out, err
+	}
+	if commandTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, commandTimeout)
+		defer cancel()
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
@@ -246,13 +268,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return nil, out, err
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
-		Budget:   in.Budget,
-		Timeout:  time.Duration(in.TimeoutSec) * time.Second,
-		Jobs:     in.Jobs,
-		Force:    in.Force,
-		Prior:    prior,
-		Decision: func(decision gomutant.RunDecision) { out.Decisions = append(out.Decisions, decision) },
-		Progress: func(event gomutant.PreparationEvent) { out.Preparation = append(out.Preparation, event) },
+		Budget:        in.Budget,
+		OracleTimeout: oracleTimeout,
+		Jobs:          in.Jobs,
+		Force:         in.Force,
+		Prior:         prior,
+		Decision:      func(decision gomutant.RunDecision) { out.Decisions = append(out.Decisions, decision) },
+		Progress:      func(event gomutant.PreparationEvent) { out.Preparation = append(out.Preparation, event) },
 	})
 	if err != nil {
 		return nil, out, err
@@ -469,16 +491,30 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 }
 
 type ephemeralIn struct {
-	File        string               `json:"file,omitempty" jsonschema:"tree-relative source file for replacement or edits; omit for batch_edits"`
-	Replacement string               `json:"replacement,omitempty" jsonschema:"the whole replacement source; give exactly one mutation form"`
-	Edits       []gomutant.Edit      `json:"edits,omitempty" jsonschema:"exact-match edits applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file"`
-	BatchEdits  []gomutant.BatchEdit `json:"batch_edits,omitempty" jsonschema:"atomic file-scoped exact-match edits; every match resolves against the original file snapshot"`
-	TestPkg     string               `json:"test_pkg" jsonschema:"go package path whose named test decides the kill"`
-	Run         string               `json:"run" jsonschema:"-run pattern naming the deciding test"`
-	TimeoutSec  int                  `json:"timeout_sec,omitempty" jsonschema:"run budget in seconds; 0 means 60"`
+	File             string               `json:"file,omitempty" jsonschema:"tree-relative source file for replacement or edits; omit for batch_edits"`
+	Replacement      string               `json:"replacement,omitempty" jsonschema:"the whole replacement source; give exactly one mutation form"`
+	Edits            []gomutant.Edit      `json:"edits,omitempty" jsonschema:"exact-match edits applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file"`
+	BatchEdits       []gomutant.BatchEdit `json:"batch_edits,omitempty" jsonschema:"atomic file-scoped exact-match edits; every match resolves against the original file snapshot"`
+	TestPkg          string               `json:"test_pkg" jsonschema:"go package path whose named test decides the kill"`
+	Run              string               `json:"run" jsonschema:"-run pattern naming the deciding test"`
+	TimeoutSec       int                  `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before attributed result completion after this many seconds; 0 means unlimited"`
+	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
 }
 
 func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in ephemeralIn) (*mcp.CallToolResult, *gomutant.EphemeralResult, error) {
+	commandTimeout, err := secondsDuration("timeout_sec", in.TimeoutSec)
+	if err != nil {
+		return nil, nil, err
+	}
+	oracleTimeout, err := secondsDuration("oracle_timeout_sec", in.OracleTimeoutSec)
+	if err != nil {
+		return nil, nil, err
+	}
+	if commandTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, commandTimeout)
+		defer cancel()
+	}
 	if in.TestPkg == "" || in.Run == "" {
 		return nil, nil, fmt.Errorf("ephemeral needs test_pkg and run")
 	}
@@ -516,15 +552,14 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	if err != nil {
 		return nil, nil, err
 	}
-	timeout := time.Duration(in.TimeoutSec) * time.Second
 	if len(in.BatchEdits) > 0 {
-		res, err := tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, timeout)
+		res, err := tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, oracleTimeout)
 		return nil, res, err
 	}
 	if len(in.Edits) > 0 {
-		res, err := tree.EphemeralEdits(ctx, in.File, in.Edits, in.TestPkg, in.Run, timeout)
+		res, err := tree.EphemeralEdits(ctx, in.File, in.Edits, in.TestPkg, in.Run, oracleTimeout)
 		return nil, res, err
 	}
-	res, err := tree.Ephemeral(ctx, in.File, []byte(in.Replacement), in.TestPkg, in.Run, timeout)
+	res, err := tree.Ephemeral(ctx, in.File, []byte(in.Replacement), in.TestPkg, in.Run, oracleTimeout)
 	return nil, res, err
 }

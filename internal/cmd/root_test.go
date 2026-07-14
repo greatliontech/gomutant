@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
 )
@@ -18,6 +19,37 @@ func TestExecuteContextCancellationStopsBeforeLoading(t *testing.T) {
 	cancel()
 	if err := ExecuteContext(ctx, []string{"discover", "--dir", fixtureDir}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled discover = %v", err)
+	}
+}
+
+func TestRunCommandTimeoutCancelsBeforeCommit(t *testing.T) {
+	docPath := filepath.Join(t.TempDir(), "findings.json")
+	document, err := gomutant.Export(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(docPath, document, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = runCommand(context.Background(), runOptions{
+		dir: filepath.Join(t.TempDir(), "missing"), findingsFile: docPath, timeout: time.Nanosecond, oracleTimeout: time.Hour,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("command timeout = %v, want context.DeadlineExceeded", err)
+	}
+	got, err := os.ReadFile(docPath)
+	if err != nil || !bytes.Equal(got, document) {
+		t.Fatalf("timed-out command changed findings: %v\n%s", err, got)
+	}
+}
+
+func TestRunTimeoutFlagsNameIndependentLimits(t *testing.T) {
+	cmd := newRunCommand()
+	if got := cmd.Flags().Lookup("timeout"); got == nil || got.DefValue != "0s" {
+		t.Fatalf("--timeout = %+v, want unlimited command default", got)
+	}
+	if got := cmd.Flags().Lookup("oracle-timeout"); got == nil || got.DefValue != "1m0s" {
+		t.Fatalf("--oracle-timeout = %+v, want one-minute oracle default", got)
 	}
 }
 
@@ -43,7 +75,7 @@ func TestFindingsAtAndUpdate(t *testing.T) {
 	evidence := func(symbol string) gomutant.SubjectEvidence {
 		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
-	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, Mutants: 1, Killed: 1,
 		Operators: []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}}
 	err := gomutant.UpdateDocument(path, func(prior []gomutant.Finding) ([]gomutant.Finding, error) {
@@ -69,7 +101,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	evidence := func(symbol string) gomutant.SubjectEvidence {
 		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
-	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
 	path := findingsAt(dir, defaultFindings)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
@@ -123,7 +155,7 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 	evidence := func(symbol string) gomutant.SubjectEvidence {
 		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
-	finding := gomutant.Finding{Symbol: "example.com/empty.Deleted", Labels: []string{"REQ-Z", "REQ-A"}, BodyHash: "body", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+	finding := gomutant.Finding{Symbol: "example.com/empty.Deleted", Labels: []string{"REQ-Z", "REQ-A"}, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, Mutants: 1,
 		Survivors: []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}},
 		Attested:  []gomutant.Attestation{{Position: "old.go:1:1", Operator: "zero return", Reason: "equivalent"}}}
@@ -204,14 +236,23 @@ func TestRenderRunStatus(t *testing.T) {
 func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 	tmp := t.TempDir()
 	targetsPath := filepath.Join(tmp, "targets.json")
+	findingsPath := filepath.Join(tmp, "findings.json")
 	if err := os.WriteFile(targetsPath, []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"]}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
 	if err := runCommand(context.Background(), runOptions{
-		dir: fixtureDir, targetsFile: targetsPath, findingsFile: filepath.Join(tmp, "findings.json"), budget: 1, jobs: 4, output: &output,
+		dir: fixtureDir, targetsFile: targetsPath, findingsFile: findingsPath, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute, output: &output,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	data, err := os.ReadFile(findingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := gomutant.ParseFindings(data)
+	if err != nil || len(findings) != 1 || findings[0].OracleTimeout != "2m0s" {
+		t.Fatalf("oracle timeout pin = %+v, %v", findings, err)
 	}
 	positions := []int{
 		strings.Index(output.String(), "prepare   loading\n"),
@@ -228,7 +269,7 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 	}
 }
 
-func TestRunCommandCancellationLeavesFindingsUntouched(t *testing.T) {
+func TestRunCommandCancellationLinearizesAtFindingsCommit(t *testing.T) {
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":         "module example.com/cancel\n\ngo 1.26.5\n",

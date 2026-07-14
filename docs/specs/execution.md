@@ -127,12 +127,24 @@ the same preparation sequence, decisions, and totals. Open survivors remain
 advisory and do not change successful exit semantics.
 
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
-caller-context cancellation MUST stop package loading and every subsequent
+caller-context cancellation, including expiry of an operator-supplied command
+timeout, MUST stop package loading and every subsequent
 preparation or aggregation boundary, cancel in-flight oracle processes, wait
 for their cleanup, return an operational cancellation error, and leave the
 findings document unchanged. Preparation progress and ordered decisions may
 contain only the prefix delivered before cancellation became observable. A
 cancelled run never reports or persists a partial measurement.
+
+The command timeout bounds CLI or MCP work through its result commit and is
+unlimited when omitted. For a findings-producing run, the atomic findings
+replacement is the success linearization point: a deadline observed before it
+leaves the prior document unchanged, while a deadline after it cannot roll back
+the committed result and final output completes successfully. For an ephemeral
+run, completion of the attributed oracle result is the equivalent success
+point. The independently named oracle timeout bounds each unmutated probe and
+mutant oracle process; it defaults to 60 seconds. Only the oracle timeout can
+change mutation attribution and therefore enter finding reuse evidence
+(REQ-result-record); changing the command timeout alone never stales a finding.
 
 Mutation execution is supported on Unix and Windows hosts, where gomutant can
 own and terminate a process group or Job Object. Other host operating systems

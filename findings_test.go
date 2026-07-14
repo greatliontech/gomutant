@@ -6,7 +6,7 @@ func TestSameAttestationPins(t *testing.T) {
 	target := SubjectEvidence{Symbol: "p.F", MaximalClosure: "f", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	oracle := SubjectEvidence{Symbol: "p.TestF", MaximalClosure: "test", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	secondOracle := SubjectEvidence{Symbol: "p.TestG", MaximalClosure: "test-g", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
-	base := Finding{OperatorSet: "go/2", Budget: 3, Timeout: "1m0s", TargetEvidence: target, OracleEvidence: []SubjectEvidence{oracle, secondOracle}}
+	base := Finding{OperatorSet: "go/2", Budget: 3, OracleTimeout: "1m0s", TargetEvidence: target, OracleEvidence: []SubjectEvidence{oracle, secondOracle}}
 	reordered := base
 	reordered.OracleEvidence = []SubjectEvidence{secondOracle, oracle}
 	if !sameAttestationPins(base, reordered) {
@@ -19,7 +19,7 @@ func TestSameAttestationPins(t *testing.T) {
 		{"operator set", func(f *Finding) { f.OperatorSet = "go/3" }},
 		{"oracle selection", func(f *Finding) { f.OracleExplicit = !f.OracleExplicit }},
 		{"budget", func(f *Finding) { f.Budget = 2 }},
-		{"timeout", func(f *Finding) { f.Timeout = "2m0s" }},
+		{"oracle timeout", func(f *Finding) { f.OracleTimeout = "2m0s" }},
 		{"target evidence", func(f *Finding) { f.TargetEvidence.RuntimeDigest = "moved" }},
 		{"oracle evidence", func(f *Finding) { f.OracleEvidence[0].RuntimeDigest = "moved" }},
 		{"oracle removed", func(f *Finding) { f.OracleEvidence = nil }},

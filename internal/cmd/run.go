@@ -18,7 +18,7 @@ type runOptions struct {
 	dir, changed, targetsFile, findingsFile string
 	packages, symbols                       []string
 	budget, jobs                            int
-	timeout                                 time.Duration
+	timeout, oracleTimeout                  time.Duration
 	force                                   bool
 	output                                  io.Writer
 }
@@ -31,7 +31,8 @@ func newRunCommand() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
 	f.IntVar(&o.budget, "budget", 0, "mutants per symbol; 0 = exhaustive")
-	f.DurationVar(&o.timeout, "timeout", 60*time.Second, "one mutant's oracle run budget")
+	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result commit after this duration; 0 = unlimited")
+	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
 	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
 	f.BoolVar(&o.force, "force", false, "re-measure targets whose prior finding still covers")
 	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref")
@@ -43,6 +44,17 @@ func newRunCommand() *cobra.Command {
 }
 
 func runCommand(ctx context.Context, o runOptions) error {
+	if o.timeout < 0 {
+		return fmt.Errorf("timeout must not be negative")
+	}
+	if o.oracleTimeout < 0 {
+		return fmt.Errorf("oracle timeout must not be negative")
+	}
+	if o.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.timeout)
+		defer cancel()
+	}
 	out := o.output
 	if out == nil {
 		out = os.Stdout
@@ -123,7 +135,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		return err
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
-		Budget: o.budget, Timeout: o.timeout, Jobs: o.jobs, Force: o.force, Prior: prior,
+		Budget: o.budget, OracleTimeout: o.oracleTimeout, Jobs: o.jobs, Force: o.force, Prior: prior,
 		Decision: func(decision gomutant.RunDecision) {
 			renderRunDecision(out, decision)
 		},

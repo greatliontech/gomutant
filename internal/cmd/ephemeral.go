@@ -13,7 +13,7 @@ import (
 
 type ephemeralOptions struct {
 	dir, file, replacement, batch, testPkg, runPat string
-	timeout                                        time.Duration
+	timeout, oracleTimeout                         time.Duration
 }
 
 func newEphemeralCommand() *cobra.Command {
@@ -28,11 +28,23 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.batch, "batch", "", "JSON edit-batch path, or - for stdin")
 	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill")
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
-	f.DurationVar(&o.timeout, "timeout", 60*time.Second, "the run's budget")
+	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
+	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
 	return cmd
 }
 
 func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
+	if o.timeout < 0 {
+		return fmt.Errorf("timeout must not be negative")
+	}
+	if o.oracleTimeout < 0 {
+		return fmt.Errorf("oracle timeout must not be negative")
+	}
+	if o.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, o.timeout)
+		defer cancel()
+	}
 	if o.testPkg == "" || o.runPat == "" {
 		return fmt.Errorf("ephemeral needs --test-pkg and --run")
 	}
@@ -75,7 +87,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	}
 	var res *gomutant.EphemeralResult
 	if o.batch != "" {
-		res, err = tree.EphemeralBatch(ctx, batchEdits, o.testPkg, o.runPat, o.timeout)
+		res, err = tree.EphemeralBatch(ctx, batchEdits, o.testPkg, o.runPat, o.oracleTimeout)
 		if err != nil {
 			return err
 		}
@@ -90,7 +102,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		res, err = tree.Ephemeral(ctx, o.file, mutant, o.testPkg, o.runPat, o.timeout)
+		res, err = tree.Ephemeral(ctx, o.file, mutant, o.testPkg, o.runPat, o.oracleTimeout)
 		if err != nil {
 			return err
 		}

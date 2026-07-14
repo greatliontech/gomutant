@@ -20,8 +20,8 @@ import (
 type Options struct {
 	// Budget caps mutants per symbol; 0 means all (REQ-mut-budget).
 	Budget int
-	// Timeout bounds one mutant's oracle run; 0 means 60s.
-	Timeout time.Duration
+	// OracleTimeout bounds each oracle process; 0 means 60s.
+	OracleTimeout time.Duration
 	// Force re-measures targets whose prior finding's pins still match.
 	Force bool
 	// Jobs bounds concurrent mutant runs; 0 means half the CPUs. Mutant runs
@@ -236,7 +236,7 @@ func sequenceKey(values []string) string {
 // Run mutates each target and executes its oracle per mutant, fanning
 // mutant runs across a worker pool (REQ-exec-oracle-run). Prior findings
 // are served only when every target and oracle evidence record, operator,
-// timeout, and budget pin holds, unless forced (REQ-result-stale). A run that
+// oracle-timeout and budget pins hold, unless forced (REQ-result-stale). A run that
 // cannot attribute an outcome aborts without findings
 // (REQ-core-attributed-kills).
 func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Finding, error) {
@@ -246,8 +246,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if opts.Budget < 0 {
 		return nil, fmt.Errorf("gomutant: budget must be non-negative")
 	}
-	if opts.Timeout <= 0 {
-		opts.Timeout = 60 * time.Second
+	if opts.OracleTimeout < 0 {
+		return nil, fmt.Errorf("gomutant: oracle timeout must be non-negative")
+	}
+	if opts.OracleTimeout == 0 {
+		opts.OracleTimeout = 60 * time.Second
 	}
 	targets = snapshotTargets(targets)
 	opts.Prior = snapshotFindings(opts.Prior)
@@ -315,7 +318,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, err
 		}
 		f := &findings[i]
-		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, Timeout: opts.Timeout.String()}
+		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, OracleTimeout: opts.OracleTimeout.String()}
 		oracle, err := preparation.oracle(ctx, tg)
 		if err != nil {
 			return nil, err
@@ -397,7 +400,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 		if hasPrior && !opts.Force && budgetCovers(rec.Budget, opts.Budget) {
-			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.Timeout.String())
+			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String())
 			if err != nil {
 				return nil, err
 			}
@@ -459,7 +462,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.Timeout, group.flags, group.moduleDir, group.packageDir, runEnv)
+				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, runEnv)
 				if err != nil {
 					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
 				}
@@ -540,7 +543,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if outcome != engine.MutantSurvived {
 						break
 					}
-					out, killer, state, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.Timeout, g.flags, g.moduleDir, g.packageDir, runEnv)
+					out, killer, state, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, runEnv)
 					processStates = append(processStates, state)
 					if err == nil && out == engine.MutantKilled {
 						err = attributedKill(killer, w.oracleSet)

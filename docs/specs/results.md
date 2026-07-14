@@ -18,7 +18,7 @@ disposition, including incomplete-process reasons.
 **REQ-result-record** (behavior): A finding record MUST be keyed by the
 mutated symbol and record the available inputs that produced it — target subject evidence,
 the oracle as a set of distinct subject evidence records, the operator version,
-whether the oracle was explicit or package-derived, the mutant budget, and the exact effective per-mutant timeout encoded as a
+whether the oracle was explicit or package-derived, the mutant budget, and the exact effective oracle timeout in the `oracleTimeout` field encoded as a
 canonical Go duration string — carrying the capture commit and dirty provenance,
 the mutant count, the kill count, each survivor's position
 and operator, plus per-operator generated, discarded, killed, and survived
@@ -49,7 +49,7 @@ structural boundary and is rejected per REQ-result-export's version tag.
 than serve a record whose pins no longer cover the request — an edit to the
 target or any target/oracle dependency, a changed runtime input, purity,
 toolchain, or build configuration, an added or removed oracle identity, a new
-oracle selection mode or operator version, a different effective timeout, or a request for more mutants
+oracle selection mode or operator version, a different effective oracle timeout, or a request for more mutants
 than a capped record generated each invalidates the record. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures. A record
 is never partially trusted: any moved pin remeasures the whole target.
@@ -57,7 +57,7 @@ is never partially trusted: any moved pin remeasures the whole target.
 **REQ-result-export** (structural): Findings MUST be serializable to a
 portable version-1 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence;
-oracle selection mode; operator version; budget; timeout; commit and dirty provenance), the mutant and
+oracle selection mode; operator version; budget; oracle timeout; commit and dirty provenance), the mutant and
 kill counts, each survivor's position and operator, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
 it does not understand. This is the inverse of the targeting seam: gomutant

@@ -100,7 +100,7 @@ type Finding struct {
 	TargetEvidence SubjectEvidence   `json:"targetEvidence"`
 	OracleEvidence []SubjectEvidence `json:"oracleEvidence"`
 	OracleExplicit bool              `json:"oracleExplicit"`
-	Timeout        string            `json:"timeout"`
+	OracleTimeout  string            `json:"oracleTimeout"`
 	Commit         string            `json:"commit,omitempty"`
 	Dirty          bool              `json:"dirty"`
 
@@ -245,10 +245,10 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	known := map[string]bool{
 		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
 		"budget": true, "targetEvidence": true, "oracleEvidence": true,
-		"oracleExplicit": true, "timeout": true, "commit": true, "dirty": true, "mutants": true,
+		"oracleExplicit": true, "oracleTimeout": true, "commit": true, "dirty": true, "mutants": true,
 		"killed": true, "discarded": true, "operators": true, "survivors": true, "attested": true,
 	}
-	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "timeout", "dirty", "mutants", "killed", "operators"}
+	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "oracleTimeout", "dirty", "mutants", "killed", "operators"}
 	findings := make([]Finding, len(rawFindings))
 	symbols := map[string]bool{}
 	for i, raw := range rawFindings {
@@ -271,9 +271,9 @@ func ParseFindings(data []byte) ([]Finding, error) {
 		if err := json.Unmarshal(raw, &findings[i]); err != nil {
 			return nil, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
 		}
-		if findings[i].Symbol == "" || findings[i].BodyHash == "" || findings[i].OperatorSet == "" || findings[i].Timeout == "" {
+		if findings[i].Symbol == "" || findings[i].BodyHash == "" || findings[i].OperatorSet == "" || findings[i].OracleTimeout == "" {
 			complete = false
-		} else if duration, err := time.ParseDuration(findings[i].Timeout); err != nil || duration <= 0 || duration.String() != findings[i].Timeout {
+		} else if duration, err := time.ParseDuration(findings[i].OracleTimeout); err != nil || duration <= 0 || duration.String() != findings[i].OracleTimeout {
 			complete = false
 		}
 		if symbols[findings[i].Symbol] {
@@ -570,7 +570,7 @@ func (t *Tree) FreshContext(ctx context.Context, f Finding, tg Target, budget in
 	return t.FreshForContext(ctx, f, tg, budget, 60*time.Second)
 }
 
-// FreshFor is Fresh under an explicit effective per-mutant timeout.
+// FreshFor is Fresh under an explicit effective oracle timeout.
 func (t *Tree) FreshFor(f Finding, tg Target, budget int, timeout time.Duration) (bool, error) {
 	return t.FreshForContext(context.Background(), f, tg, budget, timeout)
 }

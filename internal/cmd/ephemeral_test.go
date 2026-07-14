@@ -72,6 +72,25 @@ func TestReadInputContextCancelsBlockedStdin(t *testing.T) {
 	}
 }
 
+func TestEphemeralCommandTimeoutIncludesInput(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	original := os.Stdin
+	os.Stdin = reader
+	defer func() { os.Stdin = original }()
+
+	err = ephemeralCommand(context.Background(), ephemeralOptions{
+		batch: "-", testPkg: "p", runPat: "T", timeout: 10 * time.Millisecond, oracleTimeout: time.Hour,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("command timeout during stdin = %v, want context.DeadlineExceeded", err)
+	}
+}
+
 func TestEphemeralBatchCommand(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test")

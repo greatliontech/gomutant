@@ -28,8 +28,54 @@ func seededFinding(symbol string) gomutant.Finding {
 	evidence := func(name string) gomutant.SubjectEvidence {
 		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
-	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", Timeout: "1m0s", Dirty: true,
+	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence(symbol), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
+}
+
+func TestToolTimeoutInputsNameIndependentLimits(t *testing.T) {
+	s := serverAt(t)
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{TimeoutSec: -1, OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
+		t.Fatalf("negative run command timeout = %v", err)
+	}
+	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{TimeoutSec: -1, OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
+		t.Fatalf("negative ephemeral command timeout = %v", err)
+	}
+}
+
+func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":       "module example.com/slow\n\ngo 1.26.4\n",
+		"slow.go":      "package slow\nfunc Value() int { return 1 }\n",
+		"slow_test.go": "package slow\nimport (\"testing\"; \"time\")\nfunc TestValue(t *testing.T) { time.Sleep(2*time.Second); if Value() != 1 { t.Fail() } }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	document, err := gomutant.Export(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, defaultFindings)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, document, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	_, _, err = s.toolRun(context.Background(), nil, runIn{
+		TargetsJSON: `{"targets":[{"symbol":"example.com/slow.Value","oracle":["example.com/slow.TestValue"]}]}`,
+		Budget:      1, TimeoutSec: 1, OracleTimeoutSec: 10,
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("tool command timeout = %v, want context.DeadlineExceeded", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(document) {
+		t.Fatalf("timed-out tool changed findings: %v\n%s", err, got)
+	}
 }
 
 func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
@@ -117,7 +163,8 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	ctx := context.Background()
 
 	_, out, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON: `{"stipulatorTargets":1,"targets":[{"symbol":"example.com/fixture/lib.Weak","witnesses":["example.com/fixture/lib.TestWeak"],"requirements":["REQ-weak"]}]}`,
+		TargetsJSON:      `{"stipulatorTargets":1,"targets":[{"symbol":"example.com/fixture/lib.Weak","witnesses":["example.com/fixture/lib.TestWeak"],"requirements":["REQ-weak"]}]}`,
+		OracleTimeoutSec: 120,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +187,10 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.dir, defaultFindings)); err != nil {
 		t.Fatalf("findings document not written: %v", err)
+	}
+	persisted, err := s.loadFindings("")
+	if err != nil || len(persisted) != 1 || persisted[0].OracleTimeout != "2m0s" {
+		t.Fatalf("oracle timeout pin = %+v, %v", persisted, err)
 	}
 
 	_, fOut, err := s.toolFindings(ctx, nil, findingsIn{})
@@ -169,7 +220,8 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 
 	_, out2, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON: `{"stipulatorTargets":1,"targets":[{"symbol":"example.com/fixture/lib.Weak","witnesses":["example.com/fixture/lib.TestWeak"],"requirements":["REQ-weak"]}]}`,
+		TargetsJSON:      `{"stipulatorTargets":1,"targets":[{"symbol":"example.com/fixture/lib.Weak","witnesses":["example.com/fixture/lib.TestWeak"],"requirements":["REQ-weak"]}]}`,
+		OracleTimeoutSec: 120,
 	})
 	if err != nil {
 		t.Fatal(err)

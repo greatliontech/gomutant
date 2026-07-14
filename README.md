@@ -16,6 +16,9 @@ The contract lives in [docs/specs](docs/specs/overview.md).
 # Measure every function in the tree against its package's tests.
 gomutant run
 
+# Bound command work through result commit separately from each oracle process.
+gomutant run --timeout 2h --oracle-timeout 2m
+
 # Measure only what changed since a ref, budgeted for the hot loop.
 gomutant run --changed HEAD --budget 5
 
@@ -47,7 +50,7 @@ gomutant ephemeral --batch edits.json --test-pkg example.com/pkg \
 Findings live in a versioned JSON document (default
 `.gomutant/findings.json`), pinned to the inputs that produced them — the
 target and oracle source closures, observed runtime inputs, toolchain and
-build configuration, operator-set version, budget, and effective timeout. A
+build configuration, operator-set version, budget, and effective oracle timeout. A
 run re-measures exactly what a moved pin invalidates and serves the rest from
 the document. Open findings are survivors minus attested dispositions;
 whether they fail a build is the caller's policy, not gomutant's verdict.
@@ -68,7 +71,8 @@ dogfoods that path with:
 
 ```
 gomutant discover --targets testdata/self-host-targets.json
-gomutant run --targets testdata/self-host-targets.json --jobs 1
+gomutant run --targets testdata/self-host-targets.json --jobs 1 \
+    --timeout 30m --oracle-timeout 10m
 ```
 
 A run streams deterministic preparation for loading, target resolution,
@@ -79,8 +83,13 @@ per-target findings and aggregate
 generated, discarded, killed, survived, attested, and open totals. Repeating
 the same run serves findings whose pins still hold; `--force` deliberately
 remeasures them. Package- and symbol-filtered runs are scoped and never delete
-findings outside their selected surface. An interrupt cancels the full oracle
-process tree and leaves the findings document unchanged.
+findings outside their selected surface. `--timeout` bounds command work through
+the atomic findings commit and defaults to unlimited; `--oracle-timeout` bounds
+each baseline or mutant oracle process and defaults to one minute. An interrupt
+or command timeout observed before commit cancels the full oracle process tree
+and leaves the findings document unchanged. Once commit succeeds, success wins
+and final output completes without rollback. Only the oracle timeout is a
+finding freshness pin.
 Before fresh mutant execution, each distinct oracle group must pass on the
 unmutated tree with a stable test count and result. Runtime-input movement makes
 the completed finding unverifiable and therefore ineligible for reuse; an
@@ -100,8 +109,9 @@ Strengthen a test for every non-equivalent survivor and rerun its target. Use
 an attestation only when the mutant is behaviorally equivalent, stating why;
 attestations remain visible on a stale record, but a remeasurement sheds them
 when the evidence pins move. Open survivors remain advisory, so a completed mutation run exits
-successfully regardless of their count. Operational errors, malformed or
-unattributable observations, and cancellation fail the command instead.
+successfully regardless of their count. Operational errors and malformed or
+unattributable observations fail the command; cancellation observed before the
+result commit does too.
 
 ## MCP
 

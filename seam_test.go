@@ -234,7 +234,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	prior := Finding{
-		OperatorSet: engine.OperatorSet, OracleExplicit: true, Timeout: time.Minute.String(),
+		OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(),
 		TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence,
 	}
 	calls := 0
@@ -279,7 +279,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	workspacePrior := Finding{
-		OperatorSet: engine.OperatorSet, OracleExplicit: true, Timeout: time.Minute.String(),
+		OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(),
 		TargetEvidence: workspaceTargetEvidence, OracleEvidence: workspaceOracleEvidence,
 	}
 	calls = 0
@@ -309,7 +309,7 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	prior := Finding{OperatorSet: engine.OperatorSet, OracleExplicit: true, Timeout: time.Minute.String(), TargetEvidence: evidence}
+	prior := Finding{OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(), TargetEvidence: evidence}
 	matches, err := evidenceSetMatchesContextWithCurrent(ctx, prior, target, nil, true, engine.OperatorSet, time.Minute.String(), func(ctx context.Context, _, _ string, _ []string) (runtimeinput.State, error) {
 		cancel()
 		return runtimeinput.State{}, ctx.Err()
@@ -400,7 +400,7 @@ func TestFresh(t *testing.T) {
 		t.Fatalf("capped finding fresh for an exhaustive request: %v %v", ok, err)
 	}
 	if ok, err := tr.FreshFor(f, tg, 1, 2*time.Minute); err != nil || ok {
-		t.Fatalf("finding fresh under a different timeout: %v %v", ok, err)
+		t.Fatalf("finding fresh under a different oracle timeout: %v %v", ok, err)
 	}
 	t.Setenv("GOMUTANT_TEST_INPUT", "two")
 	movedEnvironment := fixtureTree(t)
@@ -478,7 +478,7 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	finding := Finding{Symbol: "example.com/fixture/lib.Add", OperatorSet: engine.OperatorSet, OracleExplicit: true, Timeout: "1m0s", TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence}
+	finding := Finding{Symbol: "example.com/fixture/lib.Add", OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: "1m0s", TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence}
 	inspection, err := tr.InspectFinding(finding)
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("current inspection = %+v, %v", inspection, err)
@@ -583,9 +583,9 @@ func TestInspectFindingStates(t *testing.T) {
 		t.Fatalf("canonical oracle-set inspection = %+v, %v", inspection, err)
 	}
 	badTimeout := finding
-	badTimeout.Timeout = "invalid"
+	badTimeout.OracleTimeout = "invalid"
 	if _, err := tr.InspectFinding(badTimeout); err == nil {
-		t.Fatal("invalid timeout inspected")
+		t.Fatal("invalid oracle timeout inspected")
 	}
 }
 
