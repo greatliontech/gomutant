@@ -82,6 +82,14 @@ func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
 	}
 }
 
+func TestToolRunCommandTimeoutPreservesOrdinaryErrors(t *testing.T) {
+	s := serverAt(t)
+	_, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{`, TimeoutSec: 10})
+	if err == nil || errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "parse targets document") {
+		t.Fatalf("timed command parse error = %v", err)
+	}
+}
+
 func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {

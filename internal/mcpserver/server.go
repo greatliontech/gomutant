@@ -162,8 +162,7 @@ type runOut struct {
 	Document    string                      `json:"document"`
 }
 
-func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (*mcp.CallToolResult, runOut, error) {
-	var out runOut
+func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
 	commandTimeout, err := secondsDuration("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, out, err
@@ -177,6 +176,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		ctx, cancel = context.WithTimeout(ctx, commandTimeout)
 		defer cancel()
 	}
+	defer func() {
+		if err != nil {
+			if contextErr := ctx.Err(); contextErr != nil {
+				err = contextErr
+			}
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
