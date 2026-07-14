@@ -12,16 +12,16 @@ of behavior a finding is measured against.
 is run and either killed or reported as a survivor.
 
 **REQ-mut-operators** (behavior): gomutant MUST identify the exact active
-operator basis in every finding. The current active `go/7` basis comprises
+operator basis in every finding. The current active `go/8` basis comprises
 the equality, relational-boundary, relational-negation, and logical families
 exactly as cataloged below; the boolean-operand, condition, range-suppression,
-and loop-control families exactly as cataloged below; the arithmetic family
-exactly as cataloged below; compound-assignment and increment/decrement swaps;
+and loop-control families exactly as cataloged below; the arithmetic, bitwise,
+and shift families exactly as cataloged below; compound-assignment and increment/decrement swaps;
 integer-literal increments; statement deletion, with assignment stores dropped while right-hand
 sides still evaluate; and zero-value return substitution, each emitted where
 the replacement can be formed without a new import or named type expression. A
 site with no such counterpart, including a result type with no context-free
-zero expression, yields no `go/7` candidate. A selected candidate
+zero expression, yields no `go/8` candidate. A selected candidate
 that fails to compile, does not differ from the baseline, or renders identically
 to an earlier selected candidate is discarded; a timed-out oracle run is a kill under
 REQ-exec-attribution. When INV-MUT-COMPREHENSIVE lands, its catalog supersedes
@@ -31,11 +31,11 @@ and membership, lands complete catalog families rather than partial mappings,
 and satisfies the candidate, accounting, stale-pin, and grammar contracts for
 every active family.
 
-The completed `go/7` families use their catalog labels. Its remaining labels
+The completed `go/8` families use their catalog labels. Its remaining labels
 are exactly the token mappings `<old> -> <new>` for compound-assignment and
 increment/decrement swaps, plus `increment literal`,
 `delete statement`, `drop assignment`, and `zero return`. It differs from
-`go/6` only by completing the arithmetic family named
+`go/7` only by completing the bitwise and shift families named
 above; all other operator sites, replacements, candidate ordering, and
 accounting are unchanged.
 

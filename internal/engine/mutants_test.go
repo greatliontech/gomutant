@@ -12,8 +12,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/7" {
-		t.Fatalf("operator set = %q, want go/7", OperatorSet)
+	if OperatorSet != "go/8" {
+		t.Fatalf("operator set = %q, want go/8", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)

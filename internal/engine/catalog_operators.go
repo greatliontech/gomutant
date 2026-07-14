@@ -12,6 +12,7 @@ import (
 var activeCandidateEmitters = []candidateEmitter{
 	emitComparison,
 	emitArithmeticBinary,
+	emitBitwiseBinary,
 	emitBooleanOperand,
 	emitIntegerLiteral,
 	emitLoopControl,
