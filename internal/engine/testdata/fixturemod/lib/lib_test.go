@@ -159,6 +159,31 @@ func TestWeak(t *testing.T) {
 	}
 }
 
+//gofresh:pure
+func TestBoundary(t *testing.T) {
+	for _, test := range []struct {
+		a, b int
+		want bool
+	}{{0, 1, true}, {1, 0, false}, {1, 1, false}} {
+		if got := Boundary(test.a, test.b); got != test.want {
+			t.Fatalf("Boundary(%d, %d) = %v, want %v", test.a, test.b, got, test.want)
+		}
+	}
+}
+
+//gofresh:pure
+func TestEqualityLogical(t *testing.T) {
+	for _, test := range []struct {
+		a, b    int
+		enabled bool
+		want    bool
+	}{{1, 1, true, true}, {1, 2, true, false}, {1, 1, false, false}} {
+		if got := EqualityLogical(test.a, test.b, test.enabled); got != test.want {
+			t.Fatalf("EqualityLogical(%d, %d, %v) = %v, want %v", test.a, test.b, test.enabled, got, test.want)
+		}
+	}
+}
+
 // TestVacuous is deliberately assertion-free: a weak always-passing oracle.
 func TestVacuous(t *testing.T) {
 	_ = Add(1, 2)

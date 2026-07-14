@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -11,8 +12,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/4" {
-		t.Fatalf("operator set = %q, want go/4", OperatorSet)
+	if OperatorSet != "go/5" {
+		t.Fatalf("operator set = %q, want go/5", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
@@ -26,7 +27,7 @@ func TestMutants(t *testing.T) {
 			t.Fatalf("incomplete mutant: %+v", m)
 		}
 	}
-	for _, want := range []string{"== -> !=", "negate condition", "zero return"} {
+	for _, want := range []string{"equality: == -> !=", "negate condition", "zero return"} {
 		if !ops[want] {
 			t.Fatalf("operator %q missing: %v", want, ops)
 		}
@@ -46,7 +47,7 @@ func TestMutants(t *testing.T) {
 	for _, want := range []string{
 		"drop assignment", "+= -> -=", "* -> /", "+ -> -",
 		"increment literal", "continue -> break", "force false",
-		"|| -> &&", "&& -> ||", "force true", "++ -> --",
+		"logical: || -> &&", "logical: && -> ||", "force true", "++ -> --",
 	} {
 		if mixedOps[want] == 0 {
 			t.Fatalf("operator %q missing: %v", want, mixedOps)
@@ -172,6 +173,115 @@ func TestMutants(t *testing.T) {
 	for i := range ms {
 		if ms[i].Operator != again[i].Operator || ms[i].Position != again[i].Position {
 			t.Fatal("mutant order not deterministic")
+		}
+	}
+}
+
+func TestComparisonCatalog(t *testing.T) {
+	tr := fixtureTree(t)
+	want := map[string]int{
+		"equality: == -> !=":           6,
+		"equality: != -> ==":           3,
+		"relational boundary: < -> <=": 4,
+		"relational boundary: <= -> <": 2,
+		"relational boundary: > -> >=": 2,
+		"relational boundary: >= -> >": 2,
+		"relational negation: < -> >=": 4,
+		"relational negation: <= -> >": 2,
+		"relational negation: > -> <=": 2,
+		"relational negation: >= -> <": 2,
+		"logical: && -> ||":            3,
+		"logical: || -> &&":            19,
+	}
+	got := map[string]int{}
+	for _, symbol := range []string{
+		"example.com/fixture/lib.Boundary",
+		"example.com/fixture/lib.EqualGeneric",
+		"example.com/fixture/lib.RelationsGeneric",
+		"example.com/fixture/lib.RelationsDefined",
+		"example.com/fixture/lib.Logical",
+		"example.com/fixture/lib.LogicalDefined",
+		"example.com/fixture/lib.LogicalGeneric",
+		"example.com/fixture/lib.EqualityConcrete",
+		"example.com/fixture/lib.RelationsString",
+	} {
+		generation, err := tr.CandidatesContext(context.Background(), symbol, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, candidate := range generation.Candidates {
+			if _, expected := want[candidate.Operator]; expected {
+				got[candidate.Operator]++
+			}
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("comparison operators = %v, want %v", got, want)
+	}
+	for operator, count := range want {
+		if got[operator] != count {
+			t.Errorf("%s count = %d, want %d", operator, got[operator], count)
+		}
+	}
+
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Boundary", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSources := map[string]string{
+		"relational boundary: < -> <=": "package lib\n\nfunc Boundary(a, b int) bool {\n\treturn a <= b\n}\n",
+		"relational negation: < -> >=": "package lib\n\nfunc Boundary(a, b int) bool {\n\treturn a >= b\n}\n",
+	}
+	var ordered []string
+	for _, candidate := range generation.Candidates {
+		wantSource, ok := wantSources[candidate.Operator]
+		if !ok {
+			continue
+		}
+		ordered = append(ordered, candidate.Operator)
+		if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != wantSource {
+			t.Errorf("%s source = %q, want %q", candidate.Operator, candidate.Replacements, wantSource)
+		}
+	}
+	if !slices.Equal(ordered, []string{"relational boundary: < -> <=", "relational negation: < -> >="}) {
+		t.Fatalf("Boundary comparison order = %v", ordered)
+	}
+
+	const mappingSource = "package lib\n\nfunc MappingEQ(a, b int) bool   { return a == b }\nfunc MappingNEQ(a, b int) bool  { return a != b }\nfunc MappingLT(a, b int) bool   { return a < b }\nfunc MappingLE(a, b int) bool   { return a <= b }\nfunc MappingGT(a, b int) bool   { return a > b }\nfunc MappingGE(a, b int) bool   { return a >= b }\nfunc MappingAND(a, b bool) bool { return a && b }\nfunc MappingOR(a, b bool) bool  { return a || b }\n"
+	mappings := []struct {
+		symbol, operator, old, replacement string
+	}{
+		{"MappingEQ", "equality: == -> !=", "return a == b", "return a != b"},
+		{"MappingNEQ", "equality: != -> ==", "return a != b", "return a == b"},
+		{"MappingLT", "relational boundary: < -> <=", "return a < b", "return a <= b"},
+		{"MappingLT", "relational negation: < -> >=", "return a < b", "return a >= b"},
+		{"MappingLE", "relational boundary: <= -> <", "return a <= b", "return a < b"},
+		{"MappingLE", "relational negation: <= -> >", "return a <= b", "return a > b"},
+		{"MappingGT", "relational boundary: > -> >=", "return a > b", "return a >= b"},
+		{"MappingGT", "relational negation: > -> <=", "return a > b", "return a <= b"},
+		{"MappingGE", "relational boundary: >= -> >", "return a >= b", "return a > b"},
+		{"MappingGE", "relational negation: >= -> <", "return a >= b", "return a < b"},
+		{"MappingAND", "logical: && -> ||", "return a && b", "return a || b"},
+		{"MappingOR", "logical: || -> &&", "return a || b", "return a && b"},
+	}
+	for _, mapping := range mappings {
+		generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib."+mapping.symbol, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, candidate := range generation.Candidates {
+			if candidate.Operator != mapping.operator {
+				continue
+			}
+			found = true
+			wantSource := strings.Replace(mappingSource, mapping.old, mapping.replacement, 1)
+			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != wantSource {
+				t.Errorf("%s source = %q, want %q", mapping.operator, candidate.Replacements, wantSource)
+			}
+		}
+		if !found {
+			t.Errorf("%s did not emit %s", mapping.symbol, mapping.operator)
 		}
 	}
 }

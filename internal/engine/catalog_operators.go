@@ -10,21 +10,16 @@ import (
 )
 
 var activeCandidateEmitters = []candidateEmitter{
-	emitGo4Binary,
-	emitGo4Literal,
-	emitGo4Branch,
-	emitGo4IncDec,
-	emitGo4AssignmentSwap,
-	emitGo4Condition,
-	emitGo4Block,
-	emitGo4Return,
-}
-
-var comparisonSwap = map[token.Token]token.Token{
-	token.EQL: token.NEQ, token.NEQ: token.EQL,
-	token.LSS: token.GEQ, token.GEQ: token.LSS,
-	token.GTR: token.LEQ, token.LEQ: token.GTR,
-	token.LAND: token.LOR, token.LOR: token.LAND,
+	emitComparison,
+	emitArithmeticBinary,
+	emitBooleanOperand,
+	emitIntegerLiteral,
+	emitLoopControl,
+	emitIncDec,
+	emitAssignmentArithmetic,
+	emitConditionNegation,
+	emitBlockMutations,
+	emitZeroReturn,
 }
 
 var arithmeticSwap = map[token.Token]token.Token{
@@ -37,26 +32,24 @@ var assignArithmeticSwap = map[token.Token]token.Token{
 	token.MUL_ASSIGN: token.QUO_ASSIGN, token.QUO_ASSIGN: token.MUL_ASSIGN,
 }
 
-func emitGo4Binary(c *catalog, node ast.Node) []candidateSpec {
+func emitArithmeticBinary(c *catalog, node ast.Node) []candidateSpec {
+	expression, ok := node.(*ast.BinaryExpr)
+	if !ok {
+		return nil
+	}
+	if swapped, ok := arithmeticSwap[expression.Op]; ok && numeric(c, expression.X) {
+		end := expression.OpPos + token.Pos(len(expression.Op.String()))
+		return []candidateSpec{{operator: fmt.Sprintf("%s -> %s", expression.Op, swapped), start: expression.OpPos, end: end, family: 5, variant: 1, edits: []sourceEdit{c.edit(expression.OpPos, end, []byte(swapped.String()))}, preservesImportReferences: true}}
+	}
+	return nil
+}
+
+func emitBooleanOperand(c *catalog, node ast.Node) []candidateSpec {
 	expression, ok := node.(*ast.BinaryExpr)
 	if !ok {
 		return nil
 	}
 	var specs []candidateSpec
-	if swapped, ok := comparisonSwap[expression.Op]; ok {
-		family := 3
-		if expression.Op == token.EQL || expression.Op == token.NEQ {
-			family = 1
-		} else if expression.Op == token.LAND || expression.Op == token.LOR {
-			family = 4
-		}
-		end := expression.OpPos + token.Pos(len(expression.Op.String()))
-		specs = append(specs, candidateSpec{operator: fmt.Sprintf("%s -> %s", expression.Op, swapped), start: expression.OpPos, end: end, family: family, variant: 1, edits: []sourceEdit{c.edit(expression.OpPos, end, []byte(swapped.String()))}, preservesImportReferences: true})
-	}
-	if swapped, ok := arithmeticSwap[expression.Op]; ok && numeric(c, expression.X) {
-		end := expression.OpPos + token.Pos(len(expression.Op.String()))
-		specs = append(specs, candidateSpec{operator: fmt.Sprintf("%s -> %s", expression.Op, swapped), start: expression.OpPos, end: end, family: 5, variant: 1, edits: []sourceEdit{c.edit(expression.OpPos, end, []byte(swapped.String()))}, preservesImportReferences: true})
-	}
 	if expression.Op == token.LAND || expression.Op == token.LOR {
 		forced := "true"
 		if expression.Op == token.LOR {
@@ -69,7 +62,7 @@ func emitGo4Binary(c *catalog, node ast.Node) []candidateSpec {
 	return specs
 }
 
-func emitGo4Literal(c *catalog, node ast.Node) []candidateSpec {
+func emitIntegerLiteral(c *catalog, node ast.Node) []candidateSpec {
 	literal, ok := node.(*ast.BasicLit)
 	if !ok || literal.Kind != token.INT {
 		return nil
@@ -77,7 +70,7 @@ func emitGo4Literal(c *catalog, node ast.Node) []candidateSpec {
 	return []candidateSpec{{operator: "increment literal", start: literal.Pos(), end: literal.End(), family: 15, variant: 1, edits: []sourceEdit{c.edit(literal.Pos(), literal.End(), []byte(incrementInt(literal.Value)))}, preservesImportReferences: true}}
 }
 
-func emitGo4Branch(c *catalog, node ast.Node) []candidateSpec {
+func emitLoopControl(c *catalog, node ast.Node) []candidateSpec {
 	branch, ok := node.(*ast.BranchStmt)
 	if !ok || branch.Tok != token.BREAK && branch.Tok != token.CONTINUE {
 		return nil
@@ -90,7 +83,7 @@ func emitGo4Branch(c *catalog, node ast.Node) []candidateSpec {
 	return []candidateSpec{{operator: fmt.Sprintf("%s -> %s", branch.Tok, swapped), start: branch.TokPos, end: end, family: 14, variant: 1, edits: []sourceEdit{c.edit(branch.TokPos, end, []byte(swapped.String()))}, preservesImportReferences: true}}
 }
 
-func emitGo4IncDec(c *catalog, node ast.Node) []candidateSpec {
+func emitIncDec(c *catalog, node ast.Node) []candidateSpec {
 	statement, ok := node.(*ast.IncDecStmt)
 	if !ok {
 		return nil
@@ -103,7 +96,7 @@ func emitGo4IncDec(c *catalog, node ast.Node) []candidateSpec {
 	return []candidateSpec{{operator: fmt.Sprintf("%s -> %s", statement.Tok, swapped), start: statement.TokPos, end: end, family: 13, variant: 1, edits: []sourceEdit{c.edit(statement.TokPos, end, []byte(swapped.String()))}, preservesImportReferences: true}}
 }
 
-func emitGo4AssignmentSwap(c *catalog, node ast.Node) []candidateSpec {
+func emitAssignmentArithmetic(c *catalog, node ast.Node) []candidateSpec {
 	assignment, ok := node.(*ast.AssignStmt)
 	if !ok || len(assignment.Lhs) == 0 || !numeric(c, assignment.Lhs[0]) {
 		return nil
@@ -116,7 +109,7 @@ func emitGo4AssignmentSwap(c *catalog, node ast.Node) []candidateSpec {
 	return []candidateSpec{{operator: fmt.Sprintf("%s -> %s", assignment.Tok, swapped), start: assignment.TokPos, end: end, family: 9, variant: 1, edits: []sourceEdit{c.edit(assignment.TokPos, end, []byte(swapped.String()))}, preservesImportReferences: true}}
 }
 
-func emitGo4Condition(c *catalog, node ast.Node) []candidateSpec {
+func emitConditionNegation(c *catalog, node ast.Node) []candidateSpec {
 	var condition ast.Expr
 	switch statement := node.(type) {
 	case *ast.IfStmt:
@@ -132,7 +125,7 @@ func emitGo4Condition(c *catalog, node ast.Node) []candidateSpec {
 	return []candidateSpec{{operator: "negate condition", start: condition.Pos(), end: condition.End(), family: 25, variant: 1, edits: []sourceEdit{c.edit(condition.Pos(), condition.End(), replacement)}, preservesImportReferences: true}}
 }
 
-func emitGo4Block(c *catalog, node ast.Node) []candidateSpec {
+func emitBlockMutations(c *catalog, node ast.Node) []candidateSpec {
 	block, ok := node.(*ast.BlockStmt)
 	if !ok {
 		return nil
@@ -155,7 +148,7 @@ func emitGo4Block(c *catalog, node ast.Node) []candidateSpec {
 	return specs
 }
 
-func emitGo4Return(c *catalog, node ast.Node) []candidateSpec {
+func emitZeroReturn(c *catalog, node ast.Node) []candidateSpec {
 	statement, ok := node.(*ast.ReturnStmt)
 	if !ok {
 		return nil

@@ -221,6 +221,52 @@ func TestRunConservesCandidateDiscards(t *testing.T) {
 	}
 }
 
+func TestRunAccountsForComparisonFamilies(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	targets := []Target{
+		{Symbol: "example.com/fixture/lib.Boundary", Oracle: []string{"example.com/fixture/lib.TestBoundary"}},
+		{Symbol: "example.com/fixture/lib.EqualityLogical", Oracle: []string{"example.com/fixture/lib.TestEqualityLogical"}},
+	}
+	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("comparison finding = %+v", findings)
+	}
+	for _, finding := range findings {
+		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+			t.Fatalf("comparison finding = %+v", finding)
+		}
+	}
+	operators := map[string]OperatorSummary{}
+	for _, finding := range findings {
+		for _, summary := range finding.Operators {
+			operators[summary.Operator] = summary
+		}
+	}
+	for _, operator := range []string{"relational boundary: < -> <=", "relational negation: < -> >="} {
+		summary, ok := operators[operator]
+		if !ok || summary.Generated != 1 || summary.Killed != 1 || summary.Discarded != 0 || summary.Survived != 0 {
+			t.Errorf("%s summary = %+v", operator, summary)
+		}
+	}
+	for _, operator := range []string{"equality: == -> !=", "logical: && -> ||"} {
+		summary, ok := operators[operator]
+		if !ok || summary.Generated != 1 || summary.Killed != 1 || summary.Discarded != 0 || summary.Survived != 0 {
+			t.Errorf("%s summary = %+v", operator, summary)
+		}
+	}
+	oldBasis := findings[0]
+	oldBasis.OperatorSet = "go/4"
+	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+		t.Fatalf("go/4 finding under go/5 = fresh %v, err %v", fresh, err)
+	}
+}
+
 func TestRunDecisionsAndCancellation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
