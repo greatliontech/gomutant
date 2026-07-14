@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -13,20 +12,16 @@ var activeCandidateEmitters = []candidateEmitter{
 	emitComparison,
 	emitArithmeticBinary,
 	emitBitwiseBinary,
+	emitUnary,
+	emitCompoundAssignment,
 	emitBooleanOperand,
 	emitIntegerLiteral,
 	emitLoopControl,
 	emitIncDec,
-	emitAssignmentArithmetic,
 	emitConditions,
 	emitRangeSuppression,
 	emitBlockMutations,
 	emitZeroReturn,
-}
-
-var assignArithmeticSwap = map[token.Token]token.Token{
-	token.ADD_ASSIGN: token.SUB_ASSIGN, token.SUB_ASSIGN: token.ADD_ASSIGN,
-	token.MUL_ASSIGN: token.QUO_ASSIGN, token.QUO_ASSIGN: token.MUL_ASSIGN,
 }
 
 func emitIntegerLiteral(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
@@ -35,32 +30,6 @@ func emitIntegerLiteral(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec
 		return nil
 	}
 	return []candidateSpec{{operator: "increment literal", start: literal.Pos(), end: literal.End(), family: 15, variant: 1, edits: []sourceEdit{c.edit(literal.Pos(), literal.End(), []byte(incrementInt(literal.Value)))}, preservesImportReferences: true}}
-}
-
-func emitIncDec(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
-	statement, ok := node.(*ast.IncDecStmt)
-	if !ok {
-		return nil
-	}
-	swapped := token.DEC
-	if statement.Tok == token.DEC {
-		swapped = token.INC
-	}
-	end := statement.TokPos + token.Pos(len(statement.Tok.String()))
-	return []candidateSpec{{operator: fmt.Sprintf("%s -> %s", statement.Tok, swapped), start: statement.TokPos, end: end, family: 13, variant: 1, edits: []sourceEdit{c.edit(statement.TokPos, end, []byte(swapped.String()))}, preservesImportReferences: true}}
-}
-
-func emitAssignmentArithmetic(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
-	assignment, ok := node.(*ast.AssignStmt)
-	if !ok || len(assignment.Lhs) == 0 || !numeric(c, assignment.Lhs[0]) {
-		return nil
-	}
-	swapped, ok := assignArithmeticSwap[assignment.Tok]
-	if !ok {
-		return nil
-	}
-	end := assignment.TokPos + token.Pos(len(assignment.Tok.String()))
-	return []candidateSpec{{operator: fmt.Sprintf("%s -> %s", assignment.Tok, swapped), start: assignment.TokPos, end: end, family: 9, variant: 1, edits: []sourceEdit{c.edit(assignment.TokPos, end, []byte(swapped.String()))}, preservesImportReferences: true}}
 }
 
 func emitBlockMutations(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {

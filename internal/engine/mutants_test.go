@@ -12,8 +12,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/8" {
-		t.Fatalf("operator set = %q, want go/8", OperatorSet)
+	if OperatorSet != "go/9" {
+		t.Fatalf("operator set = %q, want go/9", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
@@ -45,9 +45,9 @@ func TestMutants(t *testing.T) {
 		mixedOps[m.Operator]++
 	}
 	for _, want := range []string{
-		"drop assignment", "+= -> -=", "arithmetic: * -> /", "arithmetic: + -> -",
+		"drop assignment", "compound arithmetic: += -> -=", "arithmetic: * -> /", "arithmetic: + -> -",
 		"increment literal", "loop control: continue -> break", "boolean operand: -> false",
-		"logical: || -> &&", "logical: && -> ||", "boolean operand: -> true", "++ -> --",
+		"logical: || -> &&", "logical: && -> ||", "boolean operand: -> true", "increment/decrement: ++ -> --",
 	} {
 		if mixedOps[want] == 0 {
 			t.Fatalf("operator %q missing: %v", want, mixedOps)
