@@ -693,6 +693,7 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
+	reportPreparation(nil, PreparationEvent{Stage: PreparationLoading})
 	tr := fixtureTree(t)
 	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
 	type runStatus struct {

@@ -46,10 +46,11 @@ normalization, not additional mutation sites. Any change to catalog membership,
 mapping, applicability, ordering, or deduplication receives a new operator-set
 identifier before its findings can be reused.
 
-INV-MUT-COMPREHENSIVE: enforced by `TestComparisonCatalog`,
-`TestArithmeticCatalog`, `TestBitwiseCatalog`, `TestUnaryAssignmentCatalog`,
-`TestControlCatalog`, `TestLoopControlLegality`, `TestScalarLiteralCatalog`,
-`TestReturnSubstitutionCatalog`, and `TestStatementCatalogContexts`.
+INV-MUT-COMPREHENSIVE: enforced by `TestComprehensiveCatalogInventory`,
+`TestComparisonCatalog`, `TestArithmeticCatalog`, `TestBitwiseCatalog`,
+`TestUnaryAssignmentCatalog`, `TestControlCatalog`, `TestLoopControlLegality`,
+`TestScalarLiteralCatalog`, `TestReturnSubstitutionCatalog`, and
+`TestStatementCatalogContexts`.
 
 The token-replacement families and their ordered variants are:
 
