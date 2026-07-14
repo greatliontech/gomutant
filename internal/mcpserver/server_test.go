@@ -2,9 +2,12 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -377,7 +380,11 @@ func TestToolDiscover(t *testing.T) {
 	got := map[string]bool{}
 	for _, tg := range out.Targets {
 		got[tg.Symbol] = true
-		if tg.Symbol == "example.com/fixture/lib.Add" && (tg.OracleExplicit || len(tg.Oracle) == 0) {
+		if tg.OracleSet < 0 || tg.OracleSet >= len(out.OracleSets) {
+			t.Fatalf("target oracle-set reference = %+v in %+v", tg, out.OracleSets)
+		}
+		oracle := out.OracleSets[tg.OracleSet].Oracle
+		if tg.Symbol == "example.com/fixture/lib.Add" && (tg.OracleExplicit || len(oracle) == 0) {
 			t.Fatalf("Add description = %+v", tg)
 		}
 	}
@@ -388,8 +395,16 @@ func TestToolDiscover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(explicit.Targets) != 1 || !explicit.Targets[0].OracleExplicit || explicit.Targets[0].Oracle[0] != "example.com/fixture/lib.TestAdd" || explicit.Targets[0].Labels[0] != "a" {
+	if len(explicit.Targets) != 1 || len(explicit.OracleSets) != 1 || !explicit.Targets[0].OracleExplicit ||
+		explicit.OracleSets[explicit.Targets[0].OracleSet].Oracle[0] != "example.com/fixture/lib.TestAdd" || explicit.Targets[0].Labels[0] != "a" {
 		t.Fatalf("explicit discover = %+v", explicit)
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.OracleSets) >= len(out.Targets) || len(encoded) >= 100_000 {
+		t.Fatalf("discovery was not compact: %d oracle sets, %d targets, %d bytes", len(out.OracleSets), len(out.Targets), len(encoded))
 	}
 	if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"targets":[]}`, Changed: "HEAD"}); err == nil {
 		t.Fatal("multiple discovery forms accepted")
@@ -412,6 +427,10 @@ func TestToolDiscover(t *testing.T) {
 		Symbols:     []string{"example.com/fixture/lib.Absent"},
 	}); err == nil || !strings.Contains(err.Error(), "matched no targets") {
 		t.Fatalf("run ignored symbol filter: %v", err)
+	} else if !strings.Contains(err.Error(), "* stays within one slash component") {
+		t.Fatalf("run filter error lacks pattern guidance: %v", err)
+	} else if !strings.Contains(err.Error(), "** as a complete component crosses slash components") || !strings.Contains(err.Error(), "**/*emitConditions*") {
+		t.Fatalf("run filter error lacks corrective globstar guidance: %v", err)
 	}
 	if _, _, err := New(filepath.Join(t.TempDir(), "missing")).toolRun(context.Background(), nil, runIn{}); err == nil {
 		t.Fatal("run accepted an invalid tree")
@@ -421,6 +440,61 @@ func TestToolDiscover(t *testing.T) {
 	})
 	if err != nil || len(filtered.Targets) != 2 || filtered.Targets[0].Symbol != "example.com/fixture/methods.Counter.Inc" || filtered.Targets[1].Symbol != "example.com/fixture/methods.Counter.Value" {
 		t.Fatalf("filtered discovery = %+v, %v", filtered, err)
+	}
+}
+
+func TestCompactTargetDescriptionsDeduplicatesExactOracles(t *testing.T) {
+	descriptions := []gomutant.TargetDescription{
+		{Symbol: "p.A", Oracle: []string{"ab", "c"}},
+		{Symbol: "p.B", Oracle: []string{"ab", "c"}, Labels: []string{"x"}},
+		{Symbol: "p.C", Oracle: []string{"a", "bc"}, OracleExplicit: true},
+		{Symbol: "p.D", Oracle: []string{}, OracleExplicit: true, Skipped: "no oracle"},
+	}
+	sets, targets := compactTargetDescriptions(descriptions)
+	if len(sets) != 3 || len(targets) != 4 || targets[0].OracleSet != 0 || targets[1].OracleSet != 0 || targets[2].OracleSet != 1 || targets[3].OracleSet != 2 ||
+		sets[0].ID != 0 || !slices.Equal(sets[0].Oracle, []string{"ab", "c"}) || sets[1].ID != 1 || !slices.Equal(sets[1].Oracle, []string{"a", "bc"}) ||
+		sets[2].ID != 2 || len(sets[2].Oracle) != 0 {
+		t.Fatalf("compact descriptions = sets %+v, targets %+v", sets, targets)
+	}
+	expanded := make([]gomutant.TargetDescription, len(targets))
+	for i, target := range targets {
+		expanded[i] = gomutant.TargetDescription{
+			Symbol: target.Symbol, Oracle: sets[target.OracleSet].Oracle, Labels: target.Labels,
+			OracleExplicit: target.OracleExplicit, Skipped: target.Skipped,
+		}
+	}
+	if !reflect.DeepEqual(expanded, descriptions) {
+		t.Fatalf("expanded descriptions = %+v, want %+v", expanded, descriptions)
+	}
+}
+
+func TestDiscoverSchemaExplainsOracleReferences(t *testing.T) {
+	for _, field := range []struct {
+		typeOf  reflect.Type
+		name    string
+		phrases []string
+	}{
+		{reflect.TypeOf(discoverTarget{}), "OracleSet", []string{"references", "oracleSets", "id"}},
+		{reflect.TypeOf(discoverOracleSet{}), "ID", []string{"referenced", "targets[].oracleSet"}},
+		{reflect.TypeOf(discoverOut{}), "OracleSets", []string{"first-target", "oracle sets"}},
+	} {
+		structField, ok := field.typeOf.FieldByName(field.name)
+		description := structField.Tag.Get("jsonschema")
+		if !ok {
+			t.Fatalf("%s.%s schema does not explain oracle references", field.typeOf.Name(), field.name)
+		}
+		for _, phrase := range field.phrases {
+			if !strings.Contains(description, phrase) {
+				t.Errorf("%s.%s schema %q lacks %q", field.typeOf.Name(), field.name, description, phrase)
+			}
+		}
+	}
+	for _, typeOf := range []reflect.Type{reflect.TypeOf(runIn{}), reflect.TypeOf(discoverIn{})} {
+		field, ok := typeOf.FieldByName("Symbols")
+		description := field.Tag.Get("jsonschema")
+		if !ok || !strings.Contains(description, "** as a complete component crosses slash components") || !strings.Contains(description, "**/*emitConditions*") {
+			t.Errorf("%s.Symbols schema lacks corrective globstar guidance: %q", typeOf.Name(), description)
+		}
 	}
 }
 

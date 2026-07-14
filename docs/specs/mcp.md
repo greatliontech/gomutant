@@ -17,6 +17,11 @@ Run and discovery tools expose the same package and symbol filters as the
 library (REQ-target-filtering); run results expose the same ordered target
 preparation events, decisions, and aggregate summary as the CLI
 (REQ-exec-run-status).
+Discovery encodes exact effective oracles without repeating them: the result
+contains canonical top-level `oracleSets` with zero-based integer `id` values,
+and each target carries the `oracleSet` id whose `oracle` array it uses. Oracle
+sets are assigned in first-target order, so expanding each reference yields the
+same ordered target descriptions as library and CLI inspection.
 
 **REQ-mcp-findings-doc** (behavior): The server MUST maintain the same
 findings document the CLI maintains — a measuring tool merges fresh findings

@@ -53,7 +53,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolRun)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "discover",
-		Description: "List the effective targets a run would measure — symbols, explicit or derived oracles, and labels — plus changed-scope residue with the reason each path yields no target.",
+		Description: "List effective target symbols, sorted opaque labels, explicit or package-derived oracle mode, skip reasons, and changed-scope residue. Exact oracles are deduplicated in top-level oracleSets; each target's oracleSet integer references oracleSets[].id.",
 	}, s.toolDiscover)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "findings",
@@ -134,8 +134,8 @@ type runIn struct {
 	Jobs             int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
 	Force            bool     `json:"force,omitempty" jsonschema:"re-measure targets whose prior finding still covers"`
 	Findings         string   `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
-	Packages         []string `json:"packages,omitempty" jsonschema:"package import-path glob filters; alternatives"`
-	Symbols          []string `json:"symbols,omitempty" jsonschema:"fully qualified symbol glob filters; alternatives"`
+	Packages         []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
+	Symbols          []string `json:"symbols,omitempty" jsonschema:"complete fully qualified symbol glob filters; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*; alternatives"`
 }
 
 type findingOut struct {
@@ -314,13 +314,27 @@ type discoverIn struct {
 	TargetsPath string   `json:"targets_path,omitempty" jsonschema:"path to a targets document; overrides discovery"`
 	TargetsJSON string   `json:"targets_json,omitempty" jsonschema:"inline targets document; overrides discovery"`
 	Changed     string   `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
-	Packages    []string `json:"packages,omitempty" jsonschema:"package import-path glob filters; alternatives"`
-	Symbols     []string `json:"symbols,omitempty" jsonschema:"fully qualified symbol glob filters; alternatives"`
+	Packages    []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
+	Symbols     []string `json:"symbols,omitempty" jsonschema:"complete fully qualified symbol glob filters; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*; alternatives"`
+}
+
+type discoverTarget struct {
+	Symbol         string   `json:"symbol" jsonschema:"fully qualified target symbol"`
+	OracleSet      int      `json:"oracleSet" jsonschema:"zero-based id that references one entry in the top-level oracleSets array"`
+	Labels         []string `json:"labels,omitempty" jsonschema:"sorted opaque labels carried unchanged from the target"`
+	OracleExplicit bool     `json:"oracleExplicit" jsonschema:"whether the referenced oracle was explicitly supplied rather than package-derived"`
+	Skipped        string   `json:"skipped,omitempty" jsonschema:"reason this target cannot be measured, when applicable"`
+}
+
+type discoverOracleSet struct {
+	ID     int      `json:"id" jsonschema:"zero-based oracle-set id referenced by targets[].oracleSet"`
+	Oracle []string `json:"oracle" jsonschema:"sorted fully qualified test symbols forming this exact effective oracle"`
 }
 
 type discoverOut struct {
-	Targets []gomutant.TargetDescription `json:"targets"`
-	Residue []gomutant.Residue           `json:"residue,omitempty"`
+	OracleSets []discoverOracleSet `json:"oracleSets" jsonschema:"canonical exact oracle sets assigned in first-target order"`
+	Targets    []discoverTarget    `json:"targets" jsonschema:"ordered effective targets whose oracleSet references oracleSets[].id"`
+	Residue    []gomutant.Residue  `json:"residue,omitempty"`
 }
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
@@ -385,11 +399,36 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
-	out.Targets, err = tree.DescribeTargetsContext(ctx, targets)
+	descriptions, err := tree.DescribeTargetsContext(ctx, targets)
 	if err != nil {
 		return nil, out, err
 	}
+	out.OracleSets, out.Targets = compactTargetDescriptions(descriptions)
 	return nil, out, nil
+}
+
+func compactTargetDescriptions(descriptions []gomutant.TargetDescription) ([]discoverOracleSet, []discoverTarget) {
+	sets := make([]discoverOracleSet, 0)
+	setByKey := map[string]int{}
+	targets := make([]discoverTarget, 0, len(descriptions))
+	for _, description := range descriptions {
+		var key strings.Builder
+		for _, oracle := range description.Oracle {
+			fmt.Fprintf(&key, "%d:", len(oracle))
+			key.WriteString(oracle)
+		}
+		id, ok := setByKey[key.String()]
+		if !ok {
+			id = len(sets)
+			setByKey[key.String()] = id
+			sets = append(sets, discoverOracleSet{ID: id, Oracle: description.Oracle})
+		}
+		targets = append(targets, discoverTarget{
+			Symbol: description.Symbol, OracleSet: id, Labels: description.Labels,
+			OracleExplicit: description.OracleExplicit, Skipped: description.Skipped,
+		})
+	}
+	return sets, targets
 }
 
 type findingsIn struct {

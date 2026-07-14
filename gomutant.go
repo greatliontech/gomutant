@@ -106,7 +106,7 @@ func (t *Tree) FilterTargetsContext(ctx context.Context, targets []Target, packa
 		selected = append(selected, target)
 	}
 	if len(selected) == 0 {
-		return nil, fmt.Errorf("gomutant: target filters matched no targets")
+		return nil, fmt.Errorf("gomutant: target filters matched no targets (patterns match complete paths; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*)")
 	}
 	return selected, nil
 }
