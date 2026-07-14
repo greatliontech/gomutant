@@ -57,8 +57,19 @@ func TestRunMutantOutcomes(t *testing.T) {
 	}
 
 	killed, survived, addSurvivors := run("example.com/fixture/lib.Add", "^TestAdd$")
-	if survived != 1 || killed == 0 || len(addSurvivors) != 1 || addSurvivors[0].Operator != "condition: force false" {
-		t.Fatalf("Add: killed=%d survivors=%+v, want only the equivalent force-false condition", killed, addSurvivors)
+	wantAddSurvivors := map[string]string{
+		"lib.go:24:2":  "statement: delete",
+		"lib.go:24:5":  "condition: force false",
+		"lib.go:24:12": "block: empty",
+		"lib.go:25:3":  "statement: delete",
+	}
+	if survived != len(wantAddSurvivors) || killed != 7 {
+		t.Fatalf("Add: killed=%d survivors=%+v, want exact go/12 counts", killed, addSurvivors)
+	}
+	for _, survivor := range addSurvivors {
+		if wantAddSurvivors[survivor.Position] != survivor.Operator {
+			t.Fatalf("unexpected Add survivor: %+v", survivor)
+		}
 	}
 	_, survived, survivors := run("example.com/fixture/lib.Weak", "^TestWeak$")
 	if survived == 0 {
@@ -164,15 +175,19 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 
 func TestNamedTestPanicIsIncompleteEvidence(t *testing.T) {
 	tr := fixtureTree(t)
-	mutants, err := tr.Mutants("example.com/fixture/lib.PanicValue", 1)
-	if err != nil || len(mutants) != 1 {
+	mutants, err := tr.Mutants("example.com/fixture/lib.PanicValue", 0)
+	if err != nil {
 		t.Fatalf("Mutants: %v, count %d", err, len(mutants))
+	}
+	mutantIndex := slices.IndexFunc(mutants, func(m Mutant) bool { return m.Operator == "integer literal: magnitude +1" })
+	if mutantIndex < 0 {
+		t.Fatalf("integer literal mutant missing: %+v", mutants)
 	}
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+	outcome, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[mutantIndex],
 		[]string{"example.com/fixture/lib"}, "^TestNamedPanic$", 60*time.Second, nil, moduleDir, packageDir)
 	if err != nil {
 		t.Fatal(err)

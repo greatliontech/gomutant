@@ -47,7 +47,7 @@ type Generation struct {
 
 // OperatorSet identifies the mutant-generation basis; finding records pin it,
 // so changing candidate generation re-stales every prior record.
-const OperatorSet = "go/11"
+const OperatorSet = "go/12"
 
 type importProcessor func(context.Context, string, []byte) ([]byte, error)
 

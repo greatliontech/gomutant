@@ -186,16 +186,18 @@ func TestConditionlessForLexingAndImportClassification(t *testing.T) {
 		}
 	}
 
-	processed := 0
-	tr.importProcessor = func(context.Context, string, []byte) ([]byte, error) {
-		processed++
-		return nil, nil
-	}
-	if _, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.ConditionlessOnly", 0); err != nil {
+	catalog, err := tr.candidateCatalog(context.Background(), "example.com/fixture/lib.ConditionlessOnly")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if processed != 0 {
-		t.Fatalf("conditionless insertion processed imports %d times", processed)
+	specs, err := catalog.enumerate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range specs {
+		if spec.operator == "condition: force false" && !spec.preservesImportReferences {
+			t.Fatal("conditionless insertion classified as import-removing")
+		}
 	}
 }
 

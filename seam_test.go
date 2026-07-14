@@ -656,11 +656,11 @@ func TestRunUsesEnvironmentFrozenAtLoad(t *testing.T) {
 	tr := fixtureTree(t)
 	t.Setenv("GOMUTANT_FROZEN_INPUT", "changed-after-load")
 	tg := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestFrozenEnvironment"}}
-	findings, err := tr.Run(context.Background(), []Target{tg}, Options{Budget: 1})
+	findings, err := tr.Run(context.Background(), []Target{tg}, Options{Budget: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 1 || findings[0].Mutants != 1 || findings[0].Killed != 1 {
-		t.Fatalf("frozen-environment finding = %+v, want one killed mutant", findings)
+	if len(findings) != 1 || findings[0].Mutants != 2 || findings[0].Killed != 1 || len(findings[0].Survivors) != 1 || findings[0].Survivors[0] != (Survivor{Position: "lib.go:24:2", Operator: "statement: delete"}) {
+		t.Fatalf("frozen-environment finding = %+v, want exact two-candidate prefix outcomes", findings)
 	}
 }

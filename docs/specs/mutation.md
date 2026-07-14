@@ -12,7 +12,7 @@ of behavior a finding is measured against.
 is run and either killed or reported as a survivor.
 
 **REQ-mut-operators** (behavior): gomutant MUST identify the exact active
-operator basis in every finding. The current active `go/11` basis comprises
+operator basis in every finding. The current active `go/12` basis comprises
 the equality, relational-boundary, relational-negation, and logical families
 exactly as cataloged below; the boolean-operand, condition, range-suppression,
 and loop-control families exactly as cataloged below; the arithmetic, bitwise,
@@ -20,12 +20,11 @@ and shift families exactly as cataloged below; the unary, compound arithmetic,
 compound bitwise, compound shift, compound store, and increment/decrement
 families exactly as cataloged below; the integer, rune, floating-point,
 imaginary, boolean, and string literal families exactly as cataloged below;
-the return-substitution families exactly as cataloged below; and statement
-deletion, with assignment stores dropped while right-hand
-sides still evaluate, each emitted where
+the return-substitution, block-emptying, statement-deletion, and assignment-store
+families exactly as cataloged below, each emitted where
 the replacement can be formed without a new import or named type expression. A
 site with no such counterpart, including a result type with no context-free
-zero expression, yields no `go/11` candidate. A selected candidate
+zero expression, yields no `go/12` candidate. A selected candidate
 that fails to compile, does not differ from the baseline, or renders identically
 to an earlier selected candidate is discarded; a timed-out oracle run is a kill under
 REQ-exec-attribution. When INV-MUT-COMPREHENSIVE lands, its catalog supersedes
@@ -35,8 +34,7 @@ and membership, lands complete catalog families rather than partial mappings,
 and satisfies the candidate, accounting, stale-pin, and grammar contracts for
 every active family.
 
-The completed `go/11` families use their catalog labels. Its remaining labels
-are exactly `delete statement` and `drop assignment`.
+The active `go/12` basis uses the exact catalog labels below.
 
 **INV-MUT-COMPREHENSIVE** (project invariant): The comprehensive automatic
 basis MUST be the finite first-order catalog below. Every mapping applies once
@@ -48,7 +46,10 @@ normalization, not additional mutation sites. Any change to catalog membership,
 mapping, applicability, ordering, or deduplication receives a new operator-set
 identifier before its findings can be reused.
 
-Lands: when the active operator basis implements every catalog row below.
+INV-MUT-COMPREHENSIVE: enforced by `TestComparisonCatalog`,
+`TestArithmeticCatalog`, `TestBitwiseCatalog`, `TestUnaryAssignmentCatalog`,
+`TestControlCatalog`, `TestLoopControlLegality`, `TestScalarLiteralCatalog`,
+`TestReturnSubstitutionCatalog`, and `TestStatementCatalogContexts`.
 
 The token-replacement families and their ordered variants are:
 

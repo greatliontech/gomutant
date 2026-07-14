@@ -544,7 +544,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						break
 					}
 					out, killer, state, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, runEnv)
-					processStates = append(processStates, state)
+					if out != engine.MutantDiscarded {
+						processStates = append(processStates, state)
+					}
 					if err == nil && out == engine.MutantKilled {
 						err = attributedKill(killer, w.oracleSet)
 					}

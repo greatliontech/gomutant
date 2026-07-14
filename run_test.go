@@ -40,8 +40,14 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	add, weak, iface := first[0], first[1], first[2]
-	if add.Cached || add.Mutants == 0 || add.Killed != add.Mutants-1 || len(add.Survivors) != 1 || add.Survivors[0].Operator != "condition: force false" {
-		t.Fatalf("Add = %+v, want only the equivalent force-false condition to survive fresh", add)
+	wantAddSurvivors := []Survivor{
+		{Position: "lib.go:24:2", Operator: "statement: delete"},
+		{Position: "lib.go:24:5", Operator: "condition: force false"},
+		{Position: "lib.go:24:12", Operator: "block: empty"},
+		{Position: "lib.go:25:3", Operator: "statement: delete"},
+	}
+	if add.Cached || add.Mutants != 11 || add.Killed != 7 || add.Discarded != 1 || !slices.Equal(add.Survivors, wantAddSurvivors) {
+		t.Fatalf("Add = %+v, want exact go/12 outcomes %+v", add, wantAddSurvivors)
 	}
 	if len(add.Operators) == 0 {
 		t.Fatal("Add finding omitted operator summaries")
@@ -633,6 +639,56 @@ func TestRunAccountsForReturnSubstitutions(t *testing.T) {
 	}
 }
 
+func TestRunAccountsForStatementFamilies(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	oracle := []string{"example.com/fixture/lib.TestVacuous"}
+	symbols := []string{"StatementBlocks", "StatementKinds", "StatementDropStores", "StatementExcluded"}
+	targets := make([]Target, 0, len(symbols))
+	for _, symbol := range symbols {
+		targets = append(targets, Target{Symbol: "example.com/fixture/lib." + symbol, Oracle: oracle})
+	}
+	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operators := map[string]OperatorSummary{}
+	for _, finding := range findings {
+		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+			t.Fatalf("statement finding = %+v", finding)
+		}
+		if finding.TargetEvidence.RuntimeUnverifiable {
+			t.Fatalf("compiler discard poisoned runtime evidence: %+v", finding.TargetEvidence)
+		}
+		for _, summary := range finding.Operators {
+			total := operators[summary.Operator]
+			total.Operator = summary.Operator
+			total.Generated += summary.Generated
+			total.Discarded += summary.Discarded
+			total.Killed += summary.Killed
+			total.Survived += summary.Survived
+			operators[summary.Operator] = total
+		}
+	}
+	for operator, want := range map[string]OperatorSummary{
+		"block: empty":           {Generated: 8, Discarded: 4, Survived: 4},
+		"statement: delete":      {Generated: 24, Discarded: 4, Survived: 20},
+		"assignment: drop store": {Generated: 7, Discarded: 1, Survived: 6},
+	} {
+		summary := operators[operator]
+		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+		}
+	}
+	oldBasis := findings[0]
+	oldBasis.OperatorSet = "go/11"
+	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+		t.Fatalf("go/11 finding under go/12 = fresh %v, err %v", fresh, err)
+	}
+}
+
 func TestRunDecisionsAndCancellation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -886,7 +942,7 @@ func TestRunValidatesAfterMutantProcesses(t *testing.T) {
 	findings, err := tr.Run(context.Background(), []Target{{
 		Symbol: "example.com/fixture/lib.Add",
 		Oracle: []string{"example.com/fixture/lib.TestDriftSource"},
-	}}, Options{Budget: 1})
+	}}, Options{Budget: 2})
 	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
 		t.Fatalf("post-mutant drift = findings %+v, error %v", findings, err)
 	}
@@ -990,7 +1046,7 @@ func TestRunRapidClassificationIncludesLaterTargets(t *testing.T) {
 		{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}},
 		{Symbol: "example.com/fixture/extprop.Ok", Oracle: []string{"example.com/fixture/extprop.TestExtProp"}},
 	}
-	findings, err := tree.Run(context.Background(), targets, Options{Budget: 1, Jobs: 1})
+	findings, err := tree.Run(context.Background(), targets, Options{Budget: 2, Jobs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

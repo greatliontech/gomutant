@@ -12,8 +12,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/11" {
-		t.Fatalf("operator set = %q, want go/11", OperatorSet)
+	if OperatorSet != "go/12" {
+		t.Fatalf("operator set = %q, want go/12", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
@@ -45,7 +45,7 @@ func TestMutants(t *testing.T) {
 		mixedOps[m.Operator]++
 	}
 	for _, want := range []string{
-		"drop assignment", "compound arithmetic: += -> -=", "arithmetic: * -> /", "arithmetic: + -> -",
+		"assignment: drop store", "compound arithmetic: += -> -=", "arithmetic: * -> /", "arithmetic: + -> -",
 		"integer literal: magnitude +1", "loop control: continue -> break", "boolean operand: -> false",
 		"logical: || -> &&", "logical: && -> ||", "boolean operand: -> true", "increment/decrement: ++ -> --",
 	} {
@@ -53,8 +53,8 @@ func TestMutants(t *testing.T) {
 			t.Fatalf("operator %q missing: %v", want, mixedOps)
 		}
 	}
-	if got := mixedOps["drop assignment"]; got != 2 { // += and = are stores; := is not
-		t.Fatalf("drop assignment sites = %d; a declaration must not count", got)
+	if got := mixedOps["assignment: drop store"]; got != 2 { // += and = are stores; := is not
+		t.Fatalf("drop-store sites = %d; a declaration must not count", got)
 	}
 
 	// No two mutants of one symbol render the same source: a duplicate would
@@ -109,7 +109,7 @@ func TestMutants(t *testing.T) {
 	}
 	dels := 0
 	for _, m := range dup {
-		if m.Operator == "delete statement" {
+		if m.Operator == "statement: delete" {
 			dels++
 		}
 	}
@@ -154,7 +154,7 @@ func TestMutants(t *testing.T) {
 	}
 	pruned := false
 	for _, m := range logs {
-		if m.Operator == "delete statement" && !strings.Contains(string(m.Replacements[0].Source), `"fmt"`) {
+		if m.Operator == "statement: delete" && !strings.Contains(string(m.Replacements[0].Source), `"fmt"`) {
 			pruned = true
 		}
 	}
@@ -312,9 +312,9 @@ func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
 		mutants = append(mutants, generated...)
 	}
 	removal := map[string]bool{
-		"boolean operand: -> false": true, "boolean operand: -> true": true, "delete statement": true,
+		"boolean operand: -> false": true, "boolean operand: -> true": true, "block: empty": true, "statement: delete": true,
 		"condition: force false": true, "condition: force true": true,
-		"drop assignment": true, "return: zero": true,
+		"assignment: drop store": true, "return: zero": true,
 	}
 	seenRemoval := map[string]bool{}
 	for _, mutant := range mutants {
@@ -365,9 +365,9 @@ func TestCandidatesSelectBeforeEffectiveSourceDeduplication(t *testing.T) {
 	if generation.CandidateCount <= 3 || len(generation.Candidates) != 3 {
 		t.Fatalf("generation = %+v", generation)
 	}
-	if generation.Candidates[0].Operator != "delete statement" || len(generation.Candidates[0].Replacements) != 1 ||
+	if generation.Candidates[0].Operator != "statement: delete" || len(generation.Candidates[0].Replacements) != 1 ||
 		generation.Candidates[1].Operator != "string literal: nonempty -> empty" || len(generation.Candidates[1].Replacements) != 1 ||
-		generation.Candidates[2].Operator != "delete statement" || len(generation.Candidates[2].Replacements) != 0 {
+		generation.Candidates[2].Operator != "statement: delete" || len(generation.Candidates[2].Replacements) != 0 {
 		t.Fatalf("selected candidates = %+v", generation.Candidates)
 	}
 	if got := string(generation.Candidates[0].Replacements[0].Source); got != "package lib\n" {
@@ -377,17 +377,20 @@ func TestCandidatesSelectBeforeEffectiveSourceDeduplication(t *testing.T) {
 
 func TestCandidatesRenderExactSource(t *testing.T) {
 	tr := fixtureTree(t)
-	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Exact", 1)
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Exact", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if generation.CandidateCount < 1 || len(generation.Candidates) != 1 || len(generation.Candidates[0].Replacements) != 1 {
-		t.Fatalf("generation = %+v", generation)
-	}
 	want := "package lib\n\nfunc Exact(a int) int {\n\tif !(a == 0) {\n\t\treturn 1\n\t}\n\treturn a\n}\n"
-	if got := string(generation.Candidates[0].Replacements[0].Source); got != want {
-		t.Fatalf("generated source:\n%s\nwant:\n%s", got, want)
+	for _, candidate := range generation.Candidates {
+		if candidate.Operator == "condition: negate" {
+			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
+				t.Fatalf("generated source = %q, want %q", candidate.Replacements, want)
+			}
+			return
+		}
 	}
+	t.Fatal("condition: negate candidate missing")
 }
 
 func TestApplySourceEditsRejectsOverlap(t *testing.T) {
@@ -419,16 +422,17 @@ func TestApplySourceEditsRejectsOverlap(t *testing.T) {
 
 func TestDiscardedCandidateReservesOccurrenceIdentity(t *testing.T) {
 	tr := fixtureTree(t)
-	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Reserved", 3)
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Reserved", 4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(generation.Candidates) != 3 || generation.Candidates[0].Operator != "boolean literal: true -> false" || len(generation.Candidates[0].Replacements) != 1 ||
-		generation.Candidates[1].Operator != "boolean operand: -> true" || len(generation.Candidates[1].Replacements) != 0 {
+	if len(generation.Candidates) != 4 || generation.Candidates[0].Operator != "statement: delete" ||
+		generation.Candidates[1].Operator != "boolean literal: true -> false" || len(generation.Candidates[1].Replacements) != 1 ||
+		generation.Candidates[2].Operator != "boolean operand: -> true" || len(generation.Candidates[2].Replacements) != 0 {
 		t.Fatalf("leading candidates = %+v", generation.Candidates)
 	}
-	if third := generation.Candidates[2]; third.Operator != "boolean operand: -> true" || !strings.HasSuffix(third.Position, "#2") || len(third.Replacements) != 1 {
-		t.Fatalf("third candidate = %+v", third)
+	if fourth := generation.Candidates[3]; fourth.Operator != "boolean operand: -> true" || !strings.HasSuffix(fourth.Position, "#2") || len(fourth.Replacements) != 1 {
+		t.Fatalf("fourth candidate = %+v", fourth)
 	}
 }
 
@@ -449,7 +453,7 @@ func TestMutantsContextCancellationRestoresSyntax(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, mutant := range mutants {
-		if mutant.Operator == "delete statement" && !strings.Contains(string(mutant.Replacements[0].Source), `"fmt"`) {
+		if mutant.Operator == "statement: delete" && !strings.Contains(string(mutant.Replacements[0].Source), `"fmt"`) {
 			return
 		}
 	}
