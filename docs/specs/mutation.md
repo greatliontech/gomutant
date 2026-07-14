@@ -12,16 +12,17 @@ of behavior a finding is measured against.
 is run and either killed or reported as a survivor.
 
 **REQ-mut-operators** (behavior): gomutant MUST identify the exact active
-operator basis in every finding. The current active `go/5` basis comprises
+operator basis in every finding. The current active `go/6` basis comprises
 the equality, relational-boundary, relational-negation, and logical families
-exactly as cataloged below; condition negation; arithmetic operator swaps,
+exactly as cataloged below; the boolean-operand, condition, range-suppression,
+and loop-control families exactly as cataloged below; arithmetic operator swaps,
 including their compound-assignment and increment/decrement
 forms; boolean-operand forcing; integer-literal increments; break/continue
 swaps; statement deletion, with assignment stores dropped while right-hand
 sides still evaluate; and zero-value return substitution, each emitted where
 the replacement can be formed without a new import or named type expression. A
 site with no such counterpart, including modulus and a result type with no
-context-free zero expression, yields no `go/5` candidate. A selected candidate
+context-free zero expression, yields no `go/6` candidate. A selected candidate
 that fails to compile, does not differ from the baseline, or renders identically
 to an earlier selected candidate is discarded; a timed-out oracle run is a kill under
 REQ-exec-attribution. When INV-MUT-COMPREHENSIVE lands, its catalog supersedes
@@ -31,13 +32,13 @@ and membership, lands complete catalog families rather than partial mappings,
 and satisfies the candidate, accounting, stale-pin, and grammar contracts for
 every active family.
 
-The completed `go/5` families use their catalog labels. Its remaining labels
+The completed `go/6` families use their catalog labels. Its remaining labels
 are exactly the token mappings `<old> -> <new>` for arithmetic,
-compound-assignment, increment/decrement, and break/continue swaps, plus `force
-true`, `force false`, `increment literal`, `negate condition`, `delete
-statement`, `drop assignment`, and `zero return`. It differs from `go/4` only
-by completing the four catalog families named above; all other operator sites,
-replacements, candidate ordering, and accounting are unchanged.
+compound-assignment and increment/decrement swaps, plus `increment literal`,
+`delete statement`, `drop assignment`, and `zero return`. It differs from
+`go/5` only by completing the boolean/control and loop-control families named
+above; all other operator sites, replacements, candidate ordering, and
+accounting are unchanged.
 
 **INV-MUT-COMPREHENSIVE** (project invariant): The comprehensive automatic
 basis MUST be the finite first-order catalog below. Every mapping applies once

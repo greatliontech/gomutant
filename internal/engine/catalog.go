@@ -19,7 +19,7 @@ type catalog struct {
 	tokens *token.File
 }
 
-type candidateEmitter func(*catalog, ast.Node) []candidateSpec
+type candidateEmitter func(*catalog, ast.Node, []ast.Node) []candidateSpec
 
 func (t *Tree) candidateCatalog(ctx context.Context, symbol string) (*catalog, error) {
 	if err := ctx.Err(); err != nil {
@@ -71,13 +71,19 @@ func (c *catalog) enumerate(ctx context.Context) ([]candidateSpec, error) {
 		return nil, nil
 	}
 	var specs []candidateSpec
+	var ancestors []ast.Node
 	ast.Inspect(c.fd.Body, func(node ast.Node) bool {
 		if ctx.Err() != nil {
 			return false
 		}
-		for _, emit := range activeCandidateEmitters {
-			specs = append(specs, emit(c, node)...)
+		if node == nil {
+			ancestors = ancestors[:len(ancestors)-1]
+			return true
 		}
+		for _, emit := range activeCandidateEmitters {
+			specs = append(specs, emit(c, node, ancestors)...)
+		}
+		ancestors = append(ancestors, node)
 		return true
 	})
 	if err := ctx.Err(); err != nil {

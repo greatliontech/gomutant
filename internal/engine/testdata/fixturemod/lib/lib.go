@@ -17,7 +17,7 @@ type I interface {
 }
 
 // Add exists for mutation testing: TestAdd pins both branches, so every
-// mutant dies.
+// behaviorally distinct mutant dies.
 //
 //gofresh:pure
 func Add(a, b int) int {

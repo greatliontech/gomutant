@@ -184,6 +184,30 @@ func TestEqualityLogical(t *testing.T) {
 	}
 }
 
+//gofresh:pure
+func TestControlOutcomes(t *testing.T) {
+	if !IfCondition(1) || IfCondition(0) {
+		t.Fatal("if condition")
+	}
+	if ForCondition(0) != 1 || ForCondition(2) != 2 {
+		t.Fatal("for condition")
+	}
+	if Forever() != 1 {
+		t.Fatal("conditionless loop")
+	}
+	done := false
+	ConditionlessOutcome(&done)
+	if !done {
+		t.Fatal("conditionless outcome")
+	}
+	if RangeOnce([]int{1, 2}) != 3 {
+		t.Fatal("range")
+	}
+	if BreakValue() != 0 || ContinueValue() != 2 {
+		t.Fatal("loop control")
+	}
+}
+
 // TestVacuous is deliberately assertion-free: a weak always-passing oracle.
 func TestVacuous(t *testing.T) {
 	_ = Add(1, 2)

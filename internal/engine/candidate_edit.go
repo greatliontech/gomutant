@@ -20,6 +20,7 @@ type sourceEdit struct {
 type candidateSpec struct {
 	operator                  string
 	start, end                token.Pos
+	position                  token.Pos
 	family, variant, index    int
 	edits                     []sourceEdit
 	preservesImportReferences bool
@@ -55,7 +56,11 @@ func candidatePositions(pkg *packages.Package, specs []candidateSpec) []string {
 	positions := make([]string, len(specs))
 	identities := map[string]int{}
 	for i, spec := range specs {
-		p := pkg.Fset.Position(spec.start)
+		positionPos := spec.position
+		if !positionPos.IsValid() {
+			positionPos = spec.start
+		}
+		p := pkg.Fset.Position(positionPos)
 		position := fmt.Sprintf("%s:%d:%d", filepath.Base(p.Filename), p.Line, p.Column)
 		identity := position + "|" + spec.operator
 		identities[identity]++

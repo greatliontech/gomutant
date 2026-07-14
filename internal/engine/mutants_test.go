@@ -12,8 +12,8 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
-	if OperatorSet != "go/5" {
-		t.Fatalf("operator set = %q, want go/5", OperatorSet)
+	if OperatorSet != "go/6" {
+		t.Fatalf("operator set = %q, want go/6", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
@@ -27,7 +27,7 @@ func TestMutants(t *testing.T) {
 			t.Fatalf("incomplete mutant: %+v", m)
 		}
 	}
-	for _, want := range []string{"equality: == -> !=", "negate condition", "zero return"} {
+	for _, want := range []string{"equality: == -> !=", "condition: negate", "zero return"} {
 		if !ops[want] {
 			t.Fatalf("operator %q missing: %v", want, ops)
 		}
@@ -46,8 +46,8 @@ func TestMutants(t *testing.T) {
 	}
 	for _, want := range []string{
 		"drop assignment", "+= -> -=", "* -> /", "+ -> -",
-		"increment literal", "continue -> break", "force false",
-		"logical: || -> &&", "logical: && -> ||", "force true", "++ -> --",
+		"increment literal", "loop control: continue -> break", "boolean operand: -> false",
+		"logical: || -> &&", "logical: && -> ||", "boolean operand: -> true", "++ -> --",
 	} {
 		if mixedOps[want] == 0 {
 			t.Fatalf("operator %q missing: %v", want, mixedOps)
@@ -98,8 +98,8 @@ func TestMutants(t *testing.T) {
 	for _, mutant := range loop {
 		loopOps[mutant.Operator]++
 	}
-	if loopOps["negate condition"] != 1 {
-		t.Fatalf("loop condition negations = %d, want 1: %v", loopOps["negate condition"], loopOps)
+	if loopOps["condition: negate"] != 1 {
+		t.Fatalf("loop condition negations = %d, want 1: %v", loopOps["condition: negate"], loopOps)
 	}
 	// Two identical statements delete to the same render: dedup collapses
 	// them to one effective mutant.
@@ -312,7 +312,8 @@ func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
 		mutants = append(mutants, generated...)
 	}
 	removal := map[string]bool{
-		"force false": true, "force true": true, "delete statement": true,
+		"boolean operand: -> false": true, "boolean operand: -> true": true, "delete statement": true,
+		"condition: force false": true, "condition: force true": true,
 		"drop assignment": true, "zero return": true,
 	}
 	seenRemoval := map[string]bool{}
@@ -421,10 +422,10 @@ func TestDiscardedCandidateReservesOccurrenceIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(generation.Candidates) != 2 || generation.Candidates[0].Operator != "force true" || len(generation.Candidates[0].Replacements) != 0 {
+	if len(generation.Candidates) != 2 || generation.Candidates[0].Operator != "boolean operand: -> true" || len(generation.Candidates[0].Replacements) != 0 {
 		t.Fatalf("first candidate = %+v", generation.Candidates)
 	}
-	if second := generation.Candidates[1]; second.Operator != "force true" || !strings.HasSuffix(second.Position, "#2") || len(second.Replacements) != 1 {
+	if second := generation.Candidates[1]; second.Operator != "boolean operand: -> true" || !strings.HasSuffix(second.Position, "#2") || len(second.Replacements) != 1 {
 		t.Fatalf("second candidate = %+v", second)
 	}
 }

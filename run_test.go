@@ -40,8 +40,8 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	add, weak, iface := first[0], first[1], first[2]
-	if add.Cached || add.Mutants == 0 || add.Killed != add.Mutants || len(add.Survivors) != 0 {
-		t.Fatalf("Add = %+v, want all mutants killed fresh", add)
+	if add.Cached || add.Mutants == 0 || add.Killed != add.Mutants-1 || len(add.Survivors) != 1 || add.Survivors[0].Operator != "condition: force false" {
+		t.Fatalf("Add = %+v, want only the equivalent force-false condition to survive fresh", add)
 	}
 	if len(add.Operators) == 0 {
 		t.Fatal("Add finding omitted operator summaries")
@@ -260,10 +260,73 @@ func TestRunAccountsForComparisonFamilies(t *testing.T) {
 			t.Errorf("%s summary = %+v", operator, summary)
 		}
 	}
+	if summary := operators["boolean operand: -> true"]; summary.Generated != 2 || summary.Killed != 2 || summary.Discarded != 0 || summary.Survived != 0 {
+		t.Errorf("boolean operand summary = %+v", summary)
+	}
 	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/4"
+	oldBasis.OperatorSet = "go/5"
 	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/4 finding under go/5 = fresh %v, err %v", fresh, err)
+		t.Fatalf("go/5 finding under go/6 = fresh %v, err %v", fresh, err)
+	}
+}
+
+func TestRunAccountsForControlFamilies(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	oracle := []string{"example.com/fixture/lib.TestControlOutcomes"}
+	targets := []Target{
+		{Symbol: "example.com/fixture/lib.IfCondition", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ForCondition", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ConditionlessOutcome", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.RangeOnce", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.BreakValue", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.ContinueValue", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.LogicalDefined", Oracle: oracle},
+		{Symbol: "example.com/fixture/lib.LogicalGeneric", Oracle: oracle},
+	}
+	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != len(targets) {
+		t.Fatalf("control findings = %d, want %d", len(findings), len(targets))
+	}
+	operators := map[string]OperatorSummary{}
+	for _, finding := range findings {
+		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+			t.Fatalf("control finding = %+v", finding)
+		}
+		for _, summary := range finding.Operators {
+			total := operators[summary.Operator]
+			total.Operator = summary.Operator
+			total.Generated += summary.Generated
+			total.Discarded += summary.Discarded
+			total.Killed += summary.Killed
+			total.Survived += summary.Survived
+			operators[summary.Operator] = total
+		}
+	}
+	for operator, want := range map[string]OperatorSummary{
+		"condition: negate":               {Generated: 4, Killed: 4},
+		"condition: force true":           {Generated: 3, Killed: 2, Survived: 1},
+		"condition: force false":          {Generated: 5, Killed: 5},
+		"range body: prepend break":       {Generated: 3, Killed: 2, Survived: 1},
+		"loop control: break -> continue": {Generated: 1, Killed: 1},
+		"loop control: continue -> break": {Generated: 1, Killed: 1},
+		"boolean operand: -> true":        {Generated: 4, Survived: 4},
+		"boolean operand: -> false":       {Generated: 8, Survived: 8},
+	} {
+		summary := operators[operator]
+		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+		}
+	}
+	oldBasis := findings[0]
+	oldBasis.OperatorSet = "go/5"
+	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+		t.Fatalf("go/5 finding under go/6 = fresh %v, err %v", fresh, err)
 	}
 }
 

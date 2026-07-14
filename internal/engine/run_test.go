@@ -18,8 +18,8 @@ import (
 
 // TestRunMutantOutcomes pins the overlay runner end to end
 // (REQ-exec-oracle-run, REQ-mut-overlay): a pinned-down body kills every
-// mutant, an untested branch yields survivors, every kill is attributed, and
-// the tree is never touched.
+// behaviorally distinct mutant, an untested branch yields survivors, every
+// kill is attributed, and the tree is never touched.
 func TestRunMutantOutcomes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -56,9 +56,9 @@ func TestRunMutantOutcomes(t *testing.T) {
 		return
 	}
 
-	killed, survived, _ := run("example.com/fixture/lib.Add", "^TestAdd$")
-	if survived != 0 || killed == 0 {
-		t.Fatalf("Add: killed=%d survived=%d — the pinned body should kill all", killed, survived)
+	killed, survived, addSurvivors := run("example.com/fixture/lib.Add", "^TestAdd$")
+	if survived != 1 || killed == 0 || len(addSurvivors) != 1 || addSurvivors[0].Operator != "condition: force false" {
+		t.Fatalf("Add: killed=%d survivors=%+v, want only the equivalent force-false condition", killed, addSurvivors)
 	}
 	_, survived, survivors := run("example.com/fixture/lib.Weak", "^TestWeak$")
 	if survived == 0 {

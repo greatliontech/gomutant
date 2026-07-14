@@ -24,7 +24,7 @@ var comparisonVariants = map[token.Token][]comparisonVariant{
 	token.LOR:  {{family: "logical", familyRank: 4, variantRank: 2, replacement: token.LAND}},
 }
 
-func emitComparison(c *catalog, node ast.Node) []candidateSpec {
+func emitComparison(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
 	expression, ok := node.(*ast.BinaryExpr)
 	if !ok {
 		return nil
