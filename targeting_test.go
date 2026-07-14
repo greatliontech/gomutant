@@ -327,12 +327,13 @@ func mustRead(t *testing.T, path, old, new string) []byte {
 }
 
 // TestParseTargets pins the config-file producer (REQ-target-producers):
-// one JSON document onto the same model, a symbol-less entry refused.
+// one strict JSON document onto the same model.
 func TestParseTargets(t *testing.T) {
 	doc := `{"targets": [
 		{"symbol": "example.com/p.F"},
-		{"symbol": "example.com/p.G", "oracle": ["example.com/p.TestG"], "labels": ["REQ-x"]}
-	]}`
+		{"symbol": "example.com/p.G", "oracle": ["example.com/p.TestG"], "labels": ["REQ-x"]},
+		{"symbol": "example.com/p.H", "oracle": [], "oracleExplicit": true}
+	]}` + "  \n\t"
 	targets, err := ParseTargets([]byte(doc))
 	if err != nil {
 		t.Fatal(err)
@@ -340,6 +341,7 @@ func TestParseTargets(t *testing.T) {
 	want := []Target{
 		{Symbol: "example.com/p.F"},
 		{Symbol: "example.com/p.G", Oracle: []string{"example.com/p.TestG"}, Labels: []string{"REQ-x"}},
+		{Symbol: "example.com/p.H", Oracle: []string{}, OracleExplicit: true},
 	}
 	if !reflect.DeepEqual(targets, want) {
 		t.Fatalf("targets = %+v", targets)
@@ -349,6 +351,37 @@ func TestParseTargets(t *testing.T) {
 	}
 	if _, err := ParseTargets([]byte(`not json`)); err == nil {
 		t.Fatal("malformed document accepted")
+	}
+	for name, malformed := range map[string]string{
+		"missing targets":      `{}`,
+		"null targets":         `{"targets":null}`,
+		"unknown top field":    `{"targets":[],"extra":true}`,
+		"wrong-case targets":   `{"Targets":[]}`,
+		"duplicate targets":    `{"targets":[],"targets":[]}`,
+		"null target":          `{"targets":[null]}`,
+		"misspelled oracle":    `{"targets":[{"symbol":"p.F","orcale":["p.TestF"]}]}`,
+		"unknown target field": `{"targets":[{"symbol":"p.F","extra":true}]}`,
+		"wrong-case oracle":    `{"targets":[{"symbol":"p.F","Oracle":[]}]}`,
+		"case-fold duplicate":  `{"targets":[{"symbol":"p.F","oracle":[],"Oracle":["p.TestF"]}]}`,
+		"duplicate symbol":     `{"targets":[{"symbol":"p.F","symbol":"p.G"}]}`,
+		"null symbol":          `{"targets":[{"symbol":null}]}`,
+		"null oracle":          `{"targets":[{"symbol":"p.F","oracle":null}]}`,
+		"null oracle element":  `{"targets":[{"symbol":"p.F","oracle":[null]}]}`,
+		"null labels":          `{"targets":[{"symbol":"p.F","labels":null}]}`,
+		"null labels element":  `{"targets":[{"symbol":"p.F","labels":[null]}]}`,
+		"null oracle explicit": `{"targets":[{"symbol":"p.F","oracleExplicit":null}]}`,
+		"trailing document":    `{"targets":[]} {}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTargets([]byte(malformed)); err == nil {
+				t.Fatalf("malformed target document accepted: %s", malformed)
+			}
+		})
+	}
+	invalidUTF8 := []byte(`{"targets":[{"symbol":"p.F"}]}`)
+	invalidUTF8[len(invalidUTF8)-5] = 0xff
+	if _, err := ParseTargets(invalidUTF8); err == nil {
+		t.Fatal("invalid UTF-8 target document accepted")
 	}
 }
 

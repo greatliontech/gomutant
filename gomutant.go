@@ -8,6 +8,7 @@
 package gomutant
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/greatliontech/glob"
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -294,9 +296,67 @@ type targetsDocument struct {
 // ..., "oracle": [...], "labels": [...]}, ...]}. Every producer reduces to
 // this one model (REQ-target-producers).
 func ParseTargets(data []byte) ([]Target, error) {
-	var doc targetsDocument
-	if err := json.Unmarshal(data, &doc); err != nil {
+	if !utf8.Valid(data) {
+		return nil, fmt.Errorf("gomutant: parse targets document: invalid UTF-8")
+	}
+	topKnown := map[string]bool{"targets": true}
+	fields, err := decodeKnownObject(data, topKnown)
+	if err != nil {
 		return nil, fmt.Errorf("gomutant: parse targets document: %w", err)
+	}
+	if err := rejectUnknownObjectFields(data, topKnown); err != nil {
+		return nil, fmt.Errorf("gomutant: parse targets document: %w", err)
+	}
+	if targets, ok := fields["targets"]; !ok || isJSONNull(targets) {
+		return nil, fmt.Errorf("gomutant: parse targets document: missing field targets")
+	}
+	var raw struct {
+		Targets []json.RawMessage `json:"targets"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		return nil, fmt.Errorf("gomutant: parse targets document: %w", err)
+	}
+	doc := targetsDocument{Targets: make([]Target, len(raw.Targets))}
+	known := map[string]bool{"symbol": true, "oracle": true, "labels": true, "oracleExplicit": true}
+	for i, entry := range raw.Targets {
+		entryFields, err := decodeKnownObject(entry, known)
+		if err != nil {
+			return nil, fmt.Errorf("gomutant: parse target %d: %w", i, err)
+		}
+		if err := rejectUnknownObjectFields(entry, known); err != nil {
+			return nil, fmt.Errorf("gomutant: parse target %d: %w", i, err)
+		}
+		symbol, ok := entryFields["symbol"]
+		if !ok || isJSONNull(symbol) {
+			return nil, fmt.Errorf("gomutant: target %d with no symbol", i)
+		}
+		for _, name := range []string{"oracle", "labels", "oracleExplicit"} {
+			if value, ok := entryFields[name]; ok && isJSONNull(value) {
+				return nil, fmt.Errorf("gomutant: target %d field %s is null", i, name)
+			}
+		}
+		for _, name := range []string{"oracle", "labels"} {
+			value, ok := entryFields[name]
+			if !ok {
+				continue
+			}
+			var elements []json.RawMessage
+			if err := json.Unmarshal(value, &elements); err != nil {
+				return nil, fmt.Errorf("gomutant: parse target %d field %s: %w", i, name, err)
+			}
+			for j, element := range elements {
+				if isJSONNull(element) {
+					return nil, fmt.Errorf("gomutant: target %d field %s element %d is null", i, name, j)
+				}
+			}
+		}
+		entryDec := json.NewDecoder(bytes.NewReader(entry))
+		entryDec.DisallowUnknownFields()
+		if err := entryDec.Decode(&doc.Targets[i]); err != nil {
+			return nil, fmt.Errorf("gomutant: parse target %d: %w", i, err)
+		}
 	}
 	for _, tg := range doc.Targets {
 		if tg.Symbol == "" {
@@ -304,6 +364,31 @@ func ParseTargets(data []byte) ([]Target, error) {
 		}
 	}
 	return doc.Targets, nil
+}
+
+func rejectUnknownObjectFields(data []byte, known map[string]bool) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if _, err := dec.Token(); err != nil {
+		return err
+	}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		name, ok := key.(string)
+		if !ok {
+			return fmt.Errorf("object key is not a string")
+		}
+		if !known[name] {
+			return fmt.Errorf("unknown field %s", name)
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolveOracle returns a target's effective oracle: the explicit test

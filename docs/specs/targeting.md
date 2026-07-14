@@ -34,6 +34,14 @@ requirement identifiers ride as labels — so stipulator owns that wire format
 and gomutant owns the adapter, keeping stipulator ignorant of gomutant while
 the tool stays complete standalone.
 
+The gomutant-owned config-file encoding is one valid UTF-8 JSON object with a required,
+non-null `targets` array. Each array entry is a non-null object with required
+non-null string `symbol` and optional non-null `oracle` string array, `labels`
+string array, and boolean `oracleExplicit`. Field spelling is exact and
+case-sensitive. Unknown or duplicate fields at
+either object level, null structural fields, and trailing JSON are malformed
+and MUST be rejected rather than silently changing the target or oracle.
+
 **REQ-target-oracle** (behavior): A target's oracle MUST be the sole arbiter
 of a kill: a mutant of the target is killed only when a test in that oracle
 fails (or the run times out, or a probe-confirmed package failure occurs per
