@@ -560,6 +560,34 @@ func TestAbsoluteRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 	}
 }
 
+func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "input")
+	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	absolute, err := absoluteNonReusableRuntimeEvidence(context.Background(), state, root, env)
+	if err != nil || !absolute.OK || !absolute.Unverifiable || !strings.Contains(absolute.Reason, "could not be finalized for reuse") {
+		t.Fatalf("repeatedly moved observation = %+v, %v", absolute, err)
+	}
+	paths, err := runtimeinput.Paths(absolute.Manifest, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("runtime paths = %v, want unstable paths discarded", paths)
+	}
+}
+
 func TestProbeBaselineRejectsTestCountDrift(t *testing.T) {
 	tr := fixtureTree(t)
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")

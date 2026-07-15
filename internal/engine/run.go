@@ -437,6 +437,24 @@ func absoluteRuntimeEvidenceContext(ctx context.Context, state runtimeinput.Stat
 	if merged, mergeErr := mergeRuntimeEvidenceContext(ctx, moduleDir, env, current, incomplete); mergeErr == nil {
 		incomplete = merged
 	}
+	return absoluteNonReusableRuntimeEvidence(ctx, incomplete, moduleDir, env)
+}
+
+func absoluteNonReusableRuntimeEvidence(ctx context.Context, incomplete runtimeinput.State, moduleDir string, env []string) (runtimeinput.State, error) {
+	absolute, err := runtimeinput.AbsoluteEnv(incomplete, moduleDir, env)
+	if cancelErr := ctx.Err(); cancelErr != nil {
+		return runtimeinput.State{}, cancelErr
+	}
+	if err == nil {
+		return absolute, nil
+	}
+	// Once movement is proven, reuse is forbidden. If a preserved path moves
+	// again during conversion, retain the reason without requiring that path
+	// to stabilize merely to publish the fresh mutation outcome.
+	incomplete, incompleteErr := runtimeinput.IncompleteEnv(moduleDir, "runtime input observation could not be finalized for reuse: "+err.Error(), env)
+	if incompleteErr != nil {
+		return runtimeinput.State{}, incompleteErr
+	}
 	absolute, err = runtimeinput.AbsoluteEnv(incomplete, moduleDir, env)
 	if cancelErr := ctx.Err(); cancelErr != nil {
 		return runtimeinput.State{}, cancelErr
