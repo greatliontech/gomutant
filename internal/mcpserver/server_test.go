@@ -237,7 +237,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 
 	_, out2, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON:      `{"surfaces":[{"id":"0f78123e19ecd70d242eb3a9d66d61b39aef6a22ce29e5c58a692e66813aabd9","backend":"go","symbol":"example.com/fixture/lib.Weak","requirementIds":["REQ-weak"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"example.com/fixture/lib.TestWeak"}]}],"format":"stipulator.binding-surfaces/v1"}`,
+		TargetsJSON:      `{"surfaces":[{"id":"88f70f1253489fdbb40ad694ce44c2a43e63678b133980bcd7773ea5f73302eb","backend":"go","symbol":"example.com/fixture/lib.Weak","requirementIds":["REQ-current"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"example.com/fixture/lib.TestWeak"}]}],"format":"stipulator.binding-surfaces/v1"}`,
 		OracleTimeoutSec: 120,
 	})
 	if err != nil {
@@ -245,6 +245,12 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 	if !out2.Findings[0].Cached || out2.Findings[0].Attested != 1 {
 		t.Fatalf("rerun = %+v, want cached with the disposition intact", out2.Findings[0])
+	}
+	if !slices.Equal(out2.Findings[0].Labels, []string{
+		"REQ-current",
+		"stipulator:surface:88f70f1253489fdbb40ad694ce44c2a43e63678b133980bcd7773ea5f73302eb",
+	}) {
+		t.Fatalf("cached finding labels = %v, want current surface labels", out2.Findings[0].Labels)
 	}
 	if len(out2.Decisions) != 1 || out2.Decisions[0].Action != "cached" || out2.Summary.Cached != 1 {
 		t.Fatalf("cached run status = decisions %+v, summary %+v", out2.Decisions, out2.Summary)
@@ -406,6 +412,16 @@ func TestToolDiscover(t *testing.T) {
 	if len(explicit.Targets) != 1 || len(explicit.OracleSets) != 1 || !explicit.Targets[0].OracleExplicit ||
 		explicit.OracleSets[explicit.Targets[0].OracleSet].Oracle[0] != "example.com/fixture/lib.TestAdd" || explicit.Targets[0].Labels[0] != "a" {
 		t.Fatalf("explicit discover = %+v", explicit)
+	}
+	_, stipulatorEmpty, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"surfaces":[{"id":"7e1693c30271ffb09fdb6d8a42d84fe07ab2a7c51a7c1d1232caebe220fb6885","backend":"go","symbol":"example.com/fixture/lib.Add","requirementIds":["REQ-empty"],"bindings":[]}],"format":"stipulator.binding-surfaces/v1"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stipulatorEmpty.Targets) != 1 || !stipulatorEmpty.Targets[0].OracleExplicit ||
+		stipulatorEmpty.Targets[0].Skipped != "no oracle" ||
+		len(stipulatorEmpty.OracleSets[stipulatorEmpty.Targets[0].OracleSet].Oracle) != 0 ||
+		stipulatorEmpty.Targets[0].Labels[0] != "REQ-empty" {
+		t.Fatalf("Stipulator explicit-empty discover = %+v", stipulatorEmpty)
 	}
 	encoded, err := json.Marshal(out)
 	if err != nil {
