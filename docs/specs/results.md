@@ -74,7 +74,11 @@ is never partially trusted: any moved pin remeasures the whole target. When
 INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
-serve a weaker request without remeasurement.
+serve a weaker request without remeasurement. Labels are correlation metadata,
+not measurement pins: when every measurement pin still matches, a reused
+finding adopts the current target's labels without remeasurement or shedding
+survivor attestations. Oracle membership remains a measurement pin, so changing
+the executable oracle remeasures as usual.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
 portable version-1 document that gomutant owns — carrying, per mutated
