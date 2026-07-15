@@ -132,7 +132,10 @@ An edit that matches nothing or ambiguously is refused, never guessed.
 The run and discovery tools accept the same package and symbol filters as the
 CLI. Run results include the same ordered cache/measurement decisions,
 per-operator dispositions, aggregate summary, changed-scope residue, and
-findings-document update semantics.
+findings-document update semantics. MCP runs are synchronous tool calls. Agents
+must use the CLI for work that may exceed their harness's MCP request timeout;
+progress delivery does not guarantee that a client extends its wall-clock
+limit.
 
 ## Library
 

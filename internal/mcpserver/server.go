@@ -49,7 +49,7 @@ func (s *Server) MCP() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, nil)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
-		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a document (gomutant's or stipulator's export), changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure. Survivors are findings awaiting disposition, never verdicts.",
+		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a document (gomutant's or stipulator's export), changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure. Survivors are findings awaiting disposition, never verdicts. Use the CLI for work that may exceed the MCP client's request timeout.",
 	}, s.toolRun)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "discover",
