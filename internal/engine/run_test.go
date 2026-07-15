@@ -586,6 +586,11 @@ func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
 	if len(paths) != 0 {
 		t.Fatalf("runtime paths = %v, want unstable paths discarded", paths)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := absoluteNonReusableRuntimeEvidence(ctx, absolute, root, env); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled conversion error = %v, want %v", err, context.Canceled)
+	}
 }
 
 func TestProbeBaselineRejectsTestCountDrift(t *testing.T) {
