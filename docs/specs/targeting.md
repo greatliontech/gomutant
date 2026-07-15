@@ -40,24 +40,13 @@ case-sensitive. Unknown or duplicate fields at
 either object level, null structural fields, and trailing JSON are malformed
 and MUST be rejected rather than silently changing the target or oracle.
 
-**REQ-target-stipulator** (behavior): The Stipulator adapter MUST strictly
-parse `stipulator.binding-surfaces/v1` reports, validate their canonical
-relationship identifiers, and reduce every compatible surface to the ordinary
-target model. A report is one JSON object with exactly string `format` and
-array `surfaces`; each surface has exactly string `id`, `backend`, and `symbol`,
-string array `requirementIds`, and array `bindings`; each binding has exactly
-string `backend` and `symbol` plus role `BINDING_ROLE_TESTS` or
-`BINDING_ROLE_PROVES`. Unknown or duplicate fields, null structural values,
-trailing JSON, invalid UTF-8, a JSON string containing a non-Unicode-scalar
-surrogate, an unknown format, duplicate or noncanonically ordered surfaces,
-requirements, or bindings, and an incorrect identifier are malformed and
-refused rather than repaired. Surface identifiers are exactly 64 lowercase
-hexadecimal characters, requirement identifiers match
-`REQ(-[a-z0-9]+)+`, and implementation and binding backends and symbols are
-non-empty. A surface key is `(backend, symbol)`, so two surfaces with that same
-pair are duplicates even when their identifiers or other fields differ;
-duplicate surface identifiers are likewise refused. A valid empty report maps
-to an empty target set.
+**REQ-target-stipulator** (behavior): The Stipulator adapter MUST use the
+version-matched Stipulator binding-surface Go wire module to parse and validate
+`stipulator.binding-surfaces/v1` reports before reducing compatible surfaces to
+the ordinary target model. Any format, ProtoJSON, required-field, ordering,
+uniqueness, value-domain, or identifier error from the producer-owned module
+refuses the whole document rather than being repaired or partially mapped. A
+valid empty report maps to an empty target set.
 
 A compatible surface and every one of its bindings use backend `go`; an
 incompatible surface refuses the document with its identifier, backend, and
@@ -68,18 +57,6 @@ are the raw requirement identifiers plus
 `stipulator:surface:<surface-id>`; labels form a distinct set sorted
 lexicographically over UTF-8 bytes. The producer document supplies no build
 flags, race mode, operators, budgets, timeouts, or other run-wide policy.
-
-For identifier validation, surfaces are ordered by backend then symbol,
-requirements by identifier, and bindings by role (`tests` before `proves`),
-backend, then symbol, all lexicographically over UTF-8 bytes. Let `str(x)` be
-`ASCII-decimal(len(UTF8(x)))`, one colon, then `UTF8(x)`, and let `set(xs)` be
-`ASCII-decimal(len(xs))`, one colon, then the encoded elements. Decimal values
-have no sign or leading zero except that zero is rendered `0`. The SHA-256
-preimage is
-`str("stipulator-binding-surface-v1")`, implementation backend, implementation
-symbol, the set of requirements, then the set of bindings, where each binding
-uses role token `tests` or `proves` followed by backend and symbol, all strings
-encoded by `str`. The identifier is the lowercase hexadecimal digest.
 
 **REQ-target-oracle** (behavior): A target's oracle MUST be the sole arbiter
 of a kill: a mutant of the target is killed only when a test in that oracle
