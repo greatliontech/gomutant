@@ -7,6 +7,14 @@ hardlinking, or deletion. gomutant therefore records runtime-observation
 disagreement as explicit non-reusable evidence and remeasures it rather than
 claiming automatic freshness.
 
+Observed in a consuming corpus: adding a Rapid property test caused the first
+mutation run to create `internal/temporal/testdata/rapid/<test-name>`. Every
+target whose oracle included that property was committed as `unverifiable` with
+`stat metadata input: <path>`, despite all mutant processes completing. Running
+the same command again after the producer-created metadata existed measured the
+targets normally. The first run therefore loses valid evidence solely because
+the oracle initializes its own reusable test metadata.
+
 Automatic reusable evidence for these runs requires observation-time object
 provenance across the measured process tree. A sound implementation must retain
 external targets reached through symlinks and hardlinks, follow created objects
