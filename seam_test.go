@@ -319,40 +319,6 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 	}
 }
 
-// TestParseStipulatorTargets pins the reference external producer's adapter
-// (REQ-target-producers): witnesses become the oracle, requirement ids ride
-// as labels, unknown versions and symbol-less entries are refused.
-func TestParseStipulatorTargets(t *testing.T) {
-	doc := `{"stipulatorTargets": 1, "targets": [
-		{"symbol": "example.com/p.F", "witnesses": ["example.com/p.TestF"], "requirements": ["REQ-a", "REQ-b"]},
-		{"symbol": "example.com/p.G"}
-	]}`
-	targets, err := ParseStipulatorTargets([]byte(doc))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(targets) != 2 {
-		t.Fatalf("targets = %+v", targets)
-	}
-	if targets[0].Oracle[0] != "example.com/p.TestF" || targets[0].Labels[1] != "REQ-b" {
-		t.Fatalf("mapping wrong: %+v", targets[0])
-	}
-	if len(targets[1].Oracle) != 0 {
-		t.Fatalf("witness-less entry grew an oracle: %+v", targets[1])
-	}
-	// The export is a complete statement: a witness-less entry is an
-	// explicitly empty oracle, never the package-test default.
-	if !targets[0].OracleExplicit || !targets[1].OracleExplicit {
-		t.Fatalf("export oracles not explicit: %+v", targets)
-	}
-	if _, err := ParseStipulatorTargets([]byte(`{"stipulatorTargets": 2, "targets": []}`)); err == nil {
-		t.Fatal("unknown export version accepted")
-	}
-	if _, err := ParseStipulatorTargets([]byte(`{"stipulatorTargets": 1, "targets": [{"witnesses": ["x"]}]}`)); err == nil {
-		t.Fatal("symbol-less entry accepted")
-	}
-}
-
 func TestLoadStoresAbsoluteRoot(t *testing.T) {
 	tr, err := Load(fixtureDir)
 	if err != nil {

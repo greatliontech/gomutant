@@ -175,7 +175,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	ctx := context.Background()
 
 	_, out, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON:      `{"stipulatorTargets":1,"targets":[{"symbol":"example.com/fixture/lib.Weak","witnesses":["example.com/fixture/lib.TestWeak"],"requirements":["REQ-weak"]}]}`,
+		TargetsJSON:      `{"surfaces":[{"id":"0f78123e19ecd70d242eb3a9d66d61b39aef6a22ce29e5c58a692e66813aabd9","backend":"go","symbol":"example.com/fixture/lib.Weak","requirementIds":["REQ-weak"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"example.com/fixture/lib.TestWeak"}]}],"format":"stipulator.binding-surfaces/v1"}`,
 		OracleTimeoutSec: 120,
 	})
 	if err != nil {
@@ -237,7 +237,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 
 	_, out2, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON:      `{"stipulatorTargets":1,"targets":[{"symbol":"example.com/fixture/lib.Weak","witnesses":["example.com/fixture/lib.TestWeak"],"requirements":["REQ-weak"]}]}`,
+		TargetsJSON:      `{"surfaces":[{"id":"0f78123e19ecd70d242eb3a9d66d61b39aef6a22ce29e5c58a692e66813aabd9","backend":"go","symbol":"example.com/fixture/lib.Weak","requirementIds":["REQ-weak"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"example.com/fixture/lib.TestWeak"}]}],"format":"stipulator.binding-surfaces/v1"}`,
 		OracleTimeoutSec: 120,
 	})
 	if err != nil {

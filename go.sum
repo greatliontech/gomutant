@@ -9,6 +9,8 @@ github.com/greatliontech/glob v0.1.0 h1:LwZX7EtMnHypXoZVdvQi/jW34qAtJ3VLdeB5EzTr
 github.com/greatliontech/glob v0.1.0/go.mod h1:2GCLEmzSHTM+1L3ZxH7gr4CEAOwPM1N1SEyk8R25Ke0=
 github.com/greatliontech/gofresh v0.10.0 h1:wOP6evtLB4wtxEqYUBSgz8x7izAB44z+fP34hhAvxHE=
 github.com/greatliontech/gofresh v0.10.0/go.mod h1:YLG+txeAVyPROEOGGI36HvAitgeahUrLbfHv0/XgisQ=
+github.com/greatliontech/stipulator/bindingsurface v0.1.0 h1:MKYkcxxB2t2pmdXqSFbw0KbxR2kpsRI+9WSDHTpv+9k=
+github.com/greatliontech/stipulator/bindingsurface v0.1.0/go.mod h1:UdNdn17fge54gi1sBzO0fBg944kDNeiQ9xU6aKRDAp8=
 github.com/greatliontech/stipulator/stipulate/structural v0.2.0 h1:1BDo5qKiXuoplGiy+m2/5RW95dxo0JI/jiA1jZLuQME=
 github.com/greatliontech/stipulator/stipulate/structural v0.2.0/go.mod h1:EamD9lGjaQ52lCU4ja1oKftZ7PMrDTC1Th9kVxBgSWk=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
@@ -39,4 +41,6 @@ golang.org/x/text v0.38.0 h1:sXmwo9DwP3OK9EZ7PqAdaooSGozfl/3a6/xJcbzPRhE=
 golang.org/x/text v0.38.0/go.mod h1:YXZt3QhHUKYT53r2lLKFIVi6Ao1jdzrTR/KQ09qyxF4=
 golang.org/x/tools v0.47.0 h1:7Kn5x/d1svx/PzryTsqeoZN4TZwqeH5pGWjefhLi/1Q=
 golang.org/x/tools v0.47.0/go.mod h1:dFHnyTvFWY212G+h7ZY4Vsp/K3U4/7W9TyVaAul8uCA=
+google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
+google.golang.org/protobuf v1.36.11/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
