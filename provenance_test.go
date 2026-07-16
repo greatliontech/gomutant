@@ -127,11 +127,11 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	if err := os.WriteFile(input, []byte("runtime"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open input.txt\n"), root, root)
+	state, err := runtimeinput.FromTestLog([]byte("open input.txt\n"), root, root, runtimeinput.WithCompletedProcess("test"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !repository.pathsDirty([]string{goMod, source}, state) {
+	if !repository.pathsDirty([]string{goMod, source}, state.State) {
 		t.Fatal("untracked selected runtime input reported clean")
 	}
 }

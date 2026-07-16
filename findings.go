@@ -21,39 +21,59 @@ import (
 // SubjectEvidence is gomutant's persisted encoding of one Gofresh code-result
 // fingerprint plus the runtime disposition shared by the finding.
 type SubjectEvidence struct {
-	Symbol              string `json:"symbol"`
-	MaximalClosure      string `json:"maximalClosure"`
-	Toolchain           string `json:"toolchain"`
-	BuildConfig         string `json:"buildConfig"`
-	PurityAssertion     string `json:"purityAssertion,omitempty"`
-	RuntimeInputs       string `json:"runtimeInputs"`
-	RuntimeDigest       string `json:"runtimeDigest"`
-	RuntimeUnverifiable bool   `json:"runtimeUnverifiable,omitempty"`
-	RuntimeReason       string `json:"runtimeReason,omitempty"`
+	Symbol                    string `json:"symbol"`
+	MaximalClosure            string `json:"maximalClosure"`
+	Toolchain                 string `json:"toolchain"`
+	BuildConfig               string `json:"buildConfig"`
+	ObservationAssertion      string `json:"observationAssertion"`
+	ObservationStrategy       string `json:"observationStrategy"`
+	ObservationSubjectPackage string `json:"observationSubjectPackage"`
+	ObservationSubjectSymbol  string `json:"observationSubjectSymbol"`
+	ObservationObservable     bool   `json:"observationObservable"`
+	ObservationReason         string `json:"observationReason,omitempty"`
+	ObservationEvidence       string `json:"observationEvidence"`
+	PurityAssertion           string `json:"purityAssertion,omitempty"`
+	RuntimeInputs             string `json:"runtimeInputs"`
+	RuntimeDigest             string `json:"runtimeDigest"`
+	RuntimeUnverifiable       bool   `json:"runtimeUnverifiable,omitempty"`
+	RuntimeReason             string `json:"runtimeReason,omitempty"`
 }
 
 func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtimeinput.State) SubjectEvidence {
 	return SubjectEvidence{
-		Symbol:              symbol,
-		MaximalClosure:      fp.MaximalClosure,
-		Toolchain:           fp.Guards.Toolchain,
-		BuildConfig:         fp.Guards.BuildConfig,
-		PurityAssertion:     fp.PurityAssertion,
-		RuntimeInputs:       fp.RuntimeInputs,
-		RuntimeDigest:       fp.RuntimeDigest,
-		RuntimeUnverifiable: state.Unverifiable,
-		RuntimeReason:       state.Reason,
+		Symbol:                    symbol,
+		MaximalClosure:            fp.MaximalClosure,
+		Toolchain:                 fp.Guards.Toolchain,
+		BuildConfig:               fp.Guards.BuildConfig,
+		ObservationAssertion:      fp.ObservationAssertion,
+		ObservationStrategy:       fp.ObservationProof.Strategy,
+		ObservationSubjectPackage: fp.ObservationProof.Subject.Package,
+		ObservationSubjectSymbol:  fp.ObservationProof.Subject.Symbol,
+		ObservationObservable:     fp.ObservationProof.Observable,
+		ObservationReason:         fp.ObservationProof.Reason,
+		ObservationEvidence:       fp.ObservationProof.Evidence,
+		PurityAssertion:           fp.PurityAssertion,
+		RuntimeInputs:             fp.RuntimeInputs,
+		RuntimeDigest:             fp.RuntimeDigest,
+		RuntimeUnverifiable:       state.Unverifiable,
+		RuntimeReason:             state.Reason,
 	}
 }
 
 func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
 	return gofresh.Fingerprint{
-		MaximalClosure:  e.MaximalClosure,
-		Guards:          guard.Guards{Toolchain: e.Toolchain, BuildConfig: e.BuildConfig},
-		PurityAssertion: e.PurityAssertion,
-		RuntimeInputs:   e.RuntimeInputs,
-		RuntimeDigest:   e.RuntimeDigest,
-		ResultKind:      gofresh.CodeResult,
+		MaximalClosure:       e.MaximalClosure,
+		Guards:               guard.Guards{Toolchain: e.Toolchain, BuildConfig: e.BuildConfig},
+		PurityAssertion:      e.PurityAssertion,
+		ObservationAssertion: e.ObservationAssertion,
+		ObservationProof: gofresh.ObservationProof{
+			Strategy:   e.ObservationStrategy,
+			Subject:    gofresh.Subject{Package: e.ObservationSubjectPackage, Symbol: e.ObservationSubjectSymbol},
+			Observable: e.ObservationObservable, Reason: e.ObservationReason, Evidence: e.ObservationEvidence,
+		},
+		RuntimeInputs: e.RuntimeInputs,
+		RuntimeDigest: e.RuntimeDigest,
+		ResultKind:    gofresh.CodeResult,
 	}
 }
 
@@ -459,10 +479,12 @@ func addNonnegative(a, b int) (int, bool) {
 func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
 	known := map[string]bool{
 		"symbol": true, "maximalClosure": true, "toolchain": true, "buildConfig": true,
+		"observationAssertion": true, "observationStrategy": true, "observationSubjectPackage": true,
+		"observationSubjectSymbol": true, "observationObservable": true, "observationReason": true, "observationEvidence": true,
 		"purityAssertion": true, "runtimeInputs": true, "runtimeDigest": true,
 		"runtimeUnverifiable": true, "runtimeReason": true,
 	}
-	required := []string{"symbol", "maximalClosure", "toolchain", "buildConfig", "runtimeInputs", "runtimeDigest"}
+	required := []string{"symbol", "maximalClosure", "toolchain", "buildConfig", "observationAssertion", "observationStrategy", "observationSubjectPackage", "observationSubjectSymbol", "observationObservable", "observationEvidence", "runtimeInputs", "runtimeDigest"}
 	fields, err := decodeKnownObject(raw, known)
 	if err != nil {
 		return false, err
@@ -484,8 +506,13 @@ func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
 	if evidence.RuntimeUnverifiable != (evidence.RuntimeReason != "") {
 		return false, nil
 	}
+	if evidence.ObservationObservable == (evidence.ObservationReason != "") {
+		return false, nil
+	}
 	return evidence.Symbol != "" && evidence.MaximalClosure != "" && evidence.Toolchain != "" &&
-		evidence.BuildConfig != "" && evidence.RuntimeInputs != "" && evidence.RuntimeDigest != "", nil
+		evidence.BuildConfig != "" && evidence.ObservationAssertion != "" && evidence.ObservationStrategy != "" &&
+		evidence.ObservationSubjectPackage != "" && evidence.ObservationSubjectSymbol != "" && evidence.ObservationEvidence != "" &&
+		evidence.RuntimeInputs != "" && evidence.RuntimeDigest != "", nil
 }
 
 func validateRequiredObject(raw json.RawMessage, known map[string]bool, required []string) (map[string]json.RawMessage, error) {

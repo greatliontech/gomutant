@@ -73,7 +73,10 @@ func TestFindingsAtAndUpdate(t *testing.T) {
 		t.Fatal("absolute findings path rewritten")
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
 	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
@@ -99,7 +102,10 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
 	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
@@ -153,7 +159,10 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
 	finding := gomutant.Finding{Symbol: "example.com/empty.Deleted", Labels: []string{"REQ-Z", "REQ-A"}, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, CandidateCount: 1, Generated: 1, Mutants: 1,

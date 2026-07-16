@@ -51,10 +51,10 @@ type subjectViewSet struct {
 }
 
 func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectViewSet, error) {
-	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext)
+	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false)
 }
 
-func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error)) (*subjectViewSet, error) {
+func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), observed bool) (*subjectViewSet, error) {
 	type resolvedSubject struct {
 		symbol, moduleDir string
 		subject           gofresh.Subject
@@ -111,12 +111,18 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 			return nil, err
 		}
 		module := &moduleSubjectView{view: view, validate: view.ValidateContext}
+		if observed {
+			module.validate = view.ValidateObserved
+		}
 		set.modules = append(set.modules, module)
 		for _, resolved := range group.resolved {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			fp, err := view.Capture(resolved.subject)
+			if observed {
+				fp, err = view.CaptureObserved(ctx, resolved.subject)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -184,7 +190,7 @@ func (s *subjectView) validContextWithCurrent(ctx context.Context, evidence Subj
 	if evidence.PurityAssertion != s.fp.PurityAssertion {
 		return false, nil
 	}
-	verdict, err := s.view.CheckContext(ctx, evidence.fingerprint(), s.subject)
+	verdict, err := s.checkContext(ctx, evidence.fingerprint())
 	if err != nil {
 		return false, err
 	}
@@ -221,7 +227,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 	if evidence.PurityAssertion != s.fp.PurityAssertion {
 		return FindingInspection{State: FindingStale, Reason: "purity assertion changed"}, nil
 	}
-	verdict, err := s.view.CheckContext(ctx, evidence.fingerprint(), s.subject)
+	verdict, err := s.checkContext(ctx, evidence.fingerprint())
 	if err != nil {
 		return FindingInspection{}, err
 	}
@@ -233,6 +239,13 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 	default:
 		return FindingInspection{State: FindingStale, Reason: verdict.Reason}, nil
 	}
+}
+
+func (s *subjectView) checkContext(ctx context.Context, fingerprint gofresh.Fingerprint) (gofresh.Verdict, error) {
+	if fingerprint.ObservationAssertion != "" || fingerprint.ObservationProof != (gofresh.ObservationProof{}) {
+		return s.view.CheckObserved(ctx, fingerprint, s.subject)
+	}
+	return s.view.CheckContext(ctx, fingerprint, s.subject)
 }
 
 // InspectFinding classifies a parsed finding against the current tree without
@@ -424,11 +437,16 @@ func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectVie
 	return evidenceSetMatchesContext(context.Background(), prior, target, oracle, oracleExplicit, operatorSet, timeout)
 }
 
-func attachEvidence(target *subjectView, oracle []*subjectView, state runtimeinput.State) (SubjectEvidence, []SubjectEvidence, error) {
+func attachEvidence(target *subjectView, oracle []*subjectView, observation runtimeinput.Observation) (SubjectEvidence, []SubjectEvidence, error) {
+	state, err := runtimeinput.CompletedState(observation)
+	if err != nil {
+		return SubjectEvidence{}, nil, err
+	}
 	attach := func(subject *subjectView) (SubjectEvidence, error) {
-		fp := subject.fp
-		fp.RuntimeInputs = state.Manifest
-		fp.RuntimeDigest = state.Digest
+		fp, err := subject.view.AttachObservation(subject.subject, subject.fp, observation)
+		if err != nil {
+			return SubjectEvidence{}, err
+		}
 		return evidenceFromFingerprint(subject.symbol, fp, state), nil
 	}
 	targetEvidence, err := attach(target)

@@ -11,9 +11,15 @@ freshness evidence.
 
 **subject evidence** (term): gomutant-owned persisted data for one target or
 oracle subject: its identity, maximal Gofresh source-closure hash, code-result
-toolchain and build-configuration guards, attributable purity assertion, and the
-finding's merged runtime-input manifest, digest, and explicit unverifiable
-disposition, including incomplete-process reasons.
+toolchain and build-configuration guards, attributable observation-completeness
+assertion, complete per-subject observability proof data, attributable purity
+assertion, and the finding's merged runtime-input manifest, digest, and explicit
+unverifiable disposition, including incomplete-process reasons.
+The observation proof is encoded by required `observationAssertion`,
+`observationStrategy`, `observationSubjectPackage`,
+`observationSubjectSymbol`, `observationObservable`, and
+`observationEvidence` fields plus `observationReason` exactly when the proof
+disposition is not observable.
 
 **REQ-result-record** (behavior): A finding record MUST be keyed by the
 mutated symbol and record the available inputs that produced it — target subject evidence,

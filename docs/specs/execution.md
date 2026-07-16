@@ -47,17 +47,30 @@ testlog observation for every mutant and oracle-baseline process it launches and
 finalize completed logs against that process's package working directory. When
 the completed states agree with one coherent current view, their deterministic
 union is attached conservatively to the target and every oracle subject in the
-finding. If runtime identities differ between repeated observations or the
-completed states move before union, gomutant MUST preserve the attributed fresh
-mutation outcomes, retain every observed identity whose manifest remains
-evaluable under the aggregation view, and attach canonical explicit
-unverifiable evidence instead; that finding is reportable and persistable but
-never reusable. A process that
+finding together with caller-selected observation-completeness assertion and
+compatible per-subject observability proof evidence. If runtime identities differ
+between repeated observations or completed states move before union, gomutant MUST
+preserve the attributed fresh mutation outcomes and attach canonical explicit
+unverifiable evidence instead; a completed child whose state remains evaluable may
+retain its identities, but bytes from an incomplete child MUST NOT be promoted to a
+completed observation merely to retain partial identities. That finding is reportable
+and persistable but never reusable. A process that
 times out, panics, exits before normal test-harness completion, or otherwise
 cannot prove its log complete likewise contributes an explicit unverifiable
 observation rather than an empty observation assertion. A stale or unverifiable
 subject remeasures the finding; incomplete or incoherent observation is never
 silently represented as reusable evidence.
+
+Observation-completeness proof is selected only for a fresh measurement whose
+baseline and mutant processes all run under this observation boundary. Cached or
+historical evidence is never upgraded without rerunning the measurement. Reuse and
+inspection explicitly check the persisted proof selection rather than inferring it
+from the presence of a runtime manifest.
+Every producer view that can receive one shared baseline observation is captured
+before that baseline process starts; a completed observation is never attached to
+proof evidence captured after the observed process. A launched candidate process
+contributes its completed or incomplete observation even when compilation rejection
+classifies the candidate as discarded rather than measured.
 
 **REQ-exec-quiescence** (behavior): The caller MUST exclude source and build-input
 mutation from target loading through run completion. gomutant validates captured

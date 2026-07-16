@@ -1,6 +1,34 @@
 package gomutant
 
-import "testing"
+import (
+	"testing"
+
+	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/runtimeinput"
+)
+
+func TestSubjectEvidencePreservesObservationProof(t *testing.T) {
+	for _, observable := range []bool{false, true} {
+		reason := ""
+		if !observable {
+			reason = "unobservable effect"
+		}
+		fingerprint := gofresh.Fingerprint{
+			MaximalClosure: "closure", Guards: guard.Guards{Toolchain: "toolchain", BuildConfig: "build"},
+			ObservationAssertion: "caller assertion",
+			ObservationProof: gofresh.ObservationProof{
+				Strategy: gofresh.ObservationRTA, Subject: gofresh.Subject{Package: "p", Symbol: "F"},
+				Observable: observable, Reason: reason, Evidence: "proof",
+			},
+			PurityAssertion: "source directive", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
+		}
+		evidence := evidenceFromFingerprint("p.F", fingerprint, runtimeinput.State{})
+		if got := evidence.fingerprint(); got != fingerprint {
+			t.Fatalf("observable %v round trip = %+v, want %+v", observable, got, fingerprint)
+		}
+	}
+}
 
 func TestSameAttestationPins(t *testing.T) {
 	target := SubjectEvidence{Symbol: "p.F", MaximalClosure: "f", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
@@ -23,6 +51,7 @@ func TestSameAttestationPins(t *testing.T) {
 		{"generated candidates", func(f *Finding) { f.Generated = 1 }},
 		{"oracle timeout", func(f *Finding) { f.OracleTimeout = "2m0s" }},
 		{"target evidence", func(f *Finding) { f.TargetEvidence.RuntimeDigest = "moved" }},
+		{"observation proof", func(f *Finding) { f.TargetEvidence.ObservationEvidence = "moved" }},
 		{"oracle evidence", func(f *Finding) { f.OracleEvidence[0].RuntimeDigest = "moved" }},
 		{"oracle removed", func(f *Finding) { f.OracleEvidence = nil }},
 		{"oracle duplicated", func(f *Finding) { f.OracleEvidence = []SubjectEvidence{oracle, oracle} }},

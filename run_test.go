@@ -659,8 +659,8 @@ func TestRunAccountsForStatementFamilies(t *testing.T) {
 		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
 			t.Fatalf("statement finding = %+v", finding)
 		}
-		if finding.TargetEvidence.RuntimeUnverifiable {
-			t.Fatalf("compiler discard poisoned runtime evidence: %+v", finding.TargetEvidence)
+		if finding.TargetEvidence.RuntimeUnverifiable && !strings.Contains(finding.TargetEvidence.RuntimeReason, "failed to build") {
+			t.Fatalf("pre-execution statement-family discard added incomplete process evidence without a launched compiler rejection: %+v", finding.TargetEvidence)
 		}
 		for _, summary := range finding.Operators {
 			total := operators[summary.Operator]
@@ -1008,9 +1008,16 @@ func TestRunReportsSharedBaselineOnce(t *testing.T) {
 		{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
 	}
 	var preparation []PreparationEvent
+	var lifecycle []string
 	if _, err := tr.Run(context.Background(), targets, Options{
-		Budget:   1,
-		Progress: func(event PreparationEvent) { preparation = append(preparation, event) },
+		Budget: 1,
+		Progress: func(event PreparationEvent) {
+			preparation = append(preparation, event)
+			if event.Stage == PreparationBaseline {
+				lifecycle = append(lifecycle, "baseline:"+event.Symbol)
+			}
+		},
+		producer: func(symbol string) { lifecycle = append(lifecycle, "capture:"+symbol) },
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1034,6 +1041,10 @@ func TestRunReportsSharedBaselineOnce(t *testing.T) {
 	}
 	if !slices.Equal(preparation, wantStages) {
 		t.Fatalf("batched preparation = %+v, want %+v", preparation, wantStages)
+	}
+	wantLifecycle := []string{"capture:" + targets[0].Symbol, "capture:" + targets[1].Symbol, "baseline:" + targets[0].Symbol}
+	if !slices.Equal(lifecycle, wantLifecycle) {
+		t.Fatalf("shared-baseline lifecycle = %v, want %v", lifecycle, wantLifecycle)
 	}
 }
 
@@ -1108,11 +1119,11 @@ func TestMergeFindingObservationsMakesMovementNonReusable(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env)
+	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env)
+	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1160,6 +1171,30 @@ func TestRunUnionsEveryProcessObservation(t *testing.T) {
 		if !seen[name] {
 			t.Fatalf("runtime paths = %v, missing %s", paths, name)
 		}
+	}
+}
+
+func TestRunCompileDiscardMakesFindingUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	findings, err := tr.Run(context.Background(), []Target{{
+		Symbol: "example.com/fixture/lib.Idx",
+		Oracle: []string{"example.com/fixture/lib.TestAdd"},
+	}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Discarded == 0 {
+		t.Fatalf("compile-discard finding = %+v", findings)
+	}
+	evidence := findings[0].TargetEvidence
+	if !evidence.RuntimeUnverifiable || !strings.Contains(evidence.RuntimeReason, "failed to build") {
+		t.Fatalf("compile-discard runtime evidence = %+v, want explicit build incompleteness", evidence)
+	}
+	if ok, err := tr.Fresh(findings[0], Target{Symbol: findings[0].Symbol, Oracle: []string{"example.com/fixture/lib.TestAdd"}}, 0); err != nil || ok {
+		t.Fatalf("compile-discard finding reusable = %v, %v", ok, err)
 	}
 }
 
@@ -1338,7 +1373,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(`{"version": 99, "findings": []}`)); err == nil {
 		t.Fatal("unknown version accepted")
 	}
-	fs, err := ParseFindings([]byte(`{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[],"futureField":{"nested":true}}]}`))
+	fs, err := ParseFindings([]byte(`{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[],"futureField":{"nested":true}}]}`))
 	if err != nil || len(fs) != 1 || fs[0].Symbol != "p.F" {
 		t.Fatalf("tolerant parse failed: %v %+v", err, fs)
 	}
@@ -1361,7 +1396,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 			}
 		})
 	}
-	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
+	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
 	nonGitFindings, err := ParseFindings([]byte(nonGit))
 	if err != nil || len(nonGitFindings) != 1 {
 		t.Fatalf("non-Git provenance rejected: %v %+v", err, nonGitFindings)
@@ -1369,6 +1404,11 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	for _, field := range []string{`,"candidateCount":0`, `,"generated":0`, `,"discarded":0`} {
 		if _, err := ParseFindings([]byte(strings.Replace(nonGit, field, "", 1))); err == nil {
 			t.Fatalf("finding without required count %s accepted", field)
+		}
+	}
+	for _, field := range []string{`,"observationAssertion":"caller assertion"`, `,"observationEvidence":"proof"`} {
+		if _, err := ParseFindings([]byte(strings.Replace(nonGit, field, "", 1))); err == nil {
+			t.Fatalf("finding without required observation evidence %s accepted", field)
 		}
 	}
 	for name, malformed := range map[string]string{

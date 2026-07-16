@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,6 +15,15 @@ import (
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
+
+func observedSubjectViews(t *testing.T, tree *Tree, symbols []string) *subjectViewSet {
+	t.Helper()
+	views, err := tree.newSubjectViewsWithPackageContext(context.Background(), symbols, tree.eng.PackageContextContext, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return views
+}
 
 func TestSubjectViewsBatchByModule(t *testing.T) {
 	tr := fixtureTree(t)
@@ -212,20 +222,17 @@ func TestRunPreparationDoesNotMemoizeCancellation(t *testing.T) {
 
 func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	tree := fixtureTree(t)
-	views, err := tree.newSubjectViews(context.Background(), []string{
+	views := observedSubjectViews(t, tree, []string{
 		"example.com/fixture/lib.Add",
 		"example.com/fixture/lib.TestAdd",
 		"example.com/fixture/lib.TestWeak",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	target := views.bySymbol["example.com/fixture/lib.Add"]
 	oracle := []*subjectView{
 		views.bySymbol["example.com/fixture/lib.TestAdd"],
 		views.bySymbol["example.com/fixture/lib.TestWeak"],
 	}
-	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv())
+	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("finding"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,19 +247,19 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	calls := 0
 	current := func(context.Context, string, string, []string) (runtimeinput.State, error) {
 		calls++
-		return state, nil
+		return state.State, nil
 	}
 	matches, err := evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), current)
 	if err != nil || !matches || calls != 2 {
 		t.Fatalf("matches = %v, calls = %d, error = %v", matches, calls, err)
 	}
 	movementCalls := 0
-	moved := state
+	moved := state.State
 	moved.Digest = "moved"
 	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), func(context.Context, string, string, []string) (runtimeinput.State, error) {
 		movementCalls++
 		if movementCalls == 1 {
-			return state, nil
+			return state.State, nil
 		}
 		return moved, nil
 	})
@@ -264,13 +271,10 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspaceViews, err := workspace.newSubjectViews(context.Background(), []string{"example.com/ws.Root", "example.com/ws/sub.TestNested"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	workspaceViews := observedSubjectViews(t, workspace, []string{"example.com/ws.Root", "example.com/ws/sub.TestNested"})
 	workspaceTarget := workspaceViews.bySymbol["example.com/ws.Root"]
 	workspaceOracle := []*subjectView{workspaceViews.bySymbol["example.com/ws/sub.TestNested"]}
-	workspaceState, err := runtimeinput.FromTestLogEnv(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv())
+	workspaceState, err := runtimeinput.FromTestLogEnv(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv(), runtimeinput.WithCompletedProcess("workspace"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +289,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	calls = 0
 	current = func(context.Context, string, string, []string) (runtimeinput.State, error) {
 		calls++
-		return workspaceState, nil
+		return workspaceState.State, nil
 	}
 	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), workspacePrior, workspaceTarget, workspaceOracle, true, engine.OperatorSet, time.Minute.String(), current)
 	if err != nil || !matches || calls != 2 {
@@ -295,12 +299,9 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 
 func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 	tree := fixtureTree(t)
-	views, err := tree.newSubjectViews(context.Background(), []string{"example.com/fixture/lib.Add"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	views := observedSubjectViews(t, tree, []string{"example.com/fixture/lib.Add"})
 	target := views.bySymbol["example.com/fixture/lib.Add"]
-	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv())
+	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("cancellation"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,14 +337,24 @@ func TestFresh(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
-	t.Setenv("GOMUTANT_TEST_INPUT", "one")
-	tr := fixtureTree(t)
-	tg := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/observed.TestObservedInput"}}
 	fs, err := tr.Run(context.Background(), []Target{tg}, Options{Budget: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := fs[0]
+	if f.TargetEvidence.ObservationAssertion == "" || f.TargetEvidence.ObservationStrategy != gofresh.ObservationRTA ||
+		f.TargetEvidence.ObservationEvidence == "" || f.OracleEvidence[0].ObservationEvidence == "" {
+		t.Fatalf("measured finding lacks observation proof: %+v", f)
+	}
 	inspection, err := tr.InspectFinding(f)
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("just-measured inspection = %+v, %v", inspection, err)
@@ -368,26 +379,16 @@ func TestFresh(t *testing.T) {
 	if ok, err := tr.FreshFor(f, tg, 1, 2*time.Minute); err != nil || ok {
 		t.Fatalf("finding fresh under a different oracle timeout: %v %v", ok, err)
 	}
-	t.Setenv("GOMUTANT_TEST_INPUT", "two")
-	movedEnvironment := fixtureTree(t)
-	if ok, err := movedEnvironment.Fresh(f, tg, 1); err != nil || ok {
-		t.Fatalf("finding fresh after runtime input changed: %v %v", ok, err)
-	}
-	inspection, err = movedEnvironment.InspectFinding(f)
-	if err != nil || inspection.State != FindingStale {
-		t.Fatalf("moved-input inspection = %+v, %v", inspection, err)
-	}
-	t.Setenv("GOMUTANT_TEST_INPUT", "one")
 	stale := f
 	stale.TargetEvidence.MaximalClosure = "moved"
 	if ok, err := tr.Fresh(stale, tg, 1); err != nil || ok {
 		t.Fatalf("moved closure pin read fresh: %v %v", ok, err)
 	}
-	missingPurity := f
-	missingPurity.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
-	missingPurity.OracleEvidence[0].PurityAssertion = ""
-	if ok, err := tr.Fresh(missingPurity, tg, 1); err != nil || ok {
-		t.Fatalf("missing purity pin read fresh: %v %v", ok, err)
+	missingProof := f
+	missingProof.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
+	missingProof.OracleEvidence[0].ObservationEvidence = ""
+	if ok, err := tr.Fresh(missingProof, tg, 1); err != nil || ok {
+		t.Fatalf("missing observation proof read fresh: %v %v", ok, err)
 	}
 	other := Target{Symbol: "example.com/fixture/lib.Weak"}
 	if _, err := tr.Fresh(f, other, 1); err == nil || !strings.Contains(err.Error(), "checked against") {
@@ -420,23 +421,33 @@ func TestFresh(t *testing.T) {
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "oracle") {
 		t.Fatalf("missing-oracle inspection = %+v, %v", inspection, err)
 	}
+	input := filepath.Join(dir, "observed", "input.txt")
+	if err := os.WriteFile(input, []byte("moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	movedEnvironment, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := movedEnvironment.Fresh(f, tg, 1); err != nil || ok {
+		t.Fatalf("finding fresh after runtime input changed: %v %v", ok, err)
+	}
+	inspection, err = movedEnvironment.InspectFinding(f)
+	if err != nil || inspection.State != FindingStale {
+		t.Fatalf("moved-input inspection = %+v, %v", inspection, err)
+	}
 }
 
 func TestInspectFindingStates(t *testing.T) {
 	tr := fixtureTree(t)
-	target, err := tr.newSubjectView("example.com/fixture/lib.Add")
-	if err != nil {
-		t.Fatal(err)
-	}
-	oracle, err := tr.newSubjectView("example.com/fixture/lib.TestAdd")
-	if err != nil {
-		t.Fatal(err)
-	}
+	initialViews := observedSubjectViews(t, tr, []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"})
+	target := initialViews.bySymbol["example.com/fixture/lib.Add"]
+	oracle := initialViews.bySymbol["example.com/fixture/lib.TestAdd"]
 	moduleDir, packageDir, err := tr.eng.PackageContext("example.com/fixture/lib")
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLogEnv(nil, moduleDir, packageDir, tr.eng.GoEnv())
+	state, err := runtimeinput.FromTestLogEnv(nil, moduleDir, packageDir, tr.eng.GoEnv(), runtimeinput.WithCompletedProcess("inspection"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,14 +460,11 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("current inspection = %+v, %v", inspection, err)
 	}
-	batched, err := tr.newSubjectViews(context.Background(), []string{
+	batched := observedSubjectViews(t, tr, []string{
 		"example.com/fixture/lib.Add",
 		"example.com/fixture/lib.TestAdd",
 		"example.com/fixture/lib.TestWeak",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	multiTarget, multiOracle, err := attachEvidence(batched.bySymbol["example.com/fixture/lib.Add"], []*subjectView{
 		batched.bySymbol["example.com/fixture/lib.TestAdd"],
 		batched.bySymbol["example.com/fixture/lib.TestWeak"],
@@ -572,11 +580,8 @@ func TestSortedSubjectEvidence(t *testing.T) {
 // the manifest.
 func TestIncompleteObservationCannotBeFresh(t *testing.T) {
 	tr := fixtureTree(t)
-	view, err := tr.newSubjectView("example.com/fixture/lib.Add")
-	if err != nil {
-		t.Fatal(err)
-	}
-	state, err := runtimeinput.Incomplete(view.moduleDir, "test process timed out")
+	view := observedSubjectViews(t, tr, []string{"example.com/fixture/lib.Add"}).bySymbol["example.com/fixture/lib.Add"]
+	state, err := runtimeinput.Incomplete(view.moduleDir, "timed-out-test", "test process timed out")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,11 +10,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
+
+var findingObservationSequence atomic.Uint64
 
 // Options bound a run.
 type Options struct {
@@ -41,6 +44,7 @@ type Options struct {
 	Progress       func(PreparationEvent)
 	afterExecution func()
 	aggregate      func()
+	producer       func(string)
 }
 
 // PreparationStage identifies one observable pre-execution operation.
@@ -278,12 +282,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// (skipped, cached) or to a mutant work list.
 	type work struct {
 		target      int
+		oracle      []string
+		reason      string
 		candidates  []engine.Candidate
 		groups      []group
 		oracleSet   map[string]bool
 		targetView  *subjectView
 		oracleViews []*subjectView
-		baselines   []runtimeinput.State
+		producer    *subjectViewSet
+		baselines   []runtimeinput.Observation
 	}
 	// Findings are keyed by symbol (REQ-result-record): two targets naming
 	// one symbol would collide in the document, so the set is refused up
@@ -307,7 +314,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	type baselineKey struct {
 		pkg, run, flags, moduleDir, packageDir string
 	}
-	baselineCache := map[baselineKey]runtimeinput.State{}
+	baselineCache := map[baselineKey]runtimeinput.Observation{}
 	decisions := make([]RunDecision, len(targets))
 	for i, tg := range targets {
 		if err := ctx.Err(); err != nil {
@@ -356,7 +363,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	views := &subjectViewSet{bySymbol: map[string]*subjectView{}}
 	if len(subjectSymbols) != 0 {
 		var err error
-		views, err = t.newSubjectViewsWithPackageContext(ctx, subjectSymbols, preparation.packageContext)
+		views, err = t.newSubjectViewsWithPackageContext(ctx, subjectSymbols, preparation.packageContext, false)
 		if err != nil {
 			return nil, fmt.Errorf("freshness: %w", err)
 		}
@@ -414,6 +421,38 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 
+		targetView.module.producer = true
+		for _, oracleView := range oracleViews {
+			oracleView.module.producer = true
+		}
+		producerViews, err := t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true)
+		if err != nil {
+			return nil, fmt.Errorf("freshness proof: %w", err)
+		}
+		if opts.producer != nil {
+			opts.producer(tg.Symbol)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		targetView = producerViews.bySymbol[tg.Symbol]
+		oracleViews = oracleViews[:0]
+		for _, symbol := range oracle {
+			oracleViews = append(oracleViews, producerViews.bySymbol[symbol])
+		}
+		oracleSet := make(map[string]bool, len(oracle))
+		for _, o := range oracle {
+			oracleSet[o] = true
+		}
+		for _, module := range producerViews.modules {
+			module.producer = true
+		}
+		pending = append(pending, work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews})
+	}
+	for wi := range pending {
+		w := &pending[wi]
+		tg := targets[w.target]
+		f := &findings[w.target]
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -422,23 +461,19 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err != nil {
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
-		decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Candidates: len(generation.Candidates)}
+		w.candidates = generation.Candidates
+		decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason, Candidates: len(generation.Candidates)}
 		f.Budget = opts.Budget
 		f.CandidateCount = generation.CandidateCount
 		f.Generated = len(generation.Candidates)
 		// Per-package oracle scoping (REQ-exec-oracle-run), with the rapid
 		// failfile flag only in front of binaries that register it
 		// (REQ-mut-overlay).
-		runs := pkgRuns(oracle)
-		pkgs := make([]string, 0, len(runs))
-		for _, pr := range runs {
-			pkgs = append(pkgs, pr.pkg)
-		}
+		runs := pkgRuns(w.oracle)
 		rapid, err := preparation.rapidPackages(ctx, oraclePackages)
 		if err != nil {
 			return nil, err
 		}
-		var groups []group
 		for _, pr := range runs {
 			var flags []string
 			if rapid[pr.pkg] {
@@ -448,10 +483,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if err != nil {
 				return nil, err
 			}
-			groups = append(groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
+			w.groups = append(w.groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
 		}
-		baselines := make([]runtimeinput.State, 0, len(groups))
-		for _, group := range groups {
+		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
+		for _, group := range w.groups {
 			key := baselineKey{pkg: group.pkgs[0], run: group.runRegex, flags: strings.Join(group.flags, "\x00"), moduleDir: group.moduleDir, packageDir: group.packageDir}
 			state, ok := baselineCache[key]
 			if !ok {
@@ -475,17 +510,8 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				baselineCache[key] = state
 			}
-			baselines = append(baselines, state)
+			w.baselines = append(w.baselines, state)
 		}
-		oracleSet := make(map[string]bool, len(oracle))
-		for _, o := range oracle {
-			oracleSet[o] = true
-		}
-		targetView.module.producer = true
-		for _, oracleView := range oracleViews {
-			oracleView.module.producer = true
-		}
-		pending = append(pending, work{target: i, candidates: generation.Candidates, groups: groups, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, baselines: baselines})
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -506,10 +532,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// aggregation is deterministic regardless of completion order; the first
 	// error cancels everything in flight.
 	outcomes := make([][]engine.MutantOutcome, len(pending))
-	observations := make([][]runtimeinput.State, len(pending))
+	observations := make([][]runtimeinput.Observation, len(pending))
 	for wi := range pending {
 		outcomes[wi] = make([]engine.MutantOutcome, len(pending[wi].candidates))
-		observations[wi] = make([]runtimeinput.State, len(pending[wi].candidates))
+		observations[wi] = make([]runtimeinput.Observation, len(pending[wi].candidates))
 	}
 	type job struct{ wi, mi int }
 	jobCh := make(chan job)
@@ -535,7 +561,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					continue
 				}
 				outcome := engine.MutantSurvived
-				var processStates []runtimeinput.State
+				var processStates []runtimeinput.Observation
 				for _, g := range w.groups {
 					if poolCtx.Err() != nil {
 						return
@@ -544,9 +570,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						break
 					}
 					out, killer, state, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, runEnv)
-					if out != engine.MutantDiscarded {
-						processStates = append(processStates, state)
-					}
+					processStates = append(processStates, state)
 					if err == nil && out == engine.MutantKilled {
 						err = attributedKill(killer, w.oracleSet)
 					}
@@ -615,7 +639,7 @@ dispatching:
 			opts.aggregate()
 		}
 		f := &findings[w.target]
-		states := append([]runtimeinput.State(nil), w.baselines...)
+		states := append([]runtimeinput.Observation(nil), w.baselines...)
 		for mi, candidate := range w.candidates {
 			if _, runnable := candidate.Mutant(); runnable {
 				states = append(states, observations[wi][mi])
@@ -634,6 +658,9 @@ dispatching:
 		}
 		f.TargetEvidence = targetEvidence
 		f.OracleEvidence = oracleEvidence
+		if err := w.producer.validateProducers(ctx); err != nil {
+			return nil, fmt.Errorf("validate freshness: %w", err)
+		}
 		f.Commit = repository.commit
 		sourceFiles := append([]string(nil), w.targetView.sourceFiles...)
 		for _, oracleView := range w.oracleViews {
@@ -652,7 +679,7 @@ dispatching:
 			return nil, err
 		}
 		sourceFiles = append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum"))
-		f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, state)
+		f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, state.State)
 		if err != nil {
 			return nil, err
 		}
@@ -735,42 +762,36 @@ func reportPreparation(callback func(PreparationEvent), event PreparationEvent) 
 	}
 }
 
-func mergeFindingObservations(root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {
+func mergeFindingObservations(root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
 	return mergeFindingObservationsContext(context.Background(), root, env, states...)
 }
 
-func mergeFindingObservationsContext(ctx context.Context, root string, env []string, states ...runtimeinput.State) (runtimeinput.State, error) {
+func mergeFindingObservationsContext(ctx context.Context, root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
 	if err := ctx.Err(); err != nil {
-		return runtimeinput.State{}, err
+		return runtimeinput.Observation{}, err
 	}
 	state, err := runtimeinput.MergeEnv(root, env, states...)
 	if cancelErr := ctx.Err(); cancelErr != nil {
-		return runtimeinput.State{}, cancelErr
+		return runtimeinput.Observation{}, cancelErr
 	}
 	if err == nil {
 		return state, nil
 	}
-	result, incompleteErr := runtimeinput.IncompleteEnv(root, "runtime input observations could not be merged for reuse: "+err.Error(), env)
+	process := fmt.Sprintf("gomutant-finding-merge-%d", findingObservationSequence.Add(1))
+	result, incompleteErr := runtimeinput.IncompleteEnv(root, process, "runtime input observations could not be merged for reuse: "+err.Error(), env)
 	if incompleteErr != nil {
-		return runtimeinput.State{}, incompleteErr
+		return runtimeinput.Observation{}, incompleteErr
 	}
 	for _, input := range states {
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.State{}, err
+			return runtimeinput.Observation{}, err
 		}
 		if input.Manifest == "" {
 			continue
 		}
-		current, currentErr := runtimeinput.CurrentEnvContext(ctx, input.Manifest, root, env)
-		if currentErr != nil && ctx.Err() != nil {
-			return runtimeinput.State{}, ctx.Err()
-		}
-		if currentErr != nil || !current.OK {
-			continue
-		}
-		merged, mergeErr := runtimeinput.MergeEnv(root, env, result, current)
+		merged, mergeErr := runtimeinput.MergeEnv(root, env, result, input)
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.State{}, err
+			return runtimeinput.Observation{}, err
 		}
 		if mergeErr == nil {
 			result = merged

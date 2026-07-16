@@ -29,7 +29,10 @@ func serverAt(t *testing.T) *Server {
 
 func seededFinding(symbol string) gomutant.Finding {
 	evidence := func(name string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: name, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	}
 	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		CandidateCount: 0, Generated: 0,
@@ -176,6 +179,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 
 	_, out, err := s.toolRun(ctx, nil, runIn{
 		TargetsJSON:      `{"surfaces":[{"id":"0f78123e19ecd70d242eb3a9d66d61b39aef6a22ce29e5c58a692e66813aabd9","backend":"go","symbol":"example.com/fixture/lib.Weak","requirementIds":["REQ-weak"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"example.com/fixture/lib.TestWeak"}]}],"format":"stipulator.binding-surfaces/v1"}`,
+		Budget:           1,
 		OracleTimeoutSec: 120,
 	})
 	if err != nil {
@@ -189,6 +193,9 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 	if finding := out.Findings[0]; finding.CandidateCount < finding.Generated || finding.Generated != finding.Mutants+finding.Discarded || finding.Generated == 0 {
 		t.Fatalf("run candidate accounting = %+v", finding)
+	}
+	if out.Findings[0].Discarded != 0 {
+		t.Fatalf("cache-and-attest fixture generated a discard: %+v", out.Findings[0])
 	}
 	if len(out.Decisions) != 1 || out.Decisions[0].Action != "measure" || out.Decisions[0].Candidates != out.Findings[0].Generated || out.Summary.Measured != 1 || out.Summary.Targets != 1 {
 		t.Fatalf("run status = decisions %+v, summary %+v", out.Decisions, out.Summary)
@@ -238,6 +245,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 
 	_, out2, err := s.toolRun(ctx, nil, runIn{
 		TargetsJSON:      `{"surfaces":[{"id":"88f70f1253489fdbb40ad694ce44c2a43e63678b133980bcd7773ea5f73302eb","backend":"go","symbol":"example.com/fixture/lib.Weak","requirementIds":["REQ-current"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"example.com/fixture/lib.TestWeak"}]}],"format":"stipulator.binding-surfaces/v1"}`,
+		Budget:           1,
 		OracleTimeoutSec: 120,
 	})
 	if err != nil {

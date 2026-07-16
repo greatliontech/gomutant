@@ -120,12 +120,11 @@ func TestMissingProcessLogIsIncomplete(t *testing.T) {
 	}
 }
 
-func TestIncompleteProcessRetainsPartialLog(t *testing.T) {
+func TestIncompleteProcessDoesNotAssertPartialLogComplete(t *testing.T) {
 	moduleDir, err := filepath.Abs("testdata/fixturemod")
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := filepath.Join(moduleDir, "lib", "input-0.txt")
 	logPath := filepath.Join(t.TempDir(), "partial.testlog")
 	log := append([]byte("open input-0.txt\n"), bytes.Repeat([]byte{'x'}, 128<<10)...)
 	if err := os.WriteFile(logPath, log, 0o644); err != nil {
@@ -140,7 +139,7 @@ func TestIncompleteProcessRetainsPartialLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !state.Unverifiable || len(paths) != 1 || paths[0] != input {
+	if !state.Unverifiable || len(paths) != 0 {
 		t.Fatalf("partial observation = %+v, paths %v", state, paths)
 	}
 }
@@ -499,11 +498,11 @@ func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env)
+	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env)
+	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,14 +522,14 @@ func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 	}
 }
 
-func TestAbsoluteRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
+func TestAbsoluteRuntimeEvidenceDropsMovedUnsealedInputs(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "input")
 	if err := os.WriteFile(path, []byte("before"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env)
+	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("absolute"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,12 +544,12 @@ func TestAbsoluteRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(paths, path) {
-		t.Fatalf("runtime paths = %v, missing %s", paths, path)
+	if len(paths) != 0 {
+		t.Fatalf("runtime paths = %v, want moved input omitted from incomplete evidence", paths)
 	}
-	for name, malformed := range map[string]runtimeinput.State{
+	for name, malformed := range map[string]runtimeinput.Observation{
 		"empty":     {},
-		"malformed": {OK: true, Manifest: "malformed", Digest: "digest"},
+		"malformed": {State: runtimeinput.State{OK: true, Manifest: "malformed", Digest: "digest"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if state, err := absoluteRuntimeEvidence(malformed, root, env); err == nil || state.OK {
@@ -567,7 +566,7 @@ func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env)
+	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"))
 	if err != nil {
 		t.Fatal(err)
 	}
