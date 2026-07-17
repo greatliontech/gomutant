@@ -390,6 +390,29 @@ func TestFresh(t *testing.T) {
 	if ok, err := tr.Fresh(missingProof, tg, 1); err != nil || ok {
 		t.Fatalf("missing observation proof read fresh: %v %v", ok, err)
 	}
+	oldProof := f
+	oldProof.TargetEvidence.ObservationStrategy = "gofresh/observation-rta@2"
+	oldProof.TargetEvidence.ObservationEvidence = "b0c9aaba09049e1642fd517a09b00877"
+	oldProof.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
+	oldProof.OracleEvidence[0].ObservationStrategy = "gofresh/observation-rta@2"
+	oldProof.OracleEvidence[0].ObservationEvidence = "46056b8e7fea776a3b95b884b1b1c953"
+	if ok, err := tr.Fresh(oldProof, tg, 1); err != nil || ok {
+		t.Fatalf("superseded observation proof read fresh: %v %v", ok, err)
+	}
+	inspection, err = tr.InspectFinding(oldProof)
+	if err != nil || inspection.State != FindingUnverifiable {
+		t.Fatalf("superseded observation proof inspection = %+v, %v", inspection, err)
+	}
+	var oldProofDecisions []RunDecision
+	remeasured, err := tr.Run(context.Background(), []Target{tg}, Options{Budget: 1, Prior: []Finding{oldProof}, Decision: func(decision RunDecision) {
+		oldProofDecisions = append(oldProofDecisions, decision)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remeasured) != 1 || remeasured[0].Cached || len(oldProofDecisions) != 1 || oldProofDecisions[0].Reason != "stale" {
+		t.Fatalf("superseded observation proof run = %+v, decisions %+v", remeasured, oldProofDecisions)
+	}
 	other := Target{Symbol: "example.com/fixture/lib.Weak"}
 	if _, err := tr.Fresh(f, other, 1); err == nil || !strings.Contains(err.Error(), "checked against") {
 		t.Fatalf("cross-symbol check accepted: %v", err)

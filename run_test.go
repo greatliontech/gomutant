@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -33,13 +34,13 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 
 	var firstDecisions []RunDecision
-	first, err := tr.Run(ctx, targets, Options{Decision: func(decision RunDecision) {
+	first, err := tr.Run(ctx, []Target{targets[0], targets[2]}, Options{Decision: func(decision RunDecision) {
 		firstDecisions = append(firstDecisions, decision)
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	add, weak, iface := first[0], first[1], first[2]
+	add, iface := first[0], first[1]
 	wantAddSurvivors := []Survivor{
 		{Position: "lib.go:24:2", Operator: "statement: delete"},
 		{Position: "lib.go:24:5", Operator: "condition: force false"},
@@ -55,78 +56,91 @@ func TestRunEndToEnd(t *testing.T) {
 	if add.BodyHash == "" || add.TargetEvidence.Toolchain == "" || add.OperatorSet == "" || len(add.OracleEvidence) != 1 {
 		t.Fatalf("Add pins incomplete: %+v", add)
 	}
-	if len(weak.Survivors) == 0 || weak.Labels[0] != "REQ-weak" {
-		t.Fatalf("Weak = %+v, want survivors with labels echoed", weak)
-	}
 	if iface.Skipped != "not a function" {
 		t.Fatalf("interface target = %+v, want skipped as not a function", iface)
 	}
-	if len(firstDecisions) != 3 || firstDecisions[0].Reason != "no-prior" || firstDecisions[1].Reason != "no-prior" || firstDecisions[2].Action != "skipped" || firstDecisions[2].Reason != "not a function" {
+	if len(firstDecisions) != 2 || firstDecisions[0].Reason != "no-prior" || firstDecisions[1].Action != "skipped" || firstDecisions[1].Reason != "not a function" {
 		t.Fatalf("first decisions = %+v", firstDecisions)
 	}
-	if len(weak.Open()) != len(weak.Survivors) {
-		t.Fatalf("open != survivors before any attestation")
-	}
 
-	// Attest one survivor; the export/parse round trip preserves it.
-	s0 := weak.Survivors[0]
-	if err := weak.Attest(s0.Position, s0.Operator, "equivalent by inspection"); err != nil {
-		t.Fatal(err)
-	}
-	if err := weak.Attest("nowhere:1:1", "no-op", "x"); err == nil {
-		t.Fatal("attested a mutant that is not a survivor")
-	}
-	if len(weak.Open()) != len(weak.Survivors)-1 {
-		t.Fatal("attestation did not close the finding")
-	}
-	doc, err := Export([]Finding{add, weak, iface})
+	// The export/parse round trip omits skipped targets.
+	doc, err := Export([]Finding{add, iface})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(doc), "example.com/fixture/lib.I") {
 		t.Fatal("a skipped result was exported")
 	}
-	prior, err := ParseFindings(doc)
+	measured, err := ParseFindings(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(prior) != 2 {
-		t.Fatalf("document findings = %d, want 2", len(prior))
+	if len(measured) != 1 {
+		t.Fatalf("document findings = %d, want 1", len(measured))
+	}
+
+	// Use a discard-free measurement for cache behavior: a launched compiler
+	// rejection deliberately makes the exhaustive findings unverifiable.
+	cacheable, err := tr.Run(ctx, targets[1:2], Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cacheable[0].Discarded != 0 || len(cacheable[0].Survivors) == 0 || !slices.Equal(cacheable[0].Labels, []string{"REQ-weak"}) {
+		t.Fatalf("cache fixture = %+v, want a discard-free survivor", cacheable[0])
+	}
+	if len(cacheable[0].Open()) != len(cacheable[0].Survivors) {
+		t.Fatal("open != survivors before any attestation")
+	}
+	cacheSurvivor := cacheable[0].Survivors[0]
+	if err := cacheable[0].Attest(cacheSurvivor.Position, cacheSurvivor.Operator, "equivalent by inspection"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cacheable[0].Attest("nowhere:1:1", "no-op", "x"); err == nil {
+		t.Fatal("attested a mutant that is not a survivor")
+	}
+	if len(cacheable[0].Open()) != len(cacheable[0].Survivors)-1 {
+		t.Fatal("attestation did not close the finding")
+	}
+	cacheDoc, err := Export(cacheable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(cacheDoc)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// Second run under the same pins: served from cache, attestation intact.
-	second, err := tr.Run(ctx, targets[:2], Options{Prior: prior})
+	second, err := tr.Run(ctx, targets[1:2], Options{Budget: 1, Prior: prior})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !second[0].Cached || !second[1].Cached {
-		t.Fatalf("unchanged pins re-measured: %+v %+v", second[0].Cached, second[1].Cached)
+	if !second[0].Cached {
+		t.Fatal("unchanged pins re-measured")
 	}
-	if len(second[1].Attested) != 1 || second[1].Attested[0].Reason != "equivalent by inspection" {
-		t.Fatalf("attestation lost across cache: %+v", second[1].Attested)
+	if len(second[0].Attested) != 1 || second[0].Attested[0].Reason != "equivalent by inspection" {
+		t.Fatalf("attestation lost across cache: %+v", second[0].Attested)
 	}
 
 	// A moved pin re-measures instead of serving the cache, and sheds the
 	// attestation: every source-evidence version's equivalences are re-judged
 	// (REQ-result-stale, REQ-attest-survivor).
 	tampered := append([]Finding(nil), prior...)
-	for i := range tampered {
-		tampered[i].TargetEvidence.MaximalClosure = "not-the-current-closure"
-	}
+	tampered[0].TargetEvidence.MaximalClosure = "not-the-current-closure"
 	var movedDecisions []RunDecision
-	moved, err := tr.Run(ctx, targets[:2], Options{Prior: tampered, Decision: func(decision RunDecision) {
+	moved, err := tr.Run(ctx, targets[1:2], Options{Budget: 1, Prior: tampered, Decision: func(decision RunDecision) {
 		movedDecisions = append(movedDecisions, decision)
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if moved[0].Cached || moved[1].Cached {
+	if moved[0].Cached {
 		t.Fatal("a moved pin served from cache")
 	}
-	if len(moved[1].Attested) != 0 {
-		t.Fatalf("attestation survived a pin move: %+v", moved[1].Attested)
+	if len(moved[0].Attested) != 0 {
+		t.Fatalf("attestation survived a pin move: %+v", moved[0].Attested)
 	}
-	if len(movedDecisions) != 2 || movedDecisions[0].Reason != "stale" || movedDecisions[1].Reason != "stale" {
+	if len(movedDecisions) != 1 || movedDecisions[0].Reason != "stale" {
 		t.Fatalf("moved decisions = %+v", movedDecisions)
 	}
 
@@ -1064,6 +1078,16 @@ func TestRunRapidClassificationIncludesLaterTargets(t *testing.T) {
 	}
 	if len(findings) != 2 || findings[0].Mutants != 1 || findings[1].Mutants != 1 {
 		t.Fatalf("findings = %+v", findings)
+	}
+	if !findings[1].TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("external-test-only observation proof unexpectedly reusable: %+v", findings[1].TargetEvidence)
+	}
+	if findings[1].TargetEvidence.ObservationStrategy != gofresh.ObservationRTA || findings[1].TargetEvidence.ObservationObservable ||
+		!strings.Contains(findings[1].TargetEvidence.ObservationReason, "observation analysis unavailable") {
+		t.Fatalf("external-test-only observation proof = %+v", findings[1].TargetEvidence)
+	}
+	if _, err := Export(findings); err != nil {
+		t.Fatalf("exporting unavailable observation proof: %v", err)
 	}
 }
 
