@@ -291,6 +291,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		oracleViews []*subjectView
 		producer    *subjectViewSet
 		baselines   []runtimeinput.Observation
+		// serve is the prior record being served with candidate-local
+		// re-execution (REQ-result-stale): only the candidate indexes in
+		// flagged execute, and phase three splices their fresh outcomes and
+		// evidence into the served record.
+		serve   *Finding
+		flagged map[int]bool
 	}
 	// Findings are keyed by symbol (REQ-result-record): two targets naming
 	// one symbol would collide in the document, so the set is refused up
@@ -406,18 +412,28 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				reason = "stale"
 			}
 		}
+		var serve *Finding
 		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
 			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String())
 			if err != nil {
 				return nil, err
 			}
-			if matches {
+			if matches && len(rec.CandidateEvidence) == 0 {
 				cached := *rec
 				cached.Labels = append([]string(nil), tg.Labels...)
 				cached.Cached = true
 				findings[i] = cached
 				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached"}
 				continue
+			}
+			if matches {
+				// The record's only unverifiable runtime evidence is
+				// candidate-local: serve its covered candidates and
+				// re-execute exactly the flagged ones under a passing
+				// current baseline probe (REQ-result-stale). Candidate
+				// regeneration below decides whether the splice can proceed.
+				snapshot := snapshotFindings([]Finding{*rec})[0]
+				serve = &snapshot
 			}
 		}
 
@@ -447,7 +463,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for _, module := range producerViews.modules {
 			module.producer = true
 		}
-		pending = append(pending, work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews})
+		pending = append(pending, work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, serve: serve})
 	}
 	for wi := range pending {
 		w := &pending[wi]
@@ -457,15 +473,41 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		generation, err := t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
+		budget := opts.Budget
+		if w.serve != nil {
+			// Regenerate the served record's exact selected prefix so its
+			// flagged candidates re-identify deterministically.
+			budget = w.serve.Budget
+		}
+		generation, err := t.eng.CandidatesContext(ctx, tg.Symbol, budget)
 		if err != nil {
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
-		w.candidates = generation.Candidates
-		decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason, Candidates: len(generation.Candidates)}
-		f.Budget = opts.Budget
-		f.CandidateCount = generation.CandidateCount
-		f.Generated = len(generation.Candidates)
+		if w.serve != nil {
+			if flagged, ok := flaggedCandidateIndexes(generation, *w.serve); ok {
+				w.candidates = generation.Candidates
+				w.flagged = flagged
+				decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "cached", Candidates: len(flagged)}
+			} else {
+				// Deterministic regeneration cannot re-identify every flagged
+				// candidate and recorded survivor, so the record cannot be
+				// spliced: the whole target re-measures (REQ-result-stale).
+				w.serve, w.flagged = nil, nil
+				if budget != opts.Budget {
+					generation, err = t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
+					if err != nil {
+						return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
+					}
+				}
+			}
+		}
+		if w.serve == nil {
+			w.candidates = generation.Candidates
+			decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason, Candidates: len(generation.Candidates)}
+			f.Budget = opts.Budget
+			f.CandidateCount = generation.CandidateCount
+			f.Generated = len(generation.Candidates)
+		}
 		// Per-package oracle scoping (REQ-exec-oracle-run), with the rapid
 		// failfile flag only in front of binaries that register it
 		// (REQ-mut-overlay).
@@ -533,9 +575,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// error cancels everything in flight.
 	outcomes := make([][]engine.MutantOutcome, len(pending))
 	observations := make([][]runtimeinput.Observation, len(pending))
+	incompletes := make([][]string, len(pending))
 	for wi := range pending {
 		outcomes[wi] = make([]engine.MutantOutcome, len(pending[wi].candidates))
 		observations[wi] = make([]runtimeinput.Observation, len(pending[wi].candidates))
+		incompletes[wi] = make([]string, len(pending[wi].candidates))
 	}
 	type job struct{ wi, mi int }
 	jobCh := make(chan job)
@@ -561,6 +605,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					continue
 				}
 				outcome := engine.MutantSurvived
+				incompleteReason := ""
 				var processStates []runtimeinput.Observation
 				for _, g := range w.groups {
 					if poolCtx.Err() != nil {
@@ -569,8 +614,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if outcome != engine.MutantSurvived {
 						break
 					}
-					out, killer, state, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, runEnv)
+					out, killer, state, incomplete, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, runEnv)
 					processStates = append(processStates, state)
+					if incompleteReason == "" {
+						incompleteReason = incomplete
+					}
 					if err == nil && out == engine.MutantKilled {
 						err = attributedKill(killer, w.oracleSet)
 					}
@@ -595,6 +643,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					return
 				}
 				observations[j.wi][j.mi] = state
+				incompletes[j.wi][j.mi] = incompleteReason
 				outcomes[j.wi][j.mi] = outcome
 			}
 		}()
@@ -603,6 +652,12 @@ dispatching:
 	for wi := range pending {
 		for mi, candidate := range pending[wi].candidates {
 			if _, runnable := candidate.Mutant(); !runnable {
+				continue
+			}
+			if pending[wi].serve != nil && !pending[wi].flagged[mi] {
+				// A served record's covered candidates keep their recorded
+				// outcomes; only the flagged ones re-execute
+				// (REQ-result-stale).
 				continue
 			}
 			select {
@@ -639,19 +694,25 @@ dispatching:
 			opts.aggregate()
 		}
 		f := &findings[w.target]
-		states := append([]runtimeinput.Observation(nil), w.baselines...)
-		for mi, candidate := range w.candidates {
-			if _, runnable := candidate.Mutant(); runnable {
-				states = append(states, observations[wi][mi])
+		if w.serve != nil {
+			spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+			if err != nil {
+				return nil, err
 			}
+			if err := w.producer.validateProducers(ctx); err != nil {
+				return nil, fmt.Errorf("validate freshness: %w", err)
+			}
+			findings[w.target] = spliced
+			continue
 		}
-		state, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, states...)
+		state, candidateEvidence, err := completedObservationUnion(ctx, t.dir, runEnv, w.baselines, w.candidates, outcomes[wi], observations[wi], incompletes[wi], nil)
 		if err != nil {
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		f.CandidateEvidence = candidateEvidence
 		targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, state)
 		if err != nil {
 			return nil, err
@@ -752,6 +813,7 @@ func snapshotFindings(findings []Finding) []Finding {
 		snapshot[i].Operators = slices.Clone(snapshot[i].Operators)
 		snapshot[i].Survivors = slices.Clone(snapshot[i].Survivors)
 		snapshot[i].Attested = slices.Clone(snapshot[i].Attested)
+		snapshot[i].CandidateEvidence = slices.Clone(snapshot[i].CandidateEvidence)
 	}
 	return snapshot
 }
@@ -798,6 +860,271 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 		}
 	}
 	return result, nil
+}
+
+// completedObservationUnion unions the finding-wide baseline observations with
+// the completed candidate observations. A candidate whose process could not
+// prove its runtime evidence sound is excluded from the union and returned as
+// explicit candidate evidence carrying its incomplete-process reason and
+// measured disposition instead (REQ-exec-observation; candidate evidence,
+// REQ-result-record). Baseline observations are always finding-wide: an
+// incomplete baseline observation leaves the union — and so the finding —
+// unverifiable. A non-nil flagged set restricts the walk to those candidate
+// indexes (the re-execution splice); nil walks every runnable candidate.
+func completedObservationUnion(ctx context.Context, root string, env []string, baselines []runtimeinput.Observation, candidates []engine.Candidate, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, flagged map[int]bool) (runtimeinput.Observation, []CandidateEvidence, error) {
+	states := append([]runtimeinput.Observation(nil), baselines...)
+	var evidence []CandidateEvidence
+	for mi, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return runtimeinput.Observation{}, nil, err
+		}
+		if flagged != nil && !flagged[mi] {
+			continue
+		}
+		if _, runnable := candidate.Mutant(); !runnable {
+			continue
+		}
+		if reason := incompletes[mi]; reason != "" {
+			evidence = append(evidence, CandidateEvidence{
+				Position:    candidate.Position,
+				Operator:    candidate.Operator,
+				Reason:      reason,
+				Disposition: outcomeDisposition(outcomes[mi]),
+			})
+			continue
+		}
+		states = append(states, observations[mi])
+	}
+	union, err := mergeFindingObservationsContext(ctx, root, env, states...)
+	if err != nil {
+		return runtimeinput.Observation{}, nil, err
+	}
+	return union, evidence, nil
+}
+
+func outcomeDisposition(outcome engine.MutantOutcome) string {
+	switch outcome {
+	case engine.MutantKilled:
+		return "killed"
+	case engine.MutantSurvived:
+		return "survived"
+	default:
+		return "discarded"
+	}
+}
+
+// flaggedCandidateIndexes deterministically re-identifies a served record's
+// flagged candidates and recorded survivors within the regenerated candidate
+// set. A record whose identities cannot all be re-identified — a moved
+// count, a colliding identity, or a flagged candidate that is no longer
+// runnable — cannot be spliced and reports false, sending the whole target
+// back to re-measurement (REQ-result-stale).
+func flaggedCandidateIndexes(generation engine.Generation, rec Finding) (map[int]bool, bool) {
+	if generation.CandidateCount != rec.CandidateCount || len(generation.Candidates) != rec.Generated {
+		return nil, false
+	}
+	byIdentity := make(map[survivorKey]int, len(generation.Candidates))
+	for i, candidate := range generation.Candidates {
+		key := survivorKey{candidate.Position, candidate.Operator}
+		if _, duplicate := byIdentity[key]; duplicate {
+			return nil, false
+		}
+		byIdentity[key] = i
+	}
+	for _, survivor := range rec.Survivors {
+		if _, ok := byIdentity[survivorKey{survivor.Position, survivor.Operator}]; !ok {
+			return nil, false
+		}
+	}
+	flagged := make(map[int]bool, len(rec.CandidateEvidence))
+	for _, evidence := range rec.CandidateEvidence {
+		i, ok := byIdentity[survivorKey{evidence.Position, evidence.Operator}]
+		if !ok {
+			return nil, false
+		}
+		if _, runnable := generation.Candidates[i].Mutant(); !runnable {
+			return nil, false
+		}
+		flagged[i] = true
+	}
+	return flagged, true
+}
+
+// spliceServedFinding serves a record whose only unverifiable runtime evidence
+// is candidate-local: covered candidates keep their recorded outcomes while
+// each flagged candidate's fresh outcome and evidence replace its recorded
+// ones, conserving per-operator and total candidate accounting
+// (REQ-result-stale, INV-RESULT-CANDIDATE-CONSERVATION). The fresh completed
+// union must agree with the record's completed-process union so the spliced
+// evidence covers the re-executed processes without shedding any served
+// process's pinned runtime inputs; fresh observations that diverge are runtime
+// information the record never pinned, so the spliced outcome is preserved but
+// explicitly non-reusable (REQ-exec-observation).
+func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, error) {
+	union, freshEvidence, err := completedObservationUnion(ctx, t.dir, env, baselines, candidates, outcomes, observations, incompletes, flagged)
+	if err != nil {
+		return Finding{}, err
+	}
+	union, rec, err = t.applySplicedUnion(ctx, env, rec, union)
+	if err != nil {
+		return Finding{}, err
+	}
+	// Attach the fresh union so post-execution producer validation
+	// re-establishes the observation bracket around the re-executed
+	// processes. The persisted subject evidence stays the served record's:
+	// cached proof is never upgraded by a partial re-execution
+	// (REQ-exec-observation).
+	if _, _, err := attachEvidence(targetView, oracleViews, union); err != nil {
+		return Finding{}, err
+	}
+	rec.Labels = append([]string(nil), labels...)
+	rec.Cached = true
+	return spliceFindingCounts(ctx, rec, candidates, flagged, outcomes, freshEvidence)
+}
+
+// applySplicedUnion reconciles the re-executed processes' completed union with
+// the served record's persisted union. An equal union leaves the record's
+// evidence untouched; a diverged one — different manifest, different digest,
+// or an unverifiable fresh state — folds an explicit incomplete observation
+// into the union and stamps every subject's evidence with the resulting
+// unverifiable state, so the spliced finding is preserved but never reusable
+// (REQ-result-stale's fail-closed bound).
+func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding, union runtimeinput.Observation) (runtimeinput.Observation, Finding, error) {
+	state, err := runtimeinput.CompletedState(union)
+	if err != nil {
+		return runtimeinput.Observation{}, Finding{}, err
+	}
+	if !splicedUnionDiverged(state, rec.TargetEvidence) {
+		return union, rec, nil
+	}
+	if !state.Unverifiable {
+		incomplete, incompleteErr := runtimeinput.IncompleteEnv(t.dir, fmt.Sprintf("gomutant-splice-%d", findingObservationSequence.Add(1)), "runtime input observations diverged from the served record's completed-process union", env)
+		if incompleteErr != nil {
+			return runtimeinput.Observation{}, Finding{}, incompleteErr
+		}
+		if union, err = mergeFindingObservationsContext(ctx, t.dir, env, union, incomplete); err != nil {
+			return runtimeinput.Observation{}, Finding{}, err
+		}
+		if state, err = runtimeinput.CompletedState(union); err != nil {
+			return runtimeinput.Observation{}, Finding{}, err
+		}
+	}
+	rec.TargetEvidence = withRuntimeState(rec.TargetEvidence, state)
+	for i := range rec.OracleEvidence {
+		rec.OracleEvidence[i] = withRuntimeState(rec.OracleEvidence[i], state)
+	}
+	return union, rec, nil
+}
+
+// splicedUnionDiverged reports whether the re-executed processes' completed
+// union no longer equals the served record's persisted union. A diverged
+// union makes the spliced finding explicitly non-reusable (REQ-result-stale):
+// keeping it reusable would serve kills whose processes read inputs the
+// record never pinned — the forbidden flattering direction.
+func splicedUnionDiverged(state runtimeinput.State, prior SubjectEvidence) bool {
+	return state.Unverifiable || state.Manifest != prior.RuntimeInputs || state.Digest != prior.RuntimeDigest
+}
+
+// spliceFindingCounts replaces each flagged candidate's recorded disposition
+// with its fresh outcome — per operator and in the finding totals — while
+// every covered candidate keeps its recorded one
+// (INV-RESULT-CANDIDATE-CONSERVATION). Survivor identities are rebuilt in
+// candidate order, an attestation rides only a survivor that survives again
+// at the same position and operator (REQ-attest-survivor), and the fresh
+// candidate evidence replaces the served record's.
+func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, flagged map[int]bool, outcomes []engine.MutantOutcome, freshEvidence []CandidateEvidence) (Finding, error) {
+	operators := append([]OperatorSummary(nil), rec.Operators...)
+	rec.Operators = operators
+	byOperator := make(map[string]*OperatorSummary, len(operators))
+	for i := range operators {
+		byOperator[operators[i].Operator] = &operators[i]
+	}
+	priorSurvivors := make(map[survivorKey]bool, len(rec.Survivors))
+	for _, survivor := range rec.Survivors {
+		priorSurvivors[survivorKey{survivor.Position, survivor.Operator}] = true
+	}
+	priorEvidence := make(map[survivorKey]CandidateEvidence, len(rec.CandidateEvidence))
+	for _, evidence := range rec.CandidateEvidence {
+		priorEvidence[survivorKey{evidence.Position, evidence.Operator}] = evidence
+	}
+	freshByKey := make(map[survivorKey]CandidateEvidence, len(freshEvidence))
+	for _, evidence := range freshEvidence {
+		freshByKey[survivorKey{evidence.Position, evidence.Operator}] = evidence
+	}
+	var survivors []Survivor
+	var candidateEvidence []CandidateEvidence
+	for mi, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return Finding{}, err
+		}
+		key := survivorKey{candidate.Position, candidate.Operator}
+		if !flagged[mi] {
+			if priorSurvivors[key] {
+				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator})
+			}
+			continue
+		}
+		summary := byOperator[candidate.Operator]
+		if summary == nil {
+			return Finding{}, fmt.Errorf("gomutant: spliced candidate %s %s has no operator summary", candidate.Position, candidate.Operator)
+		}
+		switch priorEvidence[key].Disposition {
+		case "killed":
+			summary.Killed--
+		case "survived":
+			summary.Survived--
+		case "discarded":
+			summary.Discarded--
+		}
+		switch outcomeDisposition(outcomes[mi]) {
+		case "killed":
+			summary.Killed++
+		case "survived":
+			summary.Survived++
+			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator})
+		case "discarded":
+			summary.Discarded++
+		}
+		if entry, ok := freshByKey[key]; ok {
+			candidateEvidence = append(candidateEvidence, entry)
+		}
+	}
+	killed, discarded, survived := 0, 0, 0
+	for _, summary := range operators {
+		if summary.Killed < 0 || summary.Discarded < 0 || summary.Survived < 0 {
+			return Finding{}, fmt.Errorf("gomutant: spliced operator %s counts do not reconcile", summary.Operator)
+		}
+		killed += summary.Killed
+		discarded += summary.Discarded
+		survived += summary.Survived
+	}
+	rec.Killed = killed
+	rec.Discarded = discarded
+	rec.Mutants = killed + survived
+	rec.Survivors = survivors
+	rec.CandidateEvidence = candidateEvidence
+	// A disposition rides only a survivor that survives again at the same
+	// position and operator (REQ-attest-survivor).
+	current := make(map[survivorKey]bool, len(survivors))
+	for _, survivor := range survivors {
+		current[survivorKey{survivor.Position, survivor.Operator}] = true
+	}
+	var attested []Attestation
+	for _, attestation := range rec.Attested {
+		if current[survivorKey{attestation.Position, attestation.Operator}] {
+			attested = append(attested, attestation)
+		}
+	}
+	rec.Attested = attested
+	return rec, nil
+}
+
+func withRuntimeState(evidence SubjectEvidence, state runtimeinput.State) SubjectEvidence {
+	evidence.RuntimeInputs = state.Manifest
+	evidence.RuntimeDigest = state.Digest
+	evidence.RuntimeUnverifiable = state.Unverifiable
+	evidence.RuntimeReason = state.Reason
+	return evidence
 }
 
 func summarizeOperators(candidates []engine.Candidate, outcomes []engine.MutantOutcome) []OperatorSummary {

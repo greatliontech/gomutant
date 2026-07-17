@@ -80,7 +80,8 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 
 	// Use a discard-free measurement for cache behavior: a launched compiler
-	// rejection deliberately makes the exhaustive findings unverifiable.
+	// rejection would carry candidate evidence, which serves through the
+	// re-execution splice rather than the plain cached path pinned here.
 	cacheable, err := tr.Run(ctx, targets[1:2], Options{Budget: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -1091,6 +1092,14 @@ func TestRunRapidClassificationIncludesLaterTargets(t *testing.T) {
 	}
 }
 
+// TestRunRemeasuresGeneratedFixtureEvidence pins the finding-wide arm of
+// REQ-exec-observation against the candidate-local carve-out: the
+// generated-fixture oracle's completed observations are content-unverifiable
+// (their manifests cover generated per-run paths that cannot be re-proven),
+// and a COMPLETED observation stays in the finding-wide union — candidate
+// evidence flags only a process that could not prove its evidence sound — so
+// the subject evidence is explicitly unverifiable, carries no candidate
+// flags, and the record remeasures rather than serves.
 func TestRunRemeasuresGeneratedFixtureEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -1102,7 +1111,10 @@ func TestRunRemeasuresGeneratedFixtureEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(first) != 1 || !first[0].TargetEvidence.RuntimeUnverifiable || first[0].TargetEvidence.RuntimeReason == "" {
-		t.Fatalf("generated-fixture finding = %+v", first)
+		t.Fatalf("generated-fixture finding = %+v, want finding-wide unverifiable completed evidence", first)
+	}
+	if len(first[0].CandidateEvidence) != 0 {
+		t.Fatalf("generated-fixture candidate evidence = %+v, want none: the processes proved their logs complete", first[0].CandidateEvidence)
 	}
 	data, err := Export(first)
 	if err != nil {
@@ -1198,7 +1210,13 @@ func TestRunUnionsEveryProcessObservation(t *testing.T) {
 	}
 }
 
-func TestRunCompileDiscardMakesFindingUnverifiable(t *testing.T) {
+// TestRunCompileDiscardIsCandidateLocalEvidence pins the candidate-evidence
+// carve-out (REQ-result-record, REQ-result-stale): a launched compiler
+// rejection is an incomplete process that measured exactly one candidate, so
+// its unverifiability attaches to that candidate — never to the finding's
+// subject evidence — and the record still refuses coverage without the
+// flagged re-execution.
+func TestRunCompileDiscardIsCandidateLocalEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
@@ -1214,11 +1232,29 @@ func TestRunCompileDiscardMakesFindingUnverifiable(t *testing.T) {
 		t.Fatalf("compile-discard finding = %+v", findings)
 	}
 	evidence := findings[0].TargetEvidence
-	if !evidence.RuntimeUnverifiable || !strings.Contains(evidence.RuntimeReason, "failed to build") {
-		t.Fatalf("compile-discard runtime evidence = %+v, want explicit build incompleteness", evidence)
+	if evidence.RuntimeUnverifiable || evidence.RuntimeReason != "" {
+		t.Fatalf("compile-discard runtime evidence = %+v, want the completed-process union verifiable", evidence)
 	}
+	flagged := findings[0].CandidateEvidence
+	if len(flagged) == 0 {
+		t.Fatalf("compile-discard finding carries no candidate evidence: %+v", findings[0])
+	}
+	discardEvidence := 0
+	for _, candidate := range flagged {
+		if strings.Contains(candidate.Reason, "failed to build") && candidate.Disposition == "discarded" {
+			discardEvidence++
+		}
+	}
+	if discardEvidence == 0 {
+		t.Fatalf("candidate evidence = %+v, want an explicit build-incomplete discard", flagged)
+	}
+	// A record carrying candidate evidence is not coverable without the
+	// flagged re-execution, so Fresh reports false while the pins hold.
 	if ok, err := tr.Fresh(findings[0], Target{Symbol: findings[0].Symbol, Oracle: []string{"example.com/fixture/lib.TestAdd"}}, 0); err != nil || ok {
-		t.Fatalf("compile-discard finding reusable = %v, %v", ok, err)
+		t.Fatalf("compile-discard finding coverable without execution = %v, %v", ok, err)
+	}
+	if _, err := Export(findings); err != nil {
+		t.Fatalf("exporting candidate evidence: %v", err)
 	}
 }
 
@@ -1397,22 +1433,22 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(`{"version": 99, "findings": []}`)); err == nil {
 		t.Fatal("unknown version accepted")
 	}
-	fs, err := ParseFindings([]byte(`{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[],"futureField":{"nested":true}}]}`))
+	fs, err := ParseFindings([]byte(`{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[],"futureField":{"nested":true}}]}`))
 	if err != nil || len(fs) != 1 || fs[0].Symbol != "p.F" {
 		t.Fatalf("tolerant parse failed: %v %+v", err, fs)
 	}
 	for name, doc := range map[string]string{
-		"null budget":                    `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":null,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
-		"null dirty":                     `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","dirty":null,"mutants":1,"killed":1}]}`,
-		"duplicate budget":               `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"budget":0,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
-		"duplicate version":              `{"version":1,"version":99,"findings":[]}`,
-		"missing survivors":              `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0}]}`,
-		"empty attestation reason":       `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":""}]}]}`,
-		"duplicate nested evidence":      `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{"symbol":"p.F","symbol":"p.G"},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":0,"killed":0}]}`,
-		"inflated budget":                `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":2,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
-		"colliding attestation identity": `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"a|b.go:1:1","operator":"zero return"}],"attested":[{"position":"a","operator":"b.go:1:1|zero return","reason":"not the survivor"}]}]}`,
-		"duplicate symbols":              `{"version":1,"findings":[{"symbol":"p.F","mutants":0,"killed":0},{"symbol":"p.F","mutants":0,"killed":0}]}`,
-		"duplicate oracle symbols":       `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{},"oracleEvidence":[{"symbol":"p.TestF"},{"symbol":"p.TestF"}],"oracleTimeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`,
+		"null budget":                    `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":null,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
+		"null dirty":                     `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","dirty":null,"mutants":1,"killed":1}]}`,
+		"duplicate budget":               `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"budget":0,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
+		"duplicate version":              `{"version":2,"version":99,"findings":[]}`,
+		"missing survivors":              `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0}]}`,
+		"empty attestation reason":       `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":""}]}]}`,
+		"duplicate nested evidence":      `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{"symbol":"p.F","symbol":"p.G"},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":0,"killed":0}]}`,
+		"inflated budget":                `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":2,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
+		"colliding attestation identity": `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"a|b.go:1:1","operator":"zero return"}],"attested":[{"position":"a","operator":"b.go:1:1|zero return","reason":"not the survivor"}]}]}`,
+		"duplicate symbols":              `{"version":2,"findings":[{"symbol":"p.F","mutants":0,"killed":0},{"symbol":"p.F","mutants":0,"killed":0}]}`,
+		"duplicate oracle symbols":       `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{},"oracleEvidence":[{"symbol":"p.TestF"},{"symbol":"p.TestF"}],"oracleTimeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ParseFindings([]byte(doc)); err == nil {
@@ -1420,7 +1456,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 			}
 		})
 	}
-	nonGit := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
+	nonGit := `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
 	nonGitFindings, err := ParseFindings([]byte(nonGit))
 	if err != nil || len(nonGitFindings) != 1 {
 		t.Fatalf("non-Git provenance rejected: %v %+v", err, nonGitFindings)
@@ -1523,7 +1559,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(wrongTarget)); err == nil {
 		t.Fatal("mismatched target evidence accepted")
 	}
-	emptyOracle := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
+	emptyOracle := `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
 	if _, err := ParseFindings([]byte(emptyOracle)); err == nil {
 		t.Fatal("empty oracle evidence accepted")
 	}
@@ -1535,11 +1571,11 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(committedWithoutDirty)); err == nil {
 		t.Fatal("committed finding without explicit dirty provenance accepted")
 	}
-	legacy := `{"version":1,"findings":[{"symbol":"p.F","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"legacy"}]}]}`
+	legacy := `{"version":2,"findings":[{"symbol":"p.F","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"legacy"}]}]}`
 	if _, err := ParseFindings([]byte(legacy)); err == nil {
 		t.Fatal("legacy finding accepted")
 	}
-	emptyPins := `{"version":1,"findings":[{"symbol":"p.F","bodyHash":"","operatorSet":"","budget":1,"targetEvidence":{"symbol":"","maximalClosure":"","toolchain":"","buildConfig":"","runtimeInputs":"","runtimeDigest":""},"oracleEvidence":[],"oracleTimeout":"","dirty":true,"mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"unsupported"}]}]}`
+	emptyPins := `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"","operatorSet":"","budget":1,"targetEvidence":{"symbol":"","maximalClosure":"","toolchain":"","buildConfig":"","runtimeInputs":"","runtimeDigest":""},"oracleEvidence":[],"oracleTimeout":"","dirty":true,"mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"unsupported"}]}]}`
 	if _, err := ParseFindings([]byte(emptyPins)); err == nil {
 		t.Fatal("empty required pins accepted")
 	}
@@ -1552,5 +1588,393 @@ func TestSummarizeOperators(t *testing.T) {
 	if len(got) != 2 || got[0] != (OperatorSummary{Operator: "swap", Generated: 2, Killed: 1, Survived: 1}) ||
 		got[1] != (OperatorSummary{Operator: "zero return", Generated: 2, Discarded: 1, Killed: 1}) {
 		t.Fatalf("operator summaries = %+v", got)
+	}
+}
+
+// TestRunPanickedMutantIsCandidateLocalAndServes pins the candidate-evidence
+// serve path end to end (REQ-exec-observation, REQ-result-stale): one
+// mutant's test process panics before observation finalization, its
+// incompleteness attaches to that candidate alone while the siblings'
+// completed union stays verifiable, and a second run serves the record while
+// re-executing exactly the flagged candidates under a fresh passing baseline
+// probe — counted through the run-decision event.
+func TestRunPanickedMutantIsCandidateLocalAndServes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	target := Target{Symbol: "example.com/fixture/candlocal.Value", Oracle: []string{"example.com/fixture/candlocal.TestValue"}}
+	first, err := tr.Run(context.Background(), []Target{target}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := first[0]
+	if f.TargetEvidence.RuntimeUnverifiable || len(f.OracleEvidence) != 1 || f.OracleEvidence[0].RuntimeUnverifiable {
+		t.Fatalf("sibling evidence = %+v, want the completed-process union verifiable", f.TargetEvidence)
+	}
+	panicked := 0
+	for _, candidate := range f.CandidateEvidence {
+		if candidate.Operator == "return: zero" && strings.Contains(candidate.Reason, "panicked before observation finalization") && candidate.Disposition == "killed" {
+			panicked++
+		}
+	}
+	if panicked != 1 {
+		t.Fatalf("candidate evidence = %+v, want the panicking zero-return kill flagged once", f.CandidateEvidence)
+	}
+	if f.Generated != f.Mutants+f.Discarded || f.Mutants != f.Killed+len(f.Survivors) || f.Generated != f.CandidateCount {
+		t.Fatalf("first-run counts do not reconcile: %+v", f)
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Every pin matches, yet the record covers the target only through the
+	// flagged re-execution, so it is not fresh without measurement
+	// (REQ-result-stale).
+	if ok, err := tr.Fresh(prior[0], target, 0); err != nil || ok {
+		t.Fatalf("candidate-local record coverable without execution = %v, %v", ok, err)
+	}
+
+	var decisions []RunDecision
+	var preparation []PreparationEvent
+	second, err := tr.Run(context.Background(), []Target{target}, Options{
+		Prior:    prior,
+		Decision: func(decision RunDecision) { decisions = append(decisions, decision) },
+		Progress: func(event PreparationEvent) { preparation = append(preparation, event) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RunDecision{Symbol: target.Symbol, Action: "cached", Candidates: len(f.CandidateEvidence)}
+	if len(decisions) != 1 || decisions[0] != want {
+		t.Fatalf("serve decision = %+v, want %+v (exactly the flagged candidates re-executed)", decisions, want)
+	}
+	probed := false
+	for _, event := range preparation {
+		if event.Stage == PreparationBaseline {
+			probed = true
+		}
+	}
+	if !probed {
+		t.Fatal("serve path launched no current baseline probe")
+	}
+	s := second[0]
+	if !s.Cached {
+		t.Fatal("candidate-local record was not served")
+	}
+	if s.Mutants != f.Mutants || s.Killed != f.Killed || s.Discarded != f.Discarded || s.Generated != f.Generated || s.CandidateCount != f.CandidateCount {
+		t.Fatalf("spliced counts = %+v, want conserved against %+v", s, f)
+	}
+	if s.TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("spliced evidence = %+v, want the served union intact", s.TargetEvidence)
+	}
+	if len(s.CandidateEvidence) != len(f.CandidateEvidence) {
+		t.Fatalf("re-executed candidate evidence = %+v, want the deterministic incompleteness re-flagged", s.CandidateEvidence)
+	}
+	if _, err := Export(second); err != nil {
+		t.Fatalf("exporting spliced finding: %v", err)
+	}
+}
+
+// TestCompletedObservationUnionIsCandidateGranular pins the union rule
+// (REQ-exec-observation): a candidate whose process cannot prove its log
+// complete is excluded from the completed-process union and returned as that
+// candidate's explicit evidence, while an incomplete BASELINE observation is
+// always finding-wide — the union itself becomes unverifiable and no
+// candidate is flagged for it.
+func TestCompletedObservationUnionIsCandidateGranular(t *testing.T) {
+	root := t.TempDir()
+	env := os.Environ()
+	ctx := context.Background()
+	completedBaseline, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedCandidate, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("candidate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	incompleteCandidate, err := runtimeinput.IncompleteEnv(root, "incomplete-candidate", "mutant test process panicked before observation finalization", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
+	candidates := []engine.Candidate{
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable},
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:2:2", Replacements: runnable},
+		{Symbol: "p.F", Operator: "op-c", Position: "f.go:3:3"}, // pre-execution discard: never launched, never flagged
+	}
+	outcomes := []engine.MutantOutcome{engine.MutantSurvived, engine.MutantKilled, engine.MutantDiscarded}
+	observations := []runtimeinput.Observation{completedCandidate, incompleteCandidate, {}}
+	incompletes := []string{"", "mutant test process panicked before observation finalization", ""}
+	union, evidence, err := completedObservationUnion(ctx, root, env, []runtimeinput.Observation{completedBaseline}, candidates, outcomes, observations, incompletes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !union.OK || union.Unverifiable {
+		t.Fatalf("completed-only union = %+v, want verifiable evidence with the incomplete process excluded", union)
+	}
+	want := CandidateEvidence{Position: "f.go:2:2", Operator: "op-b", Reason: "mutant test process panicked before observation finalization", Disposition: "killed"}
+	if len(evidence) != 1 || evidence[0] != want {
+		t.Fatalf("candidate evidence = %+v, want %+v", evidence, want)
+	}
+
+	incompleteBaseline, err := runtimeinput.IncompleteEnv(root, "incomplete-baseline", "baseline test process produced no runtime-input log", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	union, evidence, err = completedObservationUnion(ctx, root, env, []runtimeinput.Observation{incompleteBaseline}, candidates[:1], outcomes[:1], observations[:1], incompletes[:1], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !union.OK || !union.Unverifiable || !strings.Contains(union.Reason, "produced no runtime-input log") || len(evidence) != 0 {
+		t.Fatalf("incomplete-baseline union = %+v, evidence %+v, want finding-wide unverifiability with no candidate flagged", union, evidence)
+	}
+}
+
+// TestParseFindingsCandidateEvidence pins the persisted candidate-evidence
+// encoding (REQ-result-record, REQ-result-export): a well-formed flagged
+// candidate round-trips, while malformed identity, disposition,
+// survivor-contradicting, or count-exceeding evidence is refused.
+func TestParseFindingsCandidateEvidence(t *testing.T) {
+	valid := `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/12","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":2,"generated":2,"mutants":2,"killed":1,"discarded":0,"operators":[{"operator":"op","generated":2,"discarded":0,"killed":1,"survived":1}],"survivors":[{"position":"f.go:2:2","operator":"op"}],"candidateEvidence":[{"position":"f.go:1:1","operator":"op","reason":"mutant test process panicked before observation finalization","disposition":"killed"}]}]}`
+	findings, err := ParseFindings([]byte(valid))
+	if err != nil || len(findings) != 1 || len(findings[0].CandidateEvidence) != 1 ||
+		findings[0].CandidateEvidence[0].Disposition != "killed" {
+		t.Fatalf("valid candidate evidence refused: %v %+v", err, findings)
+	}
+	entry := `{"position":"f.go:1:1","operator":"op","reason":"mutant test process panicked before observation finalization","disposition":"killed"}`
+	for name, doc := range map[string]string{
+		"invalid disposition": strings.Replace(valid, `"disposition":"killed"`, `"disposition":"vanished"`, 1),
+		"missing reason":      strings.Replace(valid, `"reason":"mutant test process panicked before observation finalization",`, "", 1),
+		"empty reason":        strings.Replace(valid, `"reason":"mutant test process panicked before observation finalization"`, `"reason":""`, 1),
+		"duplicate identity":  strings.Replace(valid, entry, entry+","+entry, 1),
+		"survivor contradiction": strings.Replace(valid,
+			`"candidateEvidence":[{"position":"f.go:1:1"`, `"candidateEvidence":[{"position":"f.go:2:2"`, 1),
+		"phantom survivor": strings.Replace(valid, `"disposition":"killed"`, `"disposition":"survived"`, 1),
+		"kill count excess": strings.Replace(valid, entry,
+			entry+`,{"position":"f.go:3:3","operator":"op","reason":"mutant test process timed out","disposition":"killed"}`, 1),
+		"discard count excess": strings.Replace(valid, `"disposition":"killed"}]`, `"disposition":"discarded"}]`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseFindings([]byte(doc)); err == nil {
+				t.Fatal("malformed candidate evidence accepted")
+			}
+		})
+	}
+}
+
+// TestSpliceFindingCountsConservesChangedOutcomes pins splice accounting
+// under INV-RESULT-CANDIDATE-CONSERVATION: each flagged candidate's fresh
+// outcome replaces its recorded disposition per operator and in the totals, a
+// flagged kill that now survives opens a survivor, a flagged survivor that
+// now dies sheds its attestation (REQ-attest-survivor), and covered
+// candidates keep their recorded outcomes.
+func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
+	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
+	candidates := []engine.Candidate{
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable}, // covered kill
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:2:2", Replacements: runnable}, // flagged kill -> survivor
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:3:3", Replacements: runnable}, // flagged survivor -> kill
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:4:4", Replacements: runnable}, // covered survivor
+		{Symbol: "p.F", Operator: "op-c", Position: "f.go:5:5", Replacements: runnable}, // flagged discard -> discard
+	}
+	rec := Finding{
+		Symbol: "p.F", CandidateCount: 5, Generated: 5, Mutants: 4, Killed: 2, Discarded: 1,
+		Operators: []OperatorSummary{
+			{Operator: "op-a", Generated: 2, Killed: 2},
+			{Operator: "op-b", Generated: 2, Survived: 2},
+			{Operator: "op-c", Generated: 1, Discarded: 1},
+		},
+		Survivors: []Survivor{{Position: "f.go:3:3", Operator: "op-b"}, {Position: "f.go:4:4", Operator: "op-b"}},
+		Attested: []Attestation{
+			{Position: "f.go:3:3", Operator: "op-b", Reason: "was equivalent"},
+			{Position: "f.go:4:4", Operator: "op-b", Reason: "still equivalent"},
+		},
+		CandidateEvidence: []CandidateEvidence{
+			{Position: "f.go:2:2", Operator: "op-a", Reason: "mutant test process panicked before observation finalization", Disposition: "killed"},
+			{Position: "f.go:3:3", Operator: "op-b", Reason: "test process produced no runtime-input log", Disposition: "survived"},
+			{Position: "f.go:5:5", Operator: "op-c", Reason: "mutant test process did not start because the mutant failed to build", Disposition: "discarded"},
+		},
+	}
+	flagged := map[int]bool{1: true, 2: true, 4: true}
+	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantKilled, 0, engine.MutantDiscarded}
+	fresh := []CandidateEvidence{{Position: "f.go:5:5", Operator: "op-c", Reason: "mutant test process did not start because the mutant failed to build", Disposition: "discarded"}}
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, outcomes, fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spliced.Generated != 5 || spliced.CandidateCount != 5 || spliced.Mutants != 4 || spliced.Killed != 2 || spliced.Discarded != 1 {
+		t.Fatalf("spliced totals = %+v, want conservation across swapped outcomes", spliced)
+	}
+	wantOperators := []OperatorSummary{
+		{Operator: "op-a", Generated: 2, Killed: 1, Survived: 1},
+		{Operator: "op-b", Generated: 2, Killed: 1, Survived: 1},
+		{Operator: "op-c", Generated: 1, Discarded: 1},
+	}
+	if !slices.Equal(spliced.Operators, wantOperators) {
+		t.Fatalf("spliced operators = %+v, want %+v", spliced.Operators, wantOperators)
+	}
+	wantSurvivors := []Survivor{{Position: "f.go:2:2", Operator: "op-a"}, {Position: "f.go:4:4", Operator: "op-b"}}
+	if !slices.Equal(spliced.Survivors, wantSurvivors) {
+		t.Fatalf("spliced survivors = %+v, want %+v", spliced.Survivors, wantSurvivors)
+	}
+	if len(spliced.Attested) != 1 || spliced.Attested[0].Position != "f.go:4:4" {
+		t.Fatalf("spliced attestations = %+v, want the dead survivor's disposition shed", spliced.Attested)
+	}
+	if !slices.Equal(spliced.CandidateEvidence, fresh) {
+		t.Fatalf("spliced candidate evidence = %+v, want the fresh flags only", spliced.CandidateEvidence)
+	}
+	for _, summary := range spliced.Operators {
+		if summary.Generated != summary.Discarded+summary.Killed+summary.Survived {
+			t.Fatalf("operator summary does not conserve: %+v", summary)
+		}
+	}
+	if spliced.Generated != spliced.Mutants+spliced.Discarded || spliced.Mutants != spliced.Killed+len(spliced.Survivors) {
+		t.Fatalf("finding totals do not conserve: %+v", spliced)
+	}
+}
+
+// TestSplicedUnionDivergenceIsNonReusable: REQ-result-stale's union-divergence
+// bound — a fresh completed union that does not equal the served record's
+// persisted union, in manifest, digest, or verifiability, marks the splice
+// diverged; only the equal union keeps the serve reusable.
+func TestSplicedUnionDivergenceIsNonReusable(t *testing.T) {
+	prior := SubjectEvidence{RuntimeInputs: "manifest-a", RuntimeDigest: "digest-a"}
+	equal := runtimeinput.State{OK: true, Manifest: "manifest-a", Digest: "digest-a"}
+	if splicedUnionDiverged(equal, prior) {
+		t.Fatal("equal union reported diverged")
+	}
+	for name, state := range map[string]runtimeinput.State{
+		"manifest":     {OK: true, Manifest: "manifest-b", Digest: "digest-a"},
+		"digest":       {OK: true, Manifest: "manifest-a", Digest: "digest-b"},
+		"unverifiable": {OK: true, Manifest: "manifest-a", Digest: "digest-a", Unverifiable: true},
+	} {
+		if !splicedUnionDiverged(state, prior) {
+			t.Fatalf("%s divergence reported equal", name)
+		}
+	}
+}
+
+// TestFlaggedCandidateIndexesFallsBackOnMismatch: REQ-result-stale's
+// regeneration-mismatch bound — a regeneration that cannot re-identify the
+// record's candidates refuses the serve so the target remeasures whole.
+func TestFlaggedCandidateIndexesFallsBackOnMismatch(t *testing.T) {
+	runnable := []engine.Replacement{{}}
+	generation := engine.Generation{
+		CandidateCount: 2,
+		Candidates: []engine.Candidate{
+			{Position: "a.go:1:1", Operator: "return: zero", Replacements: runnable},
+			{Position: "a.go:2:1", Operator: "return: zero", Replacements: runnable},
+		},
+	}
+	rec := Finding{
+		CandidateCount: 2,
+		Generated:      2,
+		CandidateEvidence: []CandidateEvidence{
+			{Position: "a.go:1:1", Operator: "return: zero", Reason: "panicked", Disposition: "killed"},
+		},
+	}
+	flagged, ok := flaggedCandidateIndexes(generation, rec)
+	if !ok || len(flagged) != 1 || !flagged[0] {
+		t.Fatalf("matching regeneration = %v %v, want index 0 flagged", flagged, ok)
+	}
+	drifted := generation
+	drifted.CandidateCount = 3
+	if _, ok := flaggedCandidateIndexes(drifted, rec); ok {
+		t.Fatal("candidate-count drift accepted")
+	}
+	missing := rec
+	missing.CandidateEvidence = []CandidateEvidence{{Position: "a.go:9:9", Operator: "return: zero", Reason: "panicked", Disposition: "killed"}}
+	if _, ok := flaggedCandidateIndexes(generation, missing); ok {
+		t.Fatal("unidentifiable flagged position accepted")
+	}
+	shrunk := generation
+	shrunk.Candidates = shrunk.Candidates[:1]
+	if _, ok := flaggedCandidateIndexes(shrunk, rec); ok {
+		t.Fatal("generated-count drift accepted")
+	}
+	duplicated := generation
+	duplicated.Candidates = []engine.Candidate{generation.Candidates[0], generation.Candidates[0]}
+	if _, ok := flaggedCandidateIndexes(duplicated, rec); ok {
+		t.Fatal("duplicate candidate identity accepted")
+	}
+	lostSurvivor := rec
+	lostSurvivor.Survivors = []Survivor{{Position: "a.go:9:9", Operator: "return: zero"}}
+	if _, ok := flaggedCandidateIndexes(generation, lostSurvivor); ok {
+		t.Fatal("unidentifiable survivor accepted")
+	}
+	unrunnable := generation
+	unrunnable.Candidates = []engine.Candidate{
+		{Position: "a.go:1:1", Operator: "return: zero"},
+		generation.Candidates[1],
+	}
+	if _, ok := flaggedCandidateIndexes(unrunnable, rec); ok {
+		t.Fatal("unrunnable flagged candidate accepted")
+	}
+}
+
+// TestApplySplicedUnionMarksDivergedEvidenceNonReusable: the effect arm of
+// REQ-result-stale's union-divergence bound — an equal union leaves the served
+// record's evidence untouched, while a diverged union stamps every subject's
+// evidence with an explicit unverifiable state so the spliced finding is
+// preserved but never reusable.
+func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "data.txt"), []byte("observed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	ctx := context.Background()
+	recorded, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedState, err := runtimeinput.CompletedState(recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := SubjectEvidence{Symbol: "example.com/empty.Gone", RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest}
+	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
+
+	_, same, err := tree.applySplicedUnion(ctx, env, rec, recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.TargetEvidence.RuntimeUnverifiable || same.OracleEvidence[0].RuntimeUnverifiable {
+		t.Fatalf("equal union marked evidence unverifiable: %+v", same.TargetEvidence)
+	}
+	if same.TargetEvidence.RuntimeInputs != recordedState.Manifest || same.TargetEvidence.RuntimeDigest != recordedState.Digest {
+		t.Fatalf("equal union rewrote pinned evidence: %+v", same.TargetEvidence)
+	}
+
+	fresh, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, marked, err := tree.applySplicedUnion(ctx, env, rec, fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !marked.TargetEvidence.RuntimeUnverifiable || !marked.OracleEvidence[0].RuntimeUnverifiable {
+		t.Fatalf("diverged union left evidence reusable: %+v", marked.TargetEvidence)
+	}
+	if marked.TargetEvidence.RuntimeReason == "" {
+		t.Fatal("diverged union carries no reason")
 	}
 }

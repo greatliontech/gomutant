@@ -54,12 +54,18 @@ preserve the attributed fresh mutation outcomes and attach canonical explicit
 unverifiable evidence instead; a completed child whose state remains evaluable may
 retain its identities, but bytes from an incomplete child MUST NOT be promoted to a
 completed observation merely to retain partial identities. That finding is reportable
-and persistable but never reusable. A process that
-times out, panics, exits before normal test-harness completion, or otherwise
-cannot prove its log complete likewise contributes an explicit unverifiable
-observation rather than an empty observation assertion. A stale or unverifiable
-subject remeasures the finding; incomplete or incoherent observation is never
-silently represented as reusable evidence.
+and persistable but never reusable. A process that times out, panics, exits
+before normal test-harness completion, or otherwise cannot prove its log
+complete contributes an explicit unverifiable observation rather than an empty
+observation assertion, and that unverifiability is candidate-local: it attaches
+to the candidate the process measured, never to the finding's other candidates,
+whose completed-state union remains their reuse evidence. On reuse, a finding
+whose incomplete observations are all candidate-local serves its covered
+candidates and re-executes exactly the unverifiable candidates under a passing
+current baseline probe; identity movement or incoherence among completed states
+remains finding-wide and remeasures the target. A stale or unverifiable subject
+remeasures the finding; incomplete or incoherent observation is never silently
+represented as reusable evidence.
 
 Observation-completeness proof is selected only for a fresh measurement whose
 baseline and mutant processes all run under this observation boundary. Cached or

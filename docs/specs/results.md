@@ -13,8 +13,16 @@ freshness evidence.
 oracle subject: its identity, maximal Gofresh source-closure hash, code-result
 toolchain and build-configuration guards, attributable observation-completeness
 assertion, complete per-subject observability proof data, attributable purity
-assertion, and the finding's merged runtime-input manifest, digest, and explicit
-unverifiable disposition, including incomplete-process reasons.
+assertion, and the completed processes' merged runtime-input manifest, digest,
+and explicit unverifiable disposition.
+
+**candidate evidence** (term): the per-candidate runtime-evidence disposition: a
+candidate measured by a process that could not prove its log complete carries an
+explicit unverifiable marker with its incomplete-process reason and its measured
+disposition — killed, survived, or discarded, so a splice can conserve the
+generated-candidate accounting — identified by the candidate's position and
+operator; every other candidate is covered by the subject evidence's
+completed-process union.
 The observation proof is encoded by required `observationAssertion`,
 `observationStrategy`, `observationSubjectPackage`,
 `observationSubjectSymbol`, `observationObservable`, and
@@ -31,9 +39,11 @@ and operator, plus per-operator generated, discarded, killed, and survived
 counts whose sums equal the finding totals. The oracle is pinned by identity and complete Gofresh evidence,
 not merely by name: strengthening a test or any source it
 depends on moves its closure, so a record cannot keep reporting a survivor a
-now-sharper test would kill. The merged runtime-input evidence is attached to
-every subject because process-wide observations cannot soundly be attributed
-more narrowly. Dirty provenance bars a finding from explicit committed-baseline use
+now-sharper test would kill. The completed processes' merged runtime-input evidence is attached to every
+subject because a completed observation's content cannot soundly be attributed
+more narrowly; incompleteness itself can — the incomplete process measured
+exactly one candidate — so it is recorded as that candidate's evidence and
+never widens to the finding. Dirty provenance bars a finding from explicit committed-baseline use
 but does not prevent reuse in the unchanged working tree. The commit is omitted only
 when no repository HEAD exists; that unavailable provenance carries `dirty=true`.
 
@@ -53,7 +63,9 @@ min(budget, candidateCount)` when budget is positive. A document violating a
 count equation or budget relation is malformed and refused.
 
 INV-RESULT-CANDIDATE-CONSERVATION: enforced by
-`TestRunConservesCandidateDiscards`.
+`TestRunConservesCandidateDiscards`,
+`TestSpliceFindingCountsConservesChangedOutcomes`, and
+`TestParseFindingsCandidateEvidence`.
 
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
@@ -75,8 +87,20 @@ target or any target/oracle dependency, a changed runtime input, purity,
 toolchain, or build configuration, an added or removed oracle identity, a new
 oracle selection mode or operator version, a different effective oracle timeout, or a request for more candidates
 than a capped record generated each invalidates the record. Every target and
-oracle Gofresh verdict must be valid; stale or unverifiable remeasures. A record
-is never partially trusted: any moved pin remeasures the whole target. When
+oracle Gofresh verdict must be valid; stale or unverifiable remeasures.
+Measurement pins are never partially trusted: any moved pin remeasures the
+whole target. Candidate evidence is the one narrower axis: a record whose only
+unverifiable runtime evidence is candidate-local serves its covered candidates
+and re-executes exactly the unverifiable ones under a passing current baseline
+probe, conserving the generated-candidate accounting; the run decision reports
+the serve with the re-executed candidate count. A candidate whose evidence
+cannot prove its runtime inputs unchanged always re-executes, because a kill
+retained past a moved runtime input its process could have read is the
+forbidden flattering direction. The serve is bounded fail-closed: when
+deterministic regeneration cannot re-identify a flagged candidate the target
+remeasures whole, and when the re-executed processes' completed union does not
+equal the record's persisted union the spliced finding is preserved but
+explicitly non-reusable. When
 INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
@@ -87,17 +111,21 @@ survivor attestations. Oracle membership remains a measurement pin, so changing
 the executable oracle remeasures as usual.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable version-1 document that gomutant owns — carrying, per mutated
+portable version-2 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence;
 oracle selection mode; operator version; budget; oracle timeout; commit and dirty provenance), the mutant and
-kill counts, each survivor's position and operator, and each attested
+kill counts, each survivor's position and operator, the candidate-evidence
+list when any candidate carries one, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
 it does not understand. This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 stipulator recovering findings by label — consumes gomutant's contract, never
-its internal store. A clean break changes the version-1 shape directly;
-documents missing any required version-1 field are malformed and refused.
+its internal store. A field that narrows reuse — candidate evidence is the precedent — always
+rides a version bump, because field tolerance in an older consumer would
+otherwise serve the record with the narrowing silently dropped. A clean break
+otherwise changes the current version's shape directly; documents missing any
+required field of their version are malformed and refused.
 
 A survivor position is `file.go:line:column`. When distinct generated mutants
 share that position and operator, the second and later identities append
@@ -136,7 +164,11 @@ unmeasured entry, even when their targets came from whole-tree discovery.
 record as `current` when all recorded mutation-domain and subject evidence
 still proves reusable, `stale` when a comparable input moved, `unverifiable`
 when current evidence cannot prove reuse, or `detached` when the mutated symbol
-no longer resolves. The classification is advisory and runs no tests. Human
-and machine-readable views carry the reason plus open survivors and attested
-dispositions independently of that state, including fully attested records;
-filtering by an opaque label changes only which records are rendered.
+no longer resolves. A record whose candidate evidence flags any candidate is
+not reusable as it stands, so it classifies `unverifiable` even when its
+subject evidence is current, with the candidate evidence carried in every view
+so the candidate-local scope is visible. The classification is advisory and
+runs no tests. Human and machine-readable views carry the reason plus open
+survivors and attested dispositions independently of that state, including
+fully attested records; filtering by an opaque label changes only which
+records are rendered.

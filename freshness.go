@@ -23,9 +23,14 @@ const (
 )
 
 // FindingInspection is one finding's current applicability and reason.
+// CandidateEvidence carries the record's candidate-local unverifiability: the
+// record itself stays classifiable by its subject evidence while each flagged
+// candidate reports its own incomplete-process reason
+// (REQ-result-inspection; candidate evidence, REQ-result-record).
 type FindingInspection struct {
-	State  FindingState `json:"state"`
-	Reason string       `json:"reason,omitempty"`
+	State             FindingState        `json:"state"`
+	Reason            string              `json:"reason,omitempty"`
+	CandidateEvidence []CandidateEvidence `json:"candidateEvidence,omitempty"`
 }
 
 type subjectView struct {
@@ -106,11 +111,11 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 		if err != nil {
 			return nil, err
 		}
-		view, err := engine.NewViewForContext(ctx, group.subjects, group.dir, gofresh.CodeResult)
+		view, err := engine.NewViewFor(ctx, group.subjects, group.dir, gofresh.CodeResult)
 		if err != nil {
 			return nil, err
 		}
-		module := &moduleSubjectView{view: view, validate: view.ValidateContext}
+		module := &moduleSubjectView{view: view, validate: view.Validate}
 		if observed {
 			module.validate = view.ValidateObserved
 		}
@@ -245,7 +250,7 @@ func (s *subjectView) checkContext(ctx context.Context, fingerprint gofresh.Fing
 	if fingerprint.ObservationAssertion != "" || fingerprint.ObservationProof != (gofresh.ObservationProof{}) {
 		return s.view.CheckObserved(ctx, fingerprint, s.subject)
 	}
-	return s.view.CheckContext(ctx, fingerprint, s.subject)
+	return s.view.Check(ctx, fingerprint, s.subject)
 }
 
 // InspectFinding classifies a parsed finding against the current tree without
@@ -256,6 +261,34 @@ func (t *Tree) InspectFinding(f Finding) (FindingInspection, error) {
 
 // InspectFindingContext is InspectFinding with caller-owned cancellation.
 func (t *Tree) InspectFindingContext(ctx context.Context, f Finding) (FindingInspection, error) {
+	inspection, err := t.inspectFindingStateContext(ctx, f)
+	if err != nil {
+		return FindingInspection{}, err
+	}
+	inspection.CandidateEvidence = canonicalCandidateEvidence(f.CandidateEvidence)
+	// The state answers "can this record be reused as it stands"; flagged
+	// candidates mean it cannot — they re-execute before any serve — so a
+	// record otherwise current classifies unverifiable with the candidate
+	// evidence carrying the specifics (REQ-result-inspection).
+	if inspection.State == FindingCurrent && len(inspection.CandidateEvidence) != 0 {
+		inspection.State = FindingUnverifiable
+		inspection.Reason = fmt.Sprintf("%d candidate(s) carry unverifiable runtime evidence and re-execute before reuse", len(inspection.CandidateEvidence))
+	}
+	return inspection, nil
+}
+
+func canonicalCandidateEvidence(evidence []CandidateEvidence) []CandidateEvidence {
+	sorted := append([]CandidateEvidence(nil), evidence...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Position != sorted[j].Position {
+			return sorted[i].Position < sorted[j].Position
+		}
+		return sorted[i].Operator < sorted[j].Operator
+	})
+	return sorted
+}
+
+func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding) (FindingInspection, error) {
 	if err := ctx.Err(); err != nil {
 		return FindingInspection{}, err
 	}

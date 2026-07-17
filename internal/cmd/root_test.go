@@ -337,3 +337,35 @@ func TestRunCommandCancellationLinearizesAtFindingsCommit(t *testing.T) {
 		t.Fatalf("post-commit document is invalid: %v\n%s", err, got)
 	}
 }
+
+// TestInspectFindingsCarriesCandidateEvidence: a candidate-flagged record
+// classifies unverifiable even with current-shaped subject evidence, and the
+// view carries the candidate evidence for rendering (REQ-result-inspection).
+func TestInspectFindingsCarriesCandidateEvidence(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := gomutant.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := gomutant.SubjectEvidence{Symbol: "example.com/empty.Gone", MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+		RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	finding := gomutant.Finding{Symbol: "example.com/empty.Gone", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence, OracleEvidence: []gomutant.SubjectEvidence{evidence}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
+		CandidateEvidence: []gomutant.CandidateEvidence{{Position: "gone.go:1:1", Operator: "return: zero", Reason: "panicked before observation finalization", Disposition: "killed"}}}
+	views, err := inspectFindings(context.Background(), tree, []gomutant.Finding{finding}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || len(views[0].Candidates) != 1 {
+		t.Fatalf("candidate evidence lost from the view: %+v", views)
+	}
+	if views[0].Candidates[0].Reason != "panicked before observation finalization" {
+		t.Fatalf("candidate reason lost: %+v", views[0].Candidates[0])
+	}
+}

@@ -51,7 +51,7 @@ func TestSubjectViewsBatchByModule(t *testing.T) {
 		if batched.view != shared || batched.module != views.modules[0] {
 			t.Fatalf("%s does not share the module view", symbol)
 		}
-		singleton, err := engine.NewViewFor([]gofresh.Subject{batched.subject}, moduleDir, gofresh.CodeResult)
+		singleton, err := engine.NewViewFor(context.Background(), []gofresh.Subject{batched.subject}, moduleDir, gofresh.CodeResult)
 		if err != nil {
 			t.Fatal(err)
 		}

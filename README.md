@@ -96,6 +96,13 @@ Before fresh mutant execution, each distinct oracle group must pass on the
 unmutated tree with a stable test count and result. Runtime-input movement makes
 the completed finding unverifiable and therefore ineligible for reuse; an
 already-failing or structurally unstable baseline refuses the measurement.
+A mutant process that cannot prove its runtime-input log complete — a panic,
+timeout, or compile rejection — marks only its own candidate's evidence
+unverifiable: the record still serves its covered candidates on a later run,
+re-executing exactly the flagged candidates under a passing current baseline
+probe (reported as a `cached` decision carrying the re-executed candidate
+count), while an incomplete baseline observation stays finding-wide and
+remeasures the whole target.
 Mutation execution is supported on Unix and Windows hosts; other hosts are
 refused during tree loading rather than run with weaker cleanup guarantees.
 

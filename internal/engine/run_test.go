@@ -95,13 +95,13 @@ func TestRunMutantObservedReturnsCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+	_, _, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
 		[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !state.OK || state.Manifest == "" || state.Digest == "" {
-		t.Fatalf("observation = %+v", state)
+	if !state.OK || state.Manifest == "" || state.Digest == "" || incomplete != "" {
+		t.Fatalf("observation = %+v, incomplete %q", state, incomplete)
 	}
 }
 
@@ -110,13 +110,16 @@ func TestMissingProcessLogIsIncomplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := processObservation(filepath.Join(t.TempDir(), "missing.testlog"), moduleDir,
+	state, incomplete, err := processObservation(filepath.Join(t.TempDir(), "missing.testlog"), moduleDir,
 		filepath.Join(moduleDir, "lib"), "", GoEnv(moduleDir), true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !state.Unverifiable || !strings.Contains(state.Reason, "produced no runtime-input log") {
 		t.Fatalf("missing-log observation = %+v, want explicit incompleteness", state)
+	}
+	if !strings.Contains(incomplete, "produced no runtime-input log") {
+		t.Fatalf("missing-log incompleteness = %q, want the candidate-local reason", incomplete)
 	}
 }
 
@@ -130,10 +133,13 @@ func TestIncompleteProcessDoesNotAssertPartialLogComplete(t *testing.T) {
 	if err := os.WriteFile(logPath, log, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := processObservation(logPath, moduleDir, filepath.Join(moduleDir, "lib"),
+	state, incomplete, err := processObservation(logPath, moduleDir, filepath.Join(moduleDir, "lib"),
 		"test process timed out", GoEnv(moduleDir), true)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if incomplete != "test process timed out" {
+		t.Fatalf("incomplete reason = %q, want the caller's process incompleteness", incomplete)
 	}
 	paths, err := runtimeinput.Paths(state.Manifest, moduleDir)
 	if err != nil {
@@ -159,7 +165,7 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GOMUTANT_MOVING_INPUT", input)
-	outcome, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+	outcome, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
 		[]string{"example.com/fixture/lib"}, "^TestMovingInput$", 60*time.Second, nil, moduleDir, packageDir)
 	if err != nil {
 		t.Fatal(err)
@@ -167,8 +173,8 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 	if outcome != MutantSurvived || killer != "" {
 		t.Fatalf("stable-input measurement = %v/%q, want survivor from second run", outcome, killer)
 	}
-	if !state.OK || state.Unverifiable {
-		t.Fatalf("runtime state = %+v", state)
+	if !state.OK || state.Unverifiable || incomplete != "" {
+		t.Fatalf("runtime state = %+v, incomplete %q", state, incomplete)
 	}
 }
 
@@ -186,7 +192,7 @@ func TestNamedTestPanicIsIncompleteEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[mutantIndex],
+	outcome, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[mutantIndex],
 		[]string{"example.com/fixture/lib"}, "^TestNamedPanic$", 60*time.Second, nil, moduleDir, packageDir)
 	if err != nil {
 		t.Fatal(err)
@@ -196,6 +202,9 @@ func TestNamedTestPanicIsIncompleteEvidence(t *testing.T) {
 	}
 	if !state.Unverifiable || !strings.Contains(state.Reason, "panicked before observation finalization") {
 		t.Fatalf("named-panic observation = %+v, want explicit incompleteness", state)
+	}
+	if !strings.Contains(incomplete, "panicked before observation finalization") {
+		t.Fatalf("named-panic incompleteness = %q, want candidate-local reason", incomplete)
 	}
 }
 
@@ -224,7 +233,7 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 		// suffices — the legitimate run is sub-second — and keeps this
 		// exhaustive loop from paying a long timeout for mutants that are
 		// incidental to the package-kill this test asserts.
-		out, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+		out, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestGuarded$", 5*time.Second, nil, moduleDir, packageDir)
 		if err != nil {
 			t.Fatalf("mutant %s %s aborted as noise: %v", m.Position, m.Operator, err)
@@ -237,11 +246,17 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 			if killer != PackageKillerPrefix+"example.com/fixture/lib)" {
 				t.Fatalf("sentinel = %q", killer)
 			}
+			if !strings.Contains(incomplete, "exited before observation finalization") {
+				t.Fatalf("package-failure incompleteness = %q, want candidate-local reason", incomplete)
+			}
 		}
 		if out == MutantKilled && killer == TimeoutKiller {
 			timeoutKills++
 			if !state.Unverifiable {
 				t.Fatalf("timeout observation = %+v, want unverifiable", state)
+			}
+			if !strings.Contains(incomplete, "timed out") {
+				t.Fatalf("timeout incompleteness = %q, want candidate-local reason", incomplete)
 			}
 		}
 	}
@@ -273,7 +288,7 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range ms {
-		out, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+		out, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir)
 		if err != nil {
 			t.Fatalf("mutant %s %s: %v", m.Position, m.Operator, err)
@@ -285,6 +300,9 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 			}
 			if !state.Unverifiable || !strings.Contains(state.Reason, "failed to build") {
 				t.Fatalf("discarded mutant observation = %+v, want explicit build incompleteness", state)
+			}
+			if !strings.Contains(incomplete, "failed to build") {
+				t.Fatalf("discard incompleteness = %q, want candidate-local reason", incomplete)
 			}
 		}
 	}
@@ -310,7 +328,7 @@ func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, killer, state, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
+	out, killer, state, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
 		[]string{"example.com/fixture/plain"}, "^TestPlain$", 60*time.Second,
 		[]string{"-no.such.flag"}, moduleDir, packageDir)
 	if err == nil || !strings.Contains(err.Error(), "no test-attributed kill") {

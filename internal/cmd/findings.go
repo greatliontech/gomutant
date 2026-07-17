@@ -19,18 +19,19 @@ type findingsOptions struct {
 }
 
 type findingView struct {
-	Symbol         string                     `json:"symbol"`
-	Labels         []string                   `json:"labels,omitempty"`
-	State          gomutant.FindingState      `json:"state"`
-	Reason         string                     `json:"reason,omitempty"`
-	CandidateCount int                        `json:"candidateCount"`
-	Generated      int                        `json:"generated"`
-	Mutants        int                        `json:"mutants"`
-	Killed         int                        `json:"killed"`
-	Discarded      int                        `json:"discarded"`
-	Operators      []gomutant.OperatorSummary `json:"operators"`
-	Open           []gomutant.Survivor        `json:"open"`
-	Attested       []gomutant.Attestation     `json:"attested"`
+	Symbol         string                       `json:"symbol"`
+	Labels         []string                     `json:"labels,omitempty"`
+	State          gomutant.FindingState        `json:"state"`
+	Reason         string                       `json:"reason,omitempty"`
+	CandidateCount int                          `json:"candidateCount"`
+	Generated      int                          `json:"generated"`
+	Mutants        int                          `json:"mutants"`
+	Killed         int                          `json:"killed"`
+	Discarded      int                          `json:"discarded"`
+	Operators      []gomutant.OperatorSummary   `json:"operators"`
+	Open           []gomutant.Survivor          `json:"open"`
+	Attested       []gomutant.Attestation       `json:"attested"`
+	Candidates     []gomutant.CandidateEvidence `json:"candidateEvidence,omitempty"`
 }
 
 func newFindingsCommand() *cobra.Command {
@@ -98,6 +99,9 @@ func findingsCommand(ctx context.Context, o findingsOptions) error {
 		for _, attestation := range view.Attested {
 			fmt.Printf("    attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
 		}
+		for _, candidate := range view.Candidates {
+			fmt.Printf("    unverifiable candidate %s %s  (%s)\n", candidate.Position, candidate.Operator, candidate.Reason)
+		}
 	}
 	return nil
 }
@@ -127,6 +131,7 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, all []gomutant.Fi
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
 			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
+			Candidates: inspection.CandidateEvidence,
 		})
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].Symbol < views[j].Symbol })

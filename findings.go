@@ -19,7 +19,10 @@ import (
 )
 
 // SubjectEvidence is gomutant's persisted encoding of one Gofresh code-result
-// fingerprint plus the runtime disposition shared by the finding.
+// fingerprint plus the completed processes' merged runtime disposition shared
+// by the finding; a process that could not prove its log complete is excluded
+// here and carried as its candidate's CandidateEvidence instead
+// (REQ-result-record).
 type SubjectEvidence struct {
 	Symbol                    string `json:"symbol"`
 	MaximalClosure            string `json:"maximalClosure"`
@@ -83,6 +86,22 @@ type Survivor struct {
 	Operator string `json:"operator"`
 }
 
+// CandidateEvidence is one candidate's explicit unverifiable runtime
+// evidence: the process that measured it could not prove its runtime-input
+// log complete, so the incompleteness attaches to this candidate alone while
+// every other candidate stays covered by the subject evidence's
+// completed-process union (candidate evidence, REQ-result-record). Reuse
+// serves the covered candidates and re-executes exactly the flagged ones
+// under a passing current baseline probe (REQ-result-stale); Disposition
+// records the measured outcome ("killed", "survived", or "discarded") so the
+// re-execution splice conserves INV-RESULT-CANDIDATE-CONSERVATION.
+type CandidateEvidence struct {
+	Position    string `json:"position"`
+	Operator    string `json:"operator"`
+	Reason      string `json:"reason"`
+	Disposition string `json:"disposition"`
+}
+
 // Attestation is one survivor disposition carried on the finding: the
 // mutant is attested equivalent, with the reasoning (REQ-attest-survivor).
 type Attestation struct {
@@ -124,14 +143,15 @@ type Finding struct {
 	Commit         string            `json:"commit,omitempty"`
 	Dirty          bool              `json:"dirty"`
 
-	CandidateCount int               `json:"candidateCount"`
-	Generated      int               `json:"generated"`
-	Mutants        int               `json:"mutants"`
-	Killed         int               `json:"killed"`
-	Discarded      int               `json:"discarded"`
-	Operators      []OperatorSummary `json:"operators"`
-	Survivors      []Survivor        `json:"survivors,omitempty"`
-	Attested       []Attestation     `json:"attested,omitempty"`
+	CandidateCount    int                 `json:"candidateCount"`
+	Generated         int                 `json:"generated"`
+	Mutants           int                 `json:"mutants"`
+	Killed            int                 `json:"killed"`
+	Discarded         int                 `json:"discarded"`
+	Operators         []OperatorSummary   `json:"operators"`
+	Survivors         []Survivor          `json:"survivors,omitempty"`
+	Attested          []Attestation       `json:"attested,omitempty"`
+	CandidateEvidence []CandidateEvidence `json:"candidateEvidence,omitempty"`
 
 	// Run metadata, never persisted: a cached finding was served from the
 	// prior document under matching pins; a skipped one names why nothing
@@ -205,8 +225,12 @@ func (f *Finding) Attest(position, operator, reason string) error {
 
 // DocumentVersion tags the finding document format; a consumer rejects a
 // version it does not understand (REQ-result-export), while unknown fields
-// within an understood version are discarded (REQ-result-tolerant).
-const DocumentVersion = 1
+// within an understood version are discarded (REQ-result-tolerant). Version 2
+// introduced candidate evidence: the field narrows reuse, so a version-1
+// consumer's field tolerance would have served flagged kills with the
+// evidence silently dropped — exactly what the version boundary exists to
+// refuse.
+const DocumentVersion = 2
 
 // document is the portable finding set (REQ-result-export).
 type document struct {
@@ -270,6 +294,7 @@ func ParseFindings(data []byte) ([]Finding, error) {
 		"oracleExplicit": true, "oracleTimeout": true, "commit": true, "dirty": true,
 		"candidateCount": true, "generated": true, "mutants": true, "killed": true,
 		"discarded": true, "operators": true, "survivors": true, "attested": true,
+		"candidateEvidence": true,
 	}
 	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "oracleTimeout", "dirty", "candidateCount", "generated", "mutants", "killed", "discarded", "operators"}
 	findings := make([]Finding, len(rawFindings))
@@ -439,6 +464,62 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 		}
 		if remainingGenerated != 0 || remainingDiscarded != 0 || remainingKilled != 0 || remainingSurvived != 0 {
 			return false, fmt.Errorf("operator summaries do not match finding totals")
+		}
+	}
+	if raw, ok := fields["candidateEvidence"]; ok {
+		var records []json.RawMessage
+		if err := json.Unmarshal(raw, &records); err != nil {
+			return false, fmt.Errorf("candidateEvidence: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record,
+				map[string]bool{"position": true, "operator": true, "reason": true, "disposition": true},
+				[]string{"position", "operator", "reason", "disposition"}); err != nil {
+				return false, fmt.Errorf("candidate evidence %d: %w", i, err)
+			}
+		}
+	}
+	flaggedSeen := map[survivorKey]bool{}
+	flaggedKilled, flaggedDiscarded := map[string]int{}, map[string]int{}
+	for _, evidence := range finding.CandidateEvidence {
+		if evidence.Position == "" || evidence.Operator == "" || evidence.Reason == "" {
+			return false, fmt.Errorf("candidate evidence is incomplete")
+		}
+		key := survivorKey{evidence.Position, evidence.Operator}
+		if flaggedSeen[key] {
+			return false, fmt.Errorf("duplicate candidate evidence %s %s", evidence.Position, evidence.Operator)
+		}
+		flaggedSeen[key] = true
+		switch evidence.Disposition {
+		case "survived":
+			if !survivors[key] {
+				return false, fmt.Errorf("candidate evidence %s %s claims a survivor the record does not carry", evidence.Position, evidence.Operator)
+			}
+		case "killed":
+			flaggedKilled[evidence.Operator]++
+		case "discarded":
+			flaggedDiscarded[evidence.Operator]++
+		default:
+			return false, fmt.Errorf("candidate evidence disposition %q is invalid", evidence.Disposition)
+		}
+		if evidence.Disposition != "survived" && survivors[key] {
+			return false, fmt.Errorf("candidate evidence %s %s contradicts the recorded survivor", evidence.Position, evidence.Operator)
+		}
+	}
+	if len(flaggedKilled) != 0 || len(flaggedDiscarded) != 0 {
+		byOperator := make(map[string]OperatorSummary, len(finding.Operators))
+		for _, summary := range finding.Operators {
+			byOperator[summary.Operator] = summary
+		}
+		for operator, killed := range flaggedKilled {
+			if killed > byOperator[operator].Killed {
+				return false, fmt.Errorf("candidate evidence kill counts exceed operator %s totals", operator)
+			}
+		}
+		for operator, discarded := range flaggedDiscarded {
+			if discarded > byOperator[operator].Discarded {
+				return false, fmt.Errorf("candidate evidence discard counts exceed operator %s totals", operator)
+			}
 		}
 	}
 	attested := map[survivorKey]bool{}
@@ -636,7 +717,14 @@ func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget
 	if !budgetCovers(f, budget) {
 		return false, nil
 	}
-	return evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String())
+	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String())
+	if err != nil || !matches {
+		return matches, err
+	}
+	// A record carrying candidate evidence serves only by re-executing its
+	// flagged candidates under a passing baseline probe (REQ-result-stale),
+	// so it does not cover the target without measurement.
+	return len(f.CandidateEvidence) == 0, nil
 }
 
 // MergeFindings merges a run's findings over a prior document by symbol — a
