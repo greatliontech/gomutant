@@ -9,9 +9,12 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const fixtureDir = "../engine/testdata/fixturemod"
@@ -27,6 +30,8 @@ func serverAt(t *testing.T) *Server {
 	return New(tmp)
 }
 
+func seconds(n int) *int { return &n }
+
 func seededFinding(symbol string) gomutant.Finding {
 	evidence := func(name string) gomutant.SubjectEvidence {
 		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
@@ -41,10 +46,10 @@ func seededFinding(symbol string) gomutant.Finding {
 
 func TestToolTimeoutInputsNameIndependentLimits(t *testing.T) {
 	s := serverAt(t)
-	if _, _, err := s.toolRun(context.Background(), nil, runIn{TimeoutSec: -1, OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{TimeoutSec: seconds(-1), OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
 		t.Fatalf("negative run command timeout = %v", err)
 	}
-	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{TimeoutSec: -1, OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
+	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{TimeoutSec: seconds(-1), OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
 		t.Fatalf("negative ephemeral command timeout = %v", err)
 	}
 }
@@ -74,7 +79,7 @@ func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
 	s := New(dir)
 	_, _, err = s.toolRun(context.Background(), nil, runIn{
 		TargetsJSON: `{"targets":[{"symbol":"example.com/slow.Value","oracle":["example.com/slow.TestValue"]}]}`,
-		Budget:      1, TimeoutSec: 1, OracleTimeoutSec: 10,
+		Budget:      1, TimeoutSec: seconds(1), OracleTimeoutSec: 10,
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("tool command timeout = %v, want context.DeadlineExceeded", err)
@@ -87,7 +92,7 @@ func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
 
 func TestToolRunCommandTimeoutPreservesOrdinaryErrors(t *testing.T) {
 	s := serverAt(t)
-	_, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{`, TimeoutSec: 10})
+	_, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{`, TimeoutSec: seconds(10)})
 	if err == nil || errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "parse targets document") {
 		t.Fatalf("timed command parse error = %v", err)
 	}
@@ -565,5 +570,183 @@ func TestToolRunCancellationAtUpdateLeavesDocumentUntouched(t *testing.T) {
 func TestMCPBuilds(t *testing.T) {
 	if srv := New(".").MCP(); srv == nil {
 		t.Fatal("no server")
+	}
+}
+
+// TestServerReusesLoadedTreeUntilSourceChanges pins the tree cache's one safe
+// reuse: byte-identical loader inputs. A non-loader file never invalidates,
+// and any source edit must reload rather than serve the stale tree.
+func TestServerReusesLoadedTreeUntilSourceChanges(t *testing.T) {
+	s := serverAt(t)
+	ctx := context.Background()
+	first, err := s.loadTreeContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.loadTreeContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != first {
+		t.Fatal("identical tree state was reloaded")
+	}
+	if err := os.WriteFile(filepath.Join(s.dir, "notes.txt"), []byte("not a loader input\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	third, err := s.loadTreeContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third != first {
+		t.Fatal("a non-loader file invalidated the cached tree")
+	}
+	source := filepath.Join(s.dir, "lib", "lib.go")
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, append(data, []byte("\n// moved\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fourth, err := s.loadTreeContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fourth == first {
+		t.Fatal("stale tree served after a source edit")
+	}
+	fifth, err := s.loadTreeContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fifth != fourth {
+		t.Fatal("re-observed tree state was reloaded")
+	}
+}
+
+// TestTreeStateKeyRefusesOutOfTreeLoaderInputs pins the two inputs the
+// in-tree fingerprint cannot cover — a filesystem replace escaping the tree
+// and cgo — and the fingerprint's content sensitivity.
+func TestTreeStateKeyRefusesOutOfTreeLoaderInputs(t *testing.T) {
+	ctx := context.Background()
+	escaping := t.TempDir()
+	if err := os.WriteFile(filepath.Join(escaping, "go.mod"), []byte("module example.com/m\n\ngo 1.26.4\n\nreplace example.com/dep => ../dep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := treeStateKeyContext(ctx, escaping); !errors.Is(err, errNoCoherentSignal) {
+		t.Fatalf("escaping replace fingerprint error = %v, want errNoCoherentSignal", err)
+	}
+
+	cgo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cgo, "go.mod"), []byte("module example.com/m\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cgo, "c.go"), []byte("package m\n\nimport \"C\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := treeStateKeyContext(ctx, cgo); !errors.Is(err, errNoCoherentSignal) {
+		t.Fatalf("cgo fingerprint error = %v, want errNoCoherentSignal", err)
+	}
+
+	plain := t.TempDir()
+	if err := os.WriteFile(filepath.Join(plain, "go.mod"), []byte("module example.com/m\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(plain, "a.go")
+	if err := os.WriteFile(source, []byte("package m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := treeStateKeyContext(ctx, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("package m\n\nfunc F() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := treeStateKeyContext(ctx, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after == before {
+		t.Fatal("source edit did not move the tree fingerprint")
+	}
+	if err := os.WriteFile(source, []byte("package m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := treeStateKeyContext(ctx, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored != before {
+		t.Fatal("identical content produced a different tree fingerprint")
+	}
+}
+
+func TestCommandTimeoutDefaultsWhenOmitted(t *testing.T) {
+	if d, err := commandTimeout("timeout_sec", nil); err != nil || d != defaultCommandTimeoutSec*time.Second {
+		t.Fatalf("omitted timeout = %v, %v, want %ds", d, err, defaultCommandTimeoutSec)
+	}
+	if d, err := commandTimeout("timeout_sec", seconds(0)); err != nil || d != 0 {
+		t.Fatalf("explicit zero timeout = %v, %v, want unlimited", d, err)
+	}
+	if _, err := commandTimeout("timeout_sec", seconds(-1)); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
+		t.Fatalf("negative timeout = %v, want a named refusal", err)
+	}
+}
+
+// TestToolRunForwardsProgressNotifications drives the protocol end to end: a
+// run request carrying a progress token receives preparation and decision
+// progress notifications; results are unchanged (spec mcp.md).
+func TestToolRunForwardsProgressNotifications(t *testing.T) {
+	s := serverAt(t)
+	ctx := context.Background()
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	serverSession, err := s.MCP().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	var mu sync.Mutex
+	var messages []string
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, &mcp.ClientOptions{
+		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			mu.Lock()
+			defer mu.Unlock()
+			if req.Params.ProgressToken == "tok" {
+				messages = append(messages, req.Params.Message)
+			}
+		},
+	})
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	params := &mcp.CallToolParams{
+		Name:      "run",
+		Arguments: map[string]any{"targets_json": `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"oracleExplicit":true}]}`},
+	}
+	params.SetProgressToken("tok")
+	result, err := clientSession.CallTool(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("run tool errored: %+v", result)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		joined := strings.Join(messages, "\n")
+		mu.Unlock()
+		if strings.Contains(joined, "prepare loading") &&
+			strings.Contains(joined, "prepare resolving example.com/fixture/lib.Add") &&
+			strings.Contains(joined, "decision skipped example.com/fixture/lib.Add (no oracle)") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("progress notifications = %q", joined)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

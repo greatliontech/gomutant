@@ -131,7 +131,10 @@ probed rather than reused within the run. Resolution and freshness events
 follow target order before module-batched view construction; subsequent mutant
 and baseline events follow target order, with baseline events in canonical
 package-group order. Worker count cannot affect the sequence. The CLI streams these events as they occur; a
-successful MCP result returns the same sequence. Event data never enters a run
+successful MCP result returns the same sequence. Advisory freshness-analysis
+keep-alive events may accompany the deterministic sequence; they are
+diagnostic, carry no ordering or completion guarantee, and never enter a
+decision or finding. Event data never enters a run
 decision or finding, and run inputs are snapshotted before delivery. Callbacks
 execute synchronously as trusted caller code and must return normally; their
 external side effects have ordinary process semantics. An error or cancellation
@@ -159,16 +162,28 @@ request needs a longer candidate prefix than the prior finding records.
 caller-context cancellation, including expiry of an operator-supplied command
 timeout, MUST stop package loading and every subsequent
 preparation or aggregation boundary, cancel in-flight oracle processes, wait
-for their cleanup, return an operational cancellation error, and leave the
-findings document unchanged. Preparation progress and ordered decisions may
-contain only the prefix delivered before cancellation became observable. A
-cancelled run never reports or persists a partial measurement.
+for their cleanup, return an operational cancellation error, and commit
+nothing further to the findings document. CLI and MCP runs commit each
+finished target's finding incrementally — a cached serve once its pins are
+proven to hold, a measured or spliced target after its post-execution source
+validation — under the same document lock the final merge takes, so an
+interrupted run keeps every finding committed before cancellation became
+observable while an unfinished target's work is discarded whole. The final
+merge of the complete result remains the authority; re-merging a committed
+finding is idempotent. A finding is committed, incrementally or finally, only
+while the capture commit still names repository HEAD. Preparation progress
+and ordered decisions may contain only the prefix delivered before
+cancellation became observable. A cancelled run never reports or persists a
+partial per-target measurement.
 
-The command timeout bounds CLI or MCP work through its result commit and is
-unlimited when omitted. For a findings-producing run, the atomic findings
-replacement is the success linearization point: a deadline observed before it
-leaves the prior document unchanged, while a deadline after it cannot roll back
-the committed result and final output completes successfully. For an ephemeral
+The command timeout bounds CLI or MCP work through its result commit. Omitted,
+it is unlimited on the CLI, while the MCP tools default it to 300 seconds —
+below typical MCP client request deadlines — and an explicitly supplied zero
+means unlimited there too. For a findings-producing run, the final atomic
+findings replacement is the success linearization point: a deadline observed
+before it leaves everything except already-committed finished targets
+unchanged, while a deadline after it cannot roll back the committed result and
+final output completes successfully. For an ephemeral
 run, completion of the attributed oracle result is the equivalent success
 point. The independently named oracle timeout bounds each unmutated probe and
 mutant oracle process; it defaults to 60 seconds. Only the oracle timeout can

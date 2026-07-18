@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -1080,8 +1082,15 @@ func TestRunRapidClassificationIncludesLaterTargets(t *testing.T) {
 	if len(findings) != 2 || findings[0].Mutants != 1 || findings[1].Mutants != 1 {
 		t.Fatalf("findings = %+v", findings)
 	}
-	if !findings[1].TargetEvidence.RuntimeUnverifiable {
-		t.Fatalf("external-test-only observation proof unexpectedly reusable: %+v", findings[1].TargetEvidence)
+	// An external-test-only production subject is unrootable in its test
+	// binary's program, so its observability analysis records a subject-local
+	// unavailable disposition. The proof confers nothing — Observable=false
+	// blocks any runtime-input lift at check time — while the runtime evidence
+	// itself stays verifiable: closure-level unverifiability is the maximal
+	// scan's independent verdict, so forcing the runtime pin here would only
+	// re-measure a finding whose every checked input still proves.
+	if findings[1].TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("unavailable proof forced the runtime pin unverifiable: %+v", findings[1].TargetEvidence)
 	}
 	if findings[1].TargetEvidence.ObservationStrategy != gofresh.ObservationRTA || findings[1].TargetEvidence.ObservationObservable ||
 		!strings.Contains(findings[1].TargetEvidence.ObservationReason, "observation analysis unavailable") {
@@ -1976,5 +1985,182 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	}
 	if marked.TargetEvidence.RuntimeReason == "" {
 		t.Fatal("diverged union carries no reason")
+	}
+}
+
+// TestRunCancellationKeepsCommittedFindings pins the incremental commit
+// boundary (REQ-exec-cancellation): every finished target's finding — a
+// measured one after its post-execution validation, a cached serve once its
+// pins are proven — is delivered to Options.Commit and persisted under the
+// document lock, so a run cancelled after the first target finished keeps
+// that finding while the unfinished target leaves nothing.
+func TestRunCancellationKeepsCommittedFindings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	add := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
+	weak := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
+
+	var committed []Finding
+	first, err := tr.Run(ctx, []Target{add}, Options{Budget: 1, Commit: func(f Finding) error {
+		committed = append(committed, f)
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(committed) != 1 || committed[0].Symbol != add.Symbol || committed[0].Cached ||
+		committed[0].Mutants != first[0].Mutants || committed[0].Killed != first[0].Killed {
+		t.Fatalf("measured-target commits = %+v, want the finished finding once", committed)
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two targets, the first served from cache: its finding commits before
+	// the ordered decisions are delivered, the Decision callback cancels, and
+	// the run aborts before the second target measures.
+	docPath := filepath.Join(t.TempDir(), "findings.json")
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	committed = nil
+	findings, err := tr.Run(runCtx, []Target{add, weak}, Options{
+		Budget: 1, Prior: prior,
+		Decision: func(RunDecision) { cancel() },
+		Commit: func(f Finding) error {
+			committed = append(committed, f)
+			return UpdateDocumentContext(ctx, docPath, func(current []Finding) ([]Finding, error) {
+				return MergeFindings(current, []Finding{f}), nil
+			})
+		},
+	})
+	if !errors.Is(err, context.Canceled) || findings != nil {
+		t.Fatalf("cancelled run = findings %v, error %v", findings, err)
+	}
+	if len(committed) != 1 || committed[0].Symbol != add.Symbol || !committed[0].Cached {
+		t.Fatalf("commits before cancellation = %+v, want the cached serve alone", committed)
+	}
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := ParseFindings(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted) != 1 || persisted[0].Symbol != add.Symbol {
+		t.Fatalf("persisted findings after cancellation = %+v, want the finished target alone", persisted)
+	}
+	for _, finding := range persisted {
+		if finding.Symbol == weak.Symbol {
+			t.Fatal("an unfinished target was persisted")
+		}
+	}
+}
+
+// TestCommitFindingRefusesMovedHead pins the incremental-commit HEAD guard
+// (REQ-exec-cancellation): a finding commits only while the capture commit
+// still names repository HEAD, mirroring the run's final check.
+func TestCommitFindingRefusesMovedHead(t *testing.T) {
+	root := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=gomutant", "GIT_AUTHOR_EMAIL=gomutant@example.invalid",
+			"GIT_COMMITTER_NAME=gomutant", "GIT_COMMITTER_EMAIL=gomutant@example.invalid",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	path := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(path, []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("init", "-q")
+	runGit("add", "file.txt")
+	runGit("commit", "-q", "-m", "one")
+	repository, err := captureRepositoryStateContext(context.Background(), root)
+	if err != nil || !repository.available {
+		t.Fatalf("repository state = %+v, %v", repository, err)
+	}
+	calls := 0
+	commit := func(Finding) error { calls++; return nil }
+	if err := commitFinding(context.Background(), repository, commit, Finding{Symbol: "p.F"}); err != nil || calls != 1 {
+		t.Fatalf("commit at unmoved HEAD = %v, calls %d", err, calls)
+	}
+	if err := os.WriteFile(path, []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "file.txt")
+	runGit("commit", "-q", "-m", "two")
+	if err := commitFinding(context.Background(), repository, commit, Finding{Symbol: "p.F"}); err == nil || !strings.Contains(err.Error(), "HEAD moved") || calls != 1 {
+		t.Fatalf("commit past moved HEAD = %v, calls %d, want a refusal without delivery", err, calls)
+	}
+	if err := commitFinding(context.Background(), repository, nil, Finding{}); err != nil {
+		t.Fatalf("nil commit callback = %v", err)
+	}
+}
+
+// TestMergeFindingsGraftsConcurrentAttestation: replacement never sheds a
+// disposition the document holds for a survivor the replacement still reports
+// — an attestation added between a run's snapshot or incremental commit and
+// its merge rides survivor identity onto the fresh record; a survivor absent
+// from the fresh record still sheds its attestation.
+func TestMergeFindingsGraftsConcurrentAttestation(t *testing.T) {
+	prior := Finding{Symbol: "p.F",
+		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op"}},
+		Attested:  []Attestation{{Position: "f.go:1:1", Operator: "op", Reason: "equivalent"}}}
+	fresh := Finding{Symbol: "p.F",
+		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op"}, {Position: "f.go:2:2", Operator: "op"}}}
+	merged := MergeFindings([]Finding{prior}, []Finding{fresh})
+	if len(merged) != 1 || len(merged[0].Attested) != 1 || merged[0].Attested[0].Reason != "equivalent" {
+		t.Fatalf("concurrent attestation clobbered: %+v", merged[0].Attested)
+	}
+	shed := Finding{Symbol: "p.F", Survivors: []Survivor{{Position: "f.go:2:2", Operator: "op"}}}
+	merged = MergeFindings([]Finding{prior}, []Finding{shed})
+	if len(merged[0].Attested) != 0 {
+		t.Fatalf("dead survivor's attestation retained: %+v", merged[0].Attested)
+	}
+	kept := Finding{Symbol: "p.F",
+		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op"}},
+		Attested:  []Attestation{{Position: "f.go:1:1", Operator: "op", Reason: "fresher"}}}
+	merged = MergeFindings([]Finding{prior}, []Finding{kept})
+	if len(merged[0].Attested) != 1 || merged[0].Attested[0].Reason != "fresher" {
+		t.Fatalf("fresh attestation not preferred: %+v", merged[0].Attested)
+	}
+}
+
+// TestRunReportsAnalysisProgress: the advisory freshness-analysis keep-alive
+// events reach Options.AnalysisProgress, with the view-observation phase
+// present — the wiring an MCP server forwards as progress notifications.
+func TestRunReportsAnalysisProgress(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	var mu sync.Mutex
+	phases := map[string]int{}
+	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
+	if _, err := tr.Run(context.Background(), []Target{target}, Options{AnalysisProgress: func(phase, pkg string) {
+		mu.Lock()
+		phases[phase]++
+		mu.Unlock()
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if phases["observe"] == 0 {
+		t.Fatalf("analysis progress phases = %v, want view observations reported", phases)
 	}
 }

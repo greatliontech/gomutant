@@ -16,7 +16,11 @@ engine's rules — but a tool may exist server-side first.
 Run and discovery tools expose the same package and symbol filters as the
 library (REQ-target-filtering); run results expose the same ordered target
 preparation events, decisions, and aggregate summary as the CLI
-(REQ-exec-run-status).
+(REQ-exec-run-status). A run request carrying an MCP progress token
+additionally receives progress notifications forwarded from the preparation
+events, target decisions, and advisory freshness-analysis keep-alive events;
+an ephemeral request's notifications are coarse tool-boundary messages.
+Notification delivery is advisory and never changes tool results or errors.
 Discovery encodes exact effective oracles without repeating them: the result
 contains canonical top-level `oracleSets` with zero-based integer `id` values,
 and each target carries the `oracleSet` id whose `oracle` array it uses. Oracle

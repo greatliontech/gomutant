@@ -55,11 +55,45 @@ type subjectViewSet struct {
 	modules  []*moduleSubjectView
 }
 
-func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectViewSet, error) {
-	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false)
+// subjectEngines shares one gofresh engine per module-directory configuration
+// across every view one run constructs. Engine construction validates the
+// build configuration against the tree, so constructing one engine per view
+// repeats that work once per target; the tree's process environment is fixed,
+// which makes the module directory the whole configuration key. Views are
+// still constructed per call: a producer view's capture-attach-validate
+// transaction is per subject set and cannot be shared across targets.
+type subjectEngines struct {
+	env      []string
+	progress func(phase, pkg string)
+	byDir    map[string]*gofresh.Engine
 }
 
-func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), observed bool) (*subjectViewSet, error) {
+func (t *Tree) newSubjectEngines(progress func(phase, pkg string)) *subjectEngines {
+	return &subjectEngines{env: t.eng.GoEnv(), progress: progress, byDir: map[string]*gofresh.Engine{}}
+}
+
+func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
+	if engine, ok := e.byDir[dir]; ok {
+		return engine, nil
+	}
+	opts := []gofresh.Option{gofresh.WithDir(dir), gofresh.WithEnv(e.env...)}
+	if e.progress != nil {
+		progress := e.progress
+		opts = append(opts, gofresh.WithProgress(func(p gofresh.Progress) { progress(p.Phase, p.Package) }))
+	}
+	engine, err := gofresh.New(opts...)
+	if err != nil {
+		return nil, err
+	}
+	e.byDir[dir] = engine
+	return engine, nil
+}
+
+func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectViewSet, error) {
+	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil))
+}
+
+func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), observed bool, engines *subjectEngines) (*subjectViewSet, error) {
 	type resolvedSubject struct {
 		symbol, moduleDir string
 		subject           gofresh.Subject
@@ -102,12 +136,12 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 		groups[index].subjects = append(groups[index].subjects, resolved.subject)
 	}
 	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(seen))}
-	env := t.eng.GoEnv()
+	env := engines.env
 	for _, group := range groups {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		engine, err := gofresh.New(gofresh.WithDir(group.dir), gofresh.WithEnv(env...))
+		engine, err := engines.engineFor(group.dir)
 		if err != nil {
 			return nil, err
 		}
@@ -116,20 +150,34 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 			return nil, err
 		}
 		module := &moduleSubjectView{view: view, validate: view.Validate}
+		var observedFingerprints map[gofresh.Subject]gofresh.Fingerprint
 		if observed {
 			module.validate = view.ValidateObserved
+			// One batched proof pass per view: the observability analysis is
+			// shared across the view's whole subject set instead of re-run per
+			// subject, with per-subject fingerprints read from the batch.
+			observedFingerprints, err = view.CaptureObservedBatch(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
 		set.modules = append(set.modules, module)
 		for _, resolved := range group.resolved {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			fp, err := view.Capture(resolved.subject)
+			var fp gofresh.Fingerprint
 			if observed {
-				fp, err = view.CaptureObserved(ctx, resolved.subject)
-			}
-			if err != nil {
-				return nil, err
+				captured, ok := observedFingerprints[resolved.subject]
+				if !ok {
+					return nil, fmt.Errorf("gomutant: batched observation capture omitted subject %s.%s", resolved.subject.Package, resolved.subject.Symbol)
+				}
+				fp = captured
+			} else {
+				fp, err = view.Capture(resolved.subject)
+				if err != nil {
+					return nil, err
+				}
 			}
 			sourceFiles, err := view.SourceFilesFor(resolved.subject)
 			if err != nil {

@@ -41,7 +41,24 @@ type Options struct {
 	// Progress synchronously receives deterministic preparation events before
 	// terminal target decisions and mutant execution. It must return normally
 	// (REQ-exec-run-status).
-	Progress       func(PreparationEvent)
+	Progress func(PreparationEvent)
+	// AnalysisProgress must be safe for concurrent invocation and synchronously receives advisory keep-alive events from
+	// the run's freshness analysis — the gofresh phase name and, for
+	// per-package phases, the package. Events are diagnostic, carry no
+	// completion signal, never enter a decision or finding, and their sequence
+	// is not part of the deterministic run-status contract
+	// (REQ-exec-run-status). The callback must return normally.
+	AnalysisProgress func(phase, pkg string)
+	// Commit synchronously receives each finished target's final finding —
+	// a cached serve as soon as its pins are proven to hold, a measured or
+	// spliced target after its post-execution producer validation — so the
+	// caller can persist completed targets incrementally and an interrupted
+	// run keeps every finding committed before cancellation became observable
+	// (REQ-exec-cancellation). The caller's final merge of the returned
+	// findings remains the authority; re-merging a committed finding is
+	// idempotent. A returned error aborts the run. Skipped targets measure
+	// nothing and are never delivered.
+	Commit         func(Finding) error
 	afterExecution func()
 	aggregate      func()
 	producer       func(string)
@@ -264,6 +281,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 	runEnv := t.eng.GoEnv()
 	preparation := newRunPreparation(t)
+	engines := t.newSubjectEngines(opts.AnalysisProgress)
 	jobs := opts.Jobs
 	if jobs <= 0 {
 		jobs = max(1, runtime.NumCPU()/2)
@@ -369,7 +387,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	views := &subjectViewSet{bySymbol: map[string]*subjectView{}}
 	if len(subjectSymbols) != 0 {
 		var err error
-		views, err = t.newSubjectViewsWithPackageContext(ctx, subjectSymbols, preparation.packageContext, false)
+		views, err = t.newSubjectViewsWithPackageContext(ctx, subjectSymbols, preparation.packageContext, false, engines)
 		if err != nil {
 			return nil, fmt.Errorf("freshness: %w", err)
 		}
@@ -424,6 +442,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				cached.Cached = true
 				findings[i] = cached
 				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached"}
+				if err := commitFinding(ctx, repository, opts.Commit, cached); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if matches {
@@ -441,7 +462,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for _, oracleView := range oracleViews {
 			oracleView.module.producer = true
 		}
-		producerViews, err := t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true)
+		producerViews, err := t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
 		if err != nil {
 			return nil, fmt.Errorf("freshness proof: %w", err)
 		}
@@ -703,6 +724,9 @@ dispatching:
 				return nil, fmt.Errorf("validate freshness: %w", err)
 			}
 			findings[w.target] = spliced
+			if err := commitFinding(ctx, repository, opts.Commit, spliced); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		state, candidateEvidence, err := completedObservationUnion(ctx, t.dir, runEnv, w.baselines, w.candidates, outcomes[wi], observations[wi], incompletes[wi], nil)
@@ -765,10 +789,7 @@ dispatching:
 		// A re-measure with unchanged pins keeps prior attestations that
 		// still name the exact survivor; changed pins shed them, so every
 		// evidence version's equivalences are re-judged (REQ-attest-survivor).
-		if rec, ok := prior[targets[w.target].Symbol]; ok {
-			if !sameAttestationPins(*rec, *f) {
-				continue
-			}
+		if rec, ok := prior[targets[w.target].Symbol]; ok && sameAttestationPins(*rec, *f) {
 			open := map[survivorKey]bool{}
 			for _, s := range f.Survivors {
 				open[survivorKey{s.Position, s.Operator}] = true
@@ -781,6 +802,9 @@ dispatching:
 					f.Attested = append(f.Attested, a)
 				}
 			}
+		}
+		if err := commitFinding(ctx, repository, opts.Commit, *f); err != nil {
+			return nil, err
 		}
 	}
 	moved, err := repository.headMovedContext(ctx)
@@ -816,6 +840,27 @@ func snapshotFindings(findings []Finding) []Finding {
 		snapshot[i].CandidateEvidence = slices.Clone(snapshot[i].CandidateEvidence)
 	}
 	return snapshot
+}
+
+// commitFinding delivers one finished finding to the caller's incremental
+// commit callback. The pre-delivery HEAD check mirrors the run's final one so
+// a finding whose capture-commit provenance no longer names HEAD is never
+// persisted incrementally: the run aborts exactly as it would at the end.
+func commitFinding(ctx context.Context, repository repositoryState, commit func(Finding) error, f Finding) error {
+	if commit == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	moved, err := repository.headMovedContext(ctx)
+	if err != nil {
+		return err
+	}
+	if moved {
+		return fmt.Errorf("gomutant: repository HEAD moved during mutation run")
+	}
+	return commit(f)
 }
 
 func reportPreparation(callback func(PreparationEvent), event PreparationEvent) {

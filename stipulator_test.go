@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -155,4 +156,36 @@ func stipulatorFixture(t *testing.T, parts ...string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// TestParseStipulatorRealMethodExport pins the shared symbol grammar at the
+// adapter seam with a fixture captured verbatim from a real `stipulator
+// targets` export: a method-symbol surface parses into a target whose symbol
+// keeps the <import-path>.<Receiver>.<Method> form gomutant's resolver
+// expects, with the tests-role binding as its explicit oracle.
+func TestParseStipulatorRealMethodExport(t *testing.T) {
+	data, err := os.ReadFile("testdata/stipulator/v1/valid/real-method-export.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := ParseStipulatorTargets(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets = %+v, want one method surface", targets)
+	}
+	got := targets[0]
+	if got.Symbol != "github.com/greatliontech/stipulator/internal/coverage.Report.GatePasses" {
+		t.Fatalf("method symbol = %q, want the receiver-qualified form preserved", got.Symbol)
+	}
+	if base := path.Base(got.Symbol); strings.Count(base, ".") != 2 {
+		t.Fatalf("method symbol base %q does not carry the package.Receiver.Method grammar", base)
+	}
+	if !got.OracleExplicit || len(got.Oracle) != 1 || got.Oracle[0] != "github.com/greatliontech/stipulator/internal/coverage.TestGate" {
+		t.Fatalf("oracle = %+v, want the tests-role binding explicit", got)
+	}
+	if !slices.Contains(got.Labels, "REQ-coverage-no-scalar") {
+		t.Fatalf("labels = %+v, want the requirement id", got.Labels)
+	}
 }

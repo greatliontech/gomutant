@@ -87,9 +87,11 @@ the same run serves findings whose pins still hold; `--force` deliberately
 remeasures them. Package- and symbol-filtered runs are scoped and never delete
 findings outside their selected surface. `--timeout` bounds command work through
 the atomic findings commit and defaults to unlimited; `--oracle-timeout` bounds
-each baseline or mutant oracle process and defaults to one minute. An interrupt
-or command timeout observed before commit cancels the full oracle process tree
-and leaves the findings document unchanged. Once commit succeeds, success wins
+each baseline or mutant oracle process and defaults to one minute. Each
+finished target's finding commits incrementally under the findings document
+lock, so an interrupt or command timeout observed mid-run cancels the full
+oracle process tree while keeping every already-finished target; an unfinished
+target commits nothing. Once the final commit succeeds, success wins
 and final output completes without rollback. Only the oracle timeout is a
 finding freshness pin.
 Before fresh mutant execution, each distinct oracle group must pass on the
@@ -139,7 +141,12 @@ An edit that matches nothing or ambiguously is refused, never guessed.
 The run and discovery tools accept the same package and symbol filters as the
 CLI. Run results include the same ordered cache/measurement decisions,
 per-operator dispositions, aggregate summary, changed-scope residue, and
-findings-document update semantics. MCP runs are synchronous tool calls. Agents
+findings-document update semantics. A request carrying an MCP progress token
+additionally receives progress notifications for preparation events, target
+decisions, and freshness-analysis keep-alives. The `run` and `ephemeral` tools
+default `timeout_sec` to 300 seconds when omitted — below typical MCP client
+request deadlines — and an explicit 0 means unlimited. MCP runs are
+synchronous tool calls. Agents
 must use the CLI for work that may exceed their harness's MCP request timeout;
 progress delivery does not guarantee that a client extends its wall-clock
 limit.

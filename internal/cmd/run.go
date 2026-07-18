@@ -142,6 +142,17 @@ func runCommand(ctx context.Context, o runOptions) error {
 		Progress: func(event gomutant.PreparationEvent) {
 			renderPreparation(out, event)
 		},
+		// Each finished target commits under the same document lock the final
+		// merge takes, so an interrupted run keeps its completed targets; the
+		// final merge below remains the authority (REQ-exec-cancellation).
+		Commit: func(finding gomutant.Finding) error {
+			return gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				return gomutant.MergeFindings(current, []gomutant.Finding{finding}), nil
+			})
+		},
 	})
 	if err != nil {
 		return err

@@ -745,11 +745,43 @@ func MergeFindings(prior, fresh []Finding) []Finding {
 		if f.Skipped != "" {
 			continue
 		}
+		// Replacement never sheds a disposition the document already holds for
+		// a survivor the replacement still reports: an attestation added
+		// between a run's snapshot — or its incremental commit — and this
+		// merge rides survivor identity, so it grafts onto the fresh record
+		// rather than being clobbered by it.
+		if prior, ok := bySym[f.Symbol]; ok {
+			f.Attested = graftAttestations(prior.Attested, f.Attested, f.Survivors)
+		}
 		bySym[f.Symbol] = f
 	}
 	out := make([]Finding, 0, len(bySym))
 	for _, f := range bySym {
 		out = append(out, f)
+	}
+	return out
+}
+
+// graftAttestations returns fresh's attestations plus every prior attestation
+// whose survivor identity the fresh record still reports and fresh does not
+// already attest. Position and operator are the survivor identity
+// (REQ-attest-survivor); a survivor absent from fresh sheds its attestation as
+// before.
+func graftAttestations(prior, fresh []Attestation, survivors []Survivor) []Attestation {
+	surviving := make(map[survivorKey]bool, len(survivors))
+	for _, survivor := range survivors {
+		surviving[survivorKey{survivor.Position, survivor.Operator}] = true
+	}
+	attested := make(map[survivorKey]bool, len(fresh))
+	for _, attestation := range fresh {
+		attested[survivorKey{attestation.Position, attestation.Operator}] = true
+	}
+	out := append([]Attestation(nil), fresh...)
+	for _, attestation := range prior {
+		key := survivorKey{attestation.Position, attestation.Operator}
+		if surviving[key] && !attested[key] {
+			out = append(out, attestation)
+		}
 	}
 	return out
 }

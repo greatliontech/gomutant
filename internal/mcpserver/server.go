@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,6 +27,13 @@ import (
 type Server struct {
 	dir            string
 	updateDocument func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error
+
+	// mu guards the loaded-tree cache. The cached Tree is read-only after
+	// load and served to concurrent tool calls; see loadTreeContext for the
+	// reuse constraint.
+	mu      sync.Mutex
+	tree    *gomutant.Tree
+	treeKey string
 }
 
 // New builds a server rooted at dir.
@@ -49,7 +58,7 @@ func (s *Server) MCP() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, nil)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
-		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a document (gomutant's or stipulator's export), changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure. Survivors are findings awaiting disposition, never verdicts. Use the CLI for work that may exceed the MCP client's request timeout.",
+		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a document (gomutant's or stipulator's export), changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure, and each finished target commits incrementally so an interrupted run keeps completed targets. Survivors are findings awaiting disposition, never verdicts. An observed run executes each mutant's oracle and each baseline up to twice, bracketing runtime-input observation. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited); use the CLI for work that may exceed the MCP client's request timeout.",
 	}, s.toolRun)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "discover",
@@ -65,12 +74,18 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolAttest)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "ephemeral",
-		Description: "Run one manual mutant the operator set cannot generate: replace one file whole, apply sequential edits to one file, or apply an atomic exact-match edit batch across files, then check whether the named test kills it. The tree is never touched; the result is evidence, never persisted.",
+		Description: "Run one manual mutant the operator set cannot generate: replace one file whole, apply sequential edits to one file, or apply an atomic exact-match edit batch across files, then check whether the named test kills it. The tree is never touched; the result is evidence, never persisted. An observed probe executes the named test up to twice, bracketing runtime-input observation. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited).",
 	}, s.toolEphemeral)
 	return srv
 }
 
 const defaultFindings = ".gomutant/findings.json"
+
+// defaultCommandTimeoutSec bounds MCP tool work when the caller omits
+// timeout_sec: typical MCP clients abandon a request within a few minutes,
+// and a server that keeps working past its client's private deadline commits
+// a result nobody receives. An explicit 0 still means unlimited.
+const defaultCommandTimeoutSec = 300
 
 func secondsDuration(name string, seconds int) (time.Duration, error) {
 	const maxSeconds = int64((1<<63 - 1) / int64(time.Second))
@@ -78,6 +93,58 @@ func secondsDuration(name string, seconds int) (time.Duration, error) {
 		return 0, fmt.Errorf("%s is outside the supported duration range", name)
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+// commandTimeout resolves an optional timeout_sec input: absent defaults to
+// defaultCommandTimeoutSec, an explicit 0 means unlimited.
+func commandTimeout(name string, seconds *int) (time.Duration, error) {
+	if seconds == nil {
+		return defaultCommandTimeoutSec * time.Second, nil
+	}
+	return secondsDuration(name, *seconds)
+}
+
+// progressNotifier returns a concurrency-safe sender of MCP progress
+// notifications for req, or nil when the request carries no progress token.
+// Delivery is advisory: a notification failure never fails the tool.
+func progressNotifier(ctx context.Context, req *mcp.CallToolRequest) func(message string) {
+	if req == nil || req.Session == nil || req.Params == nil {
+		return nil
+	}
+	token := req.Params.GetProgressToken()
+	if token == nil {
+		return nil
+	}
+	var count atomic.Int64
+	return func(message string) {
+		_ = req.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+			ProgressToken: token,
+			Progress:      float64(count.Add(1)),
+			Message:       message,
+		})
+	}
+}
+
+func preparationMessage(event gomutant.PreparationEvent) string {
+	message := "prepare " + string(event.Stage)
+	if event.Symbol != "" {
+		message += " " + event.Symbol
+	}
+	if event.Package != "" {
+		message += " " + event.Package
+	}
+	return message
+}
+
+func decisionMessage(decision gomutant.RunDecision) string {
+	message := "decision " + decision.Action + " " + decision.Symbol
+	if decision.Reason != "" {
+		message += " (" + decision.Reason + ")"
+	}
+	if decision.Action == "measure" || decision.Candidates != 0 {
+		message += fmt.Sprintf(", %d candidates", decision.Candidates)
+	}
+	return message
 }
 
 func (s *Server) findingsPath(override string) string {
@@ -129,7 +196,7 @@ type runIn struct {
 	TargetsJSON      string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
 	Changed          string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
 	Budget           int      `json:"budget,omitempty" jsonschema:"candidates per symbol; 0 means exhaustive"`
-	TimeoutSec       int      `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before findings commit after this many seconds; 0 means unlimited"`
+	TimeoutSec       *int     `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before the final findings commit after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
 	OracleTimeoutSec int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
 	Jobs             int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
 	Force            bool     `json:"force,omitempty" jsonschema:"re-measure targets whose prior finding still covers"`
@@ -164,7 +231,7 @@ type runOut struct {
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
-	commandTimeout, err := secondsDuration("timeout_sec", in.TimeoutSec)
+	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, out, err
 	}
@@ -172,9 +239,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err != nil {
 		return nil, out, err
 	}
-	if commandTimeout > 0 {
+	if timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, commandTimeout)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	defer func() {
@@ -187,8 +254,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
-	out.Preparation = append(out.Preparation, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
-	tree, err := gomutant.LoadContext(ctx, s.dir)
+	notify := progressNotifier(ctx, req)
+	loading := gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}
+	out.Preparation = append(out.Preparation, loading)
+	if notify != nil {
+		notify(preparationMessage(loading))
+	}
+	tree, err := s.loadTreeContext(ctx)
 	if err != nil {
 		return nil, out, err
 	}
@@ -276,15 +348,46 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
-	findings, err := tree.Run(ctx, targets, gomutant.Options{
+	options := gomutant.Options{
 		Budget:        in.Budget,
 		OracleTimeout: oracleTimeout,
 		Jobs:          in.Jobs,
 		Force:         in.Force,
 		Prior:         prior,
-		Decision:      func(decision gomutant.RunDecision) { out.Decisions = append(out.Decisions, decision) },
-		Progress:      func(event gomutant.PreparationEvent) { out.Preparation = append(out.Preparation, event) },
-	})
+		Decision: func(decision gomutant.RunDecision) {
+			out.Decisions = append(out.Decisions, decision)
+			if notify != nil {
+				notify(decisionMessage(decision))
+			}
+		},
+		Progress: func(event gomutant.PreparationEvent) {
+			out.Preparation = append(out.Preparation, event)
+			if notify != nil {
+				notify(preparationMessage(event))
+			}
+		},
+		// Each finished target commits under the same document lock the final
+		// merge takes, so an interrupted run keeps its completed targets; the
+		// final merge below remains the authority (REQ-exec-cancellation).
+		Commit: func(finding gomutant.Finding) error {
+			return s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				return gomutant.MergeFindings(current, []gomutant.Finding{finding}), nil
+			})
+		},
+	}
+	if notify != nil {
+		options.AnalysisProgress = func(phase, pkg string) {
+			message := "analysis " + phase
+			if pkg != "" {
+				message += " " + pkg
+			}
+			notify(message)
+		}
+	}
+	findings, err := tree.Run(ctx, targets, options)
 	if err != nil {
 		return nil, out, err
 	}
@@ -347,7 +450,7 @@ type discoverOut struct {
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
 	var out discoverOut
-	tree, err := gomutant.LoadContext(ctx, s.dir)
+	tree, err := s.loadTreeContext(ctx)
 	if err != nil {
 		return nil, out, err
 	}
@@ -476,7 +579,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if len(all) == 0 {
 		return nil, out, nil
 	}
-	tree, err := gomutant.LoadContext(ctx, s.dir)
+	tree, err := s.loadTreeContext(ctx)
 	if err != nil {
 		return nil, out, err
 	}
@@ -556,12 +659,12 @@ type ephemeralIn struct {
 	BatchEdits       []gomutant.BatchEdit `json:"batch_edits,omitempty" jsonschema:"atomic file-scoped exact-match edits; every match resolves against the original file snapshot"`
 	TestPkg          string               `json:"test_pkg" jsonschema:"go package path whose named test decides the kill"`
 	Run              string               `json:"run" jsonschema:"-run pattern naming the deciding test"`
-	TimeoutSec       int                  `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before attributed result completion after this many seconds; 0 means unlimited"`
+	TimeoutSec       *int                 `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before attributed result completion after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
 	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
 }
 
 func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in ephemeralIn) (*mcp.CallToolResult, *gomutant.EphemeralResult, error) {
-	commandTimeout, err := secondsDuration("timeout_sec", in.TimeoutSec)
+	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -569,9 +672,9 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	if err != nil {
 		return nil, nil, err
 	}
-	if commandTimeout > 0 {
+	if timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, commandTimeout)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	if in.TestPkg == "" || in.Run == "" {
@@ -607,9 +710,18 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 			}
 		}
 	}
-	tree, err := gomutant.LoadContext(ctx, s.dir)
+	// The ephemeral library path exposes no per-step callbacks, so progress
+	// is limited to the two coarse boundaries the tool itself crosses.
+	notify := progressNotifier(ctx, req)
+	if notify != nil {
+		notify("prepare loading")
+	}
+	tree, err := s.loadTreeContext(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	if notify != nil {
+		notify("running " + in.TestPkg)
 	}
 	if len(in.BatchEdits) > 0 {
 		res, err := tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, oracleTimeout)
