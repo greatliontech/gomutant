@@ -7,6 +7,7 @@ evidence out of the repo, makes every verdict and refusal actionable, and redesi
 face for its actual consumer: a token-conscious agent inside a harness.
 
 - [ ] 1. Triage gate; gofresh bump to current with observation-bracket API adoption
+- [ ] 1.5. Full lifecycle and UX analysis, before any code: the tool's life inside the dev loop — git states (dirty, staged, rebase, branch switch) against records and self-cache; run/verify response-size envelopes at campaign scale, bounded and paginated; token economy per MCP response; failure-path UX walked end-to-end. Deliverable: analysis doc reviewed by the user; coding chunks start only on that review.
 - [ ] 2. Machine-local evidence split: user cache directory keyed by repo root, per-entry files with atomic installs; findings document stays repo-committable
 - [ ] 3. Changed-scope residue: gomutant-owned artifacts never report as residue
 - [ ] 4. Compile diagnostics: the captured build stderr reaches ephemeral/probe refusal messages
