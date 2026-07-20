@@ -23,3 +23,20 @@ Verify and fix the exit code if the report holds. Name the moved input
 the abort message; either continue with still-stable targets or end with
 an explicit "tree changed under measurement; re-run" — the invariant
 becomes legible instead of surprising.
+
+## Live reproduction (2026-07-20, gofresh corpus)
+
+`gomutant run --changed HEAD~2` over gofresh/runtimeinput: 33 minutes,
+639 candidates measured across ten symbols, then the terminal line
+`gomutant: validate freshness: gofresh: analysis view changed:
+observation proof for <package>.TestAbsoluteIdentityCoverageRequiresAbsoluteRoot`
+- no findings written, the whole campaign discarded. The likely mover
+was a concurrent gomutant campaign on another repository churning the
+shared GOCACHE: exactly the drift class current gofresh's
+guard-covered build-cache root eliminates, unreachable until this
+project's bump chunk lands and passes the new roots. The message names
+the test whose proof moved but neither the moved input nor a next
+action (re-run? scope down? what moved?), and the exit code of the
+observed run was masked by the caller's pipeline - the exit-0 suspicion
+above remains to be verified (a re-run with the code captured is in
+flight).

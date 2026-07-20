@@ -30,3 +30,9 @@ is deleted (git holds history).
 | [force-covers-semantics-undiscoverable](force-covers-semantics-undiscoverable.md) | Define what "still covers" pins and say why each finding was served | Served lines state their reason and the flag help defines the pin span |
 | [targets-flag-help-says-document-means-path](targets-flag-help-says-document-means-path.md) | CLI --targets help promises inline JSON but the value is a path | The help matches the semantics or both forms are accepted |
 | [targets-fed-run-output-ux](targets-fed-run-output-ux.md) | Deduplicate skip lines; hint the next step on type-symbol skips | Targets-fed runs report skip classes once, with a methodology hint for type symbols |
+| [goroutine-panic-kill-aborts-run](goroutine-panic-kill-aborts-run.md) | Classify baseline-clean goroutine-panic crashes as kills; stop aborting the run (and discarding measured symbols) over one unclassifiable mutant | A mutant whose failure reproduces under the mutant and clears the baseline probe is a kill regardless of test attribution, and unclassifiable mutants record as unverifiable without aborting the campaign |
+- **[discover-run-changed-disagree](discover-run-changed-disagree.md)** — same tree, same
+  --changed flag: discover listed seven symbols, run measured ten; the omissions were the
+  newly added functions and the edited host function carrying most candidates. discover's
+  output also buries the counts. *Lands: 10 of the active hot-loop-ux plan, or earlier if
+  targeting is touched.*
