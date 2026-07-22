@@ -340,6 +340,45 @@ type work struct {
 	flagged map[int]bool
 }
 
+// executeMutant runs one mutant through its oracle groups and merges
+// the process observations - the shared execution the worker pool and
+// the serial kill confirmation both use.
+func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, runtimeinput.Observation, string, error) {
+	outcome := engine.MutantSurvived
+	killer := ""
+	incompleteReason := ""
+	var processStates []runtimeinput.Observation
+	for _, g := range w.groups {
+		if err := ctx.Err(); err != nil {
+			return outcome, killer, runtimeinput.Observation{}, "", err
+		}
+		if outcome != engine.MutantSurvived {
+			break
+		}
+		out, groupKiller, state, incomplete, err := engine.RunMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, runEnv)
+		processStates = append(processStates, state)
+		if incompleteReason == "" {
+			incompleteReason = incomplete
+		}
+		if err == nil && out == engine.MutantKilled {
+			err = attributedKill(groupKiller, w.oracleSet)
+		}
+		if err != nil {
+			return outcome, killer, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
+		}
+		outcome = out
+		killer = groupKiller
+	}
+	if err := ctx.Err(); err != nil {
+		return outcome, killer, runtimeinput.Observation{}, "", err
+	}
+	state, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, processStates...)
+	if err != nil {
+		return outcome, killer, runtimeinput.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+	}
+	return outcome, killer, state, incompleteReason, nil
+}
+
 // bucketSurvivorExecution classifies why each survivor lived
 // (REQ-exec-survivor-evidence): unverifiable runtime evidence buckets
 // every survivor "unstable-oracle" without probing; otherwise one
@@ -777,10 +816,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	outcomes := make([][]engine.MutantOutcome, len(pending))
 	observations := make([][]runtimeinput.Observation, len(pending))
 	incompletes := make([][]string, len(pending))
+	killers := make([][]string, len(pending))
 	for wi := range pending {
 		outcomes[wi] = make([]engine.MutantOutcome, len(pending[wi].candidates))
 		observations[wi] = make([]runtimeinput.Observation, len(pending[wi].candidates))
 		incompletes[wi] = make([]string, len(pending[wi].candidates))
+		killers[wi] = make([]string, len(pending[wi].candidates))
 	}
 	type job struct{ wi, mi int }
 	jobCh := make(chan job)
@@ -805,46 +846,20 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if !runnable {
 					continue
 				}
-				outcome := engine.MutantSurvived
-				incompleteReason := ""
-				var processStates []runtimeinput.Observation
-				for _, g := range w.groups {
+				outcome, killer, state, incompleteReason, err := t.executeMutant(poolCtx, w, m, opts, runEnv)
+				if err != nil {
 					if poolCtx.Err() != nil {
 						return
 					}
-					if outcome != engine.MutantSurvived {
-						break
-					}
-					out, killer, state, incomplete, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, runEnv)
-					processStates = append(processStates, state)
-					if incompleteReason == "" {
-						incompleteReason = incomplete
-					}
-					if err == nil && out == engine.MutantKilled {
-						err = attributedKill(killer, w.oracleSet)
-					}
-					if err != nil {
-						errOnce.Do(func() {
-							poolErr = fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
-							cancel()
-						})
-						return
-					}
-					outcome = out
-				}
-				if poolCtx.Err() != nil {
-					return
-				}
-				state, err := mergeFindingObservationsContext(poolCtx, t.dir, runEnv, processStates...)
-				if err != nil {
 					errOnce.Do(func() {
-						poolErr = fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+						poolErr = err
 						cancel()
 					})
 					return
 				}
 				observations[j.wi][j.mi] = state
 				incompletes[j.wi][j.mi] = incompleteReason
+				killers[j.wi][j.mi] = killer
 				outcomes[j.wi][j.mi] = outcome
 			}
 		}()
@@ -875,6 +890,37 @@ dispatching:
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	// Serial kill confirmation (REQ-exec-attribution): a test-attributed
+	// or package-scope kill measured beside sibling mutants re-executes
+	// alone, and the serial execution is the scored one - outcome,
+	// observation, and candidate evidence replaced wholesale - so
+	// interference from a sibling never reads as a kill. Timeout kills
+	// are excluded: confirming one costs the full timeout again, and the
+	// hang bound is the caller's own budget - the named residual.
+	if jobs > 1 {
+		for wi := range pending {
+			for mi := range pending[wi].candidates {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				if outcomes[wi][mi] != engine.MutantKilled || killers[wi][mi] == engine.TimeoutKiller {
+					continue
+				}
+				m, runnable := pending[wi].candidates[mi].Mutant()
+				if !runnable {
+					continue
+				}
+				outcome, killer, state, incomplete, err := t.executeMutant(ctx, pending[wi], m, opts, runEnv)
+				if err != nil {
+					return nil, err
+				}
+				outcomes[wi][mi] = outcome
+				killers[wi][mi] = killer
+				observations[wi][mi] = state
+				incompletes[wi][mi] = incomplete
+			}
+		}
 	}
 	if opts.afterExecution != nil {
 		opts.afterExecution()

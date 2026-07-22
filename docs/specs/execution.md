@@ -27,7 +27,16 @@ goroutine-panic-class kill from environmental noise. The probe runs even when
 a hard crash truncates the structured stream before any package-level fail
 event — attribution requiring a well-formed stream would make exactly the
 strongest kills unmeasurable; a passing probe with no attributable package
-admits the kill as an unattributed package crash. An unattributable failure
+admits the kill as an unattributed package crash. A test-attributed or
+package-scope kill measured while sibling mutants could run concurrently
+(worker count above one) re-executes alone after the pool drains, and the
+serial execution is the scored measurement - outcome, killer, observation,
+and candidate evidence replaced wholesale - so a sibling-induced collision
+never reads as a kill and a kill that does not reproduce alone scores as the
+serial run says (a survivor is a finding, the anti-flattering direction). A
+timeout kill is excluded from confirmation: re-executing one costs the full
+timeout again, and the residual - a load-induced timeout - is bounded by the
+caller's own oracle budget. An unattributable failure
 whose differential baseline also fails is environmental noise: never a kill,
 and never a campaign abort — the one candidate records as a discard carrying
 the diagnostic as candidate-local evidence and the run continues, because an
@@ -86,7 +95,9 @@ whose incomplete observations are all candidate-local serves its covered
 candidates and re-executes exactly the unverifiable candidates under a passing
 current baseline probe; identity movement or incoherence among completed states
 remains finding-wide and remeasures the target. Each mutant executes exactly
-once and the baseline validity repeat contributes only its own scored
+once per scored measurement - a concurrent kill's serial confirmation IS the
+scored execution, never a comparison between two - and the baseline validity
+repeat contributes only its own scored
 observation: the historical discovery-then-score double execution and its
 cross-run evidence-drift comparison are retired — the pre-spawn observation
 bracket binds the values each run read, which is the evidence the comparison
@@ -180,7 +191,10 @@ diagnostic in the message — manual probes are interactive evidence gathering,
 so the caller repairs the edit from the compiler's reason, never from a
 guess. The result reports whether the named test killed the
 mutant and the attributed failing test; it is evidence for the caller to act
-on, never persisted to a finding record (REQ-result-record).
+on, never persisted to a finding record (REQ-result-record). Interference
+confirmation is a campaign discipline: an ephemeral probe is a single process
+with no sibling mutants, and its advisory result carries no confirmation
+pass.
 
 Each atomic batch entry carries a canonical tree-relative slash path, a
 non-empty old string, and its replacement. Every path resolves to an existing
