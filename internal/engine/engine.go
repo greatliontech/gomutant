@@ -34,6 +34,8 @@ type Tree struct {
 	// dir is the absolute tree root Load resolved, kept to reconcile
 	// Fset-absolute file paths back to the tree-relative paths callers speak.
 	dir string
+	// build lazily indexes the loaded build for ephemeral validation.
+	build buildSet
 }
 
 // Load loads the tree rooted at dir, including test packages: the module

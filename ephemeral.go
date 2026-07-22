@@ -87,6 +87,19 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	if oracleTimeout <= 0 {
 		oracleTimeout = 60 * time.Second
 	}
+	// The build ignores what it does not compile: an overlay of a
+	// build-excluded or non-Go file measures a mutant that was never
+	// present, and a test package in a go test option position changes
+	// the invocation being measured - both refuse before any process
+	// launches (REQ-exec-ephemeral).
+	if !t.eng.HasPackage(testPkg) {
+		return nil, fmt.Errorf("test package %q is not a loaded package import path", testPkg)
+	}
+	for _, replacement := range replacements {
+		if !t.eng.BuildCompilesFile(replacement.Abs) {
+			return nil, fmt.Errorf("replacement %s is not compiled by the loaded build (build-constraint-excluded, or not a Go source of any loaded package): the mutation would never be exercised", replacement.File)
+		}
+	}
 	// A rapid property failing on the baseline or against the mutant must
 	// never write a reproducer into the tree (REQ-mut-overlay).
 	var binFlags []string

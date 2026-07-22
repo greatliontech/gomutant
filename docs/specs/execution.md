@@ -163,7 +163,13 @@ seams, caller mappings). An edit that matches nothing, or matches more than
 once — match starts counted overlapping, so a self-overlapping pattern with
 two valid starts is ambiguous even when its non-overlapping count is one — is
 refused rather than guessed: a mutation applied somewhere the
-caller did not mean is a measurement of the wrong mutant. Before running the mutant gomutant probes the named
+caller did not mean is a measurement of the wrong mutant. The run refuses
+inputs the build would silently ignore before any process launches: a test
+package that is not a loaded package import path (a flag-shaped value would
+otherwise change the invocation being measured), and a replacement of a file
+the loaded build does not compile — a build-constraint-excluded source or a
+non-Go file — whose mutation could never be exercised and would report a
+false survivor. Before running the mutant gomutant probes the named
 test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
 and read as a fabricated kill — the flattering direction
