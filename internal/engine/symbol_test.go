@@ -123,6 +123,37 @@ func TestCanonText(t *testing.T) {
 	if canonHash("a  b") != canonHash("a\nb") {
 		t.Fatal("formatting moved the hash")
 	}
+
+	// Literal interiors are content, not formatting: whitespace inside
+	// string, rune, and raw literals is preserved byte-exact, while a
+	// quote inside a comment opens no literal (REQ-target-changed's
+	// formatting-vs-content line).
+	if canonHash(`return "a  b"`) == canonHash(`return "a b"`) {
+		t.Fatal("literal-interior whitespace collapsed: different programs share a hash")
+	}
+	if canonHash("return\t\"a  b\"") != canonHash(`return "a  b"`) {
+		t.Fatal("formatting outside the literal moved the hash")
+	}
+	raw := "x := `raw\n\ttext`  +  2"
+	if got := canonText(raw); got != "x := `raw\n\ttext` + 2" {
+		t.Fatalf("raw-literal preservation = %q", got)
+	}
+	escaped := `f("esc\"  q")`
+	if canonText(escaped) != escaped {
+		t.Fatalf("escaped-quote literal = %q", canonText(escaped))
+	}
+	commented := "f() // say \"hi   there\"\ng()"
+	if canonText(commented) != `f() // say "hi there" g()` {
+		t.Fatalf("comment text = %q, want prose collapsed with no literal opened", canonText(commented))
+	}
+	// The projection is applied once per source, never re-projected: a
+	// line comment followed by a literal demonstrates re-projection is
+	// lossy (the comment absorbs the literal), which no consumer relies
+	// on - both sides of every comparison are single projections.
+	oneShot := "x() // c\ny := \"a  b\""
+	if canonText(canonText(oneShot)) == canonText(oneShot) {
+		t.Fatal("re-projection unexpectedly stable; the single-projection contract comment is stale")
+	}
 }
 
 // TestResolveSymbols pins the symbol grammar: functions, value- and

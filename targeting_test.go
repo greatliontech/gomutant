@@ -258,8 +258,11 @@ func TestDiscoverChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	refs := map[string][]byte{
-		// Add's body differed at the reference: only Add targets.
-		"lib/lib.go": []byte(strings.Replace(string(libSrc), "return a + b", "return a - b", 1)),
+		// Add's body differed at the reference, and Guarded's literal
+		// interior did too: literal content is not formatting churn
+		// (REQ-target-changed), so both target.
+		"lib/lib.go": []byte(strings.Replace(strings.Replace(string(libSrc), "return a + b", "return a - b", 1),
+			`panic("negative input")`, `panic("negative  input")`, 1)),
 		// Formatting-only churn: same canonical bodies.
 		"lib/opsites.go": mustRead(t, filepath.Join(fixtureDir, "lib", "opsites.go"), "\t", "    "),
 		// The reference had one more function than the working file: a
@@ -294,6 +297,9 @@ func TestDiscoverChanged(t *testing.T) {
 	}
 	if !syms["example.com/fixture/dot.x.F"] {
 		t.Error("new file's symbol not targeted")
+	}
+	if !syms["example.com/fixture/lib.Guarded"] {
+		t.Error("literal-interior change read as formatting churn")
 	}
 
 	reasons := map[string]string{}

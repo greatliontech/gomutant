@@ -89,7 +89,8 @@ claimed, which would launder unbound kills into the producer's labels.
 mode that targets only the symbols whose bodies differ from a caller-named
 git ref — compared by canonical body hash per declaration, so a one-function
 edit in a thirty-function file yields one target, formatting churn yields
-none, a declaration absent at the ref (a new file or a new symbol) reads as
+none (whitespace inside string, rune, and raw literals is content, never
+churn: the canonical projection preserves literal interiors byte-exact), a declaration absent at the ref (a new file or a new symbol) reads as
 changed, a symbol deleted since the ref yields no target (nothing remains to
 mutate), and an unparseable prior version conservatively reads as all
 changed. Test sources are oracles, never targets, and are excluded from the

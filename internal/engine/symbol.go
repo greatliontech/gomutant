@@ -9,6 +9,8 @@ import (
 	"go/ast"
 	"go/types"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/text/unicode/norm"
@@ -49,12 +51,87 @@ func (t *Tree) BodyHashContext(ctx context.Context, symbol string) (string, erro
 }
 
 // canonText is the canonical form hashes are computed over: Unicode NFC,
-// every run of Unicode whitespace collapsed to a single space, leading and
-// trailing whitespace removed. It is a normalization projection — applying
-// it twice yields the same bytes as applying it once — so the hash never
-// depends on formatting.
+// then every run of Unicode whitespace OUTSIDE string, rune, and raw
+// literals collapsed to a single space, edges trimmed. Literal interiors
+// are preserved byte-exact - "a  b" and "a b" are different programs, so
+// collapsing them would classify a literal-content edit as formatting
+// churn (REQ-target-changed's formatting-vs-content line). Comment text
+// collapses like code, and a quote inside a comment opens no literal.
+// The projection is applied exactly once per source and compared
+// projection-to-projection; it is NOT idempotent in general (a line
+// comment absorbs following text under re-projection), which no
+// consumer relies on.
 func canonText(s string) string {
-	return strings.Join(strings.Fields(norm.NFC.String(s)), " ")
+	s = norm.NFC.String(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	pendingSpace := false
+	writePending := func() {
+		if pendingSpace && b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		pendingSpace = false
+	}
+	for i := 0; i < len(s); {
+		switch c := s[i]; {
+		case c == '"' || c == '\'':
+			writePending()
+			b.WriteByte(c)
+			i++
+			for i < len(s) {
+				ch := s[i]
+				b.WriteByte(ch)
+				i++
+				if ch == '\\' && i < len(s) {
+					b.WriteByte(s[i])
+					i++
+					continue
+				}
+				if ch == c {
+					break
+				}
+			}
+		case c == '`':
+			writePending()
+			b.WriteByte(c)
+			i++
+			for i < len(s) {
+				ch := s[i]
+				b.WriteByte(ch)
+				i++
+				if ch == '`' {
+					break
+				}
+			}
+		case c == '/' && i+1 < len(s) && (s[i+1] == '/' || s[i+1] == '*'):
+			// Comment text collapses like code, with no literal
+			// tracking: a quote in a comment is prose.
+			end := len(s)
+			if s[i+1] == '/' {
+				if nl := strings.IndexByte(s[i:], '\n'); nl >= 0 {
+					end = i + nl
+				}
+			} else if close := strings.Index(s[i+2:], "*/"); close >= 0 {
+				end = i + 2 + close + 2
+			}
+			for _, part := range strings.Fields(s[i:end]) {
+				writePending()
+				b.WriteString(part)
+				pendingSpace = true
+			}
+			i = end
+		default:
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if unicode.IsSpace(r) {
+				pendingSpace = true
+			} else {
+				writePending()
+				b.WriteString(s[i : i+size])
+			}
+			i += size
+		}
+	}
+	return b.String()
 }
 
 // canonHash is the SHA-256 digest of the UTF-8 bytes of canonText(s), as 64
