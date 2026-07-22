@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -29,6 +30,12 @@ type Options struct {
 	OracleTimeout time.Duration
 	// Force re-measures targets whose prior finding's pins still match.
 	Force bool
+	// Guidance receives oracle-instability attribution for a measured
+	// target whose merged runtime evidence landed unverifiable under a
+	// package-derived oracle: each oracle test probed individually, the
+	// unstable ones named with a narrowing suggestion
+	// (REQ-exec-oracle-guidance). Nil skips the attribution probes.
+	Guidance func(OracleGuidance)
 	// BracketPaths declares external surfaces the oracle legitimately
 	// reads — module-relative paths (a file or a directory tree) or
 	// absolute files — extending each spawn's observation bracket beyond
@@ -271,6 +278,46 @@ func sequenceKey(values []string) string {
 // oracle-timeout and budget pins hold, unless forced (REQ-result-stale). A run that
 // cannot attribute an outcome aborts without findings
 // (REQ-core-attributed-kills).
+// probeOracleInstability attributes unverifiable runtime evidence under
+// a package-derived oracle by probing each oracle test alone: a test
+// whose solo baseline run produces unverifiable evidence is the
+// instability's producer; a clean sweep means no single test reproduces
+// it (REQ-exec-oracle-guidance). Probes are best-effort - a probe that
+// errors, matches nothing, or fails skips its test rather than
+// aborting the run whose finding already committed.
+func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, groups []group, opts Options, runEnv []string) (oracleAttribution, error) {
+	byPkg := make(map[string]group, len(groups))
+	for _, g := range groups {
+		byPkg[g.pkgs[0]] = g
+	}
+	var attr oracleAttribution
+	for _, test := range oracle {
+		if err := ctx.Err(); err != nil {
+			return oracleAttribution{}, err
+		}
+		pkg, fn := splitTestSymbol(test)
+		g, ok := byPkg[pkg]
+		if pkg == "" || fn == "" || !ok {
+			continue
+		}
+		_, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, runEnv)
+		if err != nil {
+			if ctx.Err() != nil {
+				return oracleAttribution{}, ctx.Err()
+			}
+			if attr.firstErr == "" {
+				attr.firstErr = err.Error()
+			}
+			continue
+		}
+		attr.completed++
+		if passed && observed.Unverifiable {
+			attr.unstable = append(attr.unstable, test)
+		}
+	}
+	return attr, nil
+}
+
 // validateBracketPaths refuses declarations the observation bracket
 // cannot honor, loudly and before any measurement: an absolute external
 // directory cannot be walked by the bracket's hashing semantics (its
@@ -377,6 +424,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		pkg, run, flags, moduleDir, packageDir string
 	}
 	baselineCache := map[baselineKey]runtimeinput.Observation{}
+	guidanceCache := map[string]oracleAttribution{}
 	decisions := make([]RunDecision, len(targets))
 	for i, tg := range targets {
 		if err := ctx.Err(); err != nil {
@@ -877,6 +925,21 @@ dispatching:
 		}
 		if err := commitFinding(ctx, repository, opts.Commit, *f); err != nil {
 			return nil, err
+		}
+		if opts.Guidance != nil && f.TargetEvidence.RuntimeUnverifiable && !f.OracleExplicit {
+			// Targets sharing one oracle set share one attribution: the
+			// probes run once per set, not per finding.
+			key := strings.Join(slices.Sorted(slices.Values(w.oracle)), "\x00")
+			attr, ok := guidanceCache[key]
+			if !ok {
+				probed, gerr := t.probeOracleInstability(ctx, w.oracle, w.groups, opts, runEnv)
+				if gerr != nil {
+					return nil, gerr
+				}
+				attr = probed
+				guidanceCache[key] = attr
+			}
+			opts.Guidance(buildOracleGuidance(targets[w.target].Symbol, f.TargetEvidence.RuntimeReason, w.oracle, attr))
 		}
 	}
 	moved, err := repository.headMovedContext(ctx)

@@ -2237,3 +2237,52 @@ func TestRunRefusesUnhonorableBracketPaths(t *testing.T) {
 		t.Fatalf("tool-excluded declaration = %v, want a loud refusal", err)
 	}
 }
+
+// A package-derived oracle whose merged evidence lands unverifiable is
+// attributed test by test: the unstable test is named with a narrowing
+// suggestion listing the stable remainder (REQ-exec-oracle-guidance).
+func TestRunAttributesOracleInstability(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	var guidance []OracleGuidance
+	fs, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/unstableoracle.Value"}}, Options{
+		Budget:   1,
+		Guidance: func(g OracleGuidance) { guidance = append(guidance, g) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fs) != 1 || !fs[0].TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("unstable-oracle finding = %+v, want unverifiable union evidence", fs[0].TargetEvidence)
+	}
+	if len(guidance) != 1 {
+		t.Fatalf("guidance = %+v, want one attribution", guidance)
+	}
+	g := guidance[0]
+	if g.Symbol != "example.com/fixture/unstableoracle.Value" || g.Reason == "" {
+		t.Fatalf("guidance identity = %+v", g)
+	}
+	if len(g.UnstableTests) != 1 || g.UnstableTests[0] != "example.com/fixture/unstableoracle.TestUnstable" {
+		t.Fatalf("unstable attribution = %+v, want exactly TestUnstable", g.UnstableTests)
+	}
+	if !strings.Contains(g.Suggestion, "excluding example.com/fixture/unstableoracle.TestUnstable") ||
+		!strings.Contains(g.Suggestion, "stable oracle: example.com/fixture/unstableoracle.TestStable") {
+		t.Fatalf("suggestion = %q", g.Suggestion)
+	}
+
+	// An explicit oracle gets no attribution: the caller already chose
+	// the tests (REQ-exec-oracle-guidance).
+	guidance = nil
+	explicit, err := tr.Run(context.Background(), []Target{{
+		Symbol: "example.com/fixture/unstableoracle.Value",
+		Oracle: []string{"example.com/fixture/unstableoracle.TestUnstable"},
+	}}, Options{Budget: 1, Guidance: func(g OracleGuidance) { guidance = append(guidance, g) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !explicit[0].TargetEvidence.RuntimeUnverifiable || len(guidance) != 0 {
+		t.Fatalf("explicit-oracle run = unverifiable %v, guidance %+v; want unverifiable with no attribution", explicit[0].TargetEvidence.RuntimeUnverifiable, guidance)
+	}
+}

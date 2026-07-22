@@ -91,6 +91,25 @@ proof evidence captured after the observed process. A launched candidate process
 contributes its completed or incomplete observation even when compilation rejection
 classifies the candidate as discarded rather than measured.
 
+**REQ-exec-oracle-guidance** (behavior): When a fresh measurement's merged
+runtime evidence lands unverifiable under a package-derived oracle, gomutant
+MUST attribute the instability rather than leave the caller to bisect: each
+oracle test is probed alone, tests whose solo runs produce unverifiable
+evidence are named, and the report suggests narrowing to an explicit oracle of
+the stable remainder ("excluding <tests> if they do not vouch for this
+target"). A clean per-test sweep reports the instability as not
+test-reproducible (mutant-execution induced), attributed by reason alone; a
+sweep in which no probe completed claims nothing — it reports attribution
+unavailable with the first probe failure. Targets sharing one oracle set share
+one attribution: the probes run once per set, not per finding.
+Attribution is advisory run output, never persisted to the finding, and its
+probes are best-effort: a probe that errors, matches nothing, or fails skips
+its test instead of aborting a run whose finding already committed. Explicit
+oracles receive no attribution — the caller already chose the tests.
+
+REQ-exec-oracle-guidance: enforced by `TestRunAttributesOracleInstability`
+and `TestBuildOracleGuidanceArms`.
+
 **REQ-exec-quiescence** (behavior): The caller MUST exclude source and build-input
 mutation from target loading through run completion. gomutant validates captured
 source views after execution and refuses ordinary drift, but, like its Gofresh

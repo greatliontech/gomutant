@@ -225,6 +225,7 @@ type findingOut struct {
 
 type runOut struct {
 	Findings    []findingOut                `json:"findings"`
+	Guidance    []gomutant.OracleGuidance   `json:"oracleGuidance,omitempty"`
 	Residue     []gomutant.Residue          `json:"residue,omitempty"`
 	Preparation []gomutant.PreparationEvent `json:"preparation"`
 	Decisions   []gomutant.RunDecision      `json:"decisions"`
@@ -356,6 +357,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		Jobs:          in.Jobs,
 		Force:         in.Force,
 		BracketPaths:  in.BracketPaths,
+		Guidance:      func(g gomutant.OracleGuidance) { out.Guidance = append(out.Guidance, g) },
 		Prior:         prior,
 		Decision: func(decision gomutant.RunDecision) {
 			out.Decisions = append(out.Decisions, decision)
