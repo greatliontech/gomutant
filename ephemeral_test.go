@@ -92,9 +92,12 @@ func TestEphemeral(t *testing.T) {
 	}
 
 	// A replacement that does not compile measured nothing: an error, never
-	// a survivor.
+	// a survivor — and the refusal carries the compiler's own diagnostic so
+	// the caller repairs the edit from the compiler's reason, not a guess.
 	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte("package lib\nfunc Broken( {"), "example.com/fixture/lib", "^TestAdd$", time.Minute); err == nil || !strings.Contains(err.Error(), "did not compile") {
 		t.Fatalf("uncompilable replacement scored: %v", err)
+	} else if !strings.Contains(err.Error(), "syntax error") {
+		t.Fatalf("compile refusal lacks the compiler diagnostic: %v", err)
 	}
 
 	// The edits form measures identically to the whole replacement

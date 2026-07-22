@@ -33,7 +33,7 @@ func TestRunMutantOutcomes(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, m := range ms {
-			out, killer, err := RunMutant(context.Background(), dir, m, []string{"example.com/fixture/lib"}, regex, 60*time.Second, nil)
+			out, killer, _, err := RunMutant(context.Background(), dir, m, []string{"example.com/fixture/lib"}, regex, 60*time.Second, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -102,7 +102,11 @@ test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
 and read as a fabricated kill — the flattering direction
 REQ-core-attributed-kills refuses — so either probe result refuses the run
-rather than scoring it. The result reports whether the named test killed the
+rather than scoring it. A manual mutant that fails to build, and a baseline
+probe whose test package fails to build, each refuse with the compiler's own
+diagnostic in the message — manual probes are interactive evidence gathering,
+so the caller repairs the edit from the compiler's reason, never from a
+guess. The result reports whether the named test killed the
 mutant and the attributed failing test; it is evidence for the caller to act
 on, never persisted to a finding record (REQ-result-record).
 

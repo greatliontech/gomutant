@@ -120,11 +120,14 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		engineReplacements[i] = engine.Replacement{File: replacement.Abs, Source: replacement.Source}
 	}
 	m := engine.Mutant{Replacements: engineReplacements}
-	outcome, killer, err := engine.RunMutantEnv(ctx, t.dir, m, []string{testPkg}, run, oracleTimeout, binFlags, env)
+	outcome, killer, diagnostic, err := engine.RunMutantEnv(ctx, t.dir, m, []string{testPkg}, run, oracleTimeout, binFlags, env)
 	if err != nil {
 		return nil, err
 	}
 	if outcome == engine.MutantDiscarded {
+		if diagnostic != "" {
+			return nil, fmt.Errorf("mutant did not compile: nothing was measured — check the replacements for %s\n%s", strings.Join(files, ", "), diagnostic)
+		}
 		return nil, fmt.Errorf("mutant did not compile: nothing was measured — check the replacements for %s", strings.Join(files, ", "))
 	}
 	return &EphemeralResult{
