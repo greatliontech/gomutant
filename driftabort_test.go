@@ -56,6 +56,11 @@ func TestRunDriftRefusesTargetLocallyAndKeepsCompleted(t *testing.T) {
 	if len(drift.Drifted) == 0 || drift.Drifted[0].Symbol != "example.com/fixture/lib.Add" || drift.Drifted[0].Reason == "" {
 		t.Fatalf("drift attribution = %+v", drift.Drifted)
 	}
+	// The refusal names the moved file itself (gofresh v0.31.0's
+	// validation naming arm), not just the subject and class.
+	if !strings.Contains(drift.Drifted[0].Reason, "moved: ") || !strings.Contains(drift.Drifted[0].Reason, "lib.go") {
+		t.Fatalf("drift reason does not name the moved file: %q", drift.Drifted[0].Reason)
+	}
 	if drift.Completed != 1 || len(findings) != 1 || findings[0].Symbol != "example.com/fixture/plain.Ok" {
 		t.Fatalf("completed retention = %d, findings %+v", drift.Completed, findings)
 	}
