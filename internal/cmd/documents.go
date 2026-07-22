@@ -2,26 +2,21 @@ package cmd
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 
 	gomutant "github.com/greatliontech/gomutant"
-	"github.com/greatliontech/gomutant/internal/contextio"
 )
 
-func loadFindings(path string) ([]gomutant.Finding, error) {
-	return loadFindingsContext(context.Background(), path)
+func loadFindings(dir, path string) ([]gomutant.Finding, error) {
+	return loadFindingsContext(context.Background(), dir, path)
 }
 
-func loadFindingsContext(ctx context.Context, path string) ([]gomutant.Finding, error) {
-	data, err := contextio.ReadFile(ctx, path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+func loadFindingsContext(ctx context.Context, dir, path string) ([]gomutant.Finding, error) {
+	store, err := gomutant.OpenStore(path, dir)
 	if err != nil {
 		return nil, err
 	}
-	findings, err := gomutant.ParseFindings(data)
+	findings, err := store.Load(ctx)
 	if err != nil {
 		return nil, err
 	}

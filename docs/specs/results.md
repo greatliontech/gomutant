@@ -127,6 +127,39 @@ otherwise serve the record with the narrowing silently dropped. A clean break
 otherwise changes the current version's shape directly; documents missing any
 required field of their version are malformed and refused.
 
+**REQ-result-layers** (behavior): Findings persistence MUST split into two
+layers by committability. The repo document (the findings path, under version
+control) carries only portable records: clean commit provenance (not dirty,
+commit present), no runtime-unverifiable subject evidence, and no runtime-input
+path outside the module directory — evidence a reviewer on another machine can
+inherit soundly. Every other record — dirty-worktree measurements,
+unverifiable observations, machine-local input identities — lives in a
+machine-local overlay under the user cache directory keyed by the resolved
+module root, one atomically written entry per symbol; a malformed overlay entry
+is discarded, never surfaced — the overlay is a cache, not a record. A read
+merges both layers with the overlay winning per symbol. Overlay-wins is
+install-order recency, not measurement recency: a crash between the repo write
+and the overlay delete — or a slower writer's post-lock overlay install racing
+a concurrent session's prune — can leave a stale local entry, shadowing a newer
+committable repo row or resurrecting a pruned symbol, until that symbol's next
+update — and a wrong winner costs a re-measure, never a wrong verdict, because
+every record carries and revalidates its own evidence. A write decides membership under the repo
+document's lock against the freshest merged state — a concurrent session's
+committed rows are never evicted by a stale snapshot — and splits the updated
+set by committability: a committable record replaces its repo row and deletes
+its overlay entry; a local record installs into the overlay and never evicts a
+repo row that still carries portable truth for its own pins; a symbol pruned
+from the set leaves both layers. The split is
+automatic — a developer never chooses between committing no evidence and
+committing machine-local state, and full-sweep results stay shareable without
+review carrying local execution facts. Findings surfaces state each record's
+layer with the disqualifying reason for local records, so whether the artifact
+is safe to stage is answered by the tool, not by inspecting JSON.
+
+REQ-result-layers: enforced by `TestCommittableDrawsThePortableLine`,
+`TestStoreSplitsUpdatesAcrossLayers`, and
+`TestStoreUpdateDecidesMembershipUnderTheDocumentLock`.
+
 A survivor position is `file.go:line:column`. When distinct generated mutants
 share that position and operator, the second and later identities append
 `#<source-order occurrence>`. The discriminator is part of the survivor and

@@ -108,6 +108,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
 	docPath := findingsAt(o.dir, o.findingsFile)
+	docStore, err := gomutant.OpenStore(docPath, o.dir)
+	if err != nil {
+		return err
+	}
 	if len(targets) == 0 {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -115,7 +119,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		fmt.Fprintln(&terminal, "no targets")
 		renderRunSummary(&terminal, gomutant.RunSummary{})
 		if wholeTree {
-			if err := gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -127,7 +131,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		_, err := io.Copy(out, &terminal)
 		return err
 	}
-	prior, err := loadFindingsContext(ctx, docPath)
+	prior, err := loadFindingsContext(ctx, o.dir, docPath)
 	if err != nil {
 		return err
 	}
@@ -146,7 +150,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
 		Commit: func(finding gomutant.Finding) error {
-			return gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			return docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -179,7 +183,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	summary := gomutant.SummarizeRun(findings)
 	renderRunSummary(&terminal, summary)
-	if err := gomutant.UpdateDocumentContext(ctx, docPath, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

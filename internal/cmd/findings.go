@@ -23,6 +23,8 @@ type findingView struct {
 	Labels         []string                     `json:"labels,omitempty"`
 	State          gomutant.FindingState        `json:"state"`
 	Reason         string                       `json:"reason,omitempty"`
+	Layer          string                       `json:"layer"`
+	LayerReason    string                       `json:"layerReason,omitempty"`
 	CandidateCount int                          `json:"candidateCount"`
 	Generated      int                          `json:"generated"`
 	Mutants        int                          `json:"mutants"`
@@ -48,7 +50,11 @@ func newFindingsCommand() *cobra.Command {
 }
 
 func findingsCommand(ctx context.Context, o findingsOptions) error {
-	all, err := loadFindingsContext(ctx, findingsAt(o.dir, o.findingsFile))
+	store, err := gomutant.OpenStore(findingsAt(o.dir, o.findingsFile), o.dir)
+	if err != nil {
+		return err
+	}
+	all, err := store.Load(ctx)
 	if err != nil {
 		return err
 	}
@@ -66,7 +72,7 @@ func findingsCommand(ctx context.Context, o findingsOptions) error {
 	if err != nil {
 		return err
 	}
-	views, err := inspectFindings(ctx, tree, all, o.label)
+	views, err := inspectFindings(ctx, tree, store, all, o.label)
 	if err != nil {
 		return err
 	}
@@ -76,6 +82,14 @@ func findingsCommand(ctx context.Context, o findingsOptions) error {
 	if len(views) == 0 {
 		fmt.Println("no findings")
 		return nil
+	}
+	repoCount, localOnly := 0, 0
+	for _, view := range views {
+		if view.Layer == "repo" {
+			repoCount++
+		} else {
+			localOnly++
+		}
 	}
 	for _, view := range views {
 		labels := view.Labels
@@ -99,10 +113,14 @@ func findingsCommand(ctx context.Context, o findingsOptions) error {
 		for _, attestation := range view.Attested {
 			fmt.Printf("    attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
 		}
+		if view.Layer == "local" {
+			fmt.Printf("    machine-local: %s\n", view.LayerReason)
+		}
 		for _, candidate := range view.Candidates {
 			fmt.Printf("    unverifiable candidate %s %s  (%s)\n", candidate.Position, candidate.Operator, candidate.Reason)
 		}
 	}
+	fmt.Printf("%d repo-committable, %d machine-local\n", repoCount, localOnly)
 	return nil
 }
 
@@ -110,7 +128,7 @@ func renderFindingsJSON(w io.Writer, views []findingView) error {
 	return json.NewEncoder(w).Encode(views)
 }
 
-func inspectFindings(ctx context.Context, tree *gomutant.Tree, all []gomutant.Finding, label string) ([]findingView, error) {
+func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.Store, all []gomutant.Finding, label string) ([]findingView, error) {
 	views := make([]findingView, 0, len(all))
 	for _, finding := range all {
 		if err := ctx.Err(); err != nil {
@@ -123,10 +141,12 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, all []gomutant.Fi
 		if err != nil {
 			return nil, err
 		}
+		layer, layerReason := store.Layer(finding)
 		labels := append([]string(nil), finding.Labels...)
 		sort.Strings(labels)
 		views = append(views, findingView{
 			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
+			Layer: layer, LayerReason: layerReason,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),

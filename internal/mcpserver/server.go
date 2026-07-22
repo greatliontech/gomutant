@@ -7,7 +7,6 @@ package mcpserver
 import (
 	"context"
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -38,14 +37,18 @@ type Server struct {
 
 // New builds a server rooted at dir.
 func New(dir string) *Server {
-	return &Server{dir: dir, updateDocument: gomutant.UpdateDocumentContext}
+	return &Server{dir: dir}
 }
 
 func (s *Server) update(ctx context.Context, path string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
-	if s.updateDocument == nil {
-		return gomutant.UpdateDocumentContext(ctx, path, change)
+	if s.updateDocument != nil {
+		return s.updateDocument(ctx, path, change)
 	}
-	return s.updateDocument(ctx, path, change)
+	store, err := gomutant.OpenStore(path, s.dir)
+	if err != nil {
+		return err
+	}
+	return store.Update(ctx, change)
 }
 
 // Run serves MCP over stdio until the context ends.
@@ -66,7 +69,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolDiscover)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "findings",
-		Description: "Inspect every findings record as current, stale, unverifiable, or detached, with its open survivors, attested dispositions, and per-candidate unverifiable runtime evidence (candidateEvidence). Filter by opaque label; inspection runs no tests.",
+		Description: "Inspect every findings record as current, stale, unverifiable, or detached, with its open survivors, attested dispositions, and per-candidate unverifiable runtime evidence (candidateEvidence). Each record states its persistence layer: repo (portable, in the committed findings document) or local (machine-local overlay, with the reason it is not committable). Filter by opaque label; inspection runs no tests.",
 	}, s.toolFindings)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "attest_survivor",
@@ -177,14 +180,11 @@ func (s *Server) loadFindings(override string) ([]gomutant.Finding, error) {
 }
 
 func (s *Server) loadFindingsContext(ctx context.Context, override string) ([]gomutant.Finding, error) {
-	data, err := contextio.ReadFile(ctx, s.findingsPath(override))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	store, err := gomutant.OpenStore(s.findingsPath(override), s.dir)
 	if err != nil {
 		return nil, err
 	}
-	findings, err := gomutant.ParseFindings(data)
+	findings, err := store.Load(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -552,6 +552,8 @@ type inspectedFinding struct {
 	Labels         []string                     `json:"labels,omitempty"`
 	State          gomutant.FindingState        `json:"state"`
 	Reason         string                       `json:"reason,omitempty"`
+	Layer          string                       `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
+	LayerReason    string                       `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 	CandidateCount int                          `json:"candidateCount"`
 	Generated      int                          `json:"generated"`
 	Mutants        int                          `json:"mutants"`
@@ -564,12 +566,18 @@ type inspectedFinding struct {
 }
 
 type findingsOut struct {
-	Findings []inspectedFinding `json:"findings"`
+	Findings        []inspectedFinding `json:"findings"`
+	RepoCommittable int                `json:"repoCommittable" jsonschema:"records portable enough for the committed findings document"`
+	LocalOnly       int                `json:"localOnly" jsonschema:"records held in the machine-local overlay a reviewer would not inherit"`
 }
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
 	out := findingsOut{Findings: []inspectedFinding{}}
-	all, err := s.loadFindingsContext(ctx, in.Findings)
+	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	if err != nil {
+		return nil, out, err
+	}
+	all, err := store.Load(ctx)
 	if err != nil {
 		return nil, out, err
 	}
@@ -594,10 +602,17 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		if err != nil {
 			return nil, out, err
 		}
+		layer, layerReason := store.Layer(finding)
+		if layer == "repo" {
+			out.RepoCommittable++
+		} else {
+			out.LocalOnly++
+		}
 		labels := append([]string(nil), finding.Labels...)
 		sort.Strings(labels)
 		out.Findings = append(out.Findings, inspectedFinding{
 			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
+			Layer: layer, LayerReason: layerReason,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),

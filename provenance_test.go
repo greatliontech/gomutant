@@ -127,7 +127,7 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	if err := os.WriteFile(input, []byte("runtime"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open input.txt\n"), root, root, runtimeinput.WithCompletedProcess("test"))
+	state, err := runtimeinput.FromTestLog([]byte("open input.txt\n"), root, root, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}

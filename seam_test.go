@@ -55,7 +55,7 @@ func TestSubjectViewsBatchByModule(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := singleton.Capture(batched.subject)
+		fingerprint, err := singleton.Capture(context.Background(), batched.subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +232,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		views.bySymbol["example.com/fixture/lib.TestAdd"],
 		views.bySymbol["example.com/fixture/lib.TestWeak"],
 	}
-	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("finding"))
+	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("finding"), runtimeinput.WithBracket(testBracket(t, tree.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	workspaceViews := observedSubjectViews(t, workspace, []string{"example.com/ws.Root", "example.com/ws/sub.TestNested"})
 	workspaceTarget := workspaceViews.bySymbol["example.com/ws.Root"]
 	workspaceOracle := []*subjectView{workspaceViews.bySymbol["example.com/ws/sub.TestNested"]}
-	workspaceState, err := runtimeinput.FromTestLogEnv(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv(), runtimeinput.WithCompletedProcess("workspace"))
+	workspaceState, err := runtimeinput.FromTestLogEnv(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv(), runtimeinput.WithCompletedProcess("workspace"), runtimeinput.WithBracket(testBracket(t, workspace.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 	tree := fixtureTree(t)
 	views := observedSubjectViews(t, tree, []string{"example.com/fixture/lib.Add"})
 	target := views.bySymbol["example.com/fixture/lib.Add"]
-	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("cancellation"))
+	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("cancellation"), runtimeinput.WithBracket(testBracket(t, tree.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +470,7 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLogEnv(nil, moduleDir, packageDir, tr.eng.GoEnv(), runtimeinput.WithCompletedProcess("inspection"))
+	state, err := runtimeinput.FromTestLogEnv(nil, moduleDir, packageDir, tr.eng.GoEnv(), runtimeinput.WithCompletedProcess("inspection"), runtimeinput.WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}

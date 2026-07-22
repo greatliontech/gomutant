@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 
 	gomutant "github.com/greatliontech/gomutant"
@@ -28,7 +29,11 @@ func attestCommand(o attestOptions) error {
 	if o.symbol == "" || o.position == "" || o.operator == "" || o.reason == "" {
 		return fmt.Errorf("attest needs --symbol, --position, --operator, and --reason")
 	}
-	return gomutant.UpdateDocument(findingsAt(o.dir, o.findingsFile), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+	store, err := gomutant.OpenStore(findingsAt(o.dir, o.findingsFile), o.dir)
+	if err != nil {
+		return err
+	}
+	return store.Update(context.Background(), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		for i := range all {
 			if all[i].Symbol == o.symbol {
 				return all, all[i].Attest(o.position, o.operator, o.reason)

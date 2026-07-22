@@ -229,6 +229,10 @@ func TestToolRunFindingsAttest(t *testing.T) {
 		fOut.Findings[0].Mutants != out.Findings[0].Mutants || fOut.Findings[0].Discarded != out.Findings[0].Discarded {
 		t.Fatalf("findings = %+v", fOut.Findings)
 	}
+	if fOut.Findings[0].Layer != "local" || fOut.Findings[0].LayerReason == "" ||
+		fOut.LocalOnly != 1 || fOut.RepoCommittable != 0 {
+		t.Fatalf("uncommitted-fixture layer surface = %+v", fOut)
+	}
 	_, filtered, err := s.toolFindings(ctx, nil, findingsIn{Label: "REQ-other"})
 	if err != nil || filtered.Findings == nil || len(filtered.Findings) != 0 {
 		t.Fatalf("filtered-empty findings = %+v, %v", filtered, err)

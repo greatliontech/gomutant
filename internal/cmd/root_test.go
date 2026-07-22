@@ -14,6 +14,15 @@ import (
 	gomutant "github.com/greatliontech/gomutant"
 )
 
+func testStore(t *testing.T, dir string) *gomutant.Store {
+	t.Helper()
+	store, err := gomutant.OpenStore(filepath.Join(dir, defaultFindings), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
 func TestExecuteContextCancellationStopsBeforeLoading(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -87,7 +96,7 @@ func TestFindingsAtAndUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := loadFindings(path)
+	got, err := loadFindings(filepath.Dir(filepath.Dir(path)), path)
 	if err != nil || len(got) != 1 || got[0].Symbol != "p.A" {
 		t.Fatalf("round trip = %+v, %v", got, err)
 	}
@@ -120,7 +129,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, targetsFile: targetsPath}); err != nil {
 		t.Fatal(err)
 	}
-	retained, err := loadFindings(path)
+	retained, err := loadFindings(dir, path)
 	if err != nil || len(retained) != 1 {
 		t.Fatalf("scoped zero-target run pruned findings: %+v, %v", retained, err)
 	}
@@ -129,7 +138,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if err := runCommand(ctx, runOptions{dir: dir, findingsFile: defaultFindings}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled empty whole-tree run = %v", err)
 	}
-	retained, err = loadFindings(path)
+	retained, err = loadFindings(dir, path)
 	if err != nil || len(retained) != 1 {
 		t.Fatalf("cancelled empty whole-tree run changed findings: %+v, %v", retained, err)
 	}
@@ -140,7 +149,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if !strings.Contains(output.String(), "no targets\nsummary   0 targets: 0 measured, 0 cached, 0 skipped; 0 generated, 0 killed, 0 survived, 0 discarded; 0 attested, 0 open\n") {
 		t.Fatalf("empty whole-tree output = %q", output.String())
 	}
-	got, err := loadFindings(path)
+	got, err := loadFindings(filepath.Dir(filepath.Dir(path)), path)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("whole-tree empty discovery retained findings: %+v, %v", got, err)
 	}
@@ -168,14 +177,17 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, CandidateCount: 1, Generated: 1, Mutants: 1,
 		Survivors: []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}},
 		Attested:  []gomutant.Attestation{{Position: "old.go:1:1", Operator: "zero return", Reason: "equivalent"}}}
-	views, err := inspectFindings(context.Background(), tree, []gomutant.Finding{finding}, "REQ-A")
+	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "REQ-A")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(views) != 1 || views[0].State != gomutant.FindingDetached || len(views[0].Open) != 0 || len(views[0].Attested) != 1 || views[0].Labels[0] != "REQ-A" {
 		t.Fatalf("detached attested view = %+v", views)
 	}
-	views, err = inspectFindings(context.Background(), tree, []gomutant.Finding{finding}, "REQ-other")
+	if views[0].Layer != "local" || views[0].LayerReason == "" {
+		t.Fatalf("dirty finding layer = %q (%q), want machine-local", views[0].Layer, views[0].LayerReason)
+	}
+	views, err = inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "REQ-other")
 	if err != nil || len(views) != 0 {
 		t.Fatalf("label filter = %+v, %v", views, err)
 	}
@@ -358,7 +370,7 @@ func TestInspectFindingsCarriesCandidateEvidence(t *testing.T) {
 	finding := gomutant.Finding{Symbol: "example.com/empty.Gone", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence, OracleEvidence: []gomutant.SubjectEvidence{evidence}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		CandidateEvidence: []gomutant.CandidateEvidence{{Position: "gone.go:1:1", Operator: "return: zero", Reason: "panicked before observation finalization", Disposition: "killed"}}}
-	views, err := inspectFindings(context.Background(), tree, []gomutant.Finding{finding}, "")
+	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

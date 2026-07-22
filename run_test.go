@@ -1164,11 +1164,11 @@ func TestMergeFindingObservationsMakesMovementNonReusable(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"))
+	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"))
+	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1700,11 +1700,11 @@ func TestCompletedObservationUnionIsCandidateGranular(t *testing.T) {
 	root := t.TempDir()
 	env := os.Environ()
 	ctx := context.Background()
-	completedBaseline, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"))
+	completedBaseline, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	completedCandidate, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("candidate"))
+	completedCandidate, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("candidate"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1950,7 +1950,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	}
 	env := os.Environ()
 	ctx := context.Background()
-	recorded, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"))
+	recorded, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1972,7 +1972,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 		t.Fatalf("equal union rewrote pinned evidence: %+v", same.TargetEvidence)
 	}
 
-	fresh, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"))
+	fresh, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
