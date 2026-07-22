@@ -102,6 +102,13 @@ Go file the loaded packages do not cover (deleted, unparseable, or excluded
 by build constraints — an unbound surface named as such, never mislabeled) —
 so a caller layering its own classification (or a user deciding what to
 hand-mutate) sees the whole changed surface, never a silently narrowed one.
+The one named exclusion: paths under gomutant's own state directory
+(`.gomutant/`) are outside the changed source surface and report as neither
+targets nor residue — the tool's bookkeeping can never produce a mutation
+target, and reporting the tool's own writes back as residue would put
+self-noise in every incremental run over a tree the tool has measured. A
+caller relocating tool artifacts outside that directory opts back into
+ordinary classification.
 This is what keeps an incremental run proportional to the edit rather than
 to the tree.
 

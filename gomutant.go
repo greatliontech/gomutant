@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -240,7 +241,9 @@ func (t *Tree) DiscoverContext(ctx context.Context) ([]Target, error) {
 // path absent at the reference, so a new file reads as all changed). Beside
 // the targets it reports the changed-but-untargeted residue with the
 // engine-level reason each path yielded no target, so the caller sees the
-// whole changed surface, never a silently narrowed one.
+// whole changed surface, never a silently narrowed one — except paths under
+// gomutant's own state directory, which are outside the changed source
+// surface entirely (REQ-target-changed).
 func (t *Tree) DiscoverChanged(paths []string, ref func(path string) ([]byte, bool)) ([]Target, []Residue) {
 	targets, residue, _ := t.DiscoverChangedContext(context.Background(), paths, ref)
 	return targets, residue
@@ -250,7 +253,19 @@ func (t *Tree) DiscoverChanged(paths []string, ref func(path string) ([]byte, bo
 func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref func(path string) ([]byte, bool)) ([]Target, []Residue, error) {
 	var targets []Target
 	var residue []Residue
-	surface, err := t.eng.SurfaceContext(ctx, paths, ref)
+	// The tool's own state directory is outside the changed source
+	// surface (REQ-target-changed): its bookkeeping can never produce a
+	// mutation target — dot-directories are outside Go package loading,
+	// so the targets arm needs no code — and reporting the tool's own
+	// writes as residue would be self-noise on every incremental run.
+	source := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if toolOwned(p) {
+			continue
+		}
+		source = append(source, p)
+	}
+	surface, err := t.eng.SurfaceContext(ctx, source, ref)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -283,6 +298,13 @@ func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref f
 		}
 	}
 	return targets, residue, nil
+}
+
+// toolOwned reports whether a tree-relative changed path lies in
+// gomutant's own state directory.
+func toolOwned(p string) bool {
+	clean := path.Clean(filepath.ToSlash(p))
+	return clean == ".gomutant" || strings.HasPrefix(clean, ".gomutant/")
 }
 
 // targetsDocument is the config-file form of a target set

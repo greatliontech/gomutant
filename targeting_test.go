@@ -272,7 +272,8 @@ func TestDiscoverChanged(t *testing.T) {
 		"lib/lib_test.go": nil,
 		"README.md":       nil,
 	}
-	paths := []string{"lib/lib.go", "lib/opsites.go", "genp/gen.go", "lib/lib_test.go", "README.md", "dot.x/dotx.go", "dot/dot.go", "lib/doc.go", "lib/removed.go"}
+	paths := []string{"lib/lib.go", "lib/opsites.go", "genp/gen.go", "lib/lib_test.go", "README.md", "dot.x/dotx.go", "dot/dot.go", "lib/doc.go", "lib/removed.go",
+		".gomutant/findings.json", ".gomutant/targets/extra.json", ".gomutant2/note.md"}
 	targets, residue := tr.DiscoverChanged(paths, func(p string) ([]byte, bool) {
 		b, ok := refs[p]
 		if p == "dot.x/dotx.go" {
@@ -307,6 +308,9 @@ func TestDiscoverChanged(t *testing.T) {
 		"dot/dot.go":      "only deleted symbols",
 		"lib/doc.go":      "no function body declared",
 		"lib/removed.go":  "not in the loaded packages",
+		// A lookalike prefix is NOT tool-owned: the boundary is the
+		// directory, not the string prefix.
+		".gomutant2/note.md": "not a Go source file",
 	} {
 		if !strings.Contains(reasons[path], want) {
 			t.Errorf("residue[%s] = %q, want reason containing %q", path, reasons[path], want)
@@ -314,6 +318,13 @@ func TestDiscoverChanged(t *testing.T) {
 	}
 	if _, ok := reasons["lib/lib.go"]; ok {
 		t.Error("a targeting file also reported as residue")
+	}
+	// The tool's own state directory is outside the changed source
+	// surface: neither target nor residue (REQ-target-changed).
+	for _, owned := range []string{".gomutant/findings.json", ".gomutant/targets/extra.json"} {
+		if reason, ok := reasons[owned]; ok {
+			t.Errorf("tool-owned artifact reported as residue: %s (%s)", owned, reason)
+		}
 	}
 }
 
