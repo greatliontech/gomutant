@@ -203,8 +203,14 @@ measurement, and `baseline` before each package-scoped oracle group actually
 probed rather than reused within the run. Resolution and freshness events
 follow target order before module-batched view construction; subsequent mutant
 and baseline events follow target order, with baseline events in canonical
-package-group order. Worker count cannot affect the sequence. The CLI streams these events as they occur; a
-successful MCP result returns the same sequence. Advisory freshness-analysis
+package-group order. Worker count cannot affect the sequence. The CLI streams these events as they occur; the
+MCP face carries them per REQ-mcp-envelope in [mcp.md](mcp.md) — streamed to
+progress notifications or inline-capped, totals always exact. The CLI reports
+each skipped target once, as its decision line, and aggregates skip classes
+into one counted line after the summary when more than one target skipped — a
+row that would repeat an already-rendered line is dropped at the source. The
+MCP face's rows are data for the caller's own joins, not rendering: dedup is
+a CLI concern. Advisory freshness-analysis
 keep-alive events may accompany the deterministic sequence; they are
 diagnostic, carry no ordering or completion guarantee, and never enter a
 decision or finding. Event data never enters a run

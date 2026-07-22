@@ -16,6 +16,6 @@ face for its actual consumer: a token-conscious agent inside a harness.
 - [x] 7. Oracle instability: attribute unverifiability to the responsible test and suggest an explicit target oracle excluding it
 - [x] 8. Survivor execution evidence: per-candidate executed/not-covered evidence recorded and bucketed (never-executed / executed-and-passed / unstable-oracle)
 - [x] 9. Agent-first MCP face: server instructions and tool descriptions that teach when to use what; responses restructured for token economy with next-action guidance; every long-running tool arms the progress-token seam from the engine's progress events (keep-alive against client tool deadlines, phase-labeled, the stipulator gate treatment), with a heartbeat cadence so no compile or execution stretch stays silent past a deadline plus long-run advisory (native-Tasks work stays parked on its issue)
-- [ ] 10. Output and remediation audit: every message earns its lines; mechanical remediations become offered actions instead of imperative instructions
+- [x] 10. Output and remediation audit: every message earns its lines; mechanical remediations become offered actions instead of imperative instructions
 - [ ] 11. Warm-path measurement after the bump; persistent-memo decision surfaced with numbers
 - [ ] 12. Close-out gate

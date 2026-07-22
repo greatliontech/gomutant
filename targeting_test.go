@@ -423,7 +423,7 @@ func TestDescribeTargetsResolvesEffectiveOracles(t *testing.T) {
 		t.Fatal("missing oracle accepted")
 	}
 	nonFunction, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.I", Oracle: []string{"example.com/fixture/lib.TestAdd"}}})
-	if err != nil || len(nonFunction) != 1 || nonFunction[0].Skipped != "not a function" {
+	if err != nil || len(nonFunction) != 1 || !strings.HasPrefix(nonFunction[0].Skipped, "not a function - ") {
 		t.Fatalf("non-function description = %+v, %v", nonFunction, err)
 	}
 	if _, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.Deleted", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}); err == nil {

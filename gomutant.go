@@ -164,7 +164,7 @@ func (t *Tree) DescribeTargetsContext(ctx context.Context, targets []Target) ([]
 		default:
 			_, err := t.eng.BodyHashContext(ctx, target.Symbol)
 			if errors.Is(err, engine.ErrNotFunction) {
-				description.Skipped = "not a function"
+				description.Skipped = "not a function - for mutation adequacy, target its methods or the bound function-level subjects"
 			} else if err != nil {
 				return nil, fmt.Errorf("target %s: %w", target.Symbol, err)
 			}

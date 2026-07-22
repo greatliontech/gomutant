@@ -59,10 +59,10 @@ func TestRunEndToEnd(t *testing.T) {
 	if add.BodyHash == "" || add.TargetEvidence.Toolchain == "" || add.OperatorSet == "" || len(add.OracleEvidence) != 1 {
 		t.Fatalf("Add pins incomplete: %+v", add)
 	}
-	if iface.Skipped != "not a function" {
+	if !strings.HasPrefix(iface.Skipped, "not a function - ") {
 		t.Fatalf("interface target = %+v, want skipped as not a function", iface)
 	}
-	if len(firstDecisions) != 2 || firstDecisions[0].Reason != "no-prior" || firstDecisions[1].Action != "skipped" || firstDecisions[1].Reason != "not a function" {
+	if len(firstDecisions) != 2 || firstDecisions[0].Reason != "no-prior" || firstDecisions[1].Action != "skipped" || !strings.HasPrefix(firstDecisions[1].Reason, "not a function - ") {
 		t.Fatalf("first decisions = %+v", firstDecisions)
 	}
 

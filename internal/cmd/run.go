@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
@@ -39,7 +40,7 @@ func newRunCommand() *cobra.Command {
 	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "external surface the oracle legitimately reads (module-relative path or absolute file, repeatable; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run")
 	f.BoolVar(&o.force, "force", false, "re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without --force")
 	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref")
-	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery")
+	f.StringVar(&o.targetsFile, "targets", "", "path to a JSON targets document (gomutant's or a producer's export); overrides discovery")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read and update")
 	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
 	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
@@ -76,6 +77,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 	case o.targetsFile != "":
 		data, err := contextio.ReadFile(ctx, o.targetsFile)
 		if err != nil {
+			if trimmed := strings.TrimSpace(o.targetsFile); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+				return fmt.Errorf("--targets expects a file path; the value looks like an inline JSON document - write it to a file first: %w", err)
+			}
 			return err
 		}
 		if err := ctx.Err(); err != nil {
@@ -174,7 +178,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 		}
 		switch {
 		case f.Skipped != "":
-			fmt.Fprintf(&terminal, "skipped   %s  (%s)\n", f.Symbol, f.Skipped)
+			// The skip already printed as its decision line; a second
+			// identical row earns nothing (REQ-exec-run-status's
+			// dedup arm).
 		case f.Cached:
 			fmt.Fprintf(&terminal, "cached    %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
 		default:
@@ -194,6 +200,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	summary := gomutant.SummarizeRun(findings)
 	renderRunSummary(&terminal, summary)
+	// The class line earns its place only when it aggregates: a single
+	// skip's decision line already said everything.
+	if classes, skips := skipClasses(findings); skips > 1 {
+		fmt.Fprintf(&terminal, "skipped   %s\n", classes)
+	}
 	if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -237,6 +248,29 @@ func renderRunDecision(w io.Writer, decision gomutant.RunDecision) {
 	default:
 		fmt.Fprintf(w, "%-9s %s\n", decision.Action, decision.Symbol)
 	}
+}
+
+// skipClasses aggregates skip reasons so a targets-fed run reports
+// each class once with its count instead of a row per symbol.
+func skipClasses(findings []gomutant.Finding) (string, int) {
+	counts := map[string]int{}
+	var order []string
+	for _, f := range findings {
+		if f.Skipped == "" {
+			continue
+		}
+		if counts[f.Skipped] == 0 {
+			order = append(order, f.Skipped)
+		}
+		counts[f.Skipped]++
+	}
+	parts := make([]string, 0, len(order))
+	total := 0
+	for _, reason := range order {
+		parts = append(parts, fmt.Sprintf("%d x %s", counts[reason], reason))
+		total += counts[reason]
+	}
+	return strings.Join(parts, "; "), total
 }
 
 func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {

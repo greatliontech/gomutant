@@ -531,7 +531,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if errors.Is(err, engine.ErrNotFunction) {
 			// A type or variable target is a legitimate reference with no
 			// body to mutate: reported, never fatal, never silently dropped.
-			f.Skipped = "not a function"
+			f.Skipped = "not a function - for mutation adequacy, target its methods or the bound function-level subjects"
 			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
 			continue
 		}

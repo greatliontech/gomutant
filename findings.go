@@ -165,7 +165,7 @@ type Finding struct {
 
 	// Run metadata, never persisted: a cached finding was served from the
 	// prior document under matching pins; a skipped one names why nothing
-	// was measured ("no oracle", "not a function").
+	// was measured ("no oracle", "not a function - ..." with the methodology hint).
 	Cached  bool   `json:"-"`
 	Skipped string `json:"-"`
 }
