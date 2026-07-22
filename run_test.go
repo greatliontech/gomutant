@@ -3,6 +3,7 @@ package gomutant
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -143,8 +144,24 @@ func TestRunEndToEnd(t *testing.T) {
 	if len(moved[0].Attested) != 0 {
 		t.Fatalf("attestation survived a pin move: %+v", moved[0].Attested)
 	}
-	if len(movedDecisions) != 1 || movedDecisions[0].Reason != "stale" {
-		t.Fatalf("moved decisions = %+v", movedDecisions)
+	if len(movedDecisions) != 1 || !strings.HasPrefix(movedDecisions[0].Reason, "stale: ") ||
+		!strings.Contains(movedDecisions[0].Reason, "target") {
+		t.Fatalf("moved decisions = %+v; want the moved pin attributed to its subject", movedDecisions)
+	}
+
+	// An unverifiable prior is not stale: the decision reason carries the
+	// inspection's own class (REQ-result-stale).
+	sealed := append([]Finding(nil), prior...)
+	sealed[0].TargetEvidence.RuntimeUnverifiable = true
+	sealed[0].TargetEvidence.RuntimeReason = "manual input"
+	var sealedDecisions []RunDecision
+	if _, err := tr.Run(ctx, targets[1:2], Options{Budget: 1, Prior: sealed, Decision: func(decision RunDecision) {
+		sealedDecisions = append(sealedDecisions, decision)
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sealedDecisions) != 1 || !strings.HasPrefix(sealedDecisions[0].Reason, "unverifiable: ") {
+		t.Fatalf("sealed decisions = %+v; want the inspection's class, not an assumed stale", sealedDecisions)
 	}
 
 	// A capped prior finding never answers a larger request: budget 1 is
@@ -175,7 +192,7 @@ func TestRunEndToEnd(t *testing.T) {
 	if wider[0].Cached {
 		t.Fatal("a capped finding answered a larger budget request")
 	}
-	if len(widerDecisions) != 1 || widerDecisions[0].Reason != "budget" {
+	if len(widerDecisions) != 1 || !strings.HasPrefix(widerDecisions[0].Reason, "budget: ") {
 		t.Fatalf("wider decisions = %+v", widerDecisions)
 	}
 	// And the same capped request is served from the capped record.
@@ -751,8 +768,9 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 		t.Fatalf("first status = preparation %+v, timeline %v", firstStatus.preparation, firstStatus.timeline)
 	}
 	_, cachedStatus, err := collect(context.Background(), Options{Budget: 1, Prior: first})
-	if err != nil || len(cachedStatus.decisions) != 1 || cachedStatus.decisions[0].Action != "cached" {
-		t.Fatalf("cached status = %+v, %v", cachedStatus, err)
+	if err != nil || len(cachedStatus.decisions) != 1 || cachedStatus.decisions[0].Action != "cached" ||
+		!strings.Contains(cachedStatus.decisions[0].Reason, "served: body, oracle closure, and runtime inputs unchanged") {
+		t.Fatalf("cached status = %+v, %v; want the served reason naming the held pins", cachedStatus, err)
 	}
 	if want := wantPreparation[:2]; !slices.Equal(cachedStatus.preparation, want) || !slices.Equal(cachedStatus.timeline, []string{"prepare", "prepare", "decision"}) {
 		t.Fatalf("cached preparation = %+v, timeline %v", cachedStatus.preparation, cachedStatus.timeline)
@@ -1148,7 +1166,7 @@ func TestRunRemeasuresGeneratedFixtureEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(second) != 1 || len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != "stale" || second[0].Cached {
+	if len(second) != 1 || len(decisions) != 1 || decisions[0].Action != "measure" || !strings.HasPrefix(decisions[0].Reason, "unverifiable: ") || second[0].Cached {
 		t.Fatalf("remeasure = findings %+v, decisions %+v", second, decisions)
 	}
 }
@@ -1659,7 +1677,9 @@ func TestRunPanickedMutantIsCandidateLocalAndServes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := RunDecision{Symbol: target.Symbol, Action: "cached", Candidates: len(f.CandidateEvidence)}
+	want := RunDecision{Symbol: target.Symbol, Action: "cached",
+		Reason:     fmt.Sprintf("served: pins unchanged; %d candidate(s) re-execute", len(f.CandidateEvidence)),
+		Candidates: len(f.CandidateEvidence)}
 	if len(decisions) != 1 || decisions[0] != want {
 		t.Fatalf("serve decision = %+v, want %+v (exactly the flagged candidates re-executed)", decisions, want)
 	}

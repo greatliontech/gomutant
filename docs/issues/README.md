@@ -23,7 +23,7 @@ is deleted (git holds history).
   neither the moved file nor the recovery, discards still-stable targets, and reportedly
   exited 0 (unverified; a zero exit on an aborted campaign is a defect). *Lands: 6 of the
   active hot-loop-ux plan.*
-| [force-covers-semantics-undiscoverable](force-covers-semantics-undiscoverable.md) | Define what "still covers" pins and say why each finding was served | Served lines state their reason and the flag help defines the pin span |
+| [stale-reason-second-view-build](stale-reason-second-view-build.md) | Stale-decision attribution builds a second subject view per stale target | 11 of the active hot-loop-ux plan, or attribution derives from the matcher/prebuilt views |
 | [targets-flag-help-says-document-means-path](targets-flag-help-says-document-means-path.md) | CLI --targets help promises inline JSON but the value is a path | The help matches the semantics or both forms are accepted |
 | [targets-fed-run-output-ux](targets-fed-run-output-ux.md) | Deduplicate skip lines; hint the next step on type-symbol skips | Targets-fed runs report skip classes once, with a methodology hint for type symbols |
 | [goroutine-panic-kill-aborts-run](goroutine-panic-kill-aborts-run.md) | Classify baseline-clean goroutine-panic crashes as kills; stop aborting the run (and discarding measured symbols) over one unclassifiable mutant | A mutant whose failure reproduces under the mutant and clears the baseline probe is a kill regardless of test attribution, and unclassifiable mutants record as unverifiable without aborting the campaign |

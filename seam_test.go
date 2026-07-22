@@ -410,7 +410,7 @@ func TestFresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(remeasured) != 1 || remeasured[0].Cached || len(oldProofDecisions) != 1 || oldProofDecisions[0].Reason != "stale" {
+	if len(remeasured) != 1 || remeasured[0].Cached || len(oldProofDecisions) != 1 || !strings.HasPrefix(oldProofDecisions[0].Reason, "unverifiable: ") {
 		t.Fatalf("superseded observation proof run = %+v, decisions %+v", remeasured, oldProofDecisions)
 	}
 	other := Target{Symbol: "example.com/fixture/lib.Weak"}

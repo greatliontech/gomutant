@@ -34,7 +34,7 @@ func newRunCommand() *cobra.Command {
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result commit after this duration; 0 = unlimited")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
 	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
-	f.BoolVar(&o.force, "force", false, "re-measure targets whose prior finding still covers")
+	f.BoolVar(&o.force, "force", false, "re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without --force")
 	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref")
 	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read and update")

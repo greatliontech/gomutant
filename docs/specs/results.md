@@ -104,7 +104,14 @@ explicitly non-reusable. When
 INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
-serve a weaker request without remeasurement. Labels are correlation metadata,
+serve a weaker request without remeasurement. Serve and re-measure decisions
+state their reason: a served record names the pins that held ("served: body,
+oracle closure, and runtime inputs unchanged"; a splice adds its re-executed
+candidate count), and a non-matching record names its inspection class
+(stale, unverifiable, detached) and the moved pin best-effort via the
+same attribution findings inspection uses, so a caller who just strengthened
+an oracle sees the tool noticing rather than forcing a re-measure
+defensively. Labels are correlation metadata,
 not measurement pins: when every measurement pin still matches, a reused
 finding adopts the current target's labels without remeasurement or shedding
 survivor attestations. Oracle membership remains a measurement pin, so changing

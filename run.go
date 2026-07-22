@@ -425,7 +425,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			case opts.Force:
 				reason = "forced"
 			case !budgetCovers(*rec, opts.Budget):
-				reason = "budget"
+				reason = fmt.Sprintf("budget: prior generated %d of %d candidates, request wants budget %d", rec.Generated, rec.CandidateCount, opts.Budget)
 			default:
 				reason = "stale"
 			}
@@ -436,12 +436,26 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if err != nil {
 				return nil, err
 			}
+			if !matches {
+				// The moved pin is named so a caller who just wrote
+				// kill-tests sees the tool noticing them instead of
+				// forcing defensively (REQ-result-stale). The class comes
+				// from the inspection, not an assumed "stale": an
+				// unverifiable prior is not stale.
+				inspection, ierr := t.inspectFindingStateContext(ctx, *rec)
+				switch {
+				case ierr == nil && inspection.State != FindingCurrent && inspection.Reason != "":
+					reason = string(inspection.State) + ": " + inspection.Reason
+				default:
+					reason = "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)"
+				}
+			}
 			if matches && len(rec.CandidateEvidence) == 0 {
 				cached := *rec
 				cached.Labels = append([]string(nil), tg.Labels...)
 				cached.Cached = true
 				findings[i] = cached
-				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached"}
+				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: "served: body, oracle closure, and runtime inputs unchanged"}
 				if err := commitFinding(ctx, repository, opts.Commit, cached); err != nil {
 					return nil, err
 				}
@@ -508,7 +522,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if flagged, ok := flaggedCandidateIndexes(generation, *w.serve); ok {
 				w.candidates = generation.Candidates
 				w.flagged = flagged
-				decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "cached", Candidates: len(flagged)}
+				decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: fmt.Sprintf("served: pins unchanged; %d candidate(s) re-execute", len(flagged)), Candidates: len(flagged)}
 			} else {
 				// Deterministic regeneration cannot re-identify every flagged
 				// candidate and recorded survivor, so the record cannot be
