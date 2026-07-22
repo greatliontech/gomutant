@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -158,7 +159,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 			})
 		},
 	})
-	if err != nil {
+	var drift *gomutant.TreeDriftError
+	if err != nil && !errors.As(err, &drift) {
 		return err
 	}
 	for _, f := range findings {
@@ -194,8 +196,16 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}); err != nil {
 		return err
 	}
-	_, err = io.Copy(out, &terminal)
-	return err
+	if _, err := io.Copy(out, &terminal); err != nil {
+		return err
+	}
+	// A drift-refused campaign keeps its rendered completed findings and
+	// still fails operationally: a pipeline never reads a partial
+	// campaign as success (REQ-exec-quiescence).
+	if drift != nil {
+		return drift
+	}
+	return nil
 }
 
 func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {

@@ -923,7 +923,7 @@ func TestRunValidatesBatchedProducerBeforeFindings(t *testing.T) {
 			}
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
+	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || len(findings) != 0 {
 		t.Fatalf("producer drift = findings %+v, error %v", findings, err)
 	}
 }
@@ -956,7 +956,7 @@ func TestRunValidatesEveryProducerModule(t *testing.T) {
 			}
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
+	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || len(findings) != 0 {
 		t.Fatalf("oracle-module drift = findings %+v, error %v", findings, err)
 	}
 }
@@ -979,7 +979,7 @@ func TestRunValidatesAfterMutantProcesses(t *testing.T) {
 		Symbol: "example.com/fixture/lib.Add",
 		Oracle: []string{"example.com/fixture/lib.TestDriftSource"},
 	}}, Options{Budget: 2})
-	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
+	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || len(findings) != 0 {
 		t.Fatalf("post-mutant drift = findings %+v, error %v", findings, err)
 	}
 }
@@ -1011,7 +1011,7 @@ func TestRunValidatesZeroMutantProducer(t *testing.T) {
 			}
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || findings != nil {
+	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || len(findings) != 0 {
 		t.Fatalf("zero-mutant drift = findings %+v, error %v", findings, err)
 	}
 }

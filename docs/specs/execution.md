@@ -87,7 +87,15 @@ classifies the candidate as discarded rather than measured.
 mutation from target loading through run completion. gomutant validates captured
 source views after execution and refuses ordinary drift, but, like its Gofresh
 producer boundary, cannot prove that an external actor did not change and restore an
-input while a compiler read it.
+input while a compiler read it. Drift refusal is target-local: a target whose own
+producer evidence no longer validates is refused with the drift named, while every
+target whose evidence still validates keeps its completed finding — committed
+incrementally, so a partial campaign retains its sound results. A drift-refused run
+reports the refused set with a re-run hint and fails operationally (a pipeline
+never reads a partial campaign as success); a transient global drift that no
+surviving target's evidence reflects is still reported, never silently absorbed.
+A repository HEAD move remains campaign-wide: it breaks the commit provenance
+pin every finding carries — a global pin, not per-target source drift.
 
 **REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant — a
 caller-supplied replacement of one or more existing source files, given whole,

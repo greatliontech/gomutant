@@ -710,11 +710,20 @@ dispatching:
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if err := views.validateProducers(ctx); err != nil {
-		return nil, fmt.Errorf("validate freshness: %w", err)
-	}
 	if opts.afterExecution != nil {
 		opts.afterExecution()
+	}
+	// A drifted producer view refuses target-locally, not campaign-wide:
+	// the per-target validations below decide which findings still bind,
+	// so a concurrent edit costs only the affected targets
+	// (REQ-exec-quiescence).
+	var treeDrift error
+	var drifted []TargetDrift
+	if err := views.validateProducers(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		treeDrift = err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -735,7 +744,11 @@ dispatching:
 				return nil, err
 			}
 			if err := w.producer.validateProducers(ctx); err != nil {
-				return nil, fmt.Errorf("validate freshness: %w", err)
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+				continue
 			}
 			findings[w.target] = spliced
 			if err := commitFinding(ctx, repository, opts.Commit, spliced); err != nil {
@@ -758,7 +771,11 @@ dispatching:
 		f.TargetEvidence = targetEvidence
 		f.OracleEvidence = oracleEvidence
 		if err := w.producer.validateProducers(ctx); err != nil {
-			return nil, fmt.Errorf("validate freshness: %w", err)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+			continue
 		}
 		f.Commit = repository.commit
 		sourceFiles := append([]string(nil), w.targetView.sourceFiles...)
@@ -830,6 +847,13 @@ dispatching:
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if len(drifted) > 0 || treeDrift != nil {
+		completed := completedFindings(findings, drifted)
+		if len(drifted) == 0 {
+			return completed, &TreeDriftError{Completed: len(completed), Transient: treeDrift.Error()}
+		}
+		return completed, &TreeDriftError{Drifted: drifted, Completed: len(completed)}
 	}
 	return findings, nil
 }

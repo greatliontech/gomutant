@@ -6,6 +6,7 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -388,7 +389,8 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 	}
 	findings, err := tree.Run(ctx, targets, options)
-	if err != nil {
+	var drift *gomutant.TreeDriftError
+	if err != nil && !errors.As(err, &drift) {
 		return nil, out, err
 	}
 	out.Summary = gomutant.SummarizeRun(findings)
@@ -418,6 +420,12 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return nil, out, err
 	}
 	out.Document = s.findingsPath(in.Findings)
+	// A drift-refused campaign persists its completed findings and still
+	// errors: the client never reads a partial campaign as success
+	// (REQ-exec-quiescence).
+	if drift != nil {
+		return nil, out, drift
+	}
 	return nil, out, nil
 }
 

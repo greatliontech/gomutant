@@ -19,10 +19,6 @@ is deleted (git holds history).
 | [ephemeral-input-validation](ephemeral-input-validation.md) | Ephemeral runs score unexercised replacements as survivors and pass unvalidated test packages into go test option positions | Ephemeral runs refuse replacements outside the selected build and test packages that are not loaded import paths |
 | [spec-corpus-compile-diagnostics](spec-corpus-compile-diagnostics.md) | `stipulator compile` over docs/specs emits seven diagnostics; coverage gating cannot run clean | `stipulator compile` reports zero diagnostics under the gating Stipulator version |
 | [edit-uniqueness-overlap](edit-uniqueness-overlap.md) | Exact-match edit uniqueness counts non-overlapping occurrences, so a self-overlapping pattern applies at a guessed location | Edit uniqueness counts overlapping match starts and refuses more than one as ambiguous |
-- **[run-drift-abort-ux](run-drift-abort-ux.md)** — a mid-run freshness drift abort names
-  neither the moved file nor the recovery, discards still-stable targets, and reportedly
-  exited 0 (unverified; a zero exit on an aborted campaign is a defect). *Lands: 6 of the
-  active hot-loop-ux plan.*
 | [stale-reason-second-view-build](stale-reason-second-view-build.md) | Stale-decision attribution builds a second subject view per stale target | 11 of the active hot-loop-ux plan, or attribution derives from the matcher/prebuilt views |
 | [targets-flag-help-says-document-means-path](targets-flag-help-says-document-means-path.md) | CLI --targets help promises inline JSON but the value is a path | The help matches the semantics or both forms are accepted |
 | [targets-fed-run-output-ux](targets-fed-run-output-ux.md) | Deduplicate skip lines; hint the next step on type-symbol skips | Targets-fed runs report skip classes once, with a methodology hint for type symbols |
