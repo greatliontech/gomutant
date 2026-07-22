@@ -262,6 +262,11 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		args = append(args, "-test.testlogfile="+testlog)
 		baseArgs = append(baseArgs, "-test.testlogfile="+baseTestlog)
 	}
+	var oracleBracket *runtimeinput.Bracket
+	var oracleBracketReason string
+	if capture {
+		oracleBracket, oracleBracketReason = captureOracleBracket(ctx, moduleDir, packageDir)
+	}
 	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
 	cmd.Env = env
@@ -271,11 +276,11 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	runErr := cmd.Run()
 
 	if runCtx.Err() == context.DeadlineExceeded {
-		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process timed out", env, capture)
+		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process timed out", env, capture, oracleBracket, oracleBracketReason)
 		return MutantKilled, TimeoutKiller, state, incomplete, err
 	}
 	if runCtx.Err() != nil {
-		state, incomplete, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process was cancelled", env, capture)
+		state, incomplete, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process was cancelled", env, capture, oracleBracket, oracleBracketReason)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", observationErr
 		}
@@ -283,7 +288,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	}
 	killer, parseErr := firstFailingTest(stdout.Bytes())
 	if parseErr != nil {
-		state, incomplete, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "go test output was malformed before observation finalization", env, capture)
+		state, incomplete, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "go test output was malformed before observation finalization", env, capture, oracleBracket, oracleBracketReason)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", observationErr
 		}
@@ -291,10 +296,10 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	}
 	switch {
 	case runErr == nil:
-		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "", env, capture)
+		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "", env, capture, oracleBracket, oracleBracketReason)
 		return MutantSurvived, "", state, incomplete, err
 	case strings.Contains(stdout.String(), "[build failed]"):
-		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process did not start because the mutant failed to build", env, capture)
+		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process did not start because the mutant failed to build", env, capture, oracleBracket, oracleBracketReason)
 		return MutantDiscarded, "", state, incomplete, err
 	case killer != "":
 		reason := ""
@@ -304,7 +309,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 				reason = "mutant test process exited before observation finalization"
 			}
 		}
-		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, reason, env, capture)
+		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, reason, env, capture, oracleBracket, oracleBracketReason)
 		return MutantKilled, killer, state, incomplete, err
 	}
 
@@ -322,12 +327,12 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		base.Dir = dir
 		base.Env = env
 		baseErr := base.Run()
-		mutantState, mutantIncomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process exited before observation finalization", env, capture)
+		mutantState, mutantIncomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process exited before observation finalization", env, capture, oracleBracket, oracleBracketReason)
 		if err != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", err
 		}
 		if baseCtx.Err() != nil {
-			baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "baseline test process did not complete", env, capture)
+			baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "baseline test process did not complete", env, capture, oracleBracket, oracleBracketReason)
 			if observationErr != nil {
 				return MutantDiscarded, "", runtimeinput.Observation{}, "", observationErr
 			}
@@ -338,14 +343,14 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 			return MutantDiscarded, "", state, mutantIncomplete, baseCtx.Err()
 		}
 		if baseErr == nil {
-			baselineState, _, err := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "", env, capture)
+			baselineState, _, err := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "", env, capture, oracleBracket, oracleBracketReason)
 			if err != nil {
 				return MutantDiscarded, "", runtimeinput.Observation{}, "", err
 			}
 			state, err := mergeProcessObservationsContext(ctx, dir, env, capture, mutantState, baselineState)
 			return MutantKilled, PackageKillerPrefix + pkg + ")", state, mutantIncomplete, err
 		}
-		baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "baseline test process failed before observation finalization", env, capture)
+		baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "baseline test process failed before observation finalization", env, capture, oracleBracket, oracleBracketReason)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", observationErr
 		}
@@ -355,7 +360,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		}
 		return MutantDiscarded, "", state, mutantIncomplete, fmt.Errorf("mutant run failed with no test-attributed kill (environmental noise, not a kill; baseline probe did not clear it): %v: %s", runErr, tail(stderr.String()+stdout.String(), 400))
 	}
-	state, incomplete, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process failed before attributable completion", env, capture)
+	state, incomplete, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process failed before attributable completion", env, capture, oracleBracket, oracleBracketReason)
 	if observationErr != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", observationErr
 	}
@@ -363,7 +368,39 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 }
 
 func processObservation(path, moduleDir, packageDir, incompleteReason string, env []string, capture bool) (runtimeinput.Observation, string, error) {
-	return processObservationContext(context.Background(), path, moduleDir, packageDir, incompleteReason, env, capture)
+	return processObservationContext(context.Background(), path, moduleDir, packageDir, incompleteReason, env, capture, nil, "")
+}
+
+// captureOracleBracket fingerprints the oracle package's directory
+// before the test process spawns, so a completed observation can bind
+// the values the tests read (mutants run through a build overlay, so
+// the on-disk tree the bracket covers is unmutated and stable across
+// the run). A capture failure degrades the observation to incomplete
+// with the stated reason - fail-closed, never an error.
+func captureOracleBracket(ctx context.Context, moduleDir, packageDir string) (*runtimeinput.Bracket, string) {
+	root, err := filepath.EvalSymlinks(moduleDir)
+	if err != nil {
+		return nil, fmt.Sprintf("observation bracket capture failed: %v", err)
+	}
+	resolvedPkg, err := filepath.EvalSymlinks(packageDir)
+	if err != nil {
+		return nil, fmt.Sprintf("observation bracket capture failed: %v", err)
+	}
+	rel, err := filepath.Rel(root, resolvedPkg)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Sprintf("package directory %s lies outside the module; no observation bracket can cover it", packageDir)
+	}
+	// Tool-owned bookkeeping directories are excluded: an orchestrating
+	// corpus check or gomutant's own cache writing mid-run is not the
+	// oracle's runtime input. A module-root oracle package makes the
+	// bracket span the whole module - conservative and priced per
+	// spawn; any other volatile in-tree subtree seals it.
+	b, err := runtimeinput.CaptureBracketContext(ctx, root, []string{filepath.ToSlash(rel)},
+		runtimeinput.WithBracketExcludedPaths(".git", ".stipulator", ".gomutant"))
+	if err != nil {
+		return nil, fmt.Sprintf("observation bracket capture failed: %v", err)
+	}
+	return &b, ""
 }
 
 // processObservationContext finalizes one launched test process's runtime-input
@@ -373,7 +410,7 @@ func processObservation(path, moduleDir, packageDir, incompleteReason string, en
 // observation that later fails absolute finalization keeps an empty reason
 // because that is input movement, which stays finding-wide
 // (REQ-exec-observation).
-func processObservationContext(ctx context.Context, path, moduleDir, packageDir, incompleteReason string, env []string, capture bool) (runtimeinput.Observation, string, error) {
+func processObservationContext(ctx context.Context, path, moduleDir, packageDir, incompleteReason string, env []string, capture bool, bracket *runtimeinput.Bracket, bracketReason string) (runtimeinput.Observation, string, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.Observation{}, "", err
 	}
@@ -391,8 +428,17 @@ func processObservationContext(ctx context.Context, path, moduleDir, packageDir,
 			observation, err = runtimeinput.IncompleteEnv(moduleDir, path, incompleteReason, env)
 		} else if readErr != nil {
 			return runtimeinput.Observation{}, "", readErr
+		} else if bracket == nil {
+			// No pre-spawn bracket, no completed observation: the values
+			// the run read cannot bind, so the evidence fails closed as
+			// incomplete with the capture's stated reason.
+			incompleteReason = bracketReason
+			if incompleteReason == "" {
+				incompleteReason = "no observation bracket was captured"
+			}
+			observation, err = runtimeinput.IncompleteEnv(moduleDir, path, incompleteReason, env)
 		} else {
-			observation, err = runtimeinput.FromTestLogEnv(data, moduleDir, packageDir, env, runtimeinput.WithCompletedProcess(path))
+			observation, err = runtimeinput.FromTestLogEnv(data, moduleDir, packageDir, env, runtimeinput.WithCompletedProcess(path), runtimeinput.WithBracket(*bracket))
 		}
 	}
 	if err != nil {
@@ -543,7 +589,12 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if ran == 0 {
 		return 0, true, first, nil
 	}
-	if !first.OK || first.Unverifiable {
+	// The repeat guards baseline VALIDITY (a flaky pass fabricating
+	// verdicts), which no observation bracket subsumes: it runs even
+	// when the first observation's evidence is already unverifiable.
+	// Only the empty-observation shortcut below needs verifiable
+	// evidence to be meaningful.
+	if !first.OK {
 		return ran, passed, first, err
 	}
 	empty, err := runtimeinput.MergeEnv(moduleDir, env)
@@ -560,7 +611,7 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if err := ctx.Err(); err != nil {
 		return 0, false, runtimeinput.Observation{}, err
 	}
-	if first.State == empty.State {
+	if !first.Unverifiable && first.State == empty.State {
 		return ran, passed, first, nil
 	}
 	secondRan, secondPassed, second, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, env)
@@ -607,6 +658,11 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		testlog = filepath.Join(tmp, "baseline.testlog")
 		args = append(args, "-test.testlogfile="+testlog)
 	}
+	var oracleBracket *runtimeinput.Bracket
+	var oracleBracketReason string
+	if capture {
+		oracleBracket, oracleBracketReason = captureOracleBracket(ctx, moduleDir, packageDir)
+	}
 	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir
 	cmd.Env = env
@@ -615,14 +671,14 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	cmd.Stderr = &buf
 	runErr := cmd.Run()
 	if ctx2.Err() == context.DeadlineExceeded {
-		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process timed out", env, capture)
+		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process timed out", env, capture, oracleBracket, oracleBracketReason)
 		if observationErr != nil {
 			return 0, false, runtimeinput.Observation{}, observationErr
 		}
 		return 0, false, state, fmt.Errorf("baseline test timed out")
 	}
 	if err := ctx2.Err(); err != nil {
-		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process was cancelled", env, capture)
+		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process was cancelled", env, capture, oracleBracket, oracleBracketReason)
 		if observationErr != nil {
 			return 0, false, runtimeinput.Observation{}, observationErr
 		}
@@ -635,7 +691,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if err != nil {
 		return 0, false, runtimeinput.Observation{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
-	state, _, err = processObservationContext(ctx, testlog, moduleDir, packageDir, "", env, capture)
+	state, _, err = processObservationContext(ctx, testlog, moduleDir, packageDir, "", env, capture, oracleBracket, oracleBracketReason)
 	if err != nil {
 		return 0, false, runtimeinput.Observation{}, err
 	}

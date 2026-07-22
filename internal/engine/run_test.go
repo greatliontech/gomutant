@@ -160,10 +160,13 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := filepath.Join(t.TempDir(), "moving-input")
+	// The input lives inside the oracle package: the pre-spawn bracket
+	// covers it, so its stable value binds instead of sealing.
+	input := filepath.Join(packageDir, ".moving-input-fixture")
 	if err := os.WriteFile(input, []byte("A"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { os.Remove(input) })
 	t.Setenv("GOMUTANT_MOVING_INPUT", input)
 	outcome, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
 		[]string{"example.com/fixture/lib"}, "^TestMovingInput$", 60*time.Second, nil, moduleDir, packageDir)
@@ -173,8 +176,12 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 	if outcome != MutantSurvived || killer != "" {
 		t.Fatalf("stable-input measurement = %v/%q, want survivor from second run", outcome, killer)
 	}
-	if !state.OK || state.Unverifiable || incomplete != "" {
-		t.Fatalf("runtime state = %+v, incomplete %q", state, incomplete)
+	// A test mutating its own runtime input mid-run seals the
+	// observation through the bracket: the settled value is exactly the
+	// false-reuse class the bracket generation refuses, so the verdict
+	// scores while the evidence stays unverifiable.
+	if !state.OK || !state.Unverifiable || incomplete != "" || !strings.Contains(state.Reason, "observation bracket moved") {
+		t.Fatalf("runtime state = %+v, incomplete %q, want bracket-sealed unverifiable evidence", state, incomplete)
 	}
 }
 
@@ -470,13 +477,18 @@ func TestProbeBaselineRecordsRuntimeInputDriftAsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := filepath.Join(t.TempDir(), "unstable-input")
+	input := filepath.Join(packageDir, ".unstable-input-fixture")
 	if err := os.WriteFile(input, []byte("A"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { os.Remove(input) })
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_INPUT="+input)
 	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableInput$", time.Minute, nil, moduleDir, packageDir, env)
-	if err != nil || ran != 1 || !passed || !state.OK || !state.Unverifiable || !strings.Contains(state.Reason, "repeated baseline executions") {
+	// A mid-run mutation of an in-bracket input seals through the
+	// bracket (the stronger signal) or through repeated-baseline drift;
+	// either way the evidence is unverifiable, never silently valid.
+	drifty := strings.Contains(state.Reason, "repeated baseline executions") || strings.Contains(state.Reason, "observation bracket moved")
+	if err != nil || ran != 1 || !passed || !state.OK || !state.Unverifiable || !drifty {
 		t.Fatalf("unstable baseline = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
 	}
 }
@@ -487,13 +499,15 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	packageDir := filepath.Join(moduleDir, "lib")
-	stable := filepath.Join(t.TempDir(), "stable-input")
+	stable := filepath.Join(packageDir, ".stable-input-fixture")
 	if err := os.WriteFile(stable, []byte("stable"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { os.Remove(stable) })
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_STABLE_INPUT="+stable)
 	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, env)
-	if err != nil || ran != 1 || !passed || !state.OK || !state.Unverifiable || !strings.Contains(state.Reason, "repeated baseline executions") {
+	drifty := strings.Contains(state.Reason, "repeated baseline executions") || strings.Contains(state.Reason, "observation bracket moved")
+	if err != nil || ran != 1 || !passed || !state.OK || !state.Unverifiable || !drifty {
 		t.Fatalf("changing identities = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
 	}
 	paths, err := runtimeinput.Paths(state.Manifest, moduleDir)
@@ -503,6 +517,18 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	if !slices.Contains(paths, stable) {
 		t.Fatalf("runtime paths = %v, missing stable input %s", paths, stable)
 	}
+}
+
+// testBracket captures an observation bracket over the whole root, so
+// direct testlog constructions satisfy the completed-observation
+// contract exactly as the engine's pre-spawn capture does.
+func testBracket(t *testing.T, root string) runtimeinput.Bracket {
+	t.Helper()
+	b, err := runtimeinput.CaptureBracket(root, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
@@ -516,11 +542,11 @@ func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"))
+	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"))
+	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,7 +573,7 @@ func TestAbsoluteRuntimeEvidenceDropsMovedUnsealedInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("absolute"))
+	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("absolute"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +610,7 @@ func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"))
+	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,5 +697,27 @@ func TestGoTestArgs(t *testing.T) {
 	got = goTestArgs(max)
 	if got[3] != max.String() {
 		t.Fatalf("maximum timeout wrapped to %q", got[3])
+	}
+}
+
+// A complete testlog without a pre-spawn bracket degrades to an
+// incomplete observation carrying the capture's stated reason: the
+// values the run read cannot bind, so the evidence fails closed
+// instead of erroring or silently completing.
+func TestObservationWithoutBracketFailsClosedAsIncomplete(t *testing.T) {
+	root := t.TempDir()
+	log := filepath.Join(root, "proc.testlog")
+	if err := os.WriteFile(log, []byte("open fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	obs, incomplete, err := processObservationContext(context.Background(), log, root, root, "", os.Environ(), true, nil, "observation bracket capture failed: fixture reason")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if incomplete == "" || !strings.Contains(incomplete, "fixture reason") {
+		t.Fatalf("incomplete = %q, want the bracket capture's stated reason", incomplete)
+	}
+	if !obs.OK || !obs.Unverifiable {
+		t.Fatalf("observation = %+v, want fail-closed incomplete evidence", obs)
 	}
 }

@@ -149,10 +149,11 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 		if err != nil {
 			return nil, err
 		}
+		// One Validate covers every capture class: the view revalidates
+		// whatever it captured (the collapsed evidence-tier surface).
 		module := &moduleSubjectView{view: view, validate: view.Validate}
 		var observedFingerprints map[gofresh.Subject]gofresh.Fingerprint
 		if observed {
-			module.validate = view.ValidateObserved
 			// One batched proof pass per view: the observability analysis is
 			// shared across the view's whole subject set instead of re-run per
 			// subject, with per-subject fingerprints read from the batch.
@@ -174,7 +175,7 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 				}
 				fp = captured
 			} else {
-				fp, err = view.Capture(resolved.subject)
+				fp, err = view.Capture(ctx, resolved.subject)
 				if err != nil {
 					return nil, err
 				}

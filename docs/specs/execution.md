@@ -44,7 +44,12 @@ fresh measurement.
 
 **REQ-exec-observation** (behavior): gomutant MUST capture one independent Go
 testlog observation for every mutant and oracle-baseline process it launches and
-finalize completed logs against that process's package working directory. When
+finalize completed logs against that process's package working directory. A
+completed observation binds its values through an observation bracket
+fingerprinted over the oracle package's directory before the process spawns
+(tool-owned bookkeeping directories excluded); a spawn whose bracket could not
+be captured finalizes as an incomplete observation carrying the capture's
+stated reason, never as a completed one - the values the run read cannot bind. When
 the completed states agree with one coherent current view, their deterministic
 union is attached conservatively to the target and every oracle subject in the
 finding together with caller-selected observation-completeness assertion and
