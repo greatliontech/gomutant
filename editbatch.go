@@ -124,7 +124,7 @@ func prepareEditBatchContext(ctx context.Context, root string, edits []BatchEdit
 		}
 
 		old := []byte(edit.OldString)
-		switch count := bytes.Count(group.source, old); count {
+		switch count := overlappingMatchStarts(string(group.source), string(old)); count {
 		case 0:
 			return nil, fmt.Errorf("gomutant: batch edit %d matches nothing in %s", i+1, edit.File)
 		case 1:

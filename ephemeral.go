@@ -183,7 +183,7 @@ func ApplyEditsContext(ctx context.Context, src []byte, edits []Edit) ([]byte, e
 		if e.Old == "" {
 			return nil, fmt.Errorf("gomutant: edit %d has an empty match", i+1)
 		}
-		switch n := strings.Count(out, e.Old); n {
+		switch n := overlappingMatchStarts(out, e.Old); n {
 		case 0:
 			return nil, fmt.Errorf("gomutant: edit %d matches nothing: %q", i+1, e.Old)
 		case 1:
@@ -196,6 +196,26 @@ func ApplyEditsContext(ctx context.Context, src []byte, edits []Edit) ([]byte, e
 		return nil, err
 	}
 	return []byte(out), nil
+}
+
+// overlappingMatchStarts counts every valid match start, overlapping
+// included: in "aaa" the pattern "aa" starts at 0 and 1, so it is
+// ambiguous even though the non-overlapping count is 1 - an edit
+// applied at a guessed start is a measurement of the wrong mutant
+// (REQ-exec-ephemeral).
+func overlappingMatchStarts(s, pattern string) int {
+	if pattern == "" {
+		return 0
+	}
+	count := 0
+	for from := 0; ; {
+		i := strings.Index(s[from:], pattern)
+		if i < 0 {
+			return count
+		}
+		count++
+		from += i + 1
+	}
 }
 
 // EphemeralEdits runs an ephemeral mutant given as exact-match edits against

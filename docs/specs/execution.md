@@ -160,7 +160,9 @@ file-scoped exact-match edits applied to the files' current
 content, exercised through one build overlay against a named oracle test, the tree never touched — for the manual
 mutations the operator set cannot generate (generated-data drift, resolver
 seams, caller mappings). An edit that matches nothing, or matches more than
-once, is refused rather than guessed: a mutation applied somewhere the
+once — match starts counted overlapping, so a self-overlapping pattern with
+two valid starts is ambiguous even when its non-overlapping count is one — is
+refused rather than guessed: a mutation applied somewhere the
 caller did not mean is a measurement of the wrong mutant. Before running the mutant gomutant probes the named
 test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
@@ -177,7 +179,8 @@ on, never persisted to a finding record (REQ-result-record).
 Each atomic batch entry carries a canonical tree-relative slash path, a
 non-empty old string, and its replacement. Every path resolves to an existing
 regular file within the tree, and every old string occurs exactly once in that
-file's original bytes. All entries resolve against the same pre-mutation file
+file's original bytes (match starts counted overlapping, per the ambiguity
+rule above). All entries resolve against the same pre-mutation file
 contents; text introduced by one entry cannot satisfy another. Entries whose
 ranges overlap, whose replacements are byte-identical, or whose combined
 result changes no file are refused before any test process starts. The whole
