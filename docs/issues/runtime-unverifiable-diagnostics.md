@@ -1,9 +1,16 @@
 # Runtime-unverifiable diagnostics omit the moving input
 
-Lands: 6 of the active hot-loop-ux plan (run-side freshness errors carry the
-moved input and subject context at the wrap sites; the findings-inspection
-surfaces already name the moved identity, the responsible subject, and the
-target record).
+Lands: when gofresh's View.Validate names the differing source identity (the
+moved file) inside ErrViewChanged, so gomutant's drift refusals can carry it.
+
+Landed so far: findings-inspection surfaces name the moved runtime-input
+identity, the responsible subject, and the target record (hot-loop chunk 5);
+run-side drift refusals are target-local and name the target, the drifted
+subject, and gofresh's drift class, and view-construction failures name the
+target and oracle (chunk 6). The one remaining gap is closure-class drift
+naming the moved FILE: gofresh compares per-file source identities during
+validation but reports only the subject and class - the naming needs upstream
+attribution in gofresh, not another gomutant wrap.
 
 ## Observed
 

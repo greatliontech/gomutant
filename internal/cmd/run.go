@@ -21,6 +21,7 @@ type runOptions struct {
 	budget, jobs                            int
 	timeout, oracleTimeout                  time.Duration
 	force                                   bool
+	bracketPaths                            []string
 	output                                  io.Writer
 }
 
@@ -35,6 +36,7 @@ func newRunCommand() *cobra.Command {
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result commit after this duration; 0 = unlimited")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
 	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
+	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "external surface the oracle legitimately reads (module-relative path or absolute file, repeatable; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run")
 	f.BoolVar(&o.force, "force", false, "re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without --force")
 	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref")
 	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery")
@@ -140,7 +142,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		return err
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
-		Budget: o.budget, OracleTimeout: o.oracleTimeout, Jobs: o.jobs, Force: o.force, Prior: prior,
+		Budget: o.budget, OracleTimeout: o.oracleTimeout, Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, Prior: prior,
 		Decision: func(decision gomutant.RunDecision) {
 			renderRunDecision(out, decision)
 		},

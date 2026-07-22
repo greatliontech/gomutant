@@ -47,7 +47,15 @@ testlog observation for every mutant and oracle-baseline process it launches and
 finalize completed logs against that process's package working directory. A
 completed observation binds its values through an observation bracket
 fingerprinted over the oracle package's directory before the process spawns
-(tool-owned bookkeeping directories excluded); a spawn whose bracket could not
+(tool-owned bookkeeping directories excluded), plus any caller-declared bracket
+paths — module-relative paths (a file or a directory tree) or absolute files an
+oracle legitimately reads outside its package directory, each declared with the
+bracket contract's mutation-free assertion for the span, so an external fixed
+fixture binds instead of sealing the observation. An absolute external
+directory cannot be walked by the bracket's hashing semantics and is refused at
+run start — declaring it would seal every observation, strictly worse than not
+declaring — as is a declared path under a tool-excluded directory, which would
+otherwise be silently uncovered; a spawn whose bracket could not
 be captured finalizes as an incomplete observation carrying the capture's
 stated reason, never as a completed one - the values the run read cannot bind. When
 the completed states agree with one coherent current view, their deterministic

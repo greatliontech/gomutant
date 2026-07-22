@@ -126,13 +126,13 @@ const PackageKillerPrefix = "(package failure: "
 // failed to build, empty otherwise, so a manual-probe refusal can name
 // the reason instead of leaving the caller to guess (REQ-exec-ephemeral).
 func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string) (MutantOutcome, string, string, error) {
-	outcome, killer, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", GoEnv(dir))
+	outcome, killer, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, GoEnv(dir))
 	return outcome, killer, diagnostic, err
 }
 
 // RunMutantEnv is RunMutant under an already-frozen complete environment.
 func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (MutantOutcome, string, string, error) {
-	outcome, killer, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", env)
+	outcome, killer, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, env)
 	return outcome, killer, diagnostic, err
 }
 
@@ -144,20 +144,20 @@ func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, 
 // and is empty otherwise; that incompleteness attaches to the measured
 // candidate alone, while content-unverifiable or disagreeing COMPLETED
 // observations stay finding-wide (REQ-exec-observation).
-func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string) (MutantOutcome, string, runtimeinput.Observation, string, error) {
-	outcome, killer, state, incomplete, _, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, GoEnv(dir))
+func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string) (MutantOutcome, string, runtimeinput.Observation, string, error) {
+	outcome, killer, state, incomplete, _, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, GoEnv(dir))
 	return outcome, killer, state, incomplete, err
 }
 
 // RunMutantObservedEnv is RunMutantObserved under an already-frozen complete
 // environment.
-func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (MutantOutcome, string, runtimeinput.Observation, string, error) {
-	outcome, killer, state, incomplete, _, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, env)
+func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (MutantOutcome, string, runtimeinput.Observation, string, error) {
+	outcome, killer, state, incomplete, _, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, env)
 	return outcome, killer, state, incomplete, err
 }
 
-func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
-	firstOutcome, firstKiller, firstState, firstIncomplete, firstDiag, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, env)
+func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+	firstOutcome, firstKiller, firstState, firstIncomplete, firstDiag, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, env)
 	if err != nil || !firstState.OK || firstState.Unverifiable {
 		return firstOutcome, firstKiller, firstState, firstIncomplete, firstDiag, err
 	}
@@ -184,7 +184,7 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 	// the evidence non-reusable without suppressing the attributed outcome,
 	// and stays finding-wide — incoherence among completed states is never
 	// candidate-local (REQ-exec-observation).
-	secondOutcome, secondKiller, secondState, secondIncomplete, secondDiag, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, env)
+	secondOutcome, secondKiller, secondState, secondIncomplete, secondDiag, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, env)
 	if err != nil {
 		return secondOutcome, secondKiller, secondState, secondIncomplete, secondDiag, err
 	}
@@ -204,7 +204,7 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 	return secondOutcome, secondKiller, combined, "", secondDiag, nil
 }
 
-func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
 	if err := ctx.Err(); err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
@@ -272,7 +272,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	var oracleBracket *runtimeinput.Bracket
 	var oracleBracketReason string
 	if capture {
-		oracleBracket, oracleBracketReason = captureOracleBracket(ctx, moduleDir, packageDir)
+		oracleBracket, oracleBracketReason = captureOracleBracket(ctx, moduleDir, packageDir, bracketPaths)
 	}
 	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
@@ -384,7 +384,7 @@ func processObservation(path, moduleDir, packageDir, incompleteReason string, en
 // the on-disk tree the bracket covers is unmutated and stable across
 // the run). A capture failure degrades the observation to incomplete
 // with the stated reason - fail-closed, never an error.
-func captureOracleBracket(ctx context.Context, moduleDir, packageDir string) (*runtimeinput.Bracket, string) {
+func captureOracleBracket(ctx context.Context, moduleDir, packageDir string, bracketPaths []string) (*runtimeinput.Bracket, string) {
 	root, err := filepath.EvalSymlinks(moduleDir)
 	if err != nil {
 		return nil, fmt.Sprintf("observation bracket capture failed: %v", err)
@@ -402,7 +402,11 @@ func captureOracleBracket(ctx context.Context, moduleDir, packageDir string) (*r
 	// oracle's runtime input. A module-root oracle package makes the
 	// bracket span the whole module - conservative and priced per
 	// spawn; any other volatile in-tree subtree seals it.
-	b, err := runtimeinput.CaptureBracketContext(ctx, root, []string{filepath.ToSlash(rel)},
+	// Caller-declared bracket paths extend the covered surface to
+	// external fixed inputs the oracle legitimately reads; declaring one
+	// carries the bracket contract's mutation-free assertion.
+	roots := append([]string{filepath.ToSlash(rel)}, bracketPaths...)
+	b, err := runtimeinput.CaptureBracketContext(ctx, root, roots,
 		runtimeinput.WithBracketExcludedPaths(".git", ".stipulator", ".gomutant"))
 	if err != nil {
 		return nil, fmt.Sprintf("observation bracket capture failed: %v", err)
@@ -579,14 +583,14 @@ func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Durat
 
 // TestProbeEnv is TestProbe under an already-frozen complete environment.
 func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (ran int, passed bool, err error) {
-	ran, passed, _, err = testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", env)
+	ran, passed, _, err = testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, env)
 	return ran, passed, err
 }
 
 // TestProbeObservedEnv is TestProbe under a frozen environment with a
 // runtime-input observation rooted at moduleDir and packageDir.
-func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (ran int, passed bool, state runtimeinput.Observation, err error) {
-	ran, passed, first, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, env)
+func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (ran int, passed bool, state runtimeinput.Observation, err error) {
+	ran, passed, first, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, env)
 	if err != nil {
 		return ran, passed, first, err
 	}
@@ -621,7 +625,7 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if !first.Unverifiable && first.State == empty.State {
 		return ran, passed, first, nil
 	}
-	secondRan, secondPassed, second, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, env)
+	secondRan, secondPassed, second, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, env)
 	if err != nil {
 		return secondRan, secondPassed, second, err
 	}
@@ -647,7 +651,7 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	return secondRan, secondPassed, combined, nil
 }
 
-func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, env []string) (ran int, passed bool, state runtimeinput.Observation, err error) {
+func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (ran int, passed bool, state runtimeinput.Observation, err error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
@@ -668,7 +672,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	var oracleBracket *runtimeinput.Bracket
 	var oracleBracketReason string
 	if capture {
-		oracleBracket, oracleBracketReason = captureOracleBracket(ctx, moduleDir, packageDir)
+		oracleBracket, oracleBracketReason = captureOracleBracket(ctx, moduleDir, packageDir, bracketPaths)
 	}
 	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir

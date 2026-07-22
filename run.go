@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -27,6 +29,15 @@ type Options struct {
 	OracleTimeout time.Duration
 	// Force re-measures targets whose prior finding's pins still match.
 	Force bool
+	// BracketPaths declares external surfaces the oracle legitimately
+	// reads — module-relative paths (a file or a directory tree) or
+	// absolute files — extending each spawn's observation bracket beyond
+	// the oracle package directory (REQ-exec-observation). An absolute
+	// external directory cannot be walked and is refused at run start,
+	// as is a path under a tool-excluded directory. Declaring a path
+	// carries the bracket contract's mutation-free assertion for the
+	// span.
+	BracketPaths []string
 	// Jobs bounds concurrent mutant runs; 0 means half the CPUs. Mutant runs
 	// are process-isolated (own overlay, own temp dir, shared
 	// content-addressed build cache), so they parallelize safely — but
@@ -260,6 +271,30 @@ func sequenceKey(values []string) string {
 // oracle-timeout and budget pins hold, unless forced (REQ-result-stale). A run that
 // cannot attribute an outcome aborts without findings
 // (REQ-core-attributed-kills).
+// validateBracketPaths refuses declarations the observation bracket
+// cannot honor, loudly and before any measurement: an absolute external
+// directory cannot be walked by the bracket's hashing semantics (its
+// capture would seal every observation in the run - strictly worse than
+// not declaring), and a path under a tool-excluded directory would be
+// silently uncovered (REQ-exec-observation).
+func validateBracketPaths(paths []string) error {
+	for _, p := range paths {
+		if filepath.IsAbs(p) {
+			if info, err := os.Stat(p); err == nil && info.IsDir() {
+				return fmt.Errorf("gomutant: bracket path %s is an absolute directory the observation bracket cannot walk; declare it module-relative or declare the files it contains", p)
+			}
+			continue
+		}
+		clean := path.Clean(filepath.ToSlash(p))
+		for _, excluded := range []string{".git", ".stipulator", ".gomutant"} {
+			if clean == excluded || strings.HasPrefix(clean, excluded+"/") {
+				return fmt.Errorf("gomutant: bracket path %s lies under tool-excluded %s and would be silently uncovered", p, excluded)
+			}
+		}
+	}
+	return nil
+}
+
 func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -269,6 +304,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 	if opts.OracleTimeout < 0 {
 		return nil, fmt.Errorf("gomutant: oracle timeout must be non-negative")
+	}
+	if err := validateBracketPaths(opts.BracketPaths); err != nil {
+		return nil, err
 	}
 	if opts.OracleTimeout == 0 {
 		opts.OracleTimeout = 60 * time.Second
@@ -478,7 +516,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		producerViews, err := t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
 		if err != nil {
-			return nil, fmt.Errorf("freshness proof: %w", err)
+			// The wrap names the target and its oracle so a freshness
+			// failure is actionable without re-deriving which subject the
+			// view was built for (REQ-exec-quiescence's legibility arm).
+			return nil, fmt.Errorf("freshness proof for target %s (oracle %s): %w", tg.Symbol, strings.Join(oracle, ", "), err)
 		}
 		if opts.producer != nil {
 			opts.producer(tg.Symbol)
@@ -571,7 +612,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, runEnv)
+				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, runEnv)
 				if err != nil {
 					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
 				}
@@ -649,7 +690,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if outcome != engine.MutantSurvived {
 						break
 					}
-					out, killer, state, incomplete, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, runEnv)
+					out, killer, state, incomplete, err := engine.RunMutantObservedEnv(poolCtx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, runEnv)
 					processStates = append(processStates, state)
 					if incompleteReason == "" {
 						incompleteReason = incomplete

@@ -2184,3 +2184,56 @@ func TestRunReportsAnalysisProgress(t *testing.T) {
 		t.Fatalf("analysis progress phases = %v, want view observations reported", phases)
 	}
 }
+
+// A caller-declared bracket path extends observation coverage to an
+// external fixed input the oracle legitimately reads: without the
+// declaration the absolute out-of-module read seals the evidence,
+// with it the value binds and the finding stays verifiable
+// (REQ-exec-observation).
+func TestRunCallerDeclaredBracketPathBindsExternalInput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	external := t.TempDir()
+	fixture := filepath.Join(external, "fixture.txt")
+	if err := os.WriteFile(fixture, []byte("stable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOMUTANT_EXTERNAL_FIXTURE", fixture)
+	tr := fixtureTree(t)
+	target := Target{Symbol: "example.com/fixture/extinput.Flag", Oracle: []string{"example.com/fixture/extinput.TestFlag"}}
+
+	sealed, err := tr.Run(context.Background(), []Target{target}, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sealed) != 1 || !sealed[0].TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("undeclared external read = %+v, want sealed unverifiable evidence", sealed[0].TargetEvidence)
+	}
+
+	tr2 := fixtureTree(t)
+	bound, err := tr2.Run(context.Background(), []Target{target}, Options{Budget: 1, BracketPaths: []string{fixture}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bound) != 1 || bound[0].TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("declared external read = %+v (%s), want bound verifiable evidence", bound[0].TargetEvidence, bound[0].TargetEvidence.RuntimeReason)
+	}
+}
+
+// Bracket-path declarations the bracket cannot honor refuse loudly at
+// run start: an absolute external directory would seal every
+// observation, and a tool-excluded path would be silently uncovered
+// (REQ-exec-observation).
+func TestRunRefusesUnhonorableBracketPaths(t *testing.T) {
+	tr := fixtureTree(t)
+	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
+	if _, err := tr.Run(context.Background(), []Target{target}, Options{BracketPaths: []string{t.TempDir()}}); err == nil ||
+		!strings.Contains(err.Error(), "absolute directory the observation bracket cannot walk") {
+		t.Fatalf("absolute-directory declaration = %v, want a loud refusal", err)
+	}
+	if _, err := tr.Run(context.Background(), []Target{target}, Options{BracketPaths: []string{".gomutant/targets.json"}}); err == nil ||
+		!strings.Contains(err.Error(), "tool-excluded") {
+		t.Fatalf("tool-excluded declaration = %v, want a loud refusal", err)
+	}
+}

@@ -96,7 +96,7 @@ func TestRunMutantObservedReturnsCompletedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
-		[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir)
+		[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 	t.Cleanup(func() { os.Remove(input) })
 	t.Setenv("GOMUTANT_MOVING_INPUT", input)
 	outcome, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
-		[]string{"example.com/fixture/lib"}, "^TestMovingInput$", 60*time.Second, nil, moduleDir, packageDir)
+		[]string{"example.com/fixture/lib"}, "^TestMovingInput$", 60*time.Second, nil, moduleDir, packageDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestNamedTestPanicIsIncompleteEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	outcome, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[mutantIndex],
-		[]string{"example.com/fixture/lib"}, "^TestNamedPanic$", 60*time.Second, nil, moduleDir, packageDir)
+		[]string{"example.com/fixture/lib"}, "^TestNamedPanic$", 60*time.Second, nil, moduleDir, packageDir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 		// exhaustive loop from paying a long timeout for mutants that are
 		// incidental to the package-kill this test asserts.
 		out, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
-			[]string{"example.com/fixture/lib"}, "^TestGuarded$", 5*time.Second, nil, moduleDir, packageDir)
+			[]string{"example.com/fixture/lib"}, "^TestGuarded$", 5*time.Second, nil, moduleDir, packageDir, nil)
 		if err != nil {
 			t.Fatalf("mutant %s %s aborted as noise: %v", m.Position, m.Operator, err)
 		}
@@ -296,7 +296,7 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 	}
 	for _, m := range ms {
 		out, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
-			[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir)
+			[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir, nil)
 		if err != nil {
 			t.Fatalf("mutant %s %s: %v", m.Position, m.Operator, err)
 		}
@@ -337,7 +337,7 @@ func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 	}
 	out, killer, state, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
 		[]string{"example.com/fixture/plain"}, "^TestPlain$", 60*time.Second,
-		[]string{"-no.such.flag"}, moduleDir, packageDir)
+		[]string{"-no.such.flag"}, moduleDir, packageDir, nil)
 	if err == nil || !strings.Contains(err.Error(), "no test-attributed kill") {
 		t.Fatalf("noise read as outcome %v killer %q err %v", out, killer, err)
 	}
@@ -447,11 +447,11 @@ func TestProbeBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := GoEnv("testdata/fixturemod")
-	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestPickInput$", time.Minute, nil, moduleDir, packageDir, env)
+	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestPickInput$", time.Minute, nil, moduleDir, packageDir, nil, env)
 	if err != nil || ran != 1 || !passed || !state.OK || state.Unverifiable {
 		t.Fatalf("observed passing baseline = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
 	}
-	ran, passed, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestNoSuch$", time.Minute, nil, moduleDir, packageDir, env)
+	ran, passed, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestNoSuch$", time.Minute, nil, moduleDir, packageDir, nil, env)
 	if err != nil || ran != 0 || !passed {
 		t.Fatalf("observed zero-match baseline = ran %d, passed %v, error %v", ran, passed, err)
 	}
@@ -459,13 +459,13 @@ func TestProbeBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ran, passed, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/failing", "^TestAlwaysFails$", time.Minute, nil, failingModule, failingDir, env)
+	ran, passed, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/failing", "^TestAlwaysFails$", time.Minute, nil, failingModule, failingDir, nil, env)
 	if err != nil || ran != 1 || passed {
 		t.Fatalf("observed failing baseline = ran %d, passed %v, error %v", ran, passed, err)
 	}
 	ctx, cancel = context.WithCancel(context.Background())
 	cancel()
-	if _, _, _, err := TestProbeObservedEnv(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", time.Minute, nil, moduleDir, packageDir, env); !errors.Is(err, context.Canceled) {
+	if _, _, _, err := TestProbeObservedEnv(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", time.Minute, nil, moduleDir, packageDir, nil, env); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled observed baseline = %v", err)
 	}
 }
@@ -483,7 +483,7 @@ func TestProbeBaselineRecordsRuntimeInputDriftAsUnverifiable(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Remove(input) })
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_INPUT="+input)
-	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableInput$", time.Minute, nil, moduleDir, packageDir, env)
+	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableInput$", time.Minute, nil, moduleDir, packageDir, nil, env)
 	// A mid-run mutation of an in-bracket input seals through the
 	// bracket (the stronger signal) or through repeated-baseline drift;
 	// either way the evidence is unverifiable, never silently valid.
@@ -505,7 +505,7 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Remove(stable) })
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_STABLE_INPUT="+stable)
-	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, env)
+	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, nil, env)
 	drifty := strings.Contains(state.Reason, "repeated baseline executions") || strings.Contains(state.Reason, "observation bracket moved")
 	if err != nil || ran != 1 || !passed || !state.OK || !state.Unverifiable || !drifty {
 		t.Fatalf("changing identities = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
@@ -644,7 +644,7 @@ func TestProbeBaselineRejectsTestCountDrift(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "baseline-count")
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_COUNT="+marker)
-	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", time.Minute, nil, moduleDir, packageDir, env)
+	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", time.Minute, nil, moduleDir, packageDir, nil, env)
 	if err == nil || !strings.Contains(err.Error(), "baseline test count changed") {
 		t.Fatalf("unstable baseline count = %v", err)
 	}
@@ -659,7 +659,7 @@ func TestProbeBaselineRejectsResultDrift(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "baseline-result")
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_RESULT="+marker)
-	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableBaselineResult$", time.Minute, nil, moduleDir, packageDir, env)
+	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableBaselineResult$", time.Minute, nil, moduleDir, packageDir, nil, env)
 	if err == nil || !strings.Contains(err.Error(), "result changed between discovery and measurement") {
 		t.Fatalf("unstable baseline result = %v", err)
 	}
