@@ -59,14 +59,16 @@ func (s *Server) Run(ctx context.Context) error {
 
 // MCP builds the protocol server (REQ-mcp-tools).
 func (s *Server) MCP() *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, &mcp.ServerOptions{
+		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
+	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
-		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a document (gomutant's or stipulator's export), changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure, and each finished target commits incrementally so an interrupted run keeps completed targets. Survivors are findings awaiting disposition, never verdicts. An observed run executes each mutant's oracle and each baseline up to twice, bracketing runtime-input observation. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited); use the CLI for work that may exceed the MCP client's request timeout.",
+		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a document (gomutant's or stipulator's export), changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure, and each finished target commits incrementally so an interrupted run keeps completed targets. Survivors are findings awaiting disposition, never verdicts. Each mutant's oracle executes once, bracketing runtime-input observation. With a progress token: phase notifications plus a heartbeat. Preparation and decision streams leave the response when streamed; long lists cap with the remainder counted. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited); use the CLI for work that may exceed the MCP client's request timeout.",
 	}, s.toolRun)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "discover",
-		Description: "List effective target symbols, sorted opaque labels, explicit or package-derived oracle mode, skip reasons, and changed-scope residue. Exact oracles are deduplicated in top-level oracleSets; each target's oracleSet integer references oracleSets[].id.",
+		Description: "List effective target symbols, sorted opaque labels, explicit or package-derived oracle mode, skip reasons, and changed-scope residue. Counts lead the response; target rows cap at 50 unless detail=true. Exact oracles are deduplicated in top-level oracleSets; each target's oracleSet integer references oracleSets[].id.",
 	}, s.toolDiscover)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "findings",
@@ -78,7 +80,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolAttest)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "ephemeral",
-		Description: "Run one manual mutant the operator set cannot generate: replace one file whole, apply sequential edits to one file, or apply an atomic exact-match edit batch across files, then check whether the named test kills it. The tree is never touched; the result is evidence, never persisted. An observed probe executes the named test up to twice, bracketing runtime-input observation. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited).",
+		Description: "Run one manual mutant the operator set cannot generate: replace one file whole, apply sequential edits to one file, or apply an atomic exact-match edit batch across files, then check whether the named test kills it. The tree is never touched; the result is evidence, never persisted. An observed probe executes the named test once, bracketing runtime-input observation. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited).",
 	}, s.toolEphemeral)
 	return srv
 }
@@ -106,6 +108,103 @@ func commandTimeout(name string, seconds *int) (time.Duration, error) {
 		return defaultCommandTimeoutSec * time.Second, nil
 	}
 	return secondsDuration(name, *seconds)
+}
+
+// capRunFindings builds the run response's finding rows under the
+// envelope caps (REQ-mcp-envelope): a campaign multiplies every list;
+// the document on disk carries the full set, so the response counts
+// what it drops instead of inlining it. Candidate evidence is
+// drill-down via the findings tool, not run payload.
+func capRunFindings(findings []gomutant.Finding) (rows []findingOut, omitted int) {
+	const findingRowCap, openCap = 50, 20
+	for _, f := range findings {
+		if len(rows) == findingRowCap {
+			omitted++
+			continue
+		}
+		open := f.Open()
+		omittedOpen := 0
+		if len(open) > openCap {
+			omittedOpen = len(open) - openCap
+			open = open[:openCap]
+		}
+		rows = append(rows, findingOut{
+			Symbol: f.Symbol, Labels: f.Labels,
+			CandidateCount: f.CandidateCount, Generated: f.Generated,
+			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
+			Attested: len(f.Attested), Operators: append([]gomutant.OperatorSummary{}, f.Operators...), Open: open,
+			OmittedOpen: omittedOpen,
+			Cached:      f.Cached, Skipped: f.Skipped,
+		})
+	}
+	return rows, omitted
+}
+
+// guidanceOut is one oracle set's instability attribution shared by the
+// targets it covers: the chunk-level memo already computes one
+// attribution per set, so the response aggregates instead of repeating
+// a near-identical suggestion per target (REQ-mcp-envelope).
+type guidanceOut struct {
+	Targets       []string `json:"targets" jsonschema:"targets whose unverifiable evidence this attribution covers"`
+	UnstableTests []string `json:"unstableTests,omitempty"`
+	Reason        string   `json:"reason,omitempty" jsonschema:"the first covered finding's unverifiable reason"`
+	Suggestion    string   `json:"suggestion"`
+}
+
+// appendGuidance folds a per-target attribution into its oracle set's
+// aggregated entry, keyed by the suggestion and unstable set.
+func appendGuidance(entries *[]guidanceOut, g gomutant.OracleGuidance) {
+	key := g.Suggestion + "\x00" + strings.Join(g.UnstableTests, "\x00")
+	for i := range *entries {
+		existing := (*entries)[i]
+		if existing.Suggestion+"\x00"+strings.Join(existing.UnstableTests, "\x00") == key {
+			(*entries)[i].Targets = append(existing.Targets, g.Symbol)
+			return
+		}
+	}
+	*entries = append(*entries, guidanceOut{Targets: []string{g.Symbol}, UnstableTests: g.UnstableTests, Reason: g.Reason, Suggestion: g.Suggestion})
+}
+
+// runStreams routes the run's preparation and decision streams: with a
+// progress token they ride notifications and leave the response, their
+// totals remaining as counts; without one they stay inline, capped
+// (REQ-mcp-envelope). lastPhase feeds the heartbeat.
+type runStreams struct {
+	out       *runOut
+	notify    func(string)
+	lastPhase *atomic.Value
+}
+
+const streamRowCap = 100
+
+func newRunStreams(out *runOut, notify func(string)) runStreams {
+	var phase atomic.Value
+	phase.Store("preparing")
+	return runStreams{out: out, notify: notify, lastPhase: &phase}
+}
+
+func (r runStreams) decision(decision gomutant.RunDecision) {
+	r.out.DecisionsCount++
+	r.lastPhase.Store("executing mutants")
+	if r.notify != nil {
+		r.notify(decisionMessage(decision))
+		return
+	}
+	if len(r.out.Decisions) < streamRowCap {
+		r.out.Decisions = append(r.out.Decisions, decision)
+	}
+}
+
+func (r runStreams) progress(event gomutant.PreparationEvent) {
+	r.out.PreparationCount++
+	r.lastPhase.Store("prepare " + string(event.Stage))
+	if r.notify != nil {
+		r.notify(preparationMessage(event))
+		return
+	}
+	if len(r.out.Preparation) < streamRowCap {
+		r.out.Preparation = append(r.out.Preparation, event)
+	}
 }
 
 // progressNotifier returns a concurrency-safe sender of MCP progress
@@ -218,19 +317,23 @@ type findingOut struct {
 	Operators      []gomutant.OperatorSummary   `json:"operators"`
 	Attested       int                          `json:"attested,omitempty"`
 	Open           []gomutant.Survivor          `json:"open,omitempty"`
+	OmittedOpen    int                          `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
 	Cached         bool                         `json:"cached,omitempty"`
 	Skipped        string                       `json:"skipped,omitempty"`
-	Candidates     []gomutant.CandidateEvidence `json:"candidateEvidence,omitempty"`
 }
 
 type runOut struct {
-	Findings    []findingOut                `json:"findings"`
-	Guidance    []gomutant.OracleGuidance   `json:"oracleGuidance,omitempty"`
-	Residue     []gomutant.Residue          `json:"residue,omitempty"`
-	Preparation []gomutant.PreparationEvent `json:"preparation"`
-	Decisions   []gomutant.RunDecision      `json:"decisions"`
-	Summary     gomutant.RunSummary         `json:"summary"`
-	Document    string                      `json:"document"`
+	Summary          gomutant.RunSummary         `json:"summary"`
+	Document         string                      `json:"document"`
+	Findings         []findingOut                `json:"findings"`
+	OmittedFindings  int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
+	Guidance         []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
+	Residue          []gomutant.Residue          `json:"residue,omitempty"`
+	OmittedResidue   int                         `json:"omittedResidue,omitempty"`
+	Preparation      []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
+	PreparationCount int                         `json:"preparationCount"`
+	Decisions        []gomutant.RunDecision      `json:"decisions,omitempty" jsonschema:"absent when a progress token streamed the decisions; decisionsCount still totals them"`
+	DecisionsCount   int                         `json:"decisionsCount"`
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
@@ -259,9 +362,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	notify := progressNotifier(ctx, req)
 	loading := gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}
-	out.Preparation = append(out.Preparation, loading)
+	out.PreparationCount++
 	if notify != nil {
 		notify(preparationMessage(loading))
+	} else {
+		out.Preparation = append(out.Preparation, loading)
 	}
 	tree, err := s.loadTreeContext(ctx)
 	if err != nil {
@@ -351,26 +456,17 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
+	streams := newRunStreams(&out, notify)
 	options := gomutant.Options{
 		Budget:        in.Budget,
 		OracleTimeout: oracleTimeout,
 		Jobs:          in.Jobs,
 		Force:         in.Force,
 		BracketPaths:  in.BracketPaths,
-		Guidance:      func(g gomutant.OracleGuidance) { out.Guidance = append(out.Guidance, g) },
+		Guidance:      func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
 		Prior:         prior,
-		Decision: func(decision gomutant.RunDecision) {
-			out.Decisions = append(out.Decisions, decision)
-			if notify != nil {
-				notify(decisionMessage(decision))
-			}
-		},
-		Progress: func(event gomutant.PreparationEvent) {
-			out.Preparation = append(out.Preparation, event)
-			if notify != nil {
-				notify(preparationMessage(event))
-			}
-		},
+		Decision:      streams.decision,
+		Progress:      streams.progress,
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
@@ -392,24 +488,40 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 			notify(message)
 		}
 	}
+	// The heartbeat keeps long compile and execution stretches audible
+	// under the client's deadline: no phase goes silent longer than the
+	// cadence while a token listens (REQ-mcp-envelope).
+	if notify != nil {
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			started := time.Now()
+			ticker := time.NewTicker(20 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					notify(fmt.Sprintf("still working: %s (%s elapsed)", streams.lastPhase.Load(), time.Since(started).Round(time.Second)))
+				}
+			}
+		}()
+	}
 	findings, err := tree.Run(ctx, targets, options)
 	var drift *gomutant.TreeDriftError
 	if err != nil && !errors.As(err, &drift) {
 		return nil, out, err
 	}
 	out.Summary = gomutant.SummarizeRun(findings)
-	for _, f := range findings {
-		if err := ctx.Err(); err != nil {
-			return nil, out, err
-		}
-		out.Findings = append(out.Findings, findingOut{
-			Symbol: f.Symbol, Labels: f.Labels,
-			CandidateCount: f.CandidateCount, Generated: f.Generated,
-			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
-			Attested: len(f.Attested), Operators: append([]gomutant.OperatorSummary{}, f.Operators...), Open: f.Open(),
-			Cached: f.Cached, Skipped: f.Skipped,
-			Candidates: append([]gomutant.CandidateEvidence(nil), f.CandidateEvidence...),
-		})
+	if err := ctx.Err(); err != nil {
+		return nil, out, err
+	}
+	out.Findings, out.OmittedFindings = capRunFindings(findings)
+	const residueCap = 50
+	if len(out.Residue) > residueCap {
+		out.OmittedResidue = len(out.Residue) - residueCap
+		out.Residue = out.Residue[:residueCap]
 	}
 	err = s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
@@ -439,6 +551,7 @@ type discoverIn struct {
 	Changed     string   `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
 	Packages    []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
 	Symbols     []string `json:"symbols,omitempty" jsonschema:"complete fully qualified symbol glob filters; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*; alternatives"`
+	Detail      bool     `json:"detail,omitempty" jsonschema:"return every target and residue row; default caps rows at 50 with the remainder counted"`
 }
 
 type discoverTarget struct {
@@ -455,9 +568,14 @@ type discoverOracleSet struct {
 }
 
 type discoverOut struct {
-	OracleSets []discoverOracleSet `json:"oracleSets" jsonschema:"canonical exact oracle sets assigned in first-target order"`
-	Targets    []discoverTarget    `json:"targets" jsonschema:"ordered effective targets whose oracleSet references oracleSets[].id"`
-	Residue    []gomutant.Residue  `json:"residue,omitempty"`
+	TargetCount    int                 `json:"targetCount" jsonschema:"effective targets after filtering; leads the response so a campaign's scale reads before any row"`
+	SkippedCount   int                 `json:"skippedCount,omitempty" jsonschema:"targets carrying a skip reason"`
+	ResidueCount   int                 `json:"residueCount,omitempty" jsonschema:"changed-but-untargeted paths"`
+	OracleSets     []discoverOracleSet `json:"oracleSets" jsonschema:"canonical exact oracle sets assigned in first-target order"`
+	Targets        []discoverTarget    `json:"targets" jsonschema:"ordered effective targets whose oracleSet references oracleSets[].id; capped at 50 unless detail=true"`
+	OmittedTargets int                 `json:"omittedTargets,omitempty" jsonschema:"target rows beyond the cap; set detail=true for the full set"`
+	Residue        []gomutant.Residue  `json:"residue,omitempty"`
+	OmittedResidue int                 `json:"omittedResidue,omitempty"`
 }
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
@@ -527,6 +645,26 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 		return nil, out, err
 	}
 	out.OracleSets, out.Targets = compactTargetDescriptions(descriptions)
+	out.TargetCount = len(out.Targets)
+	for _, target := range out.Targets {
+		if target.Skipped != "" {
+			out.SkippedCount++
+		}
+	}
+	out.ResidueCount = len(out.Residue)
+	// Counts lead; rows cap unless the caller asks for detail
+	// (REQ-mcp-envelope).
+	const discoverRowCap = 50
+	if !in.Detail {
+		if len(out.Targets) > discoverRowCap {
+			out.OmittedTargets = len(out.Targets) - discoverRowCap
+			out.Targets = out.Targets[:discoverRowCap]
+		}
+		if len(out.Residue) > discoverRowCap {
+			out.OmittedResidue = len(out.Residue) - discoverRowCap
+			out.Residue = out.Residue[:discoverRowCap]
+		}
+	}
 	return nil, out, nil
 }
 
