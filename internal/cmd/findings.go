@@ -83,6 +83,11 @@ func findingsCommand(ctx context.Context, o findingsOptions) error {
 		fmt.Println("no findings")
 		return nil
 	}
+	renderFindingViews(os.Stdout, views)
+	return nil
+}
+
+func renderFindingViews(w io.Writer, views []findingView) {
 	repoCount, localOnly := 0, 0
 	for _, view := range views {
 		if view.Layer == "repo" {
@@ -96,32 +101,33 @@ func findingsCommand(ctx context.Context, o findingsOptions) error {
 		if len(labels) == 0 {
 			labels = []string{"(unlabeled)"}
 		}
-		fmt.Printf("%s\n", strings.Join(labels, ", "))
-		fmt.Printf("  %s  %s", view.State, view.Symbol)
-		if view.Reason != "" {
-			fmt.Printf("  (%s)", view.Reason)
-		}
-		fmt.Printf("  %d/%d candidates, %d mutants, %d killed, %d discarded; %d open, %d attested\n",
+		fmt.Fprintf(w, "%s\n", strings.Join(labels, ", "))
+		fmt.Fprintf(w, "  %s  %s", view.State, view.Symbol)
+		fmt.Fprintf(w, "  %d/%d candidates, %d mutants, %d killed, %d discarded; %d open, %d attested\n",
 			view.Generated, view.CandidateCount, view.Mutants, view.Killed, view.Discarded, len(view.Open), len(view.Attested))
+		// The cause leads: a record that cannot be reused says why before
+		// anything it found (REQ-result-inspection).
+		if view.Reason != "" {
+			fmt.Fprintf(w, "    cause: %s\n", view.Reason)
+		}
 		for _, survivor := range view.Open {
-			fmt.Printf("    survivor %s %s\n", survivor.Position, survivor.Operator)
+			fmt.Fprintf(w, "    survivor %s %s\n", survivor.Position, survivor.Operator)
 		}
 		for _, summary := range view.Operators {
-			fmt.Printf("    operator %s: %d generated, %d killed, %d survived, %d discarded\n",
+			fmt.Fprintf(w, "    operator %s: %d generated, %d killed, %d survived, %d discarded\n",
 				summary.Operator, summary.Generated, summary.Killed, summary.Survived, summary.Discarded)
 		}
 		for _, attestation := range view.Attested {
-			fmt.Printf("    attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
+			fmt.Fprintf(w, "    attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
 		}
 		if view.Layer == "local" {
-			fmt.Printf("    machine-local: %s\n", view.LayerReason)
+			fmt.Fprintf(w, "    machine-local: %s\n", view.LayerReason)
 		}
 		for _, candidate := range view.Candidates {
-			fmt.Printf("    unverifiable candidate %s %s  (%s)\n", candidate.Position, candidate.Operator, candidate.Reason)
+			fmt.Fprintf(w, "    unverifiable candidate %s %s  (%s)\n", candidate.Position, candidate.Operator, candidate.Reason)
 		}
 	}
-	fmt.Printf("%d repo-committable, %d machine-local\n", repoCount, localOnly)
-	return nil
+	fmt.Fprintf(w, "%d repo-committable, %d machine-local\n", repoCount, localOnly)
 }
 
 func renderFindingsJSON(w io.Writer, views []findingView) error {

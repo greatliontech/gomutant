@@ -421,8 +421,8 @@ func TestFresh(t *testing.T) {
 	unverifiable.TargetEvidence.RuntimeUnverifiable = true
 	unverifiable.TargetEvidence.RuntimeReason = "manual input"
 	inspection, err = tr.InspectFinding(unverifiable)
-	if err != nil || inspection.State != FindingUnverifiable || inspection.Reason != "manual input" {
-		t.Fatalf("unverifiable inspection = %+v, %v", inspection, err)
+	if err != nil || inspection.State != FindingUnverifiable || inspection.Reason != "target: manual input" {
+		t.Fatalf("unverifiable inspection = %+v, %v; want the reason attributed to its subject", inspection, err)
 	}
 	detached := f
 	detached.Symbol = "example.com/fixture/lib.Deleted"
@@ -458,6 +458,11 @@ func TestFresh(t *testing.T) {
 	inspection, err = movedEnvironment.InspectFinding(f)
 	if err != nil || inspection.State != FindingStale {
 		t.Fatalf("moved-input inspection = %+v, %v", inspection, err)
+	}
+	// The drift names the moved identity itself, not just that one moved
+	// (REQ-result-inspection).
+	if !strings.Contains(inspection.Reason, "runtime inputs changed") || !strings.Contains(inspection.Reason, "input.txt") {
+		t.Fatalf("moved-input reason = %q, want the moved identity named", inspection.Reason)
 	}
 }
 
@@ -537,8 +542,8 @@ func TestInspectFindingStates(t *testing.T) {
 	unverifiable.TargetEvidence.RuntimeUnverifiable = true
 	unverifiable.TargetEvidence.RuntimeReason = "manual input"
 	inspection, err = tr.InspectFinding(unverifiable)
-	if err != nil || inspection.State != FindingUnverifiable || inspection.Reason != "manual input" {
-		t.Fatalf("unverifiable inspection = %+v, %v", inspection, err)
+	if err != nil || inspection.State != FindingUnverifiable || inspection.Reason != "target: manual input" {
+		t.Fatalf("unverifiable inspection = %+v, %v; want the reason attributed to its subject", inspection, err)
 	}
 	staleOracle := finding
 	staleOracle.OracleEvidence = append([]SubjectEvidence(nil), finding.OracleEvidence...)

@@ -1,7 +1,9 @@
 # Runtime-unverifiable diagnostics omit the moving input
 
-Lands: when unverifiable runtime evidence names the unstable observed input, the
-oracle test, and the target whose reuse was refused.
+Lands: 6 of the active hot-loop-ux plan (run-side freshness errors carry the
+moved input and subject context at the wrap sites; the findings-inspection
+surfaces already name the moved identity, the responsible subject, and the
+target record).
 
 ## Observed
 

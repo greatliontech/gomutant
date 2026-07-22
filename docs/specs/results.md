@@ -204,4 +204,11 @@ so the candidate-local scope is visible. The classification is advisory and
 runs no tests. Human and machine-readable views carry the reason plus open
 survivors and attested dispositions independently of that state, including
 fully attested records; filtering by an opaque label changes only which
-records are rendered.
+records are rendered. The reason leads — it precedes the open survivors in
+every view — and is self-contained: a subject-caused reason names the
+responsible subject (`target:` or `oracle <symbol>:`), record-level causes
+(a detached symbol, a changed operator set or derived oracle set,
+candidate-local evidence) need no subject, and a runtime-input digest drift
+names the moved input identities themselves, best-effort, so the developer decides
+between stabilizing the test, narrowing the oracle, and accepting a
+machine-local record without re-deriving which observed object moved.

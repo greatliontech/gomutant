@@ -11,7 +11,7 @@ face for its actual consumer: a token-conscious agent inside a harness.
 - [x] 2. Machine-local evidence split: user cache directory keyed by repo root, per-entry files with atomic installs; findings document stays repo-committable
 - [x] 3. Changed-scope residue: gomutant-owned artifacts never report as residue
 - [x] 4. Compile diagnostics: the captured build stderr reaches ephemeral/probe refusal messages
-- [ ] 5. Findings lead with the record's unverifiable cause before open survivors (CLI and MCP)
+- [x] 5. Findings lead with the record's unverifiable cause before open survivors (CLI and MCP)
 - [ ] 6. gofresh seam context: freshness errors carry subject, oracle, package, and the moved input at every wrap site; serving semantics become legible where they're consumed — the --force flag's "covers" defined in one clause at the flag (the pin spans symbol body, oracle closure, and runtime inputs), and every served/re-measured line says why (served: body and oracle unchanged / re-measuring: oracle closure moved) — observed agent runs reach for --force defensively precisely because that sentence is missing, defeating serving wholesale
 - [ ] 7. Oracle instability: attribute unverifiability to the responsible test and suggest an explicit target oracle excluding it
 - [ ] 8. Survivor execution evidence: per-candidate executed/not-covered evidence recorded and bucketed (never-executed / executed-and-passed / unstable-oracle)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -276,7 +277,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 		return FindingInspection{State: FindingUnverifiable, Reason: state.Reason}, nil
 	}
 	if state.Digest != evidence.RuntimeDigest {
-		return FindingInspection{State: FindingStale, Reason: "runtime inputs changed"}, nil
+		return FindingInspection{State: FindingStale, Reason: "runtime inputs changed" + movedInputSuffix(ctx, evidence.RuntimeInputs, s.moduleDir, s.env)}, nil
 	}
 	if evidence.PurityAssertion != s.fp.PurityAssertion {
 		return FindingInspection{State: FindingStale, Reason: "purity assertion changed"}, nil
@@ -293,6 +294,22 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 	default:
 		return FindingInspection{State: FindingStale, Reason: verdict.Reason}, nil
 	}
+}
+
+// movedInputSuffix names the moved runtime-input identities behind a
+// digest drift, so the developer sees WHICH observed input moved, not
+// just that one did (REQ-result-inspection). Attribution is
+// best-effort: an unwalkable manifest keeps the generic reason.
+func movedInputSuffix(ctx context.Context, encoded, moduleDir string, env []string) string {
+	moved, err := runtimeinput.MovedInputsContext(ctx, encoded, moduleDir, env)
+	if err != nil || len(moved) == 0 {
+		return ""
+	}
+	const show = 3
+	if len(moved) > show {
+		return ": " + strings.Join(moved[:show], ", ") + fmt.Sprintf(" and %d more", len(moved)-show)
+	}
+	return ": " + strings.Join(moved, ", ")
 }
 
 func (s *subjectView) checkContext(ctx context.Context, fingerprint gofresh.Fingerprint) (gofresh.Verdict, error) {
@@ -390,6 +407,12 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding) (Findi
 	target := views.bySymbol[f.Symbol]
 	inspection, err := target.inspectContext(ctx, f.TargetEvidence)
 	if err != nil || inspection.State != FindingCurrent {
+		// The reason names its responsible subject so it stays
+		// self-contained when copied out of the record's context,
+		// parallel to the oracle prefix below (REQ-result-inspection).
+		if err == nil && inspection.Reason != "" {
+			inspection.Reason = "target: " + inspection.Reason
+		}
 		return inspection, err
 	}
 	for _, evidence := range oracle {

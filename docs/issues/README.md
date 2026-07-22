@@ -8,7 +8,7 @@ is deleted (git holds history).
 |------|---------|-------|
 | [runtime-input-provenance](runtime-input-provenance.md) | Prove reusable runtime evidence across producer-created outputs | Observation-time object provenance distinguishes produced outputs from external inputs on every supported host |
 | [staged-snapshot-run-mode](staged-snapshot-run-mode.md) | Measure staged/index snapshots as clean content before commit | Gomutant can run against the staged index or another explicit content snapshot and produce clean evidence for it |
-| [runtime-unverifiable-diagnostics](runtime-unverifiable-diagnostics.md) | Name the unstable runtime input, oracle test, and target in unverifiable findings | Unverifiable runtime evidence names the moving input, the oracle test, and the target whose reuse was refused |
+| [runtime-unverifiable-diagnostics](runtime-unverifiable-diagnostics.md) | Run-side freshness errors omit the moved input and subject context | 6 of the active hot-loop-ux plan (findings surfaces already attribute) |
 | [mcp-progress-parity](mcp-progress-parity.md) | MCP mutation runs lack CLI-equivalent progress and timeout guidance | MCP runs expose progress, partial completion state, and timeout guidance equivalent to the CLI stream |
 | [oracle-instability-guidance](oracle-instability-guidance.md) | Package-derived oracles give no guidance when one test makes findings unverifiable | Gomutant identifies unstable oracle tests and suggests or emits an explicit target oracle for stable reuse |
 | [structural-mutation-class](structural-mutation-class.md) | Structural mutants (forbidden import, broken method set) so analyzer-shaped oracles get a teeth check | A caller needs adequacy evidence for a structural assertion's oracle |
