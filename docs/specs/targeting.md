@@ -38,7 +38,7 @@ non-null string `symbol` and optional non-null `oracle` string array, `labels`
 string array, and boolean `oracleExplicit`. Field spelling is exact and
 case-sensitive. Unknown or duplicate fields at
 either object level, null structural fields, and trailing JSON are malformed
-and MUST be rejected rather than silently changing the target or oracle.
+and rejected rather than silently changing the target or oracle.
 
 **REQ-target-stipulator** (behavior): The Stipulator adapter MUST use the
 version-matched Stipulator binding-surface Go wire module to parse and validate

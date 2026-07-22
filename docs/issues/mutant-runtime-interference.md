@@ -1,8 +1,13 @@
 # Concurrent mutant runs share runtime resources
 
-Lands: when mutant oracle execution isolates concurrent mutant test processes'
-shared runtime resources, or interference-induced oracle failures are
-differentially distinguished from mutant-caused kills.
+Lands: when the user picks the confirmation economics - the fork is theirs:
+(a) serial kill-confirmation by default (a kill re-runs its oracle alone
+before scoring; a non-reproducing kill records candidate-locally as
+unverifiable - never a false kill, but kill-heavy campaigns near-double),
+(b) confirmation as an option (a knob), or (c) runtime isolation as a design
+feature (its own plan). Classification without re-execution is not
+computable: the observation boundary records what a process read, not what a
+sibling perturbed.
 
 ## Observed
 

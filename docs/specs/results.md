@@ -48,17 +48,17 @@ but does not prevent reuse in the unchanged working tree. The commit is omitted 
 when no repository HEAD exists; that unavailable provenance carries `dirty=true`.
 
 **INV-RESULT-CANDIDATE-CONSERVATION** (project invariant): Every finding
-produced by a candidate-accounted active basis MUST carry required `candidateCount` and
+produced by a candidate-accounted active basis carries required `candidateCount` and
 `generated` fields. `candidateCount` is the total applicable catalog candidates
 before a budget; `generated` is the selected exhaustive set or positive-budget
 prefix. The existing `mutants` field is the measured count after discards.
-Finding and per-operator totals MUST satisfy `generated = discarded + killed +
+Finding and per-operator totals satisfy `generated = discarded + killed +
 survived`, `mutants = killed + survived`, and `generated = mutants +
 discarded`. Run decisions expose selected candidates as `candidates`, not as
 measured mutants. `candidateCount` makes exact-budget exhaustion representable
 without an additional exhaustive flag; every REQ-result-stale pin still applies.
 All counts and `budget` are nonnegative, `generated <= candidateCount`, and the
-record MUST have `generated == candidateCount` when budget is zero or `generated ==
+record has `generated == candidateCount` when budget is zero or `generated ==
 min(budget, candidateCount)` when budget is positive. A document violating a
 count equation or budget relation is malformed and refused.
 

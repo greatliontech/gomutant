@@ -71,10 +71,10 @@ the completed states agree with one coherent current view, their deterministic
 union is attached conservatively to the target and every oracle subject in the
 finding together with caller-selected observation-completeness assertion and
 compatible per-subject observability proof evidence. If runtime identities differ
-between repeated observations or completed states move before union, gomutant MUST
-preserve the attributed fresh mutation outcomes and attach canonical explicit
+between repeated observations or completed states move before union, gomutant
+preserves the attributed fresh mutation outcomes and attaches canonical explicit
 unverifiable evidence instead; a completed child whose state remains evaluable may
-retain its identities, but bytes from an incomplete child MUST NOT be promoted to a
+retain its identities, but bytes from an incomplete child are never promoted to a
 completed observation merely to retain partial identities. That finding is reportable
 and persistable but never reusable. A process that times out, panics, exits
 before normal test-harness completion, or otherwise cannot prove its log
@@ -228,7 +228,7 @@ execute synchronously as trusted caller code and must return normally; their
 external side effects have ordinary process semantics. An error or cancellation
 may leave a rendered prefix, but never a partial finding or decision.
 
-Before executing mutants, a run MUST report one target decision in target
+Before executing mutants, a run reports one target decision in target
 order: `cached` when reusable prior evidence is
 served, `skipped` with the skip reason when no measurement can run, or
 `measure` with the selected candidate count and one reason from `no-prior`,

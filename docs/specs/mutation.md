@@ -37,7 +37,7 @@ every active family.
 The active `go/12` basis uses the exact catalog labels below.
 
 **INV-MUT-COMPREHENSIVE** (project invariant): The comprehensive automatic
-basis MUST be the finite first-order catalog below. Every mapping applies once
+basis is exactly the finite first-order catalog below. Every mapping applies once
 at every applicable original source site, with static type information used to
 admit the site but without adding an import, identifier, helper declaration,
 temporary, or named type expression. One candidate changes one catalog site;
