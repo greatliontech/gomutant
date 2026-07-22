@@ -84,6 +84,16 @@ func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
 type Survivor struct {
 	Position string `json:"position"`
 	Operator string `json:"operator"`
+	// Execution buckets why the survivor lived (REQ-result-record):
+	// "never-executed" - the oracle's baseline coverage never reaches the
+	// mutated position, so the survivor is a coverage gap;
+	// "executed-and-passed" - the position runs and the oracle still
+	// passes, so the survivor is a weak assertion or an equivalent
+	// mutant; "unstable-oracle" - the finding's runtime evidence is
+	// unverifiable, so execution evidence cannot be trusted. Empty on
+	// records measured before bucketing existed; advisory, never a
+	// measurement pin.
+	Execution string `json:"execution,omitempty"`
 }
 
 // CandidateEvidence is one candidate's explicit unverifiable runtime
@@ -411,7 +421,7 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 			return false, fmt.Errorf("survivors: %w", err)
 		}
 		for i, record := range records {
-			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true}, []string{"position", "operator"}); err != nil {
+			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "execution": true}, []string{"position", "operator"}); err != nil {
 				return false, fmt.Errorf("survivor %d: %w", i, err)
 			}
 		}

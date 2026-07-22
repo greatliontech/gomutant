@@ -23,7 +23,16 @@ that passed in a pre-measurement run of the unmutated tree reporting failure
 in the mutant run's structured output; a timeout; or a
 package-scope failure with no test-level event — admitted only when a
 baseline probe of the unmutated tree passes, which distinguishes a
-goroutine-panic-class kill from environmental noise. A run that fails in any
+goroutine-panic-class kill from environmental noise. The probe runs even when
+a hard crash truncates the structured stream before any package-level fail
+event — attribution requiring a well-formed stream would make exactly the
+strongest kills unmeasurable; a passing probe with no attributable package
+admits the kill as an unattributed package crash. An unattributable failure
+whose differential baseline also fails is environmental noise: never a kill,
+and never a campaign abort — the one candidate records as a discard carrying
+the diagnostic as candidate-local evidence and the run continues, because an
+abort that discards completed measurements is reserved for corrupted
+orchestration state. A run that fails in any
 other way — a build error the overlay should have prevented, a killer test
 outside the oracle, output that does not parse — aborts without recording a
 finding, because a corrupted measurement read as a sound one inflates kills
@@ -31,7 +40,7 @@ in the flattering direction. Under INV-RESULT-CANDIDATE-CONSERVATION in
 [results.md](results.md), compiler rejection of a selected
 candidate before any oracle test runs is instead a discard only after the same
 package-scoped baseline passed and source/build inputs remained coherent;
-generator, overlay, environment, movement, unrelated-package, and malformed
+generator, overlay, and malformed
 output failures still abort.
 Each distinct package-scoped oracle group needed by fresh targets is probed
 once per run before mutant execution. A group that matches no tests or does
@@ -76,7 +85,13 @@ whose completed-state union remains their reuse evidence. On reuse, a finding
 whose incomplete observations are all candidate-local serves its covered
 candidates and re-executes exactly the unverifiable candidates under a passing
 current baseline probe; identity movement or incoherence among completed states
-remains finding-wide and remeasures the target. A stale or unverifiable subject
+remains finding-wide and remeasures the target. Each mutant executes exactly
+once and the baseline validity repeat contributes only its own scored
+observation: the historical discovery-then-score double execution and its
+cross-run evidence-drift comparison are retired — the pre-spawn observation
+bracket binds the values each run read, which is the evidence the comparison
+existed to approximate (exactly-once enforced by
+`TestRunMutantExecutesExactlyOnce`). A stale or unverifiable subject
 remeasures the finding; incomplete or incoherent observation is never silently
 represented as reusable evidence.
 
@@ -90,6 +105,20 @@ before that baseline process starts; a completed observation is never attached t
 proof evidence captured after the observed process. A launched candidate process
 contributes its completed or incomplete observation even when compilation rejection
 classifies the candidate as discarded rather than measured.
+
+**REQ-exec-survivor-evidence** (behavior): A measured finding's survivors MUST
+carry execution evidence bucketing why each lived: `never-executed` when the
+oracle's baseline coverage never reaches the mutated position (a coverage
+gap), `executed-and-passed` when the position runs and the oracle still
+passes (a weak assertion or an equivalent mutant), and `unstable-oracle` when
+the finding's runtime evidence is unverifiable, in which case no coverage
+probe runs. Coverage is measured once per oracle group on the unmutated tree
+and cached across the run's targets sharing the group and cover package —
+advisory classification, never a measurement pin; an unprobeable oracle
+leaves the bucket empty rather than failing a sound measurement. Served
+records keep their recorded buckets; re-measurement refreshes them.
+
+REQ-exec-survivor-evidence: enforced by `TestRunBucketsSurvivorExecution`.
 
 **REQ-exec-oracle-guidance** (behavior): When a fresh measurement's merged
 runtime evidence lands unverifiable under a package-derived oracle, gomutant

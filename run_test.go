@@ -45,10 +45,10 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 	add, iface := first[0], first[1]
 	wantAddSurvivors := []Survivor{
-		{Position: "lib.go:24:2", Operator: "statement: delete"},
-		{Position: "lib.go:24:5", Operator: "condition: force false"},
-		{Position: "lib.go:24:12", Operator: "block: empty"},
-		{Position: "lib.go:25:3", Operator: "statement: delete"},
+		{Position: "lib.go:24:2", Operator: "statement: delete", Execution: "executed-and-passed"},
+		{Position: "lib.go:24:5", Operator: "condition: force false", Execution: "executed-and-passed"},
+		{Position: "lib.go:24:12", Operator: "block: empty", Execution: "executed-and-passed"},
+		{Position: "lib.go:25:3", Operator: "statement: delete", Execution: "executed-and-passed"},
 	}
 	if add.Cached || add.Mutants != 11 || add.Killed != 7 || add.Discarded != 1 || !slices.Equal(add.Survivors, wantAddSurvivors) {
 		t.Fatalf("Add = %+v, want exact go/12 outcomes %+v", add, wantAddSurvivors)
@@ -2284,5 +2284,59 @@ func TestRunAttributesOracleInstability(t *testing.T) {
 	}
 	if !explicit[0].TargetEvidence.RuntimeUnverifiable || len(guidance) != 0 {
 		t.Fatalf("explicit-oracle run = unverifiable %v, guidance %+v; want unverifiable with no attribution", explicit[0].TargetEvidence.RuntimeUnverifiable, guidance)
+	}
+}
+
+// Survivor execution evidence buckets why each survivor lived
+// (REQ-exec-survivor-evidence): a coverage-gap survivor reads
+// never-executed, a survivor the oracle runs through and passes reads
+// executed-and-passed, and unverifiable runtime evidence buckets every
+// survivor unstable-oracle without probing.
+func TestRunBucketsSurvivorExecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+
+	weak, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]int{}
+	for _, s := range weak[0].Survivors {
+		buckets[s.Execution]++
+	}
+	if buckets["never-executed"] == 0 {
+		t.Fatalf("Weak survivors = %+v; want the untested branch bucketed never-executed", weak[0].Survivors)
+	}
+	if buckets[""] != 0 {
+		t.Fatalf("Weak survivors carry empty buckets: %+v", weak[0].Survivors)
+	}
+
+	add, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executed := 0
+	for _, s := range add[0].Survivors {
+		if s.Execution == "executed-and-passed" {
+			executed++
+		}
+	}
+	if executed == 0 {
+		t.Fatalf("Add survivors = %+v; want covered survivors bucketed executed-and-passed", add[0].Survivors)
+	}
+
+	unstable, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/unstableoracle.Weakly"}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !unstable[0].TargetEvidence.RuntimeUnverifiable || len(unstable[0].Survivors) == 0 {
+		t.Fatalf("unstable-oracle run = evidence %+v, survivors %d; fixture assumption broken", unstable[0].TargetEvidence, len(unstable[0].Survivors))
+	}
+	for _, s := range unstable[0].Survivors {
+		if s.Execution != "unstable-oracle" {
+			t.Fatalf("unstable-oracle survivor bucket = %+v", unstable[0].Survivors)
+		}
 	}
 }

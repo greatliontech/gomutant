@@ -111,6 +111,10 @@ func renderFindingViews(w io.Writer, views []findingView) {
 			fmt.Fprintf(w, "    cause: %s\n", view.Reason)
 		}
 		for _, survivor := range view.Open {
+			if survivor.Execution != "" {
+				fmt.Fprintf(w, "    survivor %s %s  [%s]\n", survivor.Position, survivor.Operator, survivor.Execution)
+				continue
+			}
 			fmt.Fprintf(w, "    survivor %s %s\n", survivor.Position, survivor.Operator)
 		}
 		for _, summary := range view.Operators {

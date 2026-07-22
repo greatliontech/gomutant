@@ -181,6 +181,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
 		}
 		for _, s := range f.Open() {
+			if s.Execution != "" {
+				fmt.Fprintf(&terminal, "          survivor %s %s  [%s]\n", s.Position, s.Operator, s.Execution)
+				continue
+			}
 			fmt.Fprintf(&terminal, "          survivor %s %s\n", s.Position, s.Operator)
 		}
 		for _, summary := range f.Operators {

@@ -167,6 +167,11 @@ REQ-result-layers: enforced by `TestCommittableDrawsThePortableLine`,
 `TestStoreSplitsUpdatesAcrossLayers`, and
 `TestStoreUpdateDecidesMembershipUnderTheDocumentLock`.
 
+A survivor carries optional execution evidence — `never-executed`,
+`executed-and-passed`, or `unstable-oracle` per REQ-exec-survivor-evidence in
+[execution.md](execution.md) — advisory and empty on records measured before
+bucketing existed; it is location metadata's sibling, never a measurement pin.
+
 A survivor position is `file.go:line:column`. When distinct generated mutants
 share that position and operator, the second and later identities append
 `#<source-order occurrence>`. The discriminator is part of the survivor and

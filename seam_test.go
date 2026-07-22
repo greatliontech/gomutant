@@ -659,7 +659,7 @@ func TestRunUsesEnvironmentFrozenAtLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 1 || findings[0].Mutants != 2 || findings[0].Killed != 1 || len(findings[0].Survivors) != 1 || findings[0].Survivors[0] != (Survivor{Position: "lib.go:24:2", Operator: "statement: delete"}) {
+	if len(findings) != 1 || findings[0].Mutants != 2 || findings[0].Killed != 1 || len(findings[0].Survivors) != 1 || findings[0].Survivors[0] != (Survivor{Position: "lib.go:24:2", Operator: "statement: delete", Execution: "executed-and-passed"}) {
 		t.Fatalf("frozen-environment finding = %+v, want exact two-candidate prefix outcomes", findings)
 	}
 }

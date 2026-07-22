@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"slices"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,5 +57,44 @@ func TestCompileDiagnosticsExtraction(t *testing.T) {
 	long := compileDiagnostics(nil, []byte(strings.Repeat("x", 10000)))
 	if len(long) > 5000 || !strings.Contains(long, "[diagnostic truncated]") {
 		t.Fatalf("diagnostic cap missing: len=%d", len(long))
+	}
+}
+
+// Each mutant executes exactly once: the observation bracket binds the
+// run's values, so no discovery-then-score double execution exists
+// (REQ-exec-observation's exactly-once sentence).
+func TestRunMutantExecutesExactlyOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	tr := fixtureTree(t)
+	ms, err := tr.Mutants("example.com/fixture/counting.Value", 0)
+	if err != nil || len(ms) == 0 {
+		t.Fatalf("Mutants: %v", err)
+	}
+	pick := slices.IndexFunc(ms, func(m Mutant) bool { return m.Operator == "return: zero" })
+	if pick < 0 {
+		t.Fatalf("no compilable mutant candidate: %+v", ms)
+	}
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/counting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := filepath.Join(t.TempDir(), "executions")
+	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_EXECUTION_COUNTER="+counter)
+	out, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", ms[pick],
+		[]string{"example.com/fixture/counting"}, "^TestCounting$", time.Minute, nil, moduleDir, packageDir, nil, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != MutantSurvived {
+		t.Fatalf("counting mutant = %v, want a survivor under the deliberately weak oracle", out)
+	}
+	data, err := os.ReadFile(counter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(data), "\n"); got != 1 {
+		t.Fatalf("oracle executed %d times, want exactly once", got)
 	}
 }

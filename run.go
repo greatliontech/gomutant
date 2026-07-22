@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -318,6 +319,99 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 	return attr, nil
 }
 
+// work is one target's resolved measurement state across the run's
+// three phases.
+type work struct {
+	target      int
+	oracle      []string
+	reason      string
+	candidates  []engine.Candidate
+	groups      []group
+	oracleSet   map[string]bool
+	targetView  *subjectView
+	oracleViews []*subjectView
+	producer    *subjectViewSet
+	baselines   []runtimeinput.Observation
+	// serve is the prior record being served with candidate-local
+	// re-execution (REQ-result-stale): only the candidate indexes in
+	// flagged execute, and phase three splices their fresh outcomes and
+	// evidence into the served record.
+	serve   *Finding
+	flagged map[int]bool
+}
+
+// bucketSurvivorExecution classifies why each survivor lived
+// (REQ-exec-survivor-evidence): unverifiable runtime evidence buckets
+// every survivor "unstable-oracle" without probing; otherwise one
+// baseline coverage probe per oracle group (cached across the run's
+// targets sharing a group and cover package) decides "never-executed"
+// versus "executed-and-passed" by whether any executed block spans the
+// mutated position. Advisory classification on the unmutated tree,
+// never a measurement pin.
+func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, opts Options, runEnv []string, cache map[string]engine.Coverage) error {
+	if len(f.Survivors) == 0 {
+		return nil
+	}
+	if f.TargetEvidence.RuntimeUnverifiable {
+		for si := range f.Survivors {
+			f.Survivors[si].Execution = "unstable-oracle"
+		}
+		return nil
+	}
+	coverPkg := w.targetView.subject.Package
+	coverage := engine.Coverage{}
+	for _, g := range w.groups {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		key := g.pkgs[0] + "\x00" + g.runRegex + "\x00" + coverPkg
+		got, ok := cache[key]
+		if !ok {
+			probed, err := engine.CoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.OracleTimeout, g.flags, runEnv)
+			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				// Best-effort: an unprobeable oracle leaves the bucket
+				// empty rather than failing a run whose measurement is
+				// already sound.
+				return nil
+			}
+			got = probed
+			cache[key] = got
+		}
+		coverage = coverage.Merge(got)
+	}
+	for si, survivor := range f.Survivors {
+		file, line, col, ok := splitSurvivorPosition(survivor.Position)
+		if !ok {
+			continue
+		}
+		if coverage.Covered(coverPkg+"/"+file, line, col) {
+			f.Survivors[si].Execution = "executed-and-passed"
+		} else {
+			f.Survivors[si].Execution = "never-executed"
+		}
+	}
+	return nil
+}
+
+// splitSurvivorPosition splits "file.go:line:col" (an occurrence suffix
+// "#n" stripped from the column).
+func splitSurvivorPosition(position string) (file string, line, col int, ok bool) {
+	parts := strings.Split(position, ":")
+	if len(parts) != 3 {
+		return "", 0, 0, false
+	}
+	colPart, _, _ := strings.Cut(parts[2], "#")
+	line, lineErr := strconv.Atoi(parts[1])
+	col, colErr := strconv.Atoi(colPart)
+	if lineErr != nil || colErr != nil {
+		return "", 0, 0, false
+	}
+	return parts[0], line, col, true
+}
+
 // validateBracketPaths refuses declarations the observation bracket
 // cannot honor, loudly and before any measurement: an absolute external
 // directory cannot be walked by the bracket's hashing semantics (its
@@ -383,24 +477,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 
 	// Phase one, sequential: resolve every target to a terminal finding
 	// (skipped, cached) or to a mutant work list.
-	type work struct {
-		target      int
-		oracle      []string
-		reason      string
-		candidates  []engine.Candidate
-		groups      []group
-		oracleSet   map[string]bool
-		targetView  *subjectView
-		oracleViews []*subjectView
-		producer    *subjectViewSet
-		baselines   []runtimeinput.Observation
-		// serve is the prior record being served with candidate-local
-		// re-execution (REQ-result-stale): only the candidate indexes in
-		// flagged execute, and phase three splices their fresh outcomes and
-		// evidence into the served record.
-		serve   *Finding
-		flagged map[int]bool
-	}
 	// Findings are keyed by symbol (REQ-result-record): two targets naming
 	// one symbol would collide in the document, so the set is refused up
 	// front rather than one silently shadowing the other.
@@ -424,6 +500,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		pkg, run, flags, moduleDir, packageDir string
 	}
 	baselineCache := map[baselineKey]runtimeinput.Observation{}
+	coverageCache := map[string]engine.Coverage{}
 	guidanceCache := map[string]oracleAttribution{}
 	decisions := make([]RunDecision, len(targets))
 	for i, tg := range targets {
@@ -905,6 +982,9 @@ dispatching:
 			case engine.MutantSurvived:
 				f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator})
 			}
+		}
+		if err := t.bucketSurvivorExecution(ctx, f, w, opts, runEnv, coverageCache); err != nil {
+			return nil, err
 		}
 		// A re-measure with unchanged pins keeps prior attestations that
 		// still name the exact survivor; changed pins shed them, so every

@@ -319,9 +319,11 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 }
 
 // TestRunMutantNoiseIsNeverAKill pins the attribution rule that keeps kill
-// counts sound (REQ-core-attributed-kills): a run that dies without a
-// test-attributed failure — here, a test binary refusing an unregistered
-// flag — is an error, never a kill.
+// counts sound (REQ-core-attributed-kills, REQ-exec-attribution): a run
+// that dies without a test-attributed failure and whose differential
+// baseline fails too — here, a test binary refusing an unregistered
+// flag — is never a kill; it records candidate-locally with its
+// diagnostic and the campaign continues instead of aborting.
 func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test")
@@ -335,11 +337,17 @@ func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, killer, state, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
+	out, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
 		[]string{"example.com/fixture/plain"}, "^TestPlain$", 60*time.Second,
 		[]string{"-no.such.flag"}, moduleDir, packageDir, nil)
-	if err == nil || !strings.Contains(err.Error(), "no test-attributed kill") {
-		t.Fatalf("noise read as outcome %v killer %q err %v", out, killer, err)
+	if err != nil {
+		t.Fatalf("noise aborted the run: %v", err)
+	}
+	if out != MutantDiscarded || killer != "" {
+		t.Fatalf("noise read as outcome %v killer %q, want a diagnosed discard", out, killer)
+	}
+	if !strings.Contains(incomplete, "unclassifiable mutant-run failure") || !strings.Contains(incomplete, "baseline probe failed alongside the mutant") {
+		t.Fatalf("noise diagnostic = %q, want the unclassifiable reason with the probe outcome", incomplete)
 	}
 	if !state.Unverifiable {
 		t.Fatalf("noise observation = %+v, want explicit incompleteness", state)
