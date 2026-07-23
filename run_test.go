@@ -2502,3 +2502,61 @@ func TestRunBucketsSurvivorExecution(t *testing.T) {
 		}
 	}
 }
+
+// The run's stale-reason enrichment reuses the run's own subject views: when
+// the record's oracle matches the target's, attribution builds no second
+// view; a recorded oracle the current target no longer names builds exactly
+// one supplementary view for the difference (REQ-result-stale's naming arm).
+func TestRunStaleReasonReusesTheRunsViews(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
+	first, err := tr.Run(ctx, []Target{target}, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var supplementary [][]string
+	inspectionSupplementaryViewHook = func(symbols []string) {
+		supplementary = append(supplementary, append([]string(nil), symbols...))
+	}
+	defer func() { inspectionSupplementaryViewHook = nil }()
+
+	tampered := append([]Finding(nil), first...)
+	tampered[0].TargetEvidence.MaximalClosure = "not-the-current-closure"
+	var decisions []RunDecision
+	if _, err := tr.Run(ctx, []Target{target}, Options{Budget: 1, Prior: tampered, Decision: func(d RunDecision) {
+		decisions = append(decisions, d)
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(supplementary) != 0 {
+		t.Fatalf("stale-reason attribution built supplementary views for run-covered symbols: %v", supplementary)
+	}
+	if len(decisions) != 1 || !strings.HasPrefix(decisions[0].Reason, "stale: ") || !strings.Contains(decisions[0].Reason, "target") {
+		t.Fatalf("decisions = %+v; want the moved pin still attributed through the run's views", decisions)
+	}
+
+	// A recorded oracle outside the current target's oracle set builds one
+	// supplementary view for exactly the uncovered symbol.
+	foreign := append([]Finding(nil), first...)
+	extra := foreign[0].OracleEvidence[0]
+	extra.Symbol = "example.com/fixture/plain.TestPlain"
+	foreign[0].OracleEvidence = append(append([]SubjectEvidence(nil), foreign[0].OracleEvidence...), extra)
+	supplementary = nil
+	decisions = nil
+	if _, err := tr.Run(ctx, []Target{target}, Options{Budget: 1, Prior: foreign, Decision: func(d RunDecision) {
+		decisions = append(decisions, d)
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(supplementary) != 1 || len(supplementary[0]) != 1 || supplementary[0][0] != "example.com/fixture/plain.TestPlain" {
+		t.Fatalf("supplementary views = %v; want exactly the record-only oracle symbol", supplementary)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.Contains(decisions[0].Reason, "oracle example.com/fixture/plain.TestPlain") {
+		t.Fatalf("decisions = %+v; want a re-measure whose reason names the record-only oracle through the supplementary view", decisions)
+	}
+}

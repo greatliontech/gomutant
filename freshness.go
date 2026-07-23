@@ -327,7 +327,7 @@ func (t *Tree) InspectFinding(f Finding) (FindingInspection, error) {
 
 // InspectFindingContext is InspectFinding with caller-owned cancellation.
 func (t *Tree) InspectFindingContext(ctx context.Context, f Finding) (FindingInspection, error) {
-	inspection, err := t.inspectFindingStateContext(ctx, f)
+	inspection, err := t.inspectFindingStateContext(ctx, f, nil)
 	if err != nil {
 		return FindingInspection{}, err
 	}
@@ -354,7 +354,19 @@ func canonicalCandidateEvidence(evidence []CandidateEvidence) []CandidateEvidenc
 	return sorted
 }
 
-func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding) (FindingInspection, error) {
+// inspectionSupplementaryViewHook observes the supplementary view build for
+// symbols a caller-supplied prebuilt set does not cover — the event tests pin
+// to prove the run's stale-reason enrichment reuses the run's own views.
+var inspectionSupplementaryViewHook func(symbols []string)
+
+// inspectFindingStateContext classifies a record against the current tree.
+// A non-nil prebuilt view set serves the symbols it covers — the run's
+// stale-reason enrichment passes the views the serve decision itself just
+// used, so attribution reads the same observation instead of paying a second
+// package-load-scale construction per stale target (REQ-result-stale's
+// naming arm); symbols the prebuilt set lacks (a recorded oracle the current
+// target no longer names) build one supplementary set.
+func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding, prebuilt *subjectViewSet) (FindingInspection, error) {
 	if err := ctx.Err(); err != nil {
 		return FindingInspection{}, err
 	}
@@ -400,11 +412,30 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding) (Findi
 			symbols = append(symbols, evidence.Symbol)
 		}
 	}
-	views, err := t.newSubjectViews(ctx, symbols)
-	if err != nil {
-		return FindingInspection{}, err
+	viewFor := make(map[string]*subjectView, len(symbols))
+	var missing []string
+	for _, symbol := range symbols {
+		if prebuilt != nil {
+			if view, ok := prebuilt.bySymbol[symbol]; ok {
+				viewFor[symbol] = view
+				continue
+			}
+		}
+		missing = append(missing, symbol)
 	}
-	target := views.bySymbol[f.Symbol]
+	if len(missing) > 0 {
+		if inspectionSupplementaryViewHook != nil {
+			inspectionSupplementaryViewHook(missing)
+		}
+		supplementary, err := t.newSubjectViews(ctx, missing)
+		if err != nil {
+			return FindingInspection{}, err
+		}
+		for symbol, view := range supplementary.bySymbol {
+			viewFor[symbol] = view
+		}
+	}
+	target := viewFor[f.Symbol]
 	inspection, err := target.inspectContext(ctx, f.TargetEvidence)
 	if err != nil || inspection.State != FindingCurrent {
 		// The reason names its responsible subject so it stays
@@ -422,7 +453,7 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding) (Findi
 		if !validOracle[evidence.Symbol] {
 			return FindingInspection{State: FindingStale, Reason: "oracle " + evidence.Symbol + " no longer resolves"}, nil
 		}
-		view := views.bySymbol[evidence.Symbol]
+		view := viewFor[evidence.Symbol]
 		inspection, err := view.inspectContext(ctx, evidence)
 		if err != nil {
 			return FindingInspection{}, err

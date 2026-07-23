@@ -658,7 +658,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// forcing defensively (REQ-result-stale). The class comes
 				// from the inspection, not an assumed "stale": an
 				// unverifiable prior is not stale.
-				inspection, ierr := t.inspectFindingStateContext(ctx, *rec)
+				inspection, ierr := t.inspectFindingStateContext(ctx, *rec, views)
 				switch {
 				case ierr == nil && inspection.State != FindingCurrent && inspection.Reason != "":
 					reason = string(inspection.State) + ": " + inspection.Reason
