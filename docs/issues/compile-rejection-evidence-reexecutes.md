@@ -21,3 +21,8 @@ Treat compile-rejection candidate evidence as covered when toolchain and
 build-configuration pins match (the rejection cannot change under them), or
 persist the rejection as a completed disposition rather than incomplete
 evidence. Either ends the permanent splice; the second is the cleaner shape.
+
+Re-measured at gofresh v0.32.0 (post-memo): unchanged - the affected
+target still serves with `1 candidate(s) re-execute` and pays the probe
+plus doomed compile every warm run. The memo covers observability proofs,
+not candidate evidence dispositions.

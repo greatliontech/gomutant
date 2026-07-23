@@ -3,9 +3,10 @@
 Lands: when the moved-pin attribution derives from the matcher's own failed
 check or reuses the run's prebuilt subject views. The warm-path measurement
 (fixture, 3 records: ~3.4s of freshness analysis per record per invocation)
-confirmed per-target view construction is the dominant per-run cost class;
-the persistent-memo decision in warm-path-analysis-memo.md would subsume
-this issue's cost if taken.
+confirmed per-target view construction is the dominant per-run cost class.
+The persistent observability memo (gofresh v0.32.0) did not subsume this
+cost: it covers only the proving leg, and view construction dominates -
+see warm-floor-view-construction.md for the post-memo numbers.
 
 ## Observed
 
