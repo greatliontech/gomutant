@@ -82,7 +82,7 @@ func TestRunMutantExecutesExactlyOnce(t *testing.T) {
 	}
 	counter := filepath.Join(t.TempDir(), "executions")
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_EXECUTION_COUNTER="+counter)
-	out, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", ms[pick],
+	out, _, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", ms[pick],
 		[]string{"example.com/fixture/counting"}, "^TestCounting$", time.Minute, nil, moduleDir, packageDir, nil, env)
 	if err != nil {
 		t.Fatal(err)

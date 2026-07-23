@@ -355,7 +355,21 @@ func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts 
 		if outcome != engine.MutantSurvived {
 			break
 		}
-		out, groupKiller, state, incomplete, err := engine.RunMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, runEnv)
+		out, groupKiller, state, incomplete, diagnostic, err := engine.RunMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, runEnv)
+		if diagnostic != "" {
+			// The mutant failed this group's build: no test process
+			// started, so the group contributes no runtime observation and
+			// no incomplete-process evidence — the discard is a pure
+			// function of the mutant source under the toolchain and
+			// build-configuration pins the serve validates
+			// (REQ-result-stale). Groups that ran keep their observations.
+			outcome = out
+			killer = groupKiller
+			if err != nil {
+				return outcome, killer, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
+			}
+			continue
+		}
 		processStates = append(processStates, state)
 		if incompleteReason == "" {
 			incompleteReason = incomplete

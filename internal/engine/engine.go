@@ -23,6 +23,7 @@ import (
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/tools/go/packages"
+	"strconv"
 )
 
 // Tree is a loaded Go tree: a single module, or a workspace whose go.work
@@ -65,6 +66,9 @@ func loadContextWith(ctx context.Context, dir string, executionSupported bool, l
 	}
 	if !executionSupported {
 		return nil, fmt.Errorf("gomutant: mutation execution supports Unix and Windows hosts")
+	}
+	if err := toolchainSupportsBuildEvents(ctx, dir); err != nil {
+		return nil, err
 	}
 	members, err := workspaceMembersContext(ctx, dir)
 	if err != nil {
@@ -175,6 +179,64 @@ func workspaceMembersContext(ctx context.Context, dir string) ([]string, error) 
 		return nil, fmt.Errorf("go.work declares no members")
 	}
 	return members, nil
+}
+
+// toolchainSupportsBuildEvents refuses toolchains below go1.24: build-failure
+// classification reads the test harness's build-fail events, which older
+// test2json streams do not emit — an uncompilable mutant would fall through
+// to the differential probe and score as a kill, the forbidden flattering
+// direction. A version string that does not parse (a devel toolchain) is
+// modern by construction and passes. The probe reads the PATH binary, which
+// GOTOOLCHAIN=auto could switch UP for the actual test runs when the target's
+// go.mod directs a newer toolchain — that shape refuses loudly where the runs
+// would in fact have been sound: the chosen direction is the conservative
+// one, never a silent kill on an event-less stream.
+func toolchainSupportsBuildEvents(ctx context.Context, dir string) error {
+	cmd := commandContext(ctx, "go", "version")
+	cmd.Dir = dir
+	cmd.Env = GoEnv(dir)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("gomutant: probe toolchain version: %w", err)
+	}
+	version := strings.TrimSpace(string(out))
+	if major, minor, ok := parseGoVersion(version); ok && belowBuildEventFloor(major, minor) {
+		return fmt.Errorf("gomutant: toolchain %q is below go1.24: build-failure classification requires the harness's build-fail events", version)
+	}
+	return nil
+}
+
+// belowBuildEventFloor reports whether a parsed toolchain version predates
+// the go1.24 test2json build-fail events.
+func belowBuildEventFloor(major, minor int) bool {
+	return major < 1 || (major == 1 && minor < 24)
+}
+
+// parseGoVersion extracts the goMAJOR.MINOR pair from a `go version` line;
+// ok is false for devel and otherwise unparseable strings.
+func parseGoVersion(version string) (major, minor int, ok bool) {
+	for _, field := range strings.Fields(version) {
+		if !strings.HasPrefix(field, "go") {
+			continue
+		}
+		rest := strings.TrimPrefix(field, "go")
+		parts := strings.SplitN(rest, ".", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		majorText := parts[0]
+		minorText := parts[1]
+		if i := strings.IndexFunc(minorText, func(r rune) bool { return r < '0' || r > '9' }); i >= 0 {
+			minorText = minorText[:i]
+		}
+		majorValue, majorErr := strconv.Atoi(majorText)
+		minorValue, minorErr := strconv.Atoi(minorText)
+		if majorErr != nil || minorErr != nil {
+			continue
+		}
+		return majorValue, minorValue, true
+	}
+	return 0, 0, false
 }
 
 // GoEnv returns the complete process environment with workspace mode pinned for

@@ -22,7 +22,13 @@ explicit unverifiable marker with its incomplete-process reason and its measured
 disposition — killed, survived, or discarded, so a splice can conserve the
 generated-candidate accounting — identified by the candidate's position and
 operator; every other candidate is covered by the subject evidence's
-completed-process union.
+completed-process union. A compile-rejected candidate carries no candidate
+evidence: no test process started — as reported by the test harness's own
+build-failure event, never inferred from output text a test could forge — so
+the run had no runtime exposure to prove complete, and its discard is a pure
+function of the mutant source under the toolchain and build-configuration
+pins; an oracle group that did run contributes its completed observation to
+the union as usual.
 The observation proof is encoded by required `observationAssertion`,
 `observationStrategy`, `observationSubjectPackage`,
 `observationSubjectSymbol`, `observationObservable`, and
@@ -96,7 +102,12 @@ probe, conserving the generated-candidate accounting; the run decision reports
 the serve with the re-executed candidate count. A candidate whose evidence
 cannot prove its runtime inputs unchanged always re-executes, because a kill
 retained past a moved runtime input its process could have read is the
-forbidden flattering direction. The serve is bounded fail-closed: when
+forbidden flattering direction — a compile rejection is outside that rationale
+(no process started, nothing could have been read) and serves covered under
+the toolchain and build-configuration pins without re-execution. A record
+persisted before this carve-out still carries compile-rejection candidate
+evidence; its one remaining splice re-executes the rejection, produces no
+fresh evidence, and the persisted spliced record serves fully thereafter. The serve is bounded fail-closed: when
 deterministic regeneration cannot re-identify a flagged candidate the target
 remeasures whole, and when the re-executed processes' completed union does not
 equal the record's persisted union the spliced finding is preserved but

@@ -143,17 +143,18 @@ func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, 
 // panic, exit before harness completion, compile rejection, or missing log —
 // and is empty otherwise; that incompleteness attaches to the measured
 // candidate alone, while content-unverifiable or disagreeing COMPLETED
-// observations stay finding-wide (REQ-exec-observation).
-func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string) (MutantOutcome, string, runtimeinput.Observation, string, error) {
-	outcome, killer, state, incomplete, _, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, GoEnv(dir))
-	return outcome, killer, state, incomplete, err
+// observations stay finding-wide (REQ-exec-observation). The diagnostic
+// return carries the compiler's own text exactly when the mutant failed to
+// build — the caller's signal that no test process started, so the run has
+// no runtime exposure at all.
+func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, GoEnv(dir))
 }
 
 // RunMutantObservedEnv is RunMutantObserved under an already-frozen complete
 // environment.
-func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (MutantOutcome, string, runtimeinput.Observation, string, error) {
-	outcome, killer, state, incomplete, _, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, env)
-	return outcome, killer, state, incomplete, err
+func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, env)
 }
 
 // runMutant executes each mutant exactly once: the pre-spawn observation
@@ -266,9 +267,14 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	case runErr == nil:
 		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "", env, capture, oracleBracket, oracleBracketReason)
 		return MutantSurvived, "", state, incomplete, "", err
-	case strings.Contains(stdout.String(), "[build failed]"):
-		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process did not start because the mutant failed to build", env, capture, oracleBracket, oracleBracketReason)
-		return MutantDiscarded, "", state, incomplete, compileDiagnostics(stdout.Bytes(), stderr.Bytes()), err
+	case buildRejected(stdout.Bytes()):
+		// The harness itself reported the failed build: no test process
+		// started, so there is no observation to finalize and no
+		// incomplete-process evidence to carry — the discard is a pure
+		// function of the mutant source under the toolchain and
+		// build-configuration pins (REQ-result-stale). The diagnostic
+		// carries the compiler's text for interactive surfaces.
+		return MutantDiscarded, "", runtimeinput.Observation{}, "", compileDiagnostics(stdout.Bytes(), stderr.Bytes()), nil
 	case killer != "":
 		reason := ""
 		if testProcessPanicked(stdout.Bytes()) || !testFailureCompleted(stdout.Bytes(), killer) {
@@ -766,6 +772,30 @@ func firstFailingTest(stream []byte) (string, error) {
 				name = name[:i]
 			}
 			killer = e.Package + "." + name
+		}
+	}
+}
+
+// buildRejected reports whether the test harness itself reported a failed
+// build: the top-level "build-fail" event, or a package-level fail event
+// carrying FailedBuild. Both are harness-generated and unforgeable — a test's
+// own output rides only inside "output" events' Output strings, so a test
+// printing a captured "[build failed]" line can never classify here
+// (candidate evidence term: the no-process claim is tied to the harness's
+// build-failure event, never to output text).
+func buildRejected(stream []byte) bool {
+	type event struct {
+		Action      string
+		FailedBuild string
+	}
+	dec := json.NewDecoder(bytes.NewReader(stream))
+	for {
+		var e event
+		if err := dec.Decode(&e); err != nil {
+			return false
+		}
+		if e.Action == "build-fail" || e.FailedBuild != "" {
+			return true
 		}
 	}
 }

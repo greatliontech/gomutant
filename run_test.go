@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1243,15 +1245,13 @@ func TestRunUnionsEveryProcessObservation(t *testing.T) {
 // its unverifiability attaches to that candidate — never to the finding's
 // subject evidence — and the record still refuses coverage without the
 // flagged re-execution.
-func TestRunCompileDiscardIsCandidateLocalEvidence(t *testing.T) {
+func TestRunCompileDiscardCarriesNoCandidateEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
 	tr := fixtureTree(t)
-	findings, err := tr.Run(context.Background(), []Target{{
-		Symbol: "example.com/fixture/lib.Idx",
-		Oracle: []string{"example.com/fixture/lib.TestAdd"},
-	}}, Options{})
+	target := Target{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}}
+	findings, err := tr.Run(context.Background(), []Target{target}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1262,26 +1262,188 @@ func TestRunCompileDiscardIsCandidateLocalEvidence(t *testing.T) {
 	if evidence.RuntimeUnverifiable || evidence.RuntimeReason != "" {
 		t.Fatalf("compile-discard runtime evidence = %+v, want the completed-process union verifiable", evidence)
 	}
-	flagged := findings[0].CandidateEvidence
-	if len(flagged) == 0 {
-		t.Fatalf("compile-discard finding carries no candidate evidence: %+v", findings[0])
+	// No test process started for the rejected candidates: no runtime
+	// exposure exists to prove complete, so the discard is covered by the
+	// toolchain and build-configuration pins and carries no candidate
+	// evidence (candidate evidence term, REQ-result-stale).
+	if flagged := findings[0].CandidateEvidence; len(flagged) != 0 {
+		t.Fatalf("compile-discard finding carries candidate evidence: %+v", flagged)
 	}
-	discardEvidence := 0
-	for _, candidate := range flagged {
-		if strings.Contains(candidate.Reason, "failed to build") && candidate.Disposition == "discarded" {
-			discardEvidence++
+	// The record is coverable as it stands - no splice, no probe, no
+	// doomed re-compile per serve.
+	if ok, err := tr.Fresh(findings[0], target, 0); err != nil || !ok {
+		t.Fatalf("compile-discard finding coverable without execution = %v, %v; want covered", ok, err)
+	}
+	var decisions []RunDecision
+	served, err := tr.Run(context.Background(), []Target{target}, Options{
+		Prior:    findings,
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(served) != 1 || !served[0].Cached {
+		t.Fatalf("compile-discard record did not serve: %+v", served)
+	}
+	for _, decision := range decisions {
+		if strings.Contains(decision.Reason, "re-execute") {
+			t.Fatalf("serve still splices a deterministic compile rejection: %+v", decision)
 		}
 	}
-	if discardEvidence == 0 {
-		t.Fatalf("candidate evidence = %+v, want an explicit build-incomplete discard", flagged)
-	}
-	// A record carrying candidate evidence is not coverable without the
-	// flagged re-execution, so Fresh reports false while the pins hold.
-	if ok, err := tr.Fresh(findings[0], Target{Symbol: findings[0].Symbol, Oracle: []string{"example.com/fixture/lib.TestAdd"}}, 0); err != nil || ok {
-		t.Fatalf("compile-discard finding coverable without execution = %v, %v", ok, err)
-	}
 	if _, err := Export(findings); err != nil {
-		t.Fatalf("exporting candidate evidence: %v", err)
+		t.Fatalf("exporting compile-discard finding: %v", err)
+	}
+}
+
+// A record persisted before the compile-rejection carve-out carries the
+// old-style candidate evidence: its one remaining splice re-executes the
+// rejection, produces no fresh evidence, and the persisted spliced record
+// serves fully thereafter (REQ-result-stale's self-heal sentence).
+func TestRunSelfHealsLegacyCompileRejectionEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	targets := []Target{{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}}}
+	first, err := tr.Run(ctx, targets, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || first[0].Discarded == 0 {
+		t.Fatalf("seed finding = %+v", first)
+	}
+	// Regress the record to the pre-carve-out shape: flag one discarded
+	// candidate with the legacy incomplete-process reason.
+	position, operator := discardedCandidateIdentity(t, tr, targets[0].Symbol, first[0])
+	legacy := first[0]
+	legacy.CandidateEvidence = []CandidateEvidence{{
+		Position:    position,
+		Operator:    operator,
+		Reason:      "mutant test process did not start because the mutant failed to build",
+		Disposition: "discarded",
+	}}
+
+	var decisions []RunDecision
+	second, err := tr.Run(ctx, targets, Options{
+		Prior:    []Finding{legacy},
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 1 || !second[0].Cached {
+		t.Fatalf("legacy record did not serve via splice: %+v", second)
+	}
+	spliced := false
+	for _, decision := range decisions {
+		if strings.Contains(decision.Reason, "re-execute") {
+			spliced = true
+		}
+	}
+	if !spliced {
+		t.Fatalf("legacy record served without its one remaining splice: %+v", decisions)
+	}
+	// The splice's fresh execution produces no evidence for the rejection,
+	// so the record the caller persists is evidence-free - the tax ends
+	// here (REQ-result-stale's self-heal sentence).
+	if len(second[0].CandidateEvidence) != 0 {
+		t.Fatalf("spliced record still carries candidate evidence: %+v", second[0].CandidateEvidence)
+	}
+	if !reflect.DeepEqual(summarizeFinding(first[0]), summarizeFinding(second[0])) {
+		t.Fatalf("self-heal changed the measurement:\n first %+v\n second %+v", summarizeFinding(first[0]), summarizeFinding(second[0]))
+	}
+	var healedDecisions []RunDecision
+	third, err := tr.Run(ctx, targets, Options{
+		Prior:    second,
+		Decision: func(d RunDecision) { healedDecisions = append(healedDecisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(third) != 1 || !third[0].Cached {
+		t.Fatalf("healed record did not serve: %+v", third)
+	}
+	for _, decision := range healedDecisions {
+		if strings.Contains(decision.Reason, "re-execute") {
+			t.Fatalf("healed record still splices: %+v", decision)
+		}
+	}
+}
+
+// discardedCandidateIdentity picks a candidate the fixture provably
+// compile-rejects: an operator whose every generated candidate was discarded,
+// then that operator's first candidate in the regenerated set.
+func discardedCandidateIdentity(t *testing.T, tr *Tree, symbol string, rec Finding) (position, operator string) {
+	t.Helper()
+	generation, err := tr.eng.CandidatesContext(context.Background(), symbol, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, summary := range rec.Operators {
+		if summary.Discarded == 0 || summary.Killed != 0 || summary.Survived != 0 || summary.Discarded != summary.Generated {
+			continue
+		}
+		// The discard must be a compile rejection, not a generation-time
+		// duplicate: only a runnable candidate can be spliced.
+		for _, candidate := range generation.Candidates {
+			if candidate.Operator != summary.Operator {
+				continue
+			}
+			if _, runnable := candidate.Mutant(); runnable {
+				return candidate.Position, candidate.Operator
+			}
+		}
+	}
+	t.Fatalf("fixture has no runnable fully-discarded candidate: %+v", rec.Operators)
+	return "", ""
+}
+
+type findingSummary struct {
+	killed, mutants, discarded, generated, candidateCount int
+	survivors                                             []Survivor
+}
+
+func summarizeFinding(f Finding) findingSummary {
+	survivors := append([]Survivor(nil), f.Survivors...)
+	sort.Slice(survivors, func(i, j int) bool {
+		if survivors[i].Position != survivors[j].Position {
+			return survivors[i].Position < survivors[j].Position
+		}
+		return survivors[i].Operator < survivors[j].Operator
+	})
+	for i := range survivors {
+		survivors[i].Execution = ""
+	}
+	return findingSummary{killed: f.Killed, mutants: f.Mutants, discarded: f.Discarded, generated: f.Generated, candidateCount: f.CandidateCount, survivors: survivors}
+}
+
+// An oracle group that runs contributes its completed observation even when a
+// sibling group's build rejects the mutant: the union keeps the ran process's
+// runtime evidence verifiable instead of poisoning it with a no-process state
+// (candidate evidence term: "an oracle group that did run contributes its
+// completed observation to the union as usual").
+func TestRunCompileRejectionKeepsSiblingGroupObservations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	findings, err := tr.Run(context.Background(), []Target{{
+		Symbol: "example.com/fixture/lib.Idx",
+		Oracle: []string{"example.com/fixture/lib.TestAdd", "example.com/fixture/plain.TestPlain"},
+	}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Discarded == 0 {
+		t.Fatalf("cross-package compile-discard finding = %+v", findings)
+	}
+	if flagged := findings[0].CandidateEvidence; len(flagged) != 0 {
+		t.Fatalf("candidate evidence = %+v, want none", flagged)
+	}
+	evidence := findings[0].TargetEvidence
+	if evidence.RuntimeUnverifiable {
+		t.Fatalf("sibling group's completed observation poisoned the union: %+v", evidence)
 	}
 }
 

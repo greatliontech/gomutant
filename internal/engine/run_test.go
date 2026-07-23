@@ -95,7 +95,7 @@ func TestRunMutantObservedReturnsCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+	_, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
 		[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Remove(input) })
 	t.Setenv("GOMUTANT_MOVING_INPUT", input)
-	outcome, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+	outcome, killer, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
 		[]string{"example.com/fixture/lib"}, "^TestMovingInput$", 60*time.Second, nil, moduleDir, packageDir, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestNamedTestPanicIsIncompleteEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[mutantIndex],
+	outcome, killer, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[mutantIndex],
 		[]string{"example.com/fixture/lib"}, "^TestNamedPanic$", 60*time.Second, nil, moduleDir, packageDir, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 		// suffices — the legitimate run is sub-second — and keeps this
 		// exhaustive loop from paying a long timeout for mutants that are
 		// incidental to the package-kill this test asserts.
-		out, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+		out, killer, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestGuarded$", 5*time.Second, nil, moduleDir, packageDir, nil)
 		if err != nil {
 			t.Fatalf("mutant %s %s aborted as noise: %v", m.Position, m.Operator, err)
@@ -295,21 +295,26 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range ms {
-		out, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+		out, killer, state, incomplete, diagnostic, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir, nil)
 		if err != nil {
 			t.Fatalf("mutant %s %s: %v", m.Position, m.Operator, err)
 		}
-		if out == MutantDiscarded {
+		if out == MutantDiscarded && diagnostic != "" {
 			discarded++
 			if killer != "" {
 				t.Fatalf("discarded mutant carries killer %q", killer)
 			}
-			if !state.Unverifiable || !strings.Contains(state.Reason, "failed to build") {
-				t.Fatalf("discarded mutant observation = %+v, want explicit build incompleteness", state)
+			// No test process started: the engine claims no runtime
+			// exposure and no incomplete-process evidence — the discard
+			// rides the toolchain and build-configuration pins, and the
+			// diagnostic carries the compiler's own text (candidate
+			// evidence term, REQ-result-stale).
+			if state.OK || state.Unverifiable || state.Manifest != "" {
+				t.Fatalf("build-rejected mutant claims runtime exposure: %+v", state)
 			}
-			if !strings.Contains(incomplete, "failed to build") {
-				t.Fatalf("discard incompleteness = %q, want candidate-local reason", incomplete)
+			if incomplete != "" {
+				t.Fatalf("build-rejected mutant carries incomplete-process evidence: %q", incomplete)
 			}
 		}
 	}
@@ -337,7 +342,7 @@ func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, killer, state, incomplete, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
+	out, killer, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
 		[]string{"example.com/fixture/plain"}, "^TestPlain$", 60*time.Second,
 		[]string{"-no.such.flag"}, moduleDir, packageDir, nil)
 	if err != nil {
@@ -727,5 +732,44 @@ func TestObservationWithoutBracketFailsClosedAsIncomplete(t *testing.T) {
 	}
 	if !obs.OK || !obs.Unverifiable {
 		t.Fatalf("observation = %+v, want fail-closed incomplete evidence", obs)
+	}
+}
+
+// A test that prints a captured "[build failed]" line while dying must score
+// as an attributed kill, never as a no-process build rejection: the
+// classification reads the harness's build-failure event, which test output
+// cannot forge (candidate evidence term's harness-witness sentence).
+func TestRunMutantForgedBuildFailureOutputStaysAKill(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	tr := fixtureTree(t)
+	ms, err := tr.Mutants("example.com/fixture/forgery.Guarded", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/forgery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	killed := 0
+	for _, m := range ms {
+		out, killer, _, _, diagnostic, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+			[]string{"example.com/fixture/forgery"}, "^TestGuarded$", 60*time.Second, nil, moduleDir, packageDir, nil)
+		if err != nil {
+			t.Fatalf("mutant %s %s: %v", m.Position, m.Operator, err)
+		}
+		if out == MutantKilled {
+			killed++
+			if killer != "example.com/fixture/forgery.TestGuarded" {
+				t.Fatalf("kill attributed to %q", killer)
+			}
+			if diagnostic != "" {
+				t.Fatalf("forged output classified as a build rejection: %q", diagnostic)
+			}
+		}
+	}
+	if killed == 0 {
+		t.Fatal("no mutant was killed; the boolean flip should die printing the forged marker")
 	}
 }
