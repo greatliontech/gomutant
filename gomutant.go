@@ -211,7 +211,9 @@ func LoadContext(ctx context.Context, dir string) (*Tree, error) {
 }
 
 // Discover targets every top-level function and method declared in the
-// tree's non-test, non-generated source files, oracles left to the default
+// tree's non-test, non-generated source files — package initializers
+// excepted: the language keeps init unreferencable, so it can never be a
+// resolvable target — oracles left to the default
 // (REQ-target-producers): whole-package discovery is a usable run without a
 // caller enumerating anything.
 func (t *Tree) Discover() []Target {
@@ -273,6 +275,16 @@ func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref f
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
+		// A changed or removed init body is reported beside whatever else
+		// the file yields: init is unreferencable by language definition,
+		// so it can never be a target, and one changed init must not
+		// abort — or silently narrow — the rest of the delta. A file a
+		// categorical class already excludes (generated, here; test and
+		// unloaded files never carry the count) reports that class alone
+		// (REQ-target-changed).
+		if fs.ChangedInits > 0 && !fs.Generated {
+			residue = append(residue, Residue{Path: fs.Path, Reason: "func init() changed: not an addressable mutation subject (its wiring runs under every oracle execution)"})
+		}
 		switch {
 		case fs.IsTest:
 			residue = append(residue, Residue{Path: fs.Path, Reason: "test file: tests are oracles, never targets"})
@@ -289,6 +301,9 @@ func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref f
 			for _, s := range fs.Symbols {
 				targets = append(targets, Target{Symbol: s})
 			}
+		case fs.ChangedInits > 0:
+			// The init exclusion above is this path's whole story; the
+			// remaining arms would mislabel it as churn or emptiness.
 		case fs.DeclaredBodies == 0:
 			residue = append(residue, Residue{Path: fs.Path, Reason: "no function body declared"})
 		case fs.RefOnlyDecls > 0:

@@ -15,9 +15,9 @@ on a quiet tree ran normally.
 
 ## Shape
 
-Same failure class as a changed `func init()` aborting discovery (see
-`init-func-targets-abort-discovery.md`): a per-target condition escalated into a
-campaign-level outage. A canceled or timed-out freshness proof is evidence
+Same failure class as the resolved changed-`func init()` discovery abort
+(now excluded loudly per REQ-target-changed's init arm): a per-target
+condition escalated into a campaign-level outage. A canceled or timed-out freshness proof is evidence
 about one target's oracle under momentary load, not about the campaign; the
 admissible answers are a bounded retry of that proof, or committing the target
 as unverifiable with the cancellation reason on its decision line while the

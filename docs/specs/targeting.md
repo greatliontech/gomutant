@@ -94,11 +94,20 @@ churn: the canonical projection preserves literal interiors byte-exact), a decla
 changed, a symbol deleted since the ref yields no target (nothing remains to
 mutate), and an unparseable prior version conservatively reads as all
 changed. Test sources are oracles, never targets, and are excluded from the
-changed surface. The mode also reports the changed-but-untargeted
+changed surface. A `func init()` declaration is not an addressable target in
+any discovery form — the language defines the init identifier as
+unreferencable, so an emitted init target could never resolve — and a changed
+or removed init body reports as residue naming the exclusion beside whatever
+targets the same file yields, never aborting or silently narrowing the delta;
+a file a categorical residue class already excludes whole (a test, generated,
+non-Go, or unloaded file) reports that class alone; an explicit
+target naming init is refused with an error naming the same class. The mode
+also reports the changed-but-untargeted
 residue with the engine-level reason each path yielded no target — a test
 file, a generated file, a non-Go or data-only file, a changed file declaring
 no function body, a file whose declared bodies are all canonically unchanged
-(formatting-only churn), a file whose only change is a deleted symbol, or a
+(formatting-only churn), a file whose only change is a deleted symbol, a file
+whose only change is an init body (edited or removed), or a
 Go file the loaded packages do not cover (deleted, unparseable, or excluded
 by build constraints — an unbound surface named as such, never mislabeled) —
 so a caller layering its own classification (or a user deciding what to

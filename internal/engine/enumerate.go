@@ -17,7 +17,8 @@ import (
 // and method declared in the tree's non-test, non-generated source files,
 // sorted — the whole-tree discovery surface (REQ-target-producers). Test
 // files are oracles, never targets; generated bodies have nothing
-// hand-written to strengthen a test against, so neither yields a target.
+// hand-written to strengthen a test against; and a package initializer is
+// unreferencable by language definition — none yields a target.
 func (t *Tree) DeclaredSymbols() []string {
 	symbols, _ := t.DeclaredSymbolsContext(context.Background())
 	return symbols

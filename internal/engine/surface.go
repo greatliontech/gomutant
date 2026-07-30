@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -33,6 +34,13 @@ type FileSurface struct {
 	// from the working file — deletions, which yield no target (nothing
 	// remains to mutate) but are part of the changed surface.
 	RefOnlyDecls int
+	// ChangedInits counts func init() bodies that differ from the
+	// reference — edited or removed. Go defines the init identifier as
+	// unreferencable, so an init body can never be a resolvable target
+	// symbol; the count lets the caller report the exclusion instead of
+	// either aborting on an unresolvable symbol or silently narrowing
+	// the changed surface (REQ-target-changed).
+	ChangedInits int
 	// Symbols are the resolver symbol strings of the declarations whose body
 	// differs from the reference version, sorted.
 	Symbols []string
@@ -91,20 +99,30 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 			}
 			fdecls := &fileDecls{generated: ast.IsGenerated(f), byKey: map[string]decl{}}
 			byPath[rel] = fdecls
+			inits := 0
 			for _, d := range f.Decls {
 				fn, ok := d.(*ast.FuncDecl)
 				if !ok {
 					continue
 				}
+				key := declKey(fn)
 				sym := declSymbol(pkgPath, fn)
-				if sym == "" {
+				if isInitDecl(fn) {
+					// init bodies are tracked for change detection under a
+					// per-file ordinal key — every init in a file shares the
+					// name, which the language keeps unreferencable — and
+					// carry no symbol: a changed init is reported as an
+					// exclusion, never emitted as an unresolvable target.
+					key = initKey(inits)
+					inits++
+				} else if sym == "" {
 					continue
 				}
 				src, err := t.sourceOfContext(ctx, pkg, bodyNode(fn))
 				if err != nil {
 					continue
 				}
-				fdecls.byKey[declKey(fn)] = decl{symbol: sym, hash: canonHash(string(src))}
+				fdecls.byKey[key] = decl{symbol: sym, hash: canonHash(string(src))}
 			}
 		}
 	}
@@ -135,11 +153,23 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 				if old != nil && old[key] == wd.hash {
 					continue // body unchanged since the reference
 				}
+				if wd.symbol == "" {
+					// A changed init body: counted for the exclusion
+					// report, never a target symbol (unreferencable).
+					fs.ChangedInits++
+					continue
+				}
 				fs.Symbols = append(fs.Symbols, wd.symbol)
 			}
 			for key := range old {
 				if _, ok := d.byKey[key]; !ok {
-					fs.RefOnlyDecls++
+					// A removed init is the init class, not a deleted
+					// symbol: there was never a symbol to delete.
+					if strings.HasPrefix(key, "init#") {
+						fs.ChangedInits++
+					} else {
+						fs.RefOnlyDecls++
+					}
 				}
 			}
 			sort.Strings(fs.Symbols)
@@ -161,10 +191,19 @@ func refDeclHashes(src []byte) map[string]string {
 		return nil
 	}
 	out := map[string]string{}
+	inits := 0
 	for _, d := range f.Decls {
 		fn, ok := d.(*ast.FuncDecl)
 		if !ok {
 			continue
+		}
+		key := declKey(fn)
+		if isInitDecl(fn) {
+			// Mirror the working side's per-file ordinal keying so an
+			// unchanged init compares equal instead of always reading
+			// changed.
+			key = initKey(inits)
+			inits++
 		}
 		node := bodyNode(fn)
 		start := fset.Position(node.Pos()).Offset
@@ -172,9 +211,23 @@ func refDeclHashes(src []byte) map[string]string {
 		if start < 0 || end > len(src) || start > end {
 			continue
 		}
-		out[declKey(fn)] = canonHash(string(src[start:end]))
+		out[key] = canonHash(string(src[start:end]))
 	}
 	return out
+}
+
+// isInitDecl reports whether fd is a package initializer: the one
+// top-level function form whose identifier the language defines as
+// unreferencable, so it can never be a resolver symbol.
+func isInitDecl(fd *ast.FuncDecl) bool {
+	return fd.Recv == nil && fd.Name.Name == "init"
+}
+
+// initKey is the per-file ordinal comparison key of the n-th init
+// declaration. The "#" cannot occur in a declKey identifier, so ordinal
+// keys never collide with named declarations.
+func initKey(n int) string {
+	return "init#" + strconv.Itoa(n)
 }
 
 // bodyNode is the declaration's body when it has one, else the whole
@@ -197,7 +250,13 @@ func declKey(fd *ast.FuncDecl) string {
 
 // declSymbol builds the resolver symbol string for a top-level declaration:
 // "<pkg>.<Name>" for a function, "<pkg>.<Receiver>.<Name>" for a method.
+// A package initializer yields no symbol: the language defines the init
+// identifier as unreferencable, so a "<pkg>.init" target could never
+// resolve and would abort every discovery form that emitted it.
 func declSymbol(pkgPath string, fd *ast.FuncDecl) string {
+	if isInitDecl(fd) {
+		return ""
+	}
 	if recv := recvTypeName(fd); recv != "" {
 		return pkgPath + "." + recv + "." + fd.Name.Name
 	}

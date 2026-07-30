@@ -206,6 +206,13 @@ func (t *Tree) objectContext(ctx context.Context, symbol string) (types.Object, 
 			return obj, nil
 		}
 	}
+	// init is unreferencable by language definition, so the failure is
+	// structural, not a typo: name the class so an explicit init target
+	// is actionable. Only the function form - a METHOD named init is
+	// addressable, and its resolution failures are ordinary.
+	if len(parts) == 1 && parts[0] == "init" {
+		return nil, fmt.Errorf("symbol %s does not resolve: func init() is not an addressable mutation subject (its wiring runs under every oracle execution)", symbol)
+	}
 	return nil, fmt.Errorf("symbol %s does not resolve", symbol)
 }
 
