@@ -1,39 +1,32 @@
 # Deterministic module-root discovery is classified as an unstable env input
 
-Lands: either the classification recognizes working-directory reads that resolve
-only the module root as stable under `go test`, or a per-repo oracle policy admits
-a named-test exemption with its reasoning on record, attestation-style.
+Lands: when a consuming repository needs committable witness evidence under a
+deliberately kept environment-reading idiom (the reporting corpus migrated its
+repo-root helper to a source-anchored root, so no current consumer demands it).
 
 ## Observed
 
-A consuming corpus (`candosa/cerebro`) uses one repo-root idiom in roughly ten test
-files: `os.Getwd()` walked upward to the directory containing `go.mod`. Under
-`go test` this is deterministic — the working directory is always the package
-directory, and the walk resolves the same module root from every package. The
-classification flags the test as consuming a process-local environment input
-(`PWD`), which buckets every open candidate on the affected symbols as
-unstable-oracle: their survivor records become non-committable and land only in the
-machine-local overlay. A survivor attestation made through `attest_survivor` on such
-a symbol was accepted but could not reach the repository findings document, and
-nineteen sibling survivors on the same symbol read as unverifiable rather than as
-the executed-and-passed findings they are.
+A consuming corpus (`candosa/cerebro`) used one repo-root idiom in roughly ten
+test files: `os.Getwd()` walked upward to the directory containing `go.mod`.
+Under `go test` this is deterministic — the working directory is always the
+package directory — but the classification flags the test as consuming a
+process-local environment input (`PWD`), bucketing every open candidate on the
+affected symbols as unstable-oracle: survivor records become non-committable
+(machine-local overlay only), and survivor attestations cannot reach the
+repository findings document. The caller resolved it by migrating the idiom to
+`runtime.Caller`, which dissolves the flag.
 
-The caller's fix is migrating the idiom to a source-anchored root
-(`runtime.Caller`), which dissolves the flag — but the classification itself is the
-conservative reading of a read that is provably stable for the only execution mode
-the oracle runs under. The conservatism is defensible: a wrapper (`go test -exec`,
-an IDE runner) can launch the binary from elsewhere. What is missing is a sanctioned
-way to keep committable evidence when a repository has judged the read stable.
+## Design direction (settled this session)
 
-## Shape
-
-Two admissible resolutions, either sufficient:
-
-1. **Refined classification.** A working-directory read whose derived value is used
-   only after an upward walk terminating at a `go.mod` (or an equivalent
-   module-root witness) is stable per module under `go test`; classify it stable
-   and record the reasoning in the finding.
-2. **Per-repo oracle policy.** A committed policy document naming tests exempt from
-   the env-input rule, each exemption carrying its reasoning — the same
-   on-the-record discipline `attest_survivor` already applies to equivalence, so an
-   exemption is auditable and revocable rather than a silent global switch.
+The conservative classification stands. Refining it — "a working-directory
+read whose derived value is used only after an upward walk terminating at a
+module-root witness is stable" — is a dataflow proof obligation (all uses of
+the derived value, through arbitrary helpers), and a mistake's failure
+direction is unsound reuse; the wrapper caveat (`go test -exec`, IDE runners
+launching from elsewhere) is real. The sanctioned path is the second shape:
+a per-repo reviewed exemption record — a committed document naming test
+subjects exempt from the env-input instability rule, each exemption carrying
+its reasoning, consumed at oracle-stability classification so the affected
+records become committable, with the exemption stamped into every finding it
+touches. That mirrors the on-the-record discipline `attest_survivor` already
+applies to equivalence: auditable and revocable, never a silent global switch.

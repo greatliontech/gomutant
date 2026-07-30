@@ -163,6 +163,12 @@ never reads a partial campaign as success); a transient global drift that no
 surviving target's evidence reflects is still reported, never silently absorbed.
 A repository HEAD move remains campaign-wide: it breaks the commit provenance
 pin every finding carries — a global pin, not per-target source drift.
+The same target-locality governs evidence construction: a target whose own
+freshness-proof construction fails — after one bounded retry — skips with
+the cause on its decision line, never overwriting a prior record and never
+taking sibling targets down; a campaign-wide abort remains reserved for conditions that
+invalidate every measurement (cancellation of the run itself, the HEAD
+move above, a view failure spanning all targets).
 
 **REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant — a
 caller-supplied replacement of one or more existing source files, given whole,

@@ -2560,3 +2560,204 @@ func TestRunStaleReasonReusesTheRunsViews(t *testing.T) {
 		t.Fatalf("decisions = %+v; want a re-measure whose reason names the record-only oracle through the supplementary view", decisions)
 	}
 }
+
+// A per-target freshness-proof failure is target-local (the exact rule
+// drift refusal follows, REQ-exec-quiescence): the target skips with the
+// cause on its decision line and the campaign completes — one target's
+// broken evidence never exits the run. The proof site retries once
+// (transient-load failure mode) before degrading.
+func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []Target{
+		{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}},
+		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+	}
+	libPath := filepath.Join(tmp, "lib", "lib.go")
+	libSource, err := os.ReadFile(libPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	findings, err := tr.Run(context.Background(), targets, Options{
+		Budget: 1,
+		// Decisions emit after the prepare loop: restoring here puts the
+		// byte-identical tree back before measurement and revalidation,
+		// so the induced failure stays scoped to the second target's
+		// proof construction.
+		Decision: func(d RunDecision) {
+			decisions = append(decisions, d)
+			if d.Symbol == targets[1].Symbol {
+				if wErr := os.WriteFile(libPath, libSource, 0o644); wErr != nil {
+					t.Fatal(wErr)
+				}
+			}
+		},
+		// After the first target's proof capture, break the SECOND
+		// target's package so its producer-view build fails (twice —
+		// the deletion persists through the bounded retry).
+		producer: func(symbol string) {
+			if symbol == targets[0].Symbol {
+				if rmErr := os.Remove(libPath); rmErr != nil {
+					t.Fatal(rmErr)
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("one target's proof failure escalated to a campaign abort: %v", err)
+	}
+	bySym := map[string]Finding{}
+	for _, f := range findings {
+		bySym[f.Symbol] = f
+	}
+	if skipped := bySym[targets[1].Symbol].Skipped; !strings.Contains(skipped, "freshness proof unavailable") {
+		t.Fatalf("broken target's skip = %q, want the proof-unavailable cause", skipped)
+	}
+	if healthy := bySym[targets[0].Symbol]; healthy.Skipped != "" || healthy.Generated == 0 {
+		t.Fatalf("sibling target did not measure: %+v", healthy)
+	}
+	var skipDecision *RunDecision
+	for i := range decisions {
+		if decisions[i].Symbol == targets[1].Symbol {
+			skipDecision = &decisions[i]
+		}
+	}
+	if skipDecision == nil || skipDecision.Action != "skipped" || !strings.Contains(skipDecision.Reason, "freshness proof unavailable") {
+		t.Fatalf("skip decision = %+v, want the per-target cause line", skipDecision)
+	}
+}
+
+// The proof site retries once before degrading: a transiently failing
+// construction (the field mode - momentary load) measures on the second
+// attempt instead of skipping.
+func TestFreshnessProofRetriesOnceBeforeSkipping(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}}
+	plainPath := filepath.Join(tmp, "plain", "plain.go")
+	plainSource, err := os.ReadFile(plainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attempts []int
+	findings, err := tr.Run(context.Background(), []Target{target}, Options{
+		Budget: 1,
+		proofAttempt: func(symbol string, attempt int) {
+			attempts = append(attempts, attempt)
+			switch attempt {
+			case 1:
+				if rmErr := os.Remove(plainPath); rmErr != nil {
+					t.Fatal(rmErr)
+				}
+			case 2:
+				if wErr := os.WriteFile(plainPath, plainSource, 0o644); wErr != nil {
+					t.Fatal(wErr)
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("transient proof failure aborted the run: %v", err)
+	}
+	if !slices.Equal(attempts, []int{1, 2}) {
+		t.Fatalf("proof attempts = %v, want [1 2]", attempts)
+	}
+	if len(findings) != 1 || findings[0].Skipped != "" || findings[0].Generated == 0 {
+		t.Fatalf("retry did not recover the target: %+v", findings)
+	}
+}
+
+// Cancellation of the campaign itself during a proof build stays an
+// abort — and the error keeps its target-naming wrap, so the caller
+// learns which subject's view was in flight (REQ-exec-quiescence's
+// legibility arm; the skip degrade is only for target-local conditions
+// under a live campaign).
+func TestFreshnessProofCancellationAbortsWithNamedTarget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds producer views")
+	}
+	tr := fixtureTree(t)
+	target := Target{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	findings, err := tr.Run(ctx, []Target{target}, Options{
+		Budget:       1,
+		proofAttempt: func(string, int) { cancel() },
+	})
+	if err == nil || findings != nil {
+		t.Fatalf("canceled campaign completed: findings %v, err %v", findings, err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error class lost: %v", err)
+	}
+	if !strings.Contains(err.Error(), "freshness proof for target "+target.Symbol) {
+		t.Fatalf("cancellation during the proof build lost its target-naming wrap: %v", err)
+	}
+}
+
+// A skipped target's modules never enroll in end-of-run producer
+// validation: in a workspace, one member's persistent breakage skips
+// exactly its own target and the sibling member's campaign completes —
+// no campaign-level drift report for a target-local condition
+// (REQ-exec-quiescence).
+func TestFreshnessProofSkipDoesNotEnrollItsModules(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS("internal/engine/testdata/workspacemod")); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []Target{
+		{Symbol: "example.com/ws/sub.Nested", Oracle: []string{"example.com/ws/sub.TestNested"}},
+		{Symbol: "example.com/ws.Root", Oracle: []string{"example.com/ws.TestRoot"}},
+	}
+	findings, err := tr.Run(context.Background(), targets, Options{
+		Budget: 1,
+		// Break the SECOND target's module after the first's proof
+		// capture — and never restore: with the broken module never
+		// enrolled, final validation covers only the measured member.
+		producer: func(symbol string) {
+			if symbol == targets[0].Symbol {
+				if rmErr := os.Remove(filepath.Join(tmp, "root.go")); rmErr != nil {
+					t.Fatal(rmErr)
+				}
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("skipped member's persistent breakage escalated to a campaign error: %v", err)
+	}
+	bySym := map[string]Finding{}
+	for _, f := range findings {
+		bySym[f.Symbol] = f
+	}
+	if skipped := bySym[targets[1].Symbol].Skipped; !strings.Contains(skipped, "freshness proof unavailable") {
+		t.Fatalf("broken member's skip = %q", skipped)
+	}
+	if healthy := bySym[targets[0].Symbol]; healthy.Skipped != "" || healthy.Generated == 0 {
+		t.Fatalf("sibling member did not measure: %+v", healthy)
+	}
+}

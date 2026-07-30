@@ -81,6 +81,10 @@ type Options struct {
 	afterExecution func()
 	aggregate      func()
 	producer       func(string)
+	// proofAttempt observes each per-target freshness-proof construction
+	// attempt (1, then 2 on the bounded retry) — a test seam pinning the
+	// retry, like producer above.
+	proofAttempt func(symbol string, attempt int)
 }
 
 // PreparationStage identifies one observable pre-execution operation.
@@ -688,16 +692,51 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 
+		if opts.proofAttempt != nil {
+			opts.proofAttempt(tg.Symbol, 1)
+		}
+		producerViews, err := t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
+		if err != nil && ctx.Err() == nil {
+			// One bounded retry: the field failure mode is transient
+			// pressure (a concurrent full-suite run against the same
+			// tree) canceling one target's proof construction, gone by
+			// the time anyone reads the error. The retry re-runs the
+			// full build; preparation.packageContext memoizes error
+			// results, but the batch build's success has already warmed
+			// every context this build reads, so no memoized failure can
+			// be replayed today — revisit if this site's symbol set ever
+			// diverges from the batch set.
+			if opts.proofAttempt != nil {
+				opts.proofAttempt(tg.Symbol, 2)
+			}
+			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				// The campaign itself is canceled: abort is the answer,
+				// and the wrap names the target and its oracle so the
+				// failure is actionable without re-deriving which
+				// subject the view was built for (REQ-exec-quiescence's
+				// legibility arm).
+				return nil, fmt.Errorf("freshness proof for target %s (oracle %s): %w", tg.Symbol, strings.Join(oracle, ", "), err)
+			}
+			// A per-target evidence condition, target-local by the same
+			// rule as drift refusal (REQ-exec-quiescence): this target
+			// skips with the cause on its decision line — a skip never
+			// overwrites a prior record — and the campaign proceeds.
+			f.Skipped = fmt.Sprintf("freshness proof unavailable (oracle %s): %v", strings.Join(oracle, ", "), err)
+			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			continue
+		}
+		// Producer enrollment happens only for targets whose proof
+		// exists: enrolling before the build would put a skipped
+		// target's module into end-of-run producer validation, turning a
+		// target-local condition into a campaign-level drift report; a
+		// shared oracle module is enrolled by the measured sibling
+		// itself.
 		targetView.module.producer = true
 		for _, oracleView := range oracleViews {
 			oracleView.module.producer = true
-		}
-		producerViews, err := t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
-		if err != nil {
-			// The wrap names the target and its oracle so a freshness
-			// failure is actionable without re-deriving which subject the
-			// view was built for (REQ-exec-quiescence's legibility arm).
-			return nil, fmt.Errorf("freshness proof for target %s (oracle %s): %w", tg.Symbol, strings.Join(oracle, ", "), err)
 		}
 		if opts.producer != nil {
 			opts.producer(tg.Symbol)
