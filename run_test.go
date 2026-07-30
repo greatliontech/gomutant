@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unsafe"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
@@ -2759,5 +2760,69 @@ func TestFreshnessProofSkipDoesNotEnrollItsModules(t *testing.T) {
 	}
 	if healthy := bySym[targets[0].Symbol]; healthy.Skipped != "" || healthy.Generated == 0 {
 		t.Fatalf("sibling member did not measure: %+v", healthy)
+	}
+}
+
+// TestManifestInternerSharesIdenticalManifestsAndPreservesObservations pins the
+// retention fix: two observations of the same content intern to one backing
+// manifest string, a distinct observation keeps its own, and interning never
+// alters an observation's state, processes, or merge behavior.
+func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *testing.T) {
+	root := t.TempDir()
+	env := os.Environ()
+	first, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("first"), runtimeinput.WithBracket(testBracket(t, root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("second"), runtimeinput.WithBracket(testBracket(t, root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Digest != second.Digest || first.Manifest != second.Manifest {
+		t.Fatalf("fixture expectation: identical observations, got digests %q vs %q", first.Digest, second.Digest)
+	}
+	in := &manifestInterner{byDigest: map[string]string{}}
+	internedFirst := in.intern(first)
+	internedSecond := in.intern(second)
+	if internedFirst.State != first.State || internedSecond.State != second.State {
+		t.Fatalf("interning altered a state: %+v vs %+v", internedFirst.State, first.State)
+	}
+	fp := unsafe.StringData(internedFirst.Manifest)
+	sp := unsafe.StringData(internedSecond.Manifest)
+	if fp != sp {
+		t.Fatal("identical manifests were not shared after interning")
+	}
+	// A distinct manifest keeps its own backing and its own content.
+	incomplete, err := runtimeinput.IncompleteEnv(root, "third", "distinct content", env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	internedThird := in.intern(incomplete)
+	if internedThird.State != incomplete.State {
+		t.Fatalf("interning altered the distinct state: %+v vs %+v", internedThird.State, incomplete.State)
+	}
+	// The interned observations still merge exactly as the originals do.
+	fromInterned, err := mergeFindingObservations(root, env, internedFirst, internedSecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromOriginals, err := mergeFindingObservations(root, env, first, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergedInterned, err := runtimeinput.CompletedState(fromInterned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergedOriginal, err := runtimeinput.CompletedState(fromOriginals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mergedInterned.Digest != mergedOriginal.Digest || mergedInterned.Manifest != mergedOriginal.Manifest {
+		t.Fatal("interned observations merged to a different union")
+	}
+	// A zero observation passes through untouched.
+	if got := in.intern(runtimeinput.Observation{}); got.State != (runtimeinput.State{}) {
+		t.Fatalf("zero observation changed by interning: %+v", got.State)
 	}
 }

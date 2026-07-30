@@ -876,6 +876,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		incompletes[wi] = make([]string, len(pending[wi].candidates))
 		killers[wi] = make([]string, len(pending[wi].candidates))
 	}
+	interner := &manifestInterner{byDigest: map[string]string{}}
 	type job struct{ wi, mi int }
 	jobCh := make(chan job)
 	poolCtx, cancel := context.WithCancel(ctx)
@@ -910,7 +911,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					})
 					return
 				}
-				observations[j.wi][j.mi] = state
+				observations[j.wi][j.mi] = interner.intern(state)
 				incompletes[j.wi][j.mi] = incompleteReason
 				killers[j.wi][j.mi] = killer
 				outcomes[j.wi][j.mi] = outcome
@@ -970,7 +971,7 @@ dispatching:
 				}
 				outcomes[wi][mi] = outcome
 				killers[wi][mi] = killer
-				observations[wi][mi] = state
+				observations[wi][mi] = interner.intern(state)
 				incompletes[wi][mi] = incomplete
 			}
 		}
@@ -1008,6 +1009,10 @@ dispatching:
 			if err != nil {
 				return nil, err
 			}
+			// The aggregated work item's retained observations are dead past
+			// this point; releasing them per item keeps the run's peak at the
+			// in-flight items rather than the whole campaign.
+			observations[wi] = nil
 			if err := w.producer.validateProducers(ctx); err != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
@@ -1025,6 +1030,9 @@ dispatching:
 		if err != nil {
 			return nil, err
 		}
+		// Same release as the served branch: the union is computed, the
+		// per-candidate observations are dead.
+		observations[wi] = nil
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -1226,6 +1234,32 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 		}
 	}
 	return result, nil
+}
+
+// manifestInterner shares one backing string among a run's identical retained
+// observation manifests. The digest is a content hash over exactly the entries
+// the canonical encoding serializes, so equal digests name byte-identical
+// manifest strings and the sharing is observationally invisible; what it
+// removes is candidates-times-manifest retention, which has taken a measuring
+// process to tens of gigabytes on document-heavy oracles whose mutants observe
+// the same input sets.
+type manifestInterner struct {
+	mu       sync.Mutex
+	byDigest map[string]string
+}
+
+func (in *manifestInterner) intern(o runtimeinput.Observation) runtimeinput.Observation {
+	if o.Manifest == "" || o.Digest == "" {
+		return o
+	}
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if canonical, ok := in.byDigest[o.Digest]; ok {
+		o.Manifest = canonical
+		return o
+	}
+	in.byDigest[o.Digest] = o.Manifest
+	return o
 }
 
 // completedObservationUnion unions the finding-wide baseline observations with
