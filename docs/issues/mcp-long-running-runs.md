@@ -1,7 +1,7 @@
 # MCP long-running runs
 
-Lands: when native MCP Tasks are supported by the Go SDK, OpenCode, and Claude
-Code.
+Lands: when a stable go-sdk release carries the io.modelcontextprotocol/tasks
+extension and a consuming agent client (Claude Code or OpenCode) speaks it.
 
 ## Observed
 
@@ -20,8 +20,12 @@ its wait while the server completes and atomically commits a result it can no lo
 ## Resolution
 
 MCP Tasks provide the protocol-level operation identity, polling, result retrieval, and
-cancellation needed for long-running work, but the current Go SDK, OpenCode, and Claude Code do not
-all enable that experimental feature. Until they do, agents must use the CLI for work that may
-exceed the harness's MCP request timeout. A cancellation observed by gomutant continues to retain
-the prior findings document; a private client deadline that is not propagated is not observable by
-the server and cannot be treated as cancellation.
+cancellation needed for long-running work. As of the 2026-07-28 MCP specification, tasks
+moved out of the experimental core into the io.modelcontextprotocol/tasks extension
+(poll-based tasks/get plus tasks/update, SEP-2663); go-sdk v1.7.0 carries the new
+specification in beta, and no agent client is known to speak the extension yet. Until a
+stable SDK and a consuming client exist, agents must use the CLI for work that may
+exceed the harness's MCP request timeout - the run tool's description states this and
+defaults timeout_sec to 300. A cancellation observed by gomutant continues to retain
+the prior findings document; a private client deadline that is not propagated is not
+observable by the server and cannot be treated as cancellation.
