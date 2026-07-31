@@ -65,12 +65,17 @@ measured mutants. `candidateCount` makes exact-budget exhaustion representable
 without an additional exhaustive flag; every REQ-result-stale pin still applies.
 All counts and `budget` are nonnegative, `generated <= candidateCount`, and the
 record has `generated == candidateCount` when budget is zero or `generated ==
-min(budget, candidateCount)` when budget is positive. A document violating a
+min(budget, candidateCount)` when budget is positive. A record merged from a
+served prefix and a measured remainder — the candidate re-execution splice or
+the budget extension per REQ-result-stale — satisfies the same equations over
+its merged totals: conservation is single-run and merged-provenance alike. A
+document violating a
 count equation or budget relation is malformed and refused.
 
 INV-RESULT-CANDIDATE-CONSERVATION: enforced by
 `TestRunConservesCandidateDiscards`,
-`TestSpliceFindingCountsConservesChangedOutcomes`, and
+`TestSpliceFindingCountsConservesChangedOutcomes`,
+`TestExtendFindingCountsAppendsSuffixOutcomes`, and
 `TestParseFindingsCandidateEvidence`.
 
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
@@ -91,11 +96,14 @@ structural boundary and is rejected per REQ-result-export's version tag.
 than serve a record whose pins no longer cover the request — an edit to the
 target or any target/oracle dependency, a changed runtime input, purity,
 toolchain, or build configuration, an added or removed oracle identity, a new
-oracle selection mode or operator version, a different effective oracle timeout, or a request for more candidates
-than a capped record generated each invalidates the record. Every target and
+oracle selection mode or operator version, or a different effective oracle timeout each invalidates the record; a
+request for more candidates than a capped record generated invalidates only
+the unmeasured remainder, under the budget-extension carve-out below. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures.
 Measurement pins are never partially trusted: any moved pin remeasures the
-whole target. Candidate evidence is the one narrower axis: a record whose only
+whole target, with exactly two precisely scoped carve-outs — candidate-local
+evidence, and the budget when it is the only pin that fails to cover.
+Candidate evidence is the first narrower axis: a record whose only
 unverifiable runtime evidence is candidate-local serves its covered candidates
 and re-executes exactly the unverifiable ones under a passing current baseline
 probe, conserving the generated-candidate accounting; the run decision reports
@@ -111,7 +119,33 @@ fresh evidence, and the persisted spliced record serves fully thereafter. The se
 deterministic regeneration cannot re-identify a flagged candidate the target
 remeasures whole, and when the re-executed processes' completed union does not
 equal the record's persisted union the spliced finding is preserved but
-explicitly non-reusable. When
+explicitly non-reusable. The budget is the second carve-out: candidate
+enumeration is deterministic — a stable global order over the unchanged body,
+pinned by the record's target evidence and operator set — so when every pin
+except the budget holds (target and oracle evidence valid, equal oracle set
+and selection mode, equal operator set and effective oracle timeout, no
+candidate evidence on the record), the recorded prefix remains exact evidence
+for candidates `[0, generated)` and the run measures only the unmeasured
+suffix `[generated, needed)`. The splice appends the suffix outcomes onto the
+record: prefix dispositions, survivor identities, their attestations, and
+their advisory execution buckets carry
+verbatim — their pins did not move — suffix survivors and per-operator counts
+are appended, the suffix run's candidate evidence becomes the record's, and
+`budget`, `generated`, and `candidateCount` record the merged truth. The
+extension is bounded fail-closed by the re-execution splice's own rules: it
+never composes with candidate evidence — a capped record carrying flagged
+candidates re-measures whole under a wider request, the decision naming why;
+deterministic regeneration must re-identify the recorded prefix (an unchanged
+complete candidate count, unique candidate identities, the recorded
+per-operator selected counts over the prefix, and every recorded survivor
+inside it) or the target remeasures whole; and the suffix processes' completed
+union, merged over the record's persisted union, must still equal that
+persisted union — a suffix process that read runtime inputs the record never
+pinned preserves the extended outcome but stamps it explicitly non-reusable. A
+forced run re-measures whole regardless. The extension's decision reports the
+served prefix and the measured suffix ("served: prefix of N candidates stands;
+measuring M more", the candidate noun count-aware: a one-candidate prefix
+reads "1 candidate"). When
 INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may

@@ -25,8 +25,8 @@ import (
 // labels echoed (REQ-target-labels), a prior finding with matching pins is
 // served from cache (REQ-result-stale), an attested survivor carries across
 // a cached serve and a pin-matching re-measure (REQ-attest-survivor), a
-// budget request beyond a capped finding re-measures, and the document
-// round-trips (REQ-result-export).
+// budget request beyond a capped finding measures only the unmeasured suffix
+// (REQ-mut-budget), and the document round-trips (REQ-result-export).
 func TestRunEndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -167,9 +167,11 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatalf("sealed decisions = %+v; want the inspection's class, not an assumed stale", sealedDecisions)
 	}
 
-	// A capped prior finding never answers a larger request: budget 1 is
-	// re-measured fresh under budget 1, then a budget-2 request re-measures
-	// again rather than serving the capped record (REQ-result-stale).
+	// A capped prior finding never answers a larger request without
+	// measurement: budget 1 is re-measured fresh under budget 1, then a
+	// budget-2 request serves the recorded prefix and measures only the one
+	// unmeasured candidate (REQ-mut-budget, REQ-result-stale's
+	// budget-extension carve-out).
 	capped, err := tr.Run(ctx, targets[:1], Options{Budget: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -193,10 +195,15 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	if wider[0].Cached {
-		t.Fatal("a capped finding answered a larger budget request")
+		t.Fatal("an extended finding reported itself cached")
 	}
-	if len(widerDecisions) != 1 || !strings.HasPrefix(widerDecisions[0].Reason, "budget: ") {
-		t.Fatalf("wider decisions = %+v", widerDecisions)
+	wantWider := RunDecision{Symbol: targets[0].Symbol, Action: "measure", Reason: "served: prefix of 1 candidate stands; measuring 1 more", Candidates: 1}
+	if len(widerDecisions) != 1 || widerDecisions[0] != wantWider {
+		t.Fatalf("wider decisions = %+v, want %+v", widerDecisions, wantWider)
+	}
+	if wider[0].Budget != 2 || wider[0].Generated != 2 || wider[0].CandidateCount != capped[0].CandidateCount ||
+		wider[0].Generated != wider[0].Mutants+wider[0].Discarded || wider[0].Mutants != wider[0].Killed+len(wider[0].Survivors) {
+		t.Fatalf("extended counts = %+v, want the merged truth conserved", wider[0])
 	}
 	// And the same capped request is served from the capped record.
 	same, err := tr.Run(ctx, targets[:1], Options{Budget: 1, Prior: cappedPrior})
@@ -1287,7 +1294,7 @@ func TestRunCompileDiscardCarriesNoCandidateEvidence(t *testing.T) {
 		t.Fatalf("compile-discard record did not serve: %+v", served)
 	}
 	for _, decision := range decisions {
-		if strings.Contains(decision.Reason, "re-execute") {
+		if strings.Contains(decision.Reason, "re-executing") {
 			t.Fatalf("serve still splices a deterministic compile rejection: %+v", decision)
 		}
 	}
@@ -1338,7 +1345,7 @@ func TestRunSelfHealsLegacyCompileRejectionEvidence(t *testing.T) {
 	}
 	spliced := false
 	for _, decision := range decisions {
-		if strings.Contains(decision.Reason, "re-execute") {
+		if strings.Contains(decision.Reason, "re-executing") {
 			spliced = true
 		}
 	}
@@ -1366,7 +1373,7 @@ func TestRunSelfHealsLegacyCompileRejectionEvidence(t *testing.T) {
 		t.Fatalf("healed record did not serve: %+v", third)
 	}
 	for _, decision := range healedDecisions {
-		if strings.Contains(decision.Reason, "re-execute") {
+		if strings.Contains(decision.Reason, "re-executing") {
 			t.Fatalf("healed record still splices: %+v", decision)
 		}
 	}
@@ -1841,7 +1848,7 @@ func TestRunPanickedMutantIsCandidateLocalAndServes(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := RunDecision{Symbol: target.Symbol, Action: "cached",
-		Reason:     fmt.Sprintf("served: pins unchanged; %d candidate(s) re-execute", len(f.CandidateEvidence)),
+		Reason:     fmt.Sprintf("served: pins unchanged; re-executing %s", candidateNoun(len(f.CandidateEvidence))),
 		Candidates: len(f.CandidateEvidence)}
 	if len(decisions) != 1 || decisions[0] != want {
 		t.Fatalf("serve decision = %+v, want %+v (exactly the flagged candidates re-executed)", decisions, want)
@@ -1983,7 +1990,7 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 			{Operator: "op-b", Generated: 2, Survived: 2},
 			{Operator: "op-c", Generated: 1, Discarded: 1},
 		},
-		Survivors: []Survivor{{Position: "f.go:3:3", Operator: "op-b"}, {Position: "f.go:4:4", Operator: "op-b"}},
+		Survivors: []Survivor{{Position: "f.go:3:3", Operator: "op-b", Execution: "never-executed"}, {Position: "f.go:4:4", Operator: "op-b", Execution: "executed-and-passed"}},
 		Attested: []Attestation{
 			{Position: "f.go:3:3", Operator: "op-b", Reason: "was equivalent"},
 			{Position: "f.go:4:4", Operator: "op-b", Reason: "still equivalent"},
@@ -2012,7 +2019,10 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 	if !slices.Equal(spliced.Operators, wantOperators) {
 		t.Fatalf("spliced operators = %+v, want %+v", spliced.Operators, wantOperators)
 	}
-	wantSurvivors := []Survivor{{Position: "f.go:2:2", Operator: "op-a"}, {Position: "f.go:4:4", Operator: "op-b"}}
+	// The covered survivor carries its recorded advisory bucket verbatim; the
+	// flagged kill flipping into survival has no recorded bucket and stays
+	// unbucketed (REQ-exec-survivor-evidence).
+	wantSurvivors := []Survivor{{Position: "f.go:2:2", Operator: "op-a"}, {Position: "f.go:4:4", Operator: "op-b", Execution: "executed-and-passed"}}
 	if !slices.Equal(spliced.Survivors, wantSurvivors) {
 		t.Fatalf("spliced survivors = %+v, want %+v", spliced.Survivors, wantSurvivors)
 	}
@@ -2029,6 +2039,136 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 	}
 	if spliced.Generated != spliced.Mutants+spliced.Discarded || spliced.Mutants != spliced.Killed+len(spliced.Survivors) {
 		t.Fatalf("finding totals do not conserve: %+v", spliced)
+	}
+}
+
+// TestRunExtensionDivergenceStampsAndAttributes pins the extension's
+// fail-closed divergence path end to end (REQ-result-stale's fail-closed
+// bound, REQ-exec-oracle-guidance, REQ-exec-survivor-evidence): a suffix
+// mutant flips a guard so the oracle deterministically reads an input the
+// capped record never pinned; the spliced record is preserved but stamped
+// non-reusable, suffix survivors classify unstable-oracle, and the
+// oracle-instability attribution fires for the partial measurement exactly
+// as it would for a whole one.
+func TestRunExtensionDivergenceStampsAndAttributes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":        "module example.com/gated\n\ngo 1.26.4\n",
+		"gated.go":      "package gated\n\nfunc Gated(x int) int {\n\ty := x + 1\n\tif y > 100 {\n\t\treturn y * 1000\n\t}\n\treturn y\n}\n",
+		"gated_test.go": "package gated\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestGated(t *testing.T) {\n\tbase, _ := os.ReadFile(\"baseline.txt\")\n\tif len(base) == 0 {\n\t\tt.Fail()\n\t\treturn\n\t}\n\tgot := Gated(5)\n\tif got > 100 {\n\t\tdata, _ := os.ReadFile(\"extra.txt\")\n\t\tif len(data) == 0 {\n\t\t\tt.Fail()\n\t\t\treturn\n\t\t}\n\t}\n\tif got != 6 {\n\t\tt.Fail()\n\t}\n}\n",
+		"baseline.txt":  "pinned bytes\n",
+		"extra.txt":     "unpinned bytes\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	target := Target{Symbol: "example.com/gated.Gated"}
+
+	capped, err := tr.Run(ctx, []Target{target}, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capped[0].TargetEvidence.RuntimeUnverifiable || capped[0].Generated != 1 || capped[0].CandidateCount < 2 {
+		t.Fatalf("capped fixture = %+v, want one clean measured candidate ahead of the guard mutants", capped[0])
+	}
+	for _, oracle := range capped[0].OracleEvidence {
+		if oracle.RuntimeUnverifiable {
+			t.Fatalf("capped oracle evidence unverifiable at capture: %+v", oracle)
+		}
+	}
+	inspection, ierr := tr.InspectFinding(capped[0])
+	if ierr != nil || inspection.State != FindingCurrent {
+		t.Fatalf("capped inspection = %+v, %v\noracle evidence: %+v", inspection, ierr, capped[0].OracleEvidence)
+	}
+	doc, err := Export(capped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var guided []OracleGuidance
+	var decisions []RunDecision
+	extended, err := tr.Run(ctx, []Target{target}, Options{
+		Prior:    prior,
+		Guidance: func(g OracleGuidance) { guided = append(guided, g) },
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.HasPrefix(decisions[0].Reason, "served: prefix of 1 candidate stands") {
+		t.Fatalf("extension decision = %+v, want the served-prefix measure", decisions)
+	}
+	f := extended[0]
+	if !f.TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("suffix guard-flip read an unpinned input yet the extension stayed reusable: %+v", f.TargetEvidence)
+	}
+	prefixSurvivors := len(prior[0].Survivors)
+	if len(f.Survivors) <= prefixSurvivors {
+		t.Fatalf("fixture yielded no suffix survivors, the stamp assertion would be vacuous: %+v", f.Survivors)
+	}
+	for _, survivor := range f.Survivors[prefixSurvivors:] {
+		if survivor.Execution != "unstable-oracle" {
+			t.Fatalf("suffix survivor of a stamped extension = %+v, want unstable-oracle", f.Survivors)
+		}
+	}
+	if len(guided) == 0 || guided[0].Symbol != target.Symbol {
+		t.Fatalf("guidance = %+v, want the partial measurement's oracle-instability attribution", guided)
+	}
+}
+
+// TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence pins the
+// divergence-stamp boundary of both splices at the counts layer
+// (REQ-exec-survivor-evidence): under an unverifiable spliced record only the
+// re-measured survivors classify unstable-oracle; carried survivors keep
+// their recorded buckets verbatim.
+func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testing.T) {
+	candidates := []engine.Candidate{
+		{Position: "f.go:1:1", Operator: "op-a"},
+		{Position: "f.go:2:2", Operator: "op-a"},
+	}
+	stamped := SubjectEvidence{RuntimeUnverifiable: true}
+
+	rec := Finding{
+		CandidateCount: 2, Generated: 2, Mutants: 2, TargetEvidence: stamped,
+		Operators: []OperatorSummary{{Operator: "op-a", Generated: 2, Survived: 2}},
+		Survivors: []Survivor{
+			{Position: "f.go:1:1", Operator: "op-a", Execution: "executed-and-passed"},
+			{Position: "f.go:2:2", Operator: "op-a", Execution: "executed-and-passed"},
+		},
+	}
+	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived}
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, outcomes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spliced.Survivors[0].Execution != "executed-and-passed" || spliced.Survivors[1].Execution != "unstable-oracle" {
+		t.Fatalf("spliced survivors = %+v, want the carried bucket kept and the re-executed one unstable", spliced.Survivors)
+	}
+
+	capped := Finding{
+		CandidateCount: 2, Generated: 1, Mutants: 1, TargetEvidence: stamped,
+		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
+		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op-a", Execution: "never-executed"}},
+	}
+	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, outcomes, nil, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if extended.Survivors[0].Execution != "never-executed" || extended.Survivors[1].Execution != "unstable-oracle" {
+		t.Fatalf("extended survivors = %+v, want the carried bucket kept and the suffix one unstable", extended.Survivors)
 	}
 }
 
@@ -2824,5 +2964,548 @@ func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *tes
 	// A zero observation passes through untouched.
 	if got := in.intern(runtimeinput.Observation{}); got.State != (runtimeinput.State{}) {
 		t.Fatalf("zero observation changed by interning: %+v", got.State)
+	}
+}
+
+// TestRunExtendsCappedFindingMeasuringOnlyTheSuffix pins the budget-extension
+// resume (REQ-mut-budget, REQ-result-stale's budget-extension carve-out): a
+// wider request against a capped record whose every other pin holds measures
+// only the unmeasured candidate suffix, splices the merged truth, carries the
+// prefix survivor's attestation verbatim, round-trips the document, still
+// serves a narrower request without measurement, and extends again to the
+// exhaustive set under budget zero — while force, a moved non-budget pin, and
+// prior candidate evidence each re-measure the whole target with the refusal
+// named on the decision.
+func TestRunExtendsCappedFindingMeasuringOnlyTheSuffix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	target := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
+
+	capped, err := tr.Run(ctx, []Target{target}, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := capped[0]
+	if f.Generated != 1 || len(f.Survivors) != 1 || len(f.CandidateEvidence) != 0 || f.CandidateCount <= 3 {
+		t.Fatalf("budget-1 fixture = %+v, want one measured survivor, no candidate evidence, and more candidates available", f)
+	}
+	prefixSurvivor := f.Survivors[0]
+	if err := capped[0].Attest(prefixSurvivor.Position, prefixSurvivor.Operator, "equivalent by inspection"); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Export(capped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	collect := func(opts Options) ([]Finding, []RunDecision, []int) {
+		t.Helper()
+		var decisions []RunDecision
+		var dispatched []int
+		opts.Decision = func(decision RunDecision) { decisions = append(decisions, decision) }
+		opts.dispatched = func(_ string, mi int) { dispatched = append(dispatched, mi) }
+		findings, err := tr.Run(ctx, []Target{target}, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sort.Ints(dispatched)
+		return findings, decisions, dispatched
+	}
+
+	extendedFindings, decisions, dispatched := collect(Options{Budget: 3, Prior: prior})
+	want := RunDecision{Symbol: target.Symbol, Action: "measure", Reason: "served: prefix of 1 candidate stands; measuring 2 more", Candidates: 2}
+	if len(decisions) != 1 || decisions[0] != want {
+		t.Fatalf("extension decision = %+v, want %+v", decisions, want)
+	}
+	if !slices.Equal(dispatched, []int{1, 2}) {
+		t.Fatalf("dispatched candidate indexes = %v, want exactly the suffix [1 2]", dispatched)
+	}
+	extended := extendedFindings[0]
+	if extended.Cached {
+		t.Fatal("an extended finding reported itself cached")
+	}
+	if extended.Budget != 3 || extended.Generated != 3 || extended.CandidateCount != f.CandidateCount {
+		t.Fatalf("extended pins = %+v, want budget 3, generated 3, candidate count conserved", extended)
+	}
+	if extended.Generated != extended.Mutants+extended.Discarded || extended.Mutants != extended.Killed+len(extended.Survivors) {
+		t.Fatalf("extended totals do not conserve: %+v", extended)
+	}
+	generated, discarded, killed, survived := 0, 0, 0, 0
+	for _, summary := range extended.Operators {
+		if summary.Generated != summary.Discarded+summary.Killed+summary.Survived {
+			t.Fatalf("operator summary does not conserve: %+v", summary)
+		}
+		generated += summary.Generated
+		discarded += summary.Discarded
+		killed += summary.Killed
+		survived += summary.Survived
+	}
+	if generated != extended.Generated || discarded != extended.Discarded || killed != extended.Killed || survived != len(extended.Survivors) {
+		t.Fatalf("operator totals do not reconcile: %+v", extended.Operators)
+	}
+	if len(extended.Survivors) == 0 || extended.Survivors[0].Position != prefixSurvivor.Position || extended.Survivors[0].Operator != prefixSurvivor.Operator {
+		t.Fatalf("extended survivors = %+v, want the recorded prefix survivor carried first", extended.Survivors)
+	}
+	// Advisory buckets: the carried prefix survivor keeps its recorded
+	// bucket verbatim; suffix survivors earn fresh probed buckets
+	// (REQ-exec-survivor-evidence).
+	if prefixSurvivor.Execution == "" || extended.Survivors[0].Execution != prefixSurvivor.Execution {
+		t.Fatalf("prefix survivor bucket = %q, want the recorded %q carried verbatim", extended.Survivors[0].Execution, prefixSurvivor.Execution)
+	}
+	for _, survivor := range extended.Survivors[1:] {
+		if survivor.Execution == "" {
+			t.Fatalf("suffix survivor unbucketed after a verifiable extension: %+v", extended.Survivors)
+		}
+	}
+	wantAttestation := Attestation{Position: prefixSurvivor.Position, Operator: prefixSurvivor.Operator, Reason: "equivalent by inspection"}
+	if len(extended.Attested) != 1 || extended.Attested[0] != wantAttestation {
+		t.Fatalf("extended attestations = %+v, want the prefix survivor's disposition carried verbatim", extended.Attested)
+	}
+	if extended.TargetEvidence.RuntimeUnverifiable ||
+		extended.TargetEvidence.RuntimeInputs != f.TargetEvidence.RuntimeInputs ||
+		extended.TargetEvidence.RuntimeDigest != f.TargetEvidence.RuntimeDigest {
+		t.Fatalf("extended evidence = %+v, want the served union untouched when the suffix read only recorded pins", extended.TargetEvidence)
+	}
+
+	// The merged record round-trips the versioned document unchanged.
+	extendedDoc, err := Export(extendedFindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseFindings(extendedDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTripped := parsed[0]
+	roundTripped.Cached = extended.Cached
+	if len(parsed) != 1 || !reflect.DeepEqual(roundTripped, extended) {
+		t.Fatalf("round-tripped finding = %+v, want %+v", parsed[0], extended)
+	}
+
+	// A narrower request is covered by the extended record and serves without
+	// measurement (REQ-result-stale).
+	narrower, narrowerDecisions, narrowerDispatched := collect(Options{Budget: 1, Prior: parsed})
+	if !narrower[0].Cached || len(narrowerDispatched) != 0 || len(narrowerDecisions) != 1 || narrowerDecisions[0].Action != "cached" {
+		t.Fatalf("budget shrink = %+v, decisions %+v, dispatched %v; want a measurement-free serve", narrower[0], narrowerDecisions, narrowerDispatched)
+	}
+
+	// The exhaustive request (budget zero) extends the extended record again,
+	// measuring only the remaining candidates; pre-execution discards are
+	// never dispatched, so the suffix bound is what pins the skip.
+	exhaustive, exhaustiveDecisions, exhaustiveDispatched := collect(Options{Prior: parsed})
+	wantExhaustive := RunDecision{Symbol: target.Symbol, Action: "measure",
+		Reason:     fmt.Sprintf("served: prefix of 3 candidates stands; measuring %d more", extended.CandidateCount-3),
+		Candidates: extended.CandidateCount - 3}
+	if len(exhaustiveDecisions) != 1 || exhaustiveDecisions[0] != wantExhaustive {
+		t.Fatalf("exhaustive extension decision = %+v, want %+v", exhaustiveDecisions, wantExhaustive)
+	}
+	for _, mi := range exhaustiveDispatched {
+		if mi < 3 {
+			t.Fatalf("exhaustive extension re-executed prefix candidate %d: %v", mi, exhaustiveDispatched)
+		}
+	}
+	full := exhaustive[0]
+	if full.Budget != 0 || full.Generated != full.CandidateCount || full.CandidateCount != extended.CandidateCount ||
+		full.Generated != full.Mutants+full.Discarded || full.Mutants != full.Killed+len(full.Survivors) {
+		t.Fatalf("exhaustive extension = %+v, want generated == candidateCount under budget zero with totals conserved", full)
+	}
+	if len(full.Attested) != 1 || full.Attested[0] != wantAttestation {
+		t.Fatalf("exhaustive extension attestations = %+v, want the prefix disposition still carried", full.Attested)
+	}
+	if len(full.Survivors) < 2 {
+		t.Fatalf("exhaustive fixture survivors = %+v, want the never-executed branch to keep surviving mutants", full.Survivors)
+	}
+	for _, survivor := range full.Survivors {
+		if survivor.Execution == "" {
+			t.Fatalf("exhaustive extension left a survivor unbucketed: %+v", full.Survivors)
+		}
+	}
+	if _, err := Export(exhaustive); err != nil {
+		t.Fatalf("exporting exhaustively extended finding: %v", err)
+	}
+
+	// Force re-measures the whole target, never extending.
+	forced, forcedDecisions, forcedDispatched := collect(Options{Budget: 3, Prior: prior, Force: true})
+	if forced[0].Cached || len(forcedDecisions) != 1 || forcedDecisions[0].Reason != "forced" || !slices.Equal(forcedDispatched, []int{0, 1, 2}) {
+		t.Fatalf("forced run = %+v, dispatched %v; want a whole re-measure with reason forced", forcedDecisions, forcedDispatched)
+	}
+
+	// A moved non-budget pin refuses the extension: the whole target
+	// re-measures, the attestation sheds, and the decision names both the
+	// budget shortfall and the moved pin (REQ-result-stale).
+	tampered := append([]Finding(nil), prior...)
+	tampered[0].TargetEvidence.MaximalClosure = "not-the-current-closure"
+	moved, movedDecisions, movedDispatched := collect(Options{Budget: 3, Prior: tampered})
+	if len(movedDecisions) != 1 || !strings.HasPrefix(movedDecisions[0].Reason, "budget: ") ||
+		!strings.Contains(movedDecisions[0].Reason, "stale") || !strings.Contains(movedDecisions[0].Reason, "target") {
+		t.Fatalf("moved-pin decisions = %+v, want the budget shortfall with the moved pin attributed", movedDecisions)
+	}
+	if !slices.Equal(movedDispatched, []int{0, 1, 2}) || len(moved[0].Attested) != 0 {
+		t.Fatalf("moved-pin run dispatched %v with attestations %+v, want a whole re-measure shedding the disposition", movedDispatched, moved[0].Attested)
+	}
+
+	// Prior candidate evidence never composes with the extension: the whole
+	// target re-measures with the refusal named (REQ-result-stale).
+	composed := append([]Finding(nil), prior...)
+	composed[0].CandidateEvidence = []CandidateEvidence{{Position: prefixSurvivor.Position, Operator: prefixSurvivor.Operator, Reason: "test process produced no runtime-input log", Disposition: "survived"}}
+	_, composedDecisions, composedDispatched := collect(Options{Budget: 3, Prior: composed})
+	if len(composedDecisions) != 1 || !strings.HasPrefix(composedDecisions[0].Reason, "budget: ") ||
+		!strings.Contains(composedDecisions[0].Reason, "prior candidate evidence re-executes only under its recorded budget") {
+		t.Fatalf("composition decisions = %+v, want the fail-closed refusal named", composedDecisions)
+	}
+	if !slices.Equal(composedDispatched, []int{0, 1, 2}) {
+		t.Fatalf("composition run dispatched %v, want the whole target re-measured", composedDispatched)
+	}
+
+	// A record whose measured prefix cannot be re-identified — its every
+	// other pin holding — refuses the extension: the whole target re-measures
+	// with the regeneration refusal appended to the budget reason
+	// (REQ-result-stale's budget-extension carve-out).
+	unidentifiable := append([]Finding(nil), prior...)
+	unidentifiable[0].Operators = append([]OperatorSummary(nil), prior[0].Operators...)
+	unidentifiable[0].Operators[0].Operator = "not-an-operator-the-enumeration-selects"
+	_, refusedDecisions, refusedDispatched := collect(Options{Budget: 3, Prior: unidentifiable})
+	if len(refusedDecisions) != 1 || !strings.HasPrefix(refusedDecisions[0].Reason, "budget: ") ||
+		!strings.Contains(refusedDecisions[0].Reason, "deterministic regeneration cannot re-identify the measured prefix") {
+		t.Fatalf("refused-extension decisions = %+v, want the regeneration refusal appended", refusedDecisions)
+	}
+	if !slices.Equal(refusedDispatched, []int{0, 1, 2}) {
+		t.Fatalf("refused extension dispatched %v, want the whole target re-measured", refusedDispatched)
+	}
+}
+
+// TestEmitOracleGuidanceGuards pins the guidance emission shared by the fresh
+// measure and the budget extension (REQ-exec-oracle-guidance): an
+// unverifiable merged record under a package-derived oracle emits attribution
+// through the per-oracle-set cache, while a nil callback, verifiable
+// evidence, or an explicit oracle emits nothing.
+func TestEmitOracleGuidanceGuards(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	oracle := []string{"example.com/empty.TestB", "example.com/empty.TestA"}
+	cache := map[string]oracleAttribution{"example.com/empty.TestA\x00example.com/empty.TestB": {}}
+	w := work{oracle: oracle}
+	unstable := Finding{TargetEvidence: SubjectEvidence{RuntimeUnverifiable: true, RuntimeReason: "diverged"}}
+
+	var got []OracleGuidance
+	opts := Options{Guidance: func(g OracleGuidance) { got = append(got, g) }}
+	if err := tree.emitOracleGuidance(ctx, unstable, w, "example.com/empty.F", opts, nil, cache); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Symbol != "example.com/empty.F" {
+		t.Fatalf("guidance = %+v, want one attribution for the symbol", got)
+	}
+
+	got = nil
+	if err := tree.emitOracleGuidance(ctx, Finding{}, w, "example.com/empty.F", opts, nil, cache); err != nil {
+		t.Fatal(err)
+	}
+	explicit := unstable
+	explicit.OracleExplicit = true
+	if err := tree.emitOracleGuidance(ctx, explicit, w, "example.com/empty.F", opts, nil, cache); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.emitOracleGuidance(ctx, unstable, w, "example.com/empty.F", Options{}, nil, cache); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("guarded emissions leaked guidance: %+v", got)
+	}
+}
+
+// TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets pins the splice's
+// advisory-bucket boundary: survivors below from keep their recorded buckets
+// verbatim — even under the unverifiable stamp, which classifies only the
+// re-measured tail — so a suffix-local divergence never rewrites advisory
+// data the served prefix measured under verifiable conditions.
+func TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := Finding{
+		TargetEvidence: SubjectEvidence{RuntimeUnverifiable: true},
+		Survivors: []Survivor{
+			{Position: "f.go:1:1", Operator: "op-a", Execution: "executed-and-passed"},
+			{Position: "f.go:2:2", Operator: "op-a"},
+		},
+	}
+	if err := tree.bucketSurvivorExecution(context.Background(), &f, work{}, Options{}, nil, nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	if f.Survivors[0].Execution != "executed-and-passed" {
+		t.Fatalf("carried prefix bucket rewritten: %+v", f.Survivors)
+	}
+	if f.Survivors[1].Execution != "unstable-oracle" {
+		t.Fatalf("re-measured tail not classified under the stamp: %+v", f.Survivors)
+	}
+}
+
+// TestExtendFindingCountsAppendsSuffixOutcomes pins the budget-extension
+// splice accounting under INV-RESULT-CANDIDATE-CONSERVATION: every prefix
+// candidate keeps its recorded disposition, survivor identity, and
+// attestation, each suffix outcome is appended per operator and in the totals
+// (including an operator the record never saw and a pre-execution discard),
+// the suffix run's candidate evidence becomes the record's, and budget and
+// generated record the merged truth.
+func TestExtendFindingCountsAppendsSuffixOutcomes(t *testing.T) {
+	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
+	candidates := []engine.Candidate{
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable}, // prefix kill
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:2:2", Replacements: runnable}, // prefix survivor, attested
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:3:3", Replacements: runnable}, // suffix survivor
+		{Symbol: "p.F", Operator: "op-c", Position: "f.go:4:4", Replacements: runnable}, // suffix kill, new operator
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:5:5"},                         // suffix pre-execution discard
+	}
+	rec := Finding{
+		Symbol: "p.F", Budget: 2, CandidateCount: 5, Generated: 2, Mutants: 2, Killed: 1,
+		Operators: []OperatorSummary{
+			{Operator: "op-a", Generated: 1, Killed: 1},
+			{Operator: "op-b", Generated: 1, Survived: 1},
+		},
+		Survivors: []Survivor{{Position: "f.go:2:2", Operator: "op-b", Execution: "executed-and-passed"}},
+		Attested:  []Attestation{{Position: "f.go:2:2", Operator: "op-b", Reason: "equivalent"}},
+	}
+	outcomes := []engine.MutantOutcome{0, 0, engine.MutantSurvived, engine.MutantKilled, engine.MutantDiscarded}
+	fresh := []CandidateEvidence{{Position: "f.go:3:3", Operator: "op-a", Reason: "test process produced no runtime-input log", Disposition: "survived"}}
+	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, outcomes, fresh, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if extended.Budget != 5 || extended.Generated != 5 || extended.CandidateCount != 5 ||
+		extended.Mutants != 4 || extended.Killed != 2 || extended.Discarded != 1 {
+		t.Fatalf("extended totals = %+v, want the suffix appended onto the recorded prefix", extended)
+	}
+	wantOperators := []OperatorSummary{
+		{Operator: "op-a", Generated: 2, Killed: 1, Survived: 1},
+		{Operator: "op-b", Generated: 2, Discarded: 1, Survived: 1},
+		{Operator: "op-c", Generated: 1, Killed: 1},
+	}
+	if !slices.Equal(extended.Operators, wantOperators) {
+		t.Fatalf("extended operators = %+v, want %+v", extended.Operators, wantOperators)
+	}
+	wantSurvivors := []Survivor{
+		{Position: "f.go:2:2", Operator: "op-b", Execution: "executed-and-passed"},
+		{Position: "f.go:3:3", Operator: "op-a"},
+	}
+	if !slices.Equal(extended.Survivors, wantSurvivors) {
+		t.Fatalf("extended survivors = %+v, want the prefix survivor carried and the suffix survivor appended", extended.Survivors)
+	}
+	if len(extended.Attested) != 1 || extended.Attested[0] != rec.Attested[0] {
+		t.Fatalf("extended attestations = %+v, want the prefix disposition carried verbatim", extended.Attested)
+	}
+	if !slices.Equal(extended.CandidateEvidence, fresh) {
+		t.Fatalf("extended candidate evidence = %+v, want the suffix run's flags only", extended.CandidateEvidence)
+	}
+	for _, summary := range extended.Operators {
+		if summary.Generated != summary.Discarded+summary.Killed+summary.Survived {
+			t.Fatalf("operator summary does not conserve: %+v", summary)
+		}
+	}
+	if extended.Generated != extended.Mutants+extended.Discarded || extended.Mutants != extended.Killed+len(extended.Survivors) {
+		t.Fatalf("finding totals do not conserve: %+v", extended)
+	}
+}
+
+// TestExtendedPrefixStandsFallsBackOnMismatch: REQ-result-stale's
+// budget-extension regeneration bound — a regenerated enumeration extends a
+// capped record only when the complete candidate count is unchanged, the
+// selection is strictly longer, every identity is unique, the recorded
+// per-operator selected counts equal the prefix's, and every recorded
+// survivor re-identifies inside the prefix; any mismatch refuses the
+// extension so the whole target re-measures.
+func TestExtendedPrefixStandsFallsBackOnMismatch(t *testing.T) {
+	generation := engine.Generation{
+		CandidateCount: 3,
+		Candidates: []engine.Candidate{
+			{Position: "a.go:1:1", Operator: "op-a"},
+			{Position: "a.go:2:1", Operator: "op-b"},
+			{Position: "a.go:3:1", Operator: "op-a"},
+		},
+	}
+	rec := Finding{
+		CandidateCount: 3,
+		Generated:      2,
+		Operators: []OperatorSummary{
+			{Operator: "op-a", Generated: 1, Killed: 1},
+			{Operator: "op-b", Generated: 1, Survived: 1},
+		},
+		Survivors: []Survivor{{Position: "a.go:2:1", Operator: "op-b"}},
+	}
+	if !extendedPrefixStands(generation, rec) {
+		t.Fatal("matching regeneration refused the extension")
+	}
+	drifted := generation
+	drifted.CandidateCount = 4
+	if extendedPrefixStands(drifted, rec) {
+		t.Fatal("candidate-count drift accepted")
+	}
+	covered := rec
+	covered.Generated = 3
+	covered.Operators = []OperatorSummary{
+		{Operator: "op-a", Generated: 2, Killed: 2},
+		{Operator: "op-b", Generated: 1, Survived: 1},
+	}
+	if extendedPrefixStands(generation, covered) {
+		t.Fatal("a selection no longer than the recorded prefix accepted")
+	}
+	duplicated := generation
+	duplicated.Candidates = []engine.Candidate{
+		generation.Candidates[0],
+		generation.Candidates[1],
+		generation.Candidates[0],
+	}
+	if extendedPrefixStands(duplicated, rec) {
+		t.Fatal("duplicate candidate identity accepted")
+	}
+	extraOperator := rec
+	extraOperator.Operators = []OperatorSummary{{Operator: "op-a", Generated: 2, Killed: 2}}
+	extraOperator.Survivors = nil
+	if extendedPrefixStands(generation, extraOperator) {
+		t.Fatal("prefix operator-set drift accepted")
+	}
+	miscounted := rec
+	miscounted.Operators = []OperatorSummary{
+		{Operator: "op-a", Generated: 2, Killed: 2},
+		{Operator: "op-b", Generated: 0},
+	}
+	if extendedPrefixStands(generation, miscounted) {
+		t.Fatal("prefix per-operator count drift accepted")
+	}
+	outside := rec
+	outside.Survivors = []Survivor{{Position: "a.go:3:1", Operator: "op-a"}}
+	if extendedPrefixStands(generation, outside) {
+		t.Fatal("a recorded survivor outside the prefix accepted")
+	}
+}
+
+// TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads: the budget
+// extension's union reconciliation (REQ-result-stale's fail-closed bound) — a
+// suffix union that read only inputs the served record already pinned folds
+// to exactly the persisted union and leaves the evidence untouched, while a
+// suffix read beyond the record's pins survives the fold, diverges, and
+// stamps the extended finding explicitly non-reusable.
+func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "data.txt"), []byte("observed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := os.Environ()
+	ctx := context.Background()
+	recorded, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("prior"), runtimeinput.WithBracket(testBracket(t, root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedState, err := runtimeinput.CompletedState(recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := SubjectEvidence{Symbol: "example.com/empty.Gone", RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest}
+	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
+
+	// The suffix read a subset of the recorded pins: the fold restores the
+	// persisted union exactly and the evidence stays untouched.
+	subset, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(testBracket(t, root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	folded, err := tree.foldRecordedUnion(ctx, env, rec, root, subset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, same, err := tree.applySplicedUnion(ctx, env, rec, folded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.TargetEvidence.RuntimeUnverifiable || same.OracleEvidence[0].RuntimeUnverifiable ||
+		same.TargetEvidence.RuntimeInputs != recordedState.Manifest || same.TargetEvidence.RuntimeDigest != recordedState.Digest {
+		t.Fatalf("subset suffix rewrote the served evidence: %+v", same.TargetEvidence)
+	}
+
+	// The suffix read an input the record never pinned: the fold diverges
+	// and every subject's evidence is stamped non-reusable.
+	sparse := SubjectEvidence{Symbol: "example.com/empty.Gone"}
+	sparseRecorded, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("prior"), runtimeinput.WithBracket(testBracket(t, root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sparseState, err := runtimeinput.CompletedState(sparseRecorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sparse.RuntimeInputs = sparseState.Manifest
+	sparse.RuntimeDigest = sparseState.Digest
+	sparseRec := Finding{TargetEvidence: sparse, OracleEvidence: []SubjectEvidence{sparse}}
+	grew, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(testBracket(t, root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	folded, err = tree.foldRecordedUnion(ctx, env, sparseRec, root, grew)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, marked, err := tree.applySplicedUnion(ctx, env, sparseRec, folded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !marked.TargetEvidence.RuntimeUnverifiable || !marked.OracleEvidence[0].RuntimeUnverifiable || marked.TargetEvidence.RuntimeReason == "" {
+		t.Fatalf("suffix reads beyond the recorded pins left the evidence reusable: %+v", marked.TargetEvidence)
+	}
+
+	// The recorded manifest no longer adopts (its pinned input moved on
+	// disk): the fold falls back to the bare suffix union and the resulting
+	// divergence stamps the extension non-reusable rather than serving over
+	// the moved pin (REQ-result-stale's fail-closed bound).
+	if err := os.WriteFile(filepath.Join(root, "data.txt"), []byte("moved"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unadoptable, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(testBracket(t, root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	folded, err = tree.foldRecordedUnion(ctx, env, rec, root, unadoptable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stamped, err := tree.applySplicedUnion(ctx, env, rec, folded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stamped.TargetEvidence.RuntimeUnverifiable || !stamped.OracleEvidence[0].RuntimeUnverifiable {
+		t.Fatalf("unadoptable recorded manifest left the evidence reusable: %+v", stamped.TargetEvidence)
 	}
 }

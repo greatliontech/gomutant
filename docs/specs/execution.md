@@ -127,12 +127,26 @@ probe runs. Coverage is measured once per oracle group on the unmutated tree
 and cached across the run's targets sharing the group and cover package —
 advisory classification, never a measurement pin; an unprobeable oracle
 leaves the bucket empty rather than failing a sound measurement. Served
-records keep their recorded buckets; re-measurement refreshes them.
+records keep their recorded buckets; re-measurement refreshes them. A
+spliced record mixes the two truthfully: survivors carried from the served
+portion keep their recorded buckets verbatim — measured under the record's
+own verifiable conditions, immune to a re-measured portion's divergence
+stamp — while re-measured survivors are classified by what the splice
+knows: the budget extension probes fresh coverage; the candidate
+re-execution keeps the recorded classification, exact under the very pins
+the serve verified, a flip into survival staying unbucketed like a
+probe-refused survivor; and on either splice, re-measured survivors of a
+non-reusable (unverifiable) spliced record classify unstable-oracle.
 
-REQ-exec-survivor-evidence: enforced by `TestRunBucketsSurvivorExecution`.
+REQ-exec-survivor-evidence: enforced by `TestRunBucketsSurvivorExecution`,
+`TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets`,
+`TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence`, and
+`TestRunExtendsCappedFindingMeasuringOnlyTheSuffix`.
 
 **REQ-exec-oracle-guidance** (behavior): When a fresh measurement's merged
-runtime evidence lands unverifiable under a package-derived oracle, gomutant
+runtime evidence lands unverifiable under a package-derived oracle — a
+budget extension whose spliced record lands unverifiable included; a partial
+measurement owes the same attribution — gomutant
 MUST attribute the instability rather than leave the caller to bisect: each
 oracle test is probed alone, tests whose solo runs produce unverifiable
 evidence are named, and the report suggests narrowing to an explicit oracle of
@@ -147,8 +161,9 @@ probes are best-effort: a probe that errors, matches nothing, or fails skips
 its test instead of aborting a run whose finding already committed. Explicit
 oracles receive no attribution — the caller already chose the tests.
 
-REQ-exec-oracle-guidance: enforced by `TestRunAttributesOracleInstability`
-and `TestBuildOracleGuidanceArms`.
+REQ-exec-oracle-guidance: enforced by `TestRunAttributesOracleInstability`,
+`TestBuildOracleGuidanceArms`, `TestEmitOracleGuidanceGuards`, and
+`TestRunExtensionDivergenceStampsAndAttributes`.
 
 **REQ-exec-quiescence** (behavior): The caller MUST exclude source and build-input
 mutation from target loading through run completion. gomutant validates captured
@@ -264,7 +279,13 @@ advisory and do not change successful exit semantics.
 Under INV-RESULT-CANDIDATE-CONSERVATION in [results.md](results.md), a measure
 decision reports its selected candidate count as
 `candidates`, including candidates later discarded; `budget` means the current
-request needs a longer candidate prefix than the prior finding records.
+request needs a longer candidate prefix than the prior finding records and the
+recorded prefix could not be served, with the refusal appended to the reason.
+A budget extension (REQ-result-stale's budget-extension carve-out) reports
+`measure` with `candidates` counting only the measured suffix and a reason
+naming the served prefix (`served: prefix of N candidates stands; measuring M
+more`, the candidate noun count-aware: a one-candidate prefix reads
+`1 candidate`).
 
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
 caller-context cancellation, including expiry of an operator-supplied command

@@ -52,7 +52,9 @@ Findings live in a versioned JSON document (default
 target and oracle source closures, observed runtime inputs, toolchain and
 build configuration, operator-set version, budget, and effective oracle timeout. A
 run re-measures exactly what a moved pin invalidates and serves the rest from
-the document. Open findings are survivors minus attested dispositions;
+the document; a wider budget request against a capped record whose other pins
+hold measures only the unmeasured candidate suffix and splices it onto the
+recorded prefix. Open findings are survivors minus attested dispositions;
 whether they fail a build is the caller's policy, not gomutant's verdict.
 
 ## Standalone workflow

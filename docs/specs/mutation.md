@@ -226,7 +226,13 @@ bounding how many candidates a target selects so an incremental run completes
 quickly, with the exhaustive run — every operator at every applicable site —
 available when the budget is unset. A finding records the budget it ran
 under: a capped finding never answers a request for more candidates than it
-generated. Under INV-RESULT-CANDIDATE-CONSERVATION, zero is the exhaustive
+generated without measuring them. Because candidate enumeration is
+deterministic — a stable global order over the unchanged body, pinned by the
+finding's target evidence and operator set — a capped record whose every
+other REQ-result-stale pin holds remains exact evidence for the candidate
+prefix `[0, generated)`, and a wider request measures only the unmeasured
+suffix, splicing it onto the recorded prefix under REQ-result-stale's
+budget-extension carve-out. Under INV-RESULT-CANDIDATE-CONSERVATION, zero is the exhaustive
 request and positive `N` requests the first
 `min(N, candidateCount)` candidates. The budget component of coverage holds
 when either the prior finding's `generated` equals `candidateCount`, or its
