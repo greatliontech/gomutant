@@ -17,7 +17,7 @@ func TestRenderFindingViewsLeadsWithTheCause(t *testing.T) {
 		Symbol: "p.F", State: gomutant.FindingUnverifiable,
 		Reason: "oracle p.TestF: observation bracket moved: /dev/pts/3",
 		Layer:  "local", LayerReason: "runtime-unverifiable evidence for p.TestF",
-		Open:   []gomutant.Survivor{{Position: "f.go:1:1", Operator: "zero return"}},
+		Open: []gomutant.Survivor{{Position: "f.go:1:1", Operator: "zero return"}},
 	}})
 	text := out.String()
 	cause := strings.Index(text, "cause: oracle p.TestF")

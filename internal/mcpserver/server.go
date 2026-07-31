@@ -325,21 +325,21 @@ type runIn struct {
 }
 
 type findingOut struct {
-	Symbol         string                       `json:"symbol"`
-	Labels         []string                     `json:"labels,omitempty"`
-	CandidateCount int                          `json:"candidateCount"`
-	Generated      int                          `json:"generated"`
-	Mutants        int                          `json:"mutants"`
-	Killed         int                          `json:"killed"`
-	Discarded      int                          `json:"discarded"`
-	Operators      []gomutant.OperatorSummary   `json:"operators"`
-	Attested       int                          `json:"attested,omitempty"`
-	Open           []gomutant.Survivor          `json:"open,omitempty"`
-	OmittedOpen    int                          `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
-	Cached         bool                         `json:"cached,omitempty"`
-	Skipped        string                       `json:"skipped,omitempty"`
-	Layer          string                       `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
-	LayerReason    string                       `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Symbol         string                     `json:"symbol"`
+	Labels         []string                   `json:"labels,omitempty"`
+	CandidateCount int                        `json:"candidateCount"`
+	Generated      int                        `json:"generated"`
+	Mutants        int                        `json:"mutants"`
+	Killed         int                        `json:"killed"`
+	Discarded      int                        `json:"discarded"`
+	Operators      []gomutant.OperatorSummary `json:"operators"`
+	Attested       int                        `json:"attested,omitempty"`
+	Open           []gomutant.Survivor        `json:"open,omitempty"`
+	OmittedOpen    int                        `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
+	Cached         bool                       `json:"cached,omitempty"`
+	Skipped        string                     `json:"skipped,omitempty"`
+	Layer          string                     `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
+	LayerReason    string                     `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 }
 
 type runOut struct {
@@ -490,9 +490,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 				Symbol: c.Symbol, Position: c.Position, Operator: c.Operator, Killer: c.Killer, Reason: c.Reason,
 			})
 		},
-		Prior:         prior,
-		Decision:      streams.decision,
-		Progress:      streams.progress,
+		Prior:    prior,
+		Decision: streams.decision,
+		Progress: streams.progress,
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
