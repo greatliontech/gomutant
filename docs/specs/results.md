@@ -10,7 +10,8 @@ churn. It identifies mutant positions and changed-scope candidates; it is not
 freshness evidence.
 
 **subject evidence** (term): gomutant-owned persisted data for one target or
-oracle subject: its identity, maximal Gofresh source-closure hash, code-result
+oracle subject: its identity, maximal Gofresh source-closure hash, its
+package's test-variant compartment hash, code-result
 toolchain and build-configuration guards, attributable observation-completeness
 assertion, complete per-subject observability proof data, attributable purity
 assertion, and the completed processes' merged runtime-input manifest, digest,
@@ -163,8 +164,10 @@ survivor attestations. Oracle membership remains a measurement pin, so changing
 the executable oracle remeasures as usual.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable version-2 document that gomutant owns — carrying, per mutated
-symbol, the pins that scope the record (target and oracle subject evidence;
+portable version-3 document that gomutant owns — carrying, per mutated
+symbol, the pins that scope the record (target and oracle subject evidence,
+each carrying its package's test-variant compartment hash beside the maximal
+closure;
 oracle selection mode; operator version; budget; oracle timeout; commit and dirty provenance), the mutant and
 kill counts, each survivor's position and operator, the candidate-evidence
 list when any candidate carries one, and each attested

@@ -24,8 +24,16 @@ import (
 // here and carried as its candidate's CandidateEvidence instead
 // (REQ-result-record).
 type SubjectEvidence struct {
-	Symbol                    string `json:"symbol"`
-	MaximalClosure            string `json:"maximalClosure"`
+	Symbol         string `json:"symbol"`
+	MaximalClosure string `json:"maximalClosure"`
+	// TestVariantClosure is the subject package's test-variant compartment
+	// hash: the gofresh pin that distinguishes "a sibling test moved" from
+	// every other drift, and the evidence a serve consults through gofresh's
+	// stable "test variants" verdict reason. It is required and never
+	// legitimately empty (gofresh defines a non-empty identity even for a
+	// package with no test files), so a document lacking it is refused at
+	// parse and an in-memory record built without it fails closed to stale.
+	TestVariantClosure        string `json:"testVariantClosure"`
 	Toolchain                 string `json:"toolchain"`
 	BuildConfig               string `json:"buildConfig"`
 	ObservationAssertion      string `json:"observationAssertion"`
@@ -46,6 +54,7 @@ func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtim
 	return SubjectEvidence{
 		Symbol:                    symbol,
 		MaximalClosure:            fp.MaximalClosure,
+		TestVariantClosure:        fp.TestVariantClosure,
 		Toolchain:                 fp.Guards.Toolchain,
 		BuildConfig:               fp.Guards.BuildConfig,
 		ObservationAssertion:      fp.ObservationAssertion,
@@ -66,6 +75,7 @@ func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtim
 func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
 	return gofresh.Fingerprint{
 		MaximalClosure:       e.MaximalClosure,
+		TestVariantClosure:   e.TestVariantClosure,
 		Guards:               guard.Guards{Toolchain: e.Toolchain, BuildConfig: e.BuildConfig},
 		PurityAssertion:      e.PurityAssertion,
 		ObservationAssertion: e.ObservationAssertion,
@@ -239,8 +249,11 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // introduced candidate evidence: the field narrows reuse, so a version-1
 // consumer's field tolerance would have served flagged kills with the
 // evidence silently dropped — exactly what the version boundary exists to
-// refuse.
-const DocumentVersion = 2
+// refuse. Version 3 introduced the test-variant compartment pin on every
+// subject's evidence: the field is what stales a record across sibling-test
+// movement, so an older consumer's tolerance would have dropped the pin and
+// served results whose oracle set silently changed.
+const DocumentVersion = 3
 
 // document is the portable finding set (REQ-result-export).
 type document struct {
@@ -567,15 +580,41 @@ func addNonnegative(a, b int) (int, bool) {
 	return a + b, true
 }
 
+// subjectEvidenceFields is the one field inventory of the persisted
+// SubjectEvidence encoding: each descriptor names the wire field, whether a
+// complete record must carry it, and — for required string pins — the
+// accessor whose value must be non-empty. Every validation view (known
+// fields, presence, non-emptiness) derives from this table, so a new pin
+// cannot join one view and silently skip another.
+var subjectEvidenceFields = []struct {
+	name     string
+	required bool
+	pin      func(SubjectEvidence) string // non-empty when required; nil for non-string or condition-checked fields
+}{
+	{"symbol", true, func(e SubjectEvidence) string { return e.Symbol }},
+	{"maximalClosure", true, func(e SubjectEvidence) string { return e.MaximalClosure }},
+	{"testVariantClosure", true, func(e SubjectEvidence) string { return e.TestVariantClosure }},
+	{"toolchain", true, func(e SubjectEvidence) string { return e.Toolchain }},
+	{"buildConfig", true, func(e SubjectEvidence) string { return e.BuildConfig }},
+	{"observationAssertion", true, func(e SubjectEvidence) string { return e.ObservationAssertion }},
+	{"observationStrategy", true, func(e SubjectEvidence) string { return e.ObservationStrategy }},
+	{"observationSubjectPackage", true, func(e SubjectEvidence) string { return e.ObservationSubjectPackage }},
+	{"observationSubjectSymbol", true, func(e SubjectEvidence) string { return e.ObservationSubjectSymbol }},
+	{"observationObservable", true, nil},
+	{"observationReason", false, nil},
+	{"observationEvidence", true, func(e SubjectEvidence) string { return e.ObservationEvidence }},
+	{"purityAssertion", false, nil},
+	{"runtimeInputs", true, func(e SubjectEvidence) string { return e.RuntimeInputs }},
+	{"runtimeDigest", true, func(e SubjectEvidence) string { return e.RuntimeDigest }},
+	{"runtimeUnverifiable", false, nil},
+	{"runtimeReason", false, nil},
+}
+
 func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
-	known := map[string]bool{
-		"symbol": true, "maximalClosure": true, "toolchain": true, "buildConfig": true,
-		"observationAssertion": true, "observationStrategy": true, "observationSubjectPackage": true,
-		"observationSubjectSymbol": true, "observationObservable": true, "observationReason": true, "observationEvidence": true,
-		"purityAssertion": true, "runtimeInputs": true, "runtimeDigest": true,
-		"runtimeUnverifiable": true, "runtimeReason": true,
+	known := make(map[string]bool, len(subjectEvidenceFields))
+	for _, field := range subjectEvidenceFields {
+		known[field.name] = true
 	}
-	required := []string{"symbol", "maximalClosure", "toolchain", "buildConfig", "observationAssertion", "observationStrategy", "observationSubjectPackage", "observationSubjectSymbol", "observationObservable", "observationEvidence", "runtimeInputs", "runtimeDigest"}
 	fields, err := decodeKnownObject(raw, known)
 	if err != nil {
 		return false, err
@@ -585,8 +624,8 @@ func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
 			return false, fmt.Errorf("field %s is null", name)
 		}
 	}
-	for _, name := range required {
-		if _, ok := fields[name]; !ok {
+	for _, field := range subjectEvidenceFields {
+		if _, ok := fields[field.name]; field.required && !ok {
 			return false, nil
 		}
 	}
@@ -600,10 +639,12 @@ func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
 	if evidence.ObservationObservable == (evidence.ObservationReason != "") {
 		return false, nil
 	}
-	return evidence.Symbol != "" && evidence.MaximalClosure != "" && evidence.Toolchain != "" &&
-		evidence.BuildConfig != "" && evidence.ObservationAssertion != "" && evidence.ObservationStrategy != "" &&
-		evidence.ObservationSubjectPackage != "" && evidence.ObservationSubjectSymbol != "" && evidence.ObservationEvidence != "" &&
-		evidence.RuntimeInputs != "" && evidence.RuntimeDigest != "", nil
+	for _, field := range subjectEvidenceFields {
+		if field.pin != nil && field.pin(evidence) == "" {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func validateRequiredObject(raw json.RawMessage, known map[string]bool, required []string) (map[string]json.RawMessage, error) {

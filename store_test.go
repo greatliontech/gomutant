@@ -26,7 +26,7 @@ func storeManifest(paths ...string) string {
 }
 
 func cleanEvidence(symbol string) SubjectEvidence {
-	return SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+	return SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
 		ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
 		ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
 		RuntimeInputs: storeManifest(), RuntimeDigest: "digest"}

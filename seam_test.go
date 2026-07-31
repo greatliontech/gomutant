@@ -330,6 +330,68 @@ func TestLoadStoresAbsoluteRoot(t *testing.T) {
 	}
 }
 
+// TestSiblingTestAdditionStalesRecordAsTestVariants pins the test-variant
+// compartment through the persisted document (REQ-result-record,
+// REQ-result-export): every subject's evidence round-trips its package's
+// compartment hash, and a sibling test added beside an oracle stales the
+// finding with gofresh's stable discriminating reason rather than a generic
+// closure drift.
+func TestSiblingTestAdditionStalesRecordAsTestVariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/observed.TestObservedInput"}}
+	fs, err := tr.Run(context.Background(), []Target{tg}, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fs[0]
+	if f.TargetEvidence.TestVariantClosure == "" || f.OracleEvidence[0].TestVariantClosure == "" {
+		t.Fatalf("measured evidence carries no compartment pin: %+v", f.TargetEvidence)
+	}
+	doc, err := Export(fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed[0].TargetEvidence.TestVariantClosure != f.TargetEvidence.TestVariantClosure ||
+		parsed[0].OracleEvidence[0].TestVariantClosure != f.OracleEvidence[0].TestVariantClosure {
+		t.Fatalf("compartment pin did not round-trip: %+v", parsed[0].TargetEvidence)
+	}
+	inspection, err := tr.InspectFinding(f)
+	if err != nil || inspection.State != FindingCurrent {
+		t.Fatalf("just-measured inspection = %+v, %v", inspection, err)
+	}
+
+	sibling := filepath.Join(dir, "observed", "observed_test.go")
+	source, err := os.ReadFile(sibling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sibling, append(source, []byte("\nfunc TestSibling(_ *testing.T) {}\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, err = edited.InspectFinding(f)
+	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "test variants") {
+		t.Fatalf("sibling-test inspection = %+v, %v; want stale with the discriminating reason", inspection, err)
+	}
+}
+
 // TestFresh pins the pin-check query (REQ-result-stale as a question): a
 // finding measured now is fresh for the same request, stale for a wider
 // budget, stale when its body pin lies, and the check never runs a mutant.

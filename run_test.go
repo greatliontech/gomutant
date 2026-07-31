@@ -1630,22 +1630,22 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(`{"version": 99, "findings": []}`)); err == nil {
 		t.Fatal("unknown version accepted")
 	}
-	fs, err := ParseFindings([]byte(`{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[],"futureField":{"nested":true}}]}`))
+	fs, err := ParseFindings([]byte(`{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[],"futureField":{"nested":true}}]}`))
 	if err != nil || len(fs) != 1 || fs[0].Symbol != "p.F" {
 		t.Fatalf("tolerant parse failed: %v %+v", err, fs)
 	}
 	for name, doc := range map[string]string{
-		"null budget":                    `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":null,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
-		"null dirty":                     `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","dirty":null,"mutants":1,"killed":1}]}`,
-		"duplicate budget":               `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"budget":0,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
-		"duplicate version":              `{"version":2,"version":99,"findings":[]}`,
-		"missing survivors":              `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0}]}`,
-		"empty attestation reason":       `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":""}]}]}`,
-		"duplicate nested evidence":      `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{"symbol":"p.F","symbol":"p.G"},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":0,"killed":0}]}`,
-		"inflated budget":                `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":2,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
-		"colliding attestation identity": `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"a|b.go:1:1","operator":"zero return"}],"attested":[{"position":"a","operator":"b.go:1:1|zero return","reason":"not the survivor"}]}]}`,
-		"duplicate symbols":              `{"version":2,"findings":[{"symbol":"p.F","mutants":0,"killed":0},{"symbol":"p.F","mutants":0,"killed":0}]}`,
-		"duplicate oracle symbols":       `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{},"oracleEvidence":[{"symbol":"p.TestF"},{"symbol":"p.TestF"}],"oracleTimeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`,
+		"null budget":                    `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":null,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
+		"null dirty":                     `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","dirty":null,"mutants":1,"killed":1}]}`,
+		"duplicate budget":               `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"budget":0,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
+		"duplicate version":              `{"version":3,"version":99,"findings":[]}`,
+		"missing survivors":              `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0}]}`,
+		"empty attestation reason":       `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":""}]}]}`,
+		"duplicate nested evidence":      `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{"symbol":"p.F","symbol":"p.G"},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":0,"killed":0}]}`,
+		"inflated budget":                `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":2,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
+		"colliding attestation identity": `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"a|b.go:1:1","operator":"zero return"}],"attested":[{"position":"a","operator":"b.go:1:1|zero return","reason":"not the survivor"}]}]}`,
+		"duplicate symbols":              `{"version":3,"findings":[{"symbol":"p.F","mutants":0,"killed":0},{"symbol":"p.F","mutants":0,"killed":0}]}`,
+		"duplicate oracle symbols":       `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{},"oracleEvidence":[{"symbol":"p.TestF"},{"symbol":"p.TestF"}],"oracleTimeout":"1m0s","dirty":true,"mutants":0,"killed":0}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ParseFindings([]byte(doc)); err == nil {
@@ -1653,7 +1653,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 			}
 		})
 	}
-	nonGit := `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
+	nonGit := `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
 	nonGitFindings, err := ParseFindings([]byte(nonGit))
 	if err != nil || len(nonGitFindings) != 1 {
 		t.Fatalf("non-Git provenance rejected: %v %+v", err, nonGitFindings)
@@ -1756,9 +1756,20 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(wrongTarget)); err == nil {
 		t.Fatal("mismatched target evidence accepted")
 	}
-	emptyOracle := `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
+	emptyOracle := `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`
 	if _, err := ParseFindings([]byte(emptyOracle)); err == nil {
 		t.Fatal("empty oracle evidence accepted")
+	}
+	// The compartment pin is required and never legitimately empty: gofresh
+	// defines a non-empty identity even for a package with no test files, so
+	// an empty or absent value is a record that could never serve.
+	missingCompartment := strings.Replace(nonGit, `"testVariantClosure":"tv",`, "", 1)
+	if _, err := ParseFindings([]byte(missingCompartment)); err == nil {
+		t.Fatal("missing test-variant compartment pin accepted")
+	}
+	emptyCompartment := strings.Replace(nonGit, `"testVariantClosure":"tv"`, `"testVariantClosure":""`, 1)
+	if _, err := ParseFindings([]byte(emptyCompartment)); err == nil {
+		t.Fatal("empty test-variant compartment pin accepted")
 	}
 	withoutDirty := strings.Replace(nonGit, `,"dirty":true`, "", 1)
 	if _, err := ParseFindings([]byte(withoutDirty)); err == nil {
@@ -1768,11 +1779,11 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	if _, err := ParseFindings([]byte(committedWithoutDirty)); err == nil {
 		t.Fatal("committed finding without explicit dirty provenance accepted")
 	}
-	legacy := `{"version":2,"findings":[{"symbol":"p.F","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"legacy"}]}]}`
+	legacy := `{"version":3,"findings":[{"symbol":"p.F","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"legacy"}]}]}`
 	if _, err := ParseFindings([]byte(legacy)); err == nil {
 		t.Fatal("legacy finding accepted")
 	}
-	emptyPins := `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"","operatorSet":"","budget":1,"targetEvidence":{"symbol":"","maximalClosure":"","toolchain":"","buildConfig":"","runtimeInputs":"","runtimeDigest":""},"oracleEvidence":[],"oracleTimeout":"","dirty":true,"mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"unsupported"}]}]}`
+	emptyPins := `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"","operatorSet":"","budget":1,"targetEvidence":{"symbol":"","maximalClosure":"","toolchain":"","buildConfig":"","runtimeInputs":"","runtimeDigest":""},"oracleEvidence":[],"oracleTimeout":"","dirty":true,"mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":"unsupported"}]}]}`
 	if _, err := ParseFindings([]byte(emptyPins)); err == nil {
 		t.Fatal("empty required pins accepted")
 	}
@@ -1941,7 +1952,7 @@ func TestCompletedObservationUnionIsCandidateGranular(t *testing.T) {
 // candidate round-trips, while malformed identity, disposition,
 // survivor-contradicting, or count-exceeding evidence is refused.
 func TestParseFindingsCandidateEvidence(t *testing.T) {
-	valid := `{"version":2,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/12","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":2,"generated":2,"mutants":2,"killed":1,"discarded":0,"operators":[{"operator":"op","generated":2,"discarded":0,"killed":1,"survived":1}],"survivors":[{"position":"f.go:2:2","operator":"op"}],"candidateEvidence":[{"position":"f.go:1:1","operator":"op","reason":"mutant test process panicked before observation finalization","disposition":"killed"}]}]}`
+	valid := `{"version":3,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/12","budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":2,"generated":2,"mutants":2,"killed":1,"discarded":0,"operators":[{"operator":"op","generated":2,"discarded":0,"killed":1,"survived":1}],"survivors":[{"position":"f.go:2:2","operator":"op"}],"candidateEvidence":[{"position":"f.go:1:1","operator":"op","reason":"mutant test process panicked before observation finalization","disposition":"killed"}]}]}`
 	findings, err := ParseFindings([]byte(valid))
 	if err != nil || len(findings) != 1 || len(findings[0].CandidateEvidence) != 1 ||
 		findings[0].CandidateEvidence[0].Disposition != "killed" {
