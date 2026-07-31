@@ -114,8 +114,12 @@ func commandTimeout(name string, seconds *int) (time.Duration, error) {
 // envelope caps (REQ-mcp-envelope): a campaign multiplies every list;
 // the document on disk carries the full set, so the response counts
 // what it drops instead of inlining it. Candidate evidence is
-// drill-down via the findings tool, not run payload.
-func capRunFindings(findings []gomutant.Finding) (rows []findingOut, omitted int) {
+// drill-down via the findings tool, not run payload. Each measured or
+// cached row states its persistence layer (REQ-result-layers): whether
+// the record is safe to stage is answered by the response, never by a
+// second findings call after a run that rendered healthy counts while
+// the store routed the record to the machine-local overlay.
+func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (string, string)) (rows []findingOut, omitted int) {
 	const findingRowCap, openCap = 50, 20
 	for _, f := range findings {
 		if len(rows) == findingRowCap {
@@ -128,14 +132,18 @@ func capRunFindings(findings []gomutant.Finding) (rows []findingOut, omitted int
 			omittedOpen = len(open) - openCap
 			open = open[:openCap]
 		}
-		rows = append(rows, findingOut{
+		row := findingOut{
 			Symbol: f.Symbol, Labels: f.Labels,
 			CandidateCount: f.CandidateCount, Generated: f.Generated,
 			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
 			Attested: len(f.Attested), Operators: append([]gomutant.OperatorSummary{}, f.Operators...), Open: open,
 			OmittedOpen: omittedOpen,
 			Cached:      f.Cached, Skipped: f.Skipped,
-		})
+		}
+		if f.Skipped == "" {
+			row.Layer, row.LayerReason = layer(f)
+		}
+		rows = append(rows, row)
 	}
 	return rows, omitted
 }
@@ -330,6 +338,8 @@ type findingOut struct {
 	OmittedOpen    int                          `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
 	Cached         bool                         `json:"cached,omitempty"`
 	Skipped        string                       `json:"skipped,omitempty"`
+	Layer          string                       `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
+	LayerReason    string                       `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 }
 
 type runOut struct {
@@ -533,7 +543,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
-	out.Findings, out.OmittedFindings = capRunFindings(findings)
+	runStore, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	if err != nil {
+		return nil, out, err
+	}
+	out.Findings, out.OmittedFindings = capRunFindings(findings, runStore.Layer)
 	const residueCap = 50
 	if len(out.Residue) > residueCap {
 		out.OmittedResidue = len(out.Residue) - residueCap

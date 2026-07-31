@@ -115,11 +115,25 @@ func TestCapRunFindingsCountsTheRemainder(t *testing.T) {
 		}
 		findings[i] = gomutant.Finding{Symbol: "p.F", Survivors: survivors}
 	}
-	rows, omitted := capRunFindings(findings)
+	findings[1] = gomutant.Finding{Symbol: "p.S", Skipped: "not a function - for mutation adequacy"}
+	findings[2].Cached = true
+	rows, omitted := capRunFindings(findings, func(gomutant.Finding) (string, string) { return "local", "no commit provenance" })
 	if len(rows) != 50 || omitted != 10 {
 		t.Fatalf("finding rows = %d, omitted %d", len(rows), omitted)
 	}
 	if len(rows[0].Open) != 20 || rows[0].OmittedOpen != 5 {
 		t.Fatalf("open rows = %d, omitted %d", len(rows[0].Open), rows[0].OmittedOpen)
+	}
+	if rows[0].Layer != "local" || rows[0].LayerReason != "no commit provenance" {
+		t.Fatalf("layer surface = %q/%q", rows[0].Layer, rows[0].LayerReason)
+	}
+	// A skipped target carries no record: its row must not claim a layer
+	// (the schema promises absence). A cached serve's row states the
+	// served record's layer exactly like a measured one.
+	if rows[1].Layer != "" || rows[1].LayerReason != "" {
+		t.Fatalf("skipped-row layer surface = %q/%q, want absent", rows[1].Layer, rows[1].LayerReason)
+	}
+	if rows[2].Layer != "local" || rows[2].LayerReason == "" {
+		t.Fatalf("cached-row layer surface = %q/%q", rows[2].Layer, rows[2].LayerReason)
 	}
 }

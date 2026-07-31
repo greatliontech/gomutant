@@ -189,6 +189,16 @@ func runCommand(ctx context.Context, o runOptions) error {
 		default:
 			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
 		}
+		if f.Skipped == "" {
+			// Whether the record is safe to stage is answered here, not by
+			// inspecting JSON (REQ-result-layers): a record the store routes
+			// to the machine-local overlay names its disqualifier, so a run
+			// that rendered healthy counts never leaves the repo document
+			// silently missing the record.
+			if layer, reason := docStore.Layer(f); layer == "local" {
+				fmt.Fprintf(&terminal, "          machine-local: %s\n", reason)
+			}
+		}
 		for _, s := range f.Open() {
 			if s.Execution != "" {
 				fmt.Fprintf(&terminal, "          survivor %s %s  [%s]\n", s.Position, s.Operator, s.Execution)

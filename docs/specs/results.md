@@ -248,13 +248,17 @@ repo row that still carries portable truth for its own pins; a symbol pruned
 from the set leaves both layers. The split is
 automatic — a developer never chooses between committing no evidence and
 committing machine-local state, and full-sweep results stay shareable without
-review carrying local execution facts. Findings surfaces state each record's
-layer with the disqualifying reason for local records, so whether the artifact
-is safe to stage is answered by the tool, not by inspecting JSON.
+review carrying local execution facts. Findings surfaces — the findings faces
+and the run faces' result rows (REQ-exec-run-status in
+[execution.md](execution.md)) — name a local record's disqualifying reason,
+so whether the artifact is safe to stage is answered by the tool, not by
+inspecting JSON: CLI faces render only the machine-local marker, absence
+meaning repo, while MCP rows carry the layer explicitly.
 
 REQ-result-layers: enforced by `TestCommittableDrawsThePortableLine`,
-`TestStoreSplitsUpdatesAcrossLayers`, and
-`TestStoreUpdateDecidesMembershipUnderTheDocumentLock`.
+`TestStoreSplitsUpdatesAcrossLayers`,
+`TestStoreUpdateDecidesMembershipUnderTheDocumentLock`, and
+`TestRunCommandStatesMachineLocalRouting`.
 
 A survivor carries optional execution evidence — `never-executed`,
 `executed-and-passed`, or `unstable-oracle` per REQ-exec-survivor-evidence in

@@ -273,7 +273,13 @@ coverage; stale when another reuse pin fails. Concurrent worker completion
 order never changes these decisions or the final per-target and aggregate
 summary. CLI progress renders the ordered decisions before mutant execution;
 all preparation events precede every decision. CLI and MCP final results expose
-the same preparation sequence, decisions, and totals. Open survivors remain
+the same preparation sequence, decisions, and totals. Each measured or cached
+result row also states its persistence layer when the record stays
+machine-local, with the disqualifying reason (REQ-result-layers in
+[results.md](results.md)) — the CLI as a `machine-local:` sub-row, the MCP
+face as `layer`/`layerReason` row fields — so a run whose record the store
+routes to the local overlay never reads as a healthy repo-document write.
+Open survivors remain
 advisory and do not change successful exit semantics.
 
 Under INV-RESULT-CANDIDATE-CONSERVATION in [results.md](results.md), a measure

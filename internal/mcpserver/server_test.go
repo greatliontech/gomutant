@@ -196,6 +196,12 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if len(out.Findings[0].Operators) == 0 {
 		t.Fatal("run omitted operator summaries")
 	}
+	// The run row itself states the layer (REQ-result-layers): the copied
+	// fixture has no commit provenance, so the record routes local and the
+	// response says so without a second findings call.
+	if out.Findings[0].Layer != "local" || out.Findings[0].LayerReason == "" {
+		t.Fatalf("run-row layer surface = %q/%q", out.Findings[0].Layer, out.Findings[0].LayerReason)
+	}
 	if finding := out.Findings[0]; finding.CandidateCount < finding.Generated || finding.Generated != finding.Mutants+finding.Discarded || finding.Generated == 0 {
 		t.Fatalf("run candidate accounting = %+v", finding)
 	}

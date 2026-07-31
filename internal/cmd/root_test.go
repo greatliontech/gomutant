@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,6 +23,75 @@ func testStore(t *testing.T, dir string) *gomutant.Store {
 		t.Fatal(err)
 	}
 	return store
+}
+
+// isolatedFixture copies the shared fixture tree into a temp git repository
+// with one commit. A test asserting on the repo-layer findings document needs
+// both commit provenance and evidence measured on a tree nothing else writes
+// into: concurrent test packages plant input fixtures inside the shared
+// tree's packages, which moves the observation bracket and routes the record
+// to the machine-local overlay. The copy skips dot-prefixed scratch entries
+// and tolerates files vanishing mid-walk — the planted fixtures are
+// dot-prefixed and removed on their test's cleanup, so a plain CopyFS would
+// re-import the same parallel-run race this helper exists to remove.
+func isolatedFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	err := filepath.WalkDir(fixtureDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		rel, err := filepath.Rel(fixtureDir, path)
+		if err != nil {
+			return err
+		}
+		if rel != "." && strings.HasPrefix(filepath.Base(rel), ".") {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(dir, rel)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"add", "."},
+		{"-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "commit", "--quiet", "--message", "fixture"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		// The helper must hold on any machine: neither config files
+		// (signing, templates, hooks) nor exported GIT_* plumbing
+		// (GIT_DIR, GIT_WORK_TREE, author overrides) may reach the
+		// isolated repo.
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "GIT_") {
+				cmd.Env = append(cmd.Env, kv)
+			}
+		}
+		cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+	return dir
 }
 
 func TestExecuteContextCancellationStopsBeforeLoading(t *testing.T) {
@@ -126,7 +197,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if err := os.WriteFile(targetsPath, []byte(`{"targets":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, targetsFile: targetsPath}); err != nil {
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, targetsFile: targetsPath, output: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
 	retained, err := loadFindings(dir, path)
@@ -135,7 +206,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := runCommand(ctx, runOptions{dir: dir, findingsFile: defaultFindings}); !errors.Is(err, context.Canceled) {
+	if err := runCommand(ctx, runOptions{dir: dir, findingsFile: defaultFindings, output: io.Discard}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled empty whole-tree run = %v", err)
 	}
 	retained, err = loadFindings(dir, path)
@@ -255,6 +326,7 @@ func TestRenderRunStatus(t *testing.T) {
 }
 
 func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
+	fixture := isolatedFixture(t)
 	tmp := t.TempDir()
 	targetsPath := filepath.Join(tmp, "targets.json")
 	findingsPath := filepath.Join(tmp, "findings.json")
@@ -263,7 +335,7 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 	}
 	var output bytes.Buffer
 	if err := runCommand(context.Background(), runOptions{
-		dir: fixtureDir, targetsFile: targetsPath, findingsFile: findingsPath, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute, output: &output,
+		dir: fixture, targetsFile: targetsPath, findingsFile: findingsPath, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute, output: &output,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -273,9 +345,11 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 	}
 	findings, err := gomutant.ParseFindings(data)
 	if len(findings) == 0 {
-		// A skipped target produces no finding; the rendered decisions name
-		// why, so a transient-load skip fails diagnosably.
-		t.Fatalf("no findings produced; run output:\n%s", output.String())
+		// The record parses from the repo-layer document: the isolated
+		// fixture keeps the evidence verifiable and the provenance clean, so
+		// a record routed to the machine-local overlay is a failure, not
+		// load noise — the rendered rows name the disqualifier.
+		t.Fatalf("no findings in the repo document; run output:\n%s", output.String())
 	}
 	if err != nil || len(findings) != 1 || findings[0].OracleTimeout != "2m0s" || findings[0].CandidateCount < findings[0].Generated ||
 		findings[0].Generated != 1 || findings[0].Mutants != 0 || findings[0].Discarded != 1 {
@@ -298,6 +372,66 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 		!strings.Contains(output.String(), "measured  example.com/fixture/lib.BigLit  1/") ||
 		!strings.Contains(output.String(), "0 mutants, 0 killed, 1 discarded") {
 		t.Fatalf("candidate counts missing from output:\n%s", output.String())
+	}
+	if strings.Contains(output.String(), "machine-local:") {
+		t.Fatalf("committable record rendered a machine-local line:\n%s", output.String())
+	}
+}
+
+// A measured record the store routes to the machine-local overlay names its
+// disqualifier on the run face (REQ-result-layers): whether the artifact is
+// safe to stage is answered by the tool, so a run that renders healthy counts
+// never leaves the repo document silently missing the record.
+func TestRunCommandStatesMachineLocalRouting(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":        "module example.com/local\n\ngo 1.26.5\n",
+		"local.go":      "package local\ntype Kind int\nfunc Value() int { return 1 }\n",
+		"local_test.go": "package local\nimport \"testing\"\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fail() } }\n",
+		"targets.json":  `{"targets":[{"symbol":"example.com/local.Value","oracle":["example.com/local.TestValue"]},{"symbol":"example.com/local.Kind","oracle":["example.com/local.TestValue"]}]}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	findingsPath := filepath.Join(dir, "findings.json")
+	var output bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{
+		dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: findingsPath, budget: 1, output: &output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// No git repository above the temp module: provenance is dirty, the
+	// record stays machine-local, and the run face says so — once. The
+	// type target skips, and a skipped row carries no record to state a
+	// layer for.
+	if !strings.Contains(output.String(), "machine-local: dirty worktree provenance") {
+		t.Fatalf("run output missing the machine-local routing line:\n%s", output.String())
+	}
+	if got := strings.Count(output.String(), "machine-local:"); got != 1 {
+		t.Fatalf("machine-local rows = %d, want exactly the measured record's:\n%s", got, output.String())
+	}
+	data, err := os.ReadFile(findingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := gomutant.ParseFindings(data)
+	if err != nil || len(findings) != 0 {
+		t.Fatalf("repo document for a machine-local record = %+v, %v", findings, err)
+	}
+	// A cached serve of the still-local record states the layer too.
+	output.Reset()
+	if err := runCommand(context.Background(), runOptions{
+		dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: findingsPath, budget: 1, output: &output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "cached    example.com/local.Value") ||
+		!strings.Contains(output.String(), "machine-local: dirty worktree provenance") {
+		t.Fatalf("cached serve missing the machine-local routing line:\n%s", output.String())
 	}
 }
 
