@@ -330,6 +330,57 @@ func TestLoadStoresAbsoluteRoot(t *testing.T) {
 	}
 }
 
+// TestRunRefusesLaggingEnumeration pins the derived-oracle freshness
+// cross-check end to end (REQ-target-default): a run whose loaded snapshot
+// lags the on-disk test files — here forced by editing a test file after the
+// load — refuses before measuring anything, naming the lag.
+func TestRunRefusesLaggingEnumeration(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":    "module example.com/lagrun\n\ngo 1.26\n",
+		"p.go":      "package p\n\nfunc F() int { return 1 }\n",
+		"p_test.go": "package p\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F() != 1 {\n\t\tt.Fatal(\"broken\")\n\t}\n}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p_test.go"), []byte(files["p_test.go"]+"\nfunc TestNew(_ *testing.T) {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = tr.Run(context.Background(), []Target{{Symbol: "example.com/lagrun.F"}}, Options{Budget: 1})
+	if err == nil || !strings.Contains(err.Error(), "lags the tree") || !strings.Contains(err.Error(), "example.com/lagrun.TestNew") {
+		t.Fatalf("lagging enumeration run = %v, want a refusal naming the lag", err)
+	}
+}
+
+// TestDerivedOracleDeltaNamesBothDirections pins the re-measure reason's
+// oracle-delta naming (REQ-target-default's loud shrink note): additions and
+// removals are named, equality is silent.
+func TestDerivedOracleDeltaNamesBothDirections(t *testing.T) {
+	if got := derivedOracleDelta([]string{"p.TestA", "p.TestB"}, []string{"p.TestA", "p.TestB"}); got != "" {
+		t.Fatalf("equal sets named a delta: %q", got)
+	}
+	got := derivedOracleDelta([]string{"p.TestA", "p.TestGone"}, []string{"p.TestA", "p.TestNew"})
+	if got != "derived oracle changed (added: p.TestNew; removed: p.TestGone)" {
+		t.Fatalf("delta = %q", got)
+	}
+	if got := derivedOracleDelta([]string{"p.TestA"}, []string{"p.TestA", "p.TestNew"}); got != "derived oracle changed (added: p.TestNew)" {
+		t.Fatalf("growth delta = %q", got)
+	}
+	if got := derivedOracleDelta([]string{"p.TestA", "p.TestGone"}, []string{"p.TestA"}); got != "derived oracle changed (removed: p.TestGone)" {
+		t.Fatalf("shrink delta = %q", got)
+	}
+	if got := derivedOracleDelta([]string{"p.TestA", "p.TestA"}, []string{"p.TestA"}); got != "derived oracle changed (recorded oracle repeats an identity)" {
+		t.Fatalf("duplicate delta = %q", got)
+	}
+}
+
 // TestSiblingTestAdditionStalesRecordAsTestVariants pins the test-variant
 // compartment through the persisted document (REQ-result-record,
 // REQ-result-export): every subject's evidence round-trips its package's

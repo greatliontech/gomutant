@@ -82,7 +82,7 @@ func TestFindingsAtAndUpdate(t *testing.T) {
 		t.Fatal("absolute findings path rewritten")
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
 			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
 			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
 			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
@@ -111,7 +111,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
 			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
 			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
 			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
@@ -168,7 +168,7 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
 			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
 			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
 			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
@@ -272,6 +272,11 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	findings, err := gomutant.ParseFindings(data)
+	if len(findings) == 0 {
+		// A skipped target produces no finding; the rendered decisions name
+		// why, so a transient-load skip fails diagnosably.
+		t.Fatalf("no findings produced; run output:\n%s", output.String())
+	}
 	if err != nil || len(findings) != 1 || findings[0].OracleTimeout != "2m0s" || findings[0].CandidateCount < findings[0].Generated ||
 		findings[0].Generated != 1 || findings[0].Mutants != 0 || findings[0].Discarded != 1 {
 		t.Fatalf("oracle timeout pin = %+v, %v", findings, err)
@@ -365,7 +370,7 @@ func TestInspectFindingsCarriesCandidateEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence := gomutant.SubjectEvidence{Symbol: "example.com/empty.Gone", MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+	evidence := gomutant.SubjectEvidence{Symbol: "example.com/empty.Gone", MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
 		RuntimeInputs: "manifest", RuntimeDigest: "digest"}
 	finding := gomutant.Finding{Symbol: "example.com/empty.Gone", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence, OracleEvidence: []gomutant.SubjectEvidence{evidence}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,

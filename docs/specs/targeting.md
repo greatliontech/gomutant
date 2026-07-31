@@ -84,6 +84,21 @@ producer whose document is a complete statement of who vouches (stipulator's
 export) marks its oracles explicit, and an unwitnessed target then reports
 as measurable by nothing rather than inheriting package tests it never
 claimed, which would launder unbound kills into the producer's labels.
+A derived oracle is a measurement pin only if it is provably fresh: the
+package loader's snapshot has been observed lagging the filesystem under
+rapid successive invocations, and a lagging enumeration is a silent coverage
+cap recorded as evidence — new tests absent from the derived set while the
+same run's other evidence reads the current tree. Before a run trusts a
+derived set, it MUST cross-check the enumeration against a direct parse of
+the package's on-disk test files — every on-disk test file the effective
+build configuration selects, the configuration resolved from the tree's own
+environment (a persisted go-env value or a GOFLAGS tag changes which files
+the test binary compiles), snapshot-present files re-matched exactly like
+new ones (a constraint edit after the load is itself a lag) — under the
+same runnable-test shape, and refuse the run on any disagreement,
+naming the differing test identities in both directions. A derived set that
+shrank relative to a prior finding's recorded oracle is named loudly in the
+re-measure reason: a test the record was measured against no longer exists.
 
 **REQ-target-changed** (behavior): Auto-discovery MUST offer a changed-scope
 mode that targets only the symbols whose bodies differ from a caller-named

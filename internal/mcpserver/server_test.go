@@ -34,7 +34,7 @@ func seconds(n int) *int { return &n }
 
 func seededFinding(symbol string) gomutant.Finding {
 	evidence := func(name string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", Toolchain: "go", BuildConfig: "build",
+		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
 			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
 			ObservationSubjectSymbol: name, ObservationObservable: true, ObservationEvidence: "proof",
 			RuntimeInputs: "manifest", RuntimeDigest: "digest"}

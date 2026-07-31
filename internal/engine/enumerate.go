@@ -7,8 +7,6 @@ import (
 	"go/types"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -196,21 +194,12 @@ func (t *Tree) PackageOfContext(ctx context.Context, symbol string) (pkg, rest s
 // empty run. TestMain is the harness, not a test: its *testing.M parameter
 // fails the signature rule.
 func runnableTest(pkg *packages.Package, fn *ast.FuncDecl) bool {
-	name := fn.Name.Name
-	var prefix, param string
-	switch {
-	case strings.HasPrefix(name, "Test"):
-		prefix, param = "Test", "T"
-	case strings.HasPrefix(name, "Fuzz"):
-		prefix, param = "Fuzz", "F"
-	default:
+	param := runnableTestNameShape(fn.Name.Name)
+	if param == "" || fn.Type.TypeParams != nil {
+		// A type-parameterized test is not runnable: the test harness
+		// refuses the package outright, so admitting it would derive an
+		// oracle no invocation executes.
 		return false
-	}
-	if rest := name[len(prefix):]; rest != "" {
-		r, _ := utf8.DecodeRuneInString(rest)
-		if unicode.IsLower(r) {
-			return false
-		}
 	}
 	obj, ok := pkg.TypesInfo.Defs[fn.Name].(*types.Func)
 	if !ok {

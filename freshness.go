@@ -394,13 +394,8 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding, prebui
 			recordedOracle[i] = evidence.Symbol
 		}
 		sort.Strings(recordedOracle)
-		if len(currentOracle) != len(recordedOracle) {
-			return FindingInspection{State: FindingStale, Reason: "derived oracle changed"}, nil
-		}
-		for i := range currentOracle {
-			if currentOracle[i] != recordedOracle[i] {
-				return FindingInspection{State: FindingStale, Reason: "derived oracle changed"}, nil
-			}
+		if reason := derivedOracleDelta(recordedOracle, currentOracle); reason != "" {
+			return FindingInspection{State: FindingStale, Reason: reason}, nil
 		}
 	}
 	oracle := sortedSubjectEvidence(f.OracleEvidence)
@@ -497,6 +492,50 @@ func sameAttestationPins(prior, current Finding) bool {
 		}
 	}
 	return true
+}
+
+// derivedOracleDelta names how the current derived oracle set departs from
+// the recorded one — the added and removed test identities — or returns ""
+// when the sets are equal. Naming the delta keeps the re-measure decision
+// legible: a caller who just wrote kill-tests sees the tool noticing them,
+// and a shrink is loud enough to question (a test the record was measured
+// against no longer exists). Both slices must be sorted.
+func derivedOracleDelta(recorded, current []string) string {
+	recordedSet := make(map[string]bool, len(recorded))
+	for _, symbol := range recorded {
+		recordedSet[symbol] = true
+	}
+	currentSet := make(map[string]bool, len(current))
+	for _, symbol := range current {
+		currentSet[symbol] = true
+	}
+	var added, removed []string
+	for _, symbol := range current {
+		if !recordedSet[symbol] {
+			added = append(added, symbol)
+		}
+	}
+	for _, symbol := range recorded {
+		if !currentSet[symbol] {
+			removed = append(removed, symbol)
+		}
+	}
+	if len(added) == 0 && len(removed) == 0 {
+		if len(recorded) != len(current) {
+			// Same identities, different multiplicity: a recorded oracle
+			// repeating an identity is malformed evidence, never equality.
+			return "derived oracle changed (recorded oracle repeats an identity)"
+		}
+		return ""
+	}
+	var parts []string
+	if len(added) != 0 {
+		parts = append(parts, "added: "+strings.Join(added, ", "))
+	}
+	if len(removed) != 0 {
+		parts = append(parts, "removed: "+strings.Join(removed, ", "))
+	}
+	return "derived oracle changed (" + strings.Join(parts, "; ") + ")"
 }
 
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {

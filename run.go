@@ -180,22 +180,24 @@ type runPreparation struct {
 	contextFor     func(context.Context, string) (string, string, error)
 	splitRapidPkgs func(context.Context, []string) ([]string, []string, error)
 
-	derivedOracles map[string][]string
-	validations    map[string]oracleValidationResult
-	contexts       map[string]packageContextResult
-	rapid          map[string]bool
+	verifyEnumeration func(context.Context, string, []string) error
+	derivedOracles    map[string][]string
+	validations       map[string]oracleValidationResult
+	contexts          map[string]packageContextResult
+	rapid             map[string]bool
 }
 
 func newRunPreparation(t *Tree) *runPreparation {
 	return &runPreparation{
-		packageOf:      t.eng.PackageOfContext,
-		testsOf:        t.eng.TestsOfContext,
-		validate:       t.eng.ValidateOracleContext,
-		contextFor:     t.eng.PackageContextContext,
-		splitRapidPkgs: t.eng.SplitRapidPkgsContext,
-		derivedOracles: map[string][]string{},
-		validations:    map[string]oracleValidationResult{},
-		contexts:       map[string]packageContextResult{},
+		packageOf:         t.eng.PackageOfContext,
+		testsOf:           t.eng.TestsOfContext,
+		validate:          t.eng.ValidateOracleContext,
+		contextFor:        t.eng.PackageContextContext,
+		splitRapidPkgs:    t.eng.SplitRapidPkgsContext,
+		verifyEnumeration: t.eng.VerifyTestEnumerationContext,
+		derivedOracles:    map[string][]string{},
+		validations:       map[string]oracleValidationResult{},
+		contexts:          map[string]packageContextResult{},
 	}
 }
 
@@ -216,6 +218,16 @@ func (p *runPreparation) oracle(ctx context.Context, target Target) ([]string, e
 	oracle, err := p.testsOf(ctx, pkg)
 	if err != nil {
 		return nil, err
+	}
+	// The derived set is an oracle pin only if it is provably fresh: the
+	// package loader's snapshot has been observed lagging the filesystem, so
+	// the enumeration is cross-checked against a direct parse of the
+	// package's on-disk test files before it is trusted — once per package,
+	// memoized with the set it vouches for.
+	if p.verifyEnumeration != nil {
+		if err := p.verifyEnumeration(ctx, pkg, oracle); err != nil {
+			return nil, err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
