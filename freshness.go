@@ -219,10 +219,12 @@ func (s *subjectViewSet) validateProducers(ctx context.Context) error {
 	return nil
 }
 
-// acceptValidVerdict is the ordinary matching predicate: only a plainly
-// valid gofresh verdict lets a recorded subject stand. The oracle-growth
-// gate additionally tolerates exactly the stale "test variants" verdict its
-// inert ledger diff already explained (REQ-result-stale's growth carve-out).
+// acceptValidVerdict is the one matching predicate: only a plainly valid
+// gofresh verdict lets a recorded subject stand. The oracle-growth gate
+// reaches the same bar by refreshing a target-package subject's compartment
+// pin before checking — the refresh its inert ledger diff licenses
+// (REQ-result-stale's growth carve-out) — never by tolerating a stale
+// verdict, behind whose "test variants" reason a moved pin could hide.
 func acceptValidVerdict(verdict gofresh.Verdict) bool {
 	return verdict.Status == gofresh.Valid
 }
@@ -680,11 +682,20 @@ func (m *runtimeMemo) verify(ctx context.Context) (bool, error) {
 // current derived oracle is a strict superset of the recorded set; the
 // recorded ledger diffs inert against the current view's — the one movement
 // the carve-out tolerates — and the target's and every retained oracle's
-// evidence is valid, accepting gofresh's stale "test variants" verdict for
-// subjects of the target's own package exactly because the inert diff
-// already explained it. Returns the added oracle symbols, sorted.
-func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, operatorSet, timeout string) ([]string, bool, error) {
-	if prior.OracleExplicit || prior.CompartmentLedger == nil ||
+// evidence checks plainly valid, target-package subjects with their recorded
+// compartment pin refreshed to the current one. The refresh is what the
+// inert diff licenses; tolerating the stale "test variants" verdict instead
+// would let a moved pin hide behind it — gofresh orders the compartment
+// comparison after the core and before the environment tiers, so that
+// reason certifies core equality only. Returns the added oracle symbols,
+// sorted.
+func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) ([]string, bool, error) {
+	// Growth is a derived-oracle claim on both sides: an explicit request
+	// that happens to superset the recorded derived set is the caller's
+	// selection, not derived growth — serving it would report "derived
+	// oracle grew" for a set nothing derived, and persist an explicit
+	// oracle under a non-explicit record.
+	if oracleExplicit || prior.OracleExplicit || prior.CompartmentLedger == nil ||
 		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
 		len(prior.OracleEvidence) >= len(oracle) || len(prior.CandidateEvidence) != 0 {
 		return nil, false, nil
@@ -697,9 +708,11 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 	if !delta.Inert() {
 		return nil, false, nil
 	}
-	tolerant := func(verdict gofresh.Verdict) bool {
-		return verdict.Status == gofresh.Valid ||
-			(verdict.Status == gofresh.Stale && verdict.Reason == "test variants")
+	refreshed := func(subject *subjectView, evidence SubjectEvidence) SubjectEvidence {
+		if subject.subject.Package == target.subject.Package && subject.fp.TestVariantClosure != "" {
+			evidence.TestVariantClosure = subject.fp.TestVariantClosure
+		}
+		return evidence
 	}
 	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
 	for _, evidence := range prior.OracleEvidence {
@@ -709,7 +722,7 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 		bySymbol[evidence.Symbol] = evidence
 	}
 	pairs := make([]evidencePair, 0, 1+len(oracle))
-	pairs = append(pairs, evidencePair{subject: target, evidence: prior.TargetEvidence, accept: tolerant})
+	pairs = append(pairs, evidencePair{subject: target, evidence: refreshed(target, prior.TargetEvidence), accept: acceptValidVerdict})
 	var added []string
 	retained := 0
 	for _, subject := range oracle {
@@ -719,13 +732,12 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 			continue
 		}
 		retained++
-		accept := tolerant
-		if subject.subject.Package != target.subject.Package {
-			// The inert diff explains only the target package's
-			// compartment; a subject elsewhere must be plainly valid.
-			accept = acceptValidVerdict
-		}
-		pairs = append(pairs, evidencePair{subject: subject, evidence: evidence, accept: accept})
+		// The inert diff explains only the target package's compartment: a
+		// target-package subject checks with its compartment pin refreshed,
+		// a subject elsewhere with its recorded evidence untouched. Derived
+		// oracles are package-local today, so the elsewhere case is
+		// fail-closed defense, not a reachable path.
+		pairs = append(pairs, evidencePair{subject: subject, evidence: refreshed(subject, evidence), accept: acceptValidVerdict})
 	}
 	if retained != len(prior.OracleEvidence) || len(added) == 0 {
 		// A recorded oracle absent from the current set is a removal, never

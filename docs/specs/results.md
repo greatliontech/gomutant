@@ -154,15 +154,22 @@ reads "1 candidate"). Derived oracle growth is the third carve-out, resting
 on the keystone: every recorded kill names its killer among the recorded
 oracles (REQ-core-attributed-kills), and timeout and package-scope kills rest
 on the same recorded set's behavior, so a grown oracle cannot un-kill
-anything — it can only kill more. When the finding is non-explicit, the
+anything — it can only kill more. When the finding and the request are both
+non-explicit — growth is a derived-oracle claim on both sides; an explicit
+request that happens to superset the recorded derived set is the caller's
+selection, never derived growth — the
 current derived set is a strict superset of the recorded one, and every other
 pin covers — scalar pins equal; no candidate evidence; the target's and every
-retained oracle's evidence valid, where the one tolerated divergence is
-gofresh's stale "test variants" verdict explained exactly by an inert
-declaration delta: the finding's recorded compartment ledger diffed against
-the current one classifies inert, so the compartment moved by additions no
-unchanged declaration can observe, and anything changed, removed, or
-initialization-bearing re-measures whole — then recorded outcomes stand for
+retained oracle's evidence checking plainly valid, target-package subjects
+with their recorded compartment pin refreshed to the current one: the
+refresh is licensed exactly by an inert declaration delta — the finding's
+recorded compartment ledger diffed against the current one classifies
+inert, so the compartment moved by additions no unchanged declaration can
+observe, and anything changed, removed, or initialization-bearing
+re-measures whole — and the check stays plain because gofresh orders the
+compartment comparison before the environment tiers, so accepting the stale
+"test variants" verdict instead would let a moved pin hide behind it — then
+recorded outcomes stand for
 every candidate except the survivors, which the run re-measures against only
 the added test names: a killed candidate stays killed, a discard stays
 discarded, a survivor an added test kills moves to killed with the kill

@@ -2110,6 +2110,72 @@ func TestServeMatchingBatchesEvidenceChecksPerView(t *testing.T) {
 	}
 }
 
+// TestGrowthGateRefusesPinMovedBehindCompartmentVerdict pins the growth
+// gate's plain-validity bar (REQ-result-stale): gofresh orders the
+// compartment comparison before the environment tiers, so a moved pin can
+// hide behind the stale "test variants" verdict — the gate must refuse a
+// record whose toolchain pin moved even though the compartment delta is
+// inert, and accept the same record with its pins intact.
+func TestGrowthGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":  "module example.com/growthgate\n\ngo 1.26.5\n",
+		"gate.go": "package growthgate\nfunc Value(x int) int {\n\tif x > 100 {\n\t\treturn x * 3\n\t}\n\treturn x + 1\n}\n",
+		"gate_test.go": "package growthgate\n\nimport \"testing\"\n\n" +
+			"func TestSmall(t *testing.T) {\n\tif Value(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []Target{{Symbol: "example.com/growthgate.Value"}}
+	prior, err := tr.Run(context.Background(), targets, Options{Budget: 1})
+	if err != nil || len(prior) != 1 || prior[0].CompartmentLedger == nil {
+		t.Fatalf("seed measurement = %+v, %v", prior, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "more_test.go"),
+		[]byte("package growthgate\n\nimport \"testing\"\n\nfunc TestMore(t *testing.T) {\n\tif Value(200) != 600 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grown, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	views, err := grown.newSubjectViews(context.Background(), []string{
+		"example.com/growthgate.Value", "example.com/growthgate.TestSmall", "example.com/growthgate.TestMore",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := views.bySymbol["example.com/growthgate.Value"]
+	oracle := []*subjectView{
+		views.bySymbol["example.com/growthgate.TestSmall"],
+		views.bySymbol["example.com/growthgate.TestMore"],
+	}
+	added, ok, err := evidenceSetCoversGrowthContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout)
+	if err != nil || !ok || len(added) != 1 || added[0] != "example.com/growthgate.TestMore" {
+		t.Fatalf("intact pins refused the growth gate: added=%v ok=%v err=%v", added, ok, err)
+	}
+	tampered := prior[0]
+	tampered.TargetEvidence.Toolchain = "go0.0-never"
+	if _, ok, err := evidenceSetCoversGrowthContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout); err != nil || ok {
+		t.Fatalf("a moved toolchain hid behind the compartment verdict: ok=%v err=%v", ok, err)
+	}
+	// Growth is a derived-oracle claim on both sides: an explicit request
+	// supersetting the recorded derived set is the caller's selection,
+	// never derived growth.
+	if _, ok, err := evidenceSetCoversGrowthContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout); err != nil || ok {
+		t.Fatalf("an explicit request rode the derived-growth carve-out: ok=%v err=%v", ok, err)
+	}
+}
+
 // TestRunServesGrownOracleMeasuringOnlySurvivors pins the oracle-growth
 // carve-out end to end (REQ-result-stale): a sibling test added beside the
 // oracle grows the derived set under an inert compartment delta, so the
@@ -2411,14 +2477,14 @@ func TestEvidenceSetCoversGrowthRefusesIneligibleRecords(t *testing.T) {
 			return f
 		}(),
 	} {
-		added, ok, err := evidenceSetCoversGrowthContext(ctx, prior, nil, oracle, "go/12", "1m0s")
+		added, ok, err := evidenceSetCoversGrowthContext(ctx, prior, nil, oracle, false, "go/12", "1m0s")
 		if err != nil || ok || added != nil {
 			t.Fatalf("%s: growth gate = %v %v %v, want a refusal before any evidence check", name, added, ok, err)
 		}
 	}
 	// Not strictly grown: recorded set size equals the current one.
 	equal := base
-	if added, ok, err := evidenceSetCoversGrowthContext(ctx, equal, nil, oracle[:1], "go/12", "1m0s"); err != nil || ok || added != nil {
+	if added, ok, err := evidenceSetCoversGrowthContext(ctx, equal, nil, oracle[:1], false, "go/12", "1m0s"); err != nil || ok || added != nil {
 		t.Fatalf("non-grown set = %v %v %v, want a refusal", added, ok, err)
 	}
 }

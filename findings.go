@@ -28,8 +28,11 @@ type SubjectEvidence struct {
 	MaximalClosure string `json:"maximalClosure"`
 	// TestVariantClosure is the subject package's test-variant compartment
 	// hash: the gofresh pin that distinguishes "a sibling test moved" from
-	// every other drift, and the evidence a serve consults through gofresh's
-	// stable "test variants" verdict reason. It is required and never
+	// every other drift. The oracle-growth gate refreshes a target-package
+	// subject's recorded pin to the current one — the refresh its inert
+	// ledger diff licenses — and requires the refreshed evidence plainly
+	// valid; inspection and attribution surface gofresh's stable "test
+	// variants" verdict reason on refusal paths. It is required and never
 	// legitimately empty (gofresh defines a non-empty identity even for a
 	// package with no test files), so a document lacking it is refused at
 	// parse and an in-memory record built without it fails closed to stale.

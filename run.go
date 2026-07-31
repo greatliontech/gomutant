@@ -704,7 +704,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// A mismatch may be exactly the growth the third carve-out
 				// serves: the derived oracle grew while the compartment
 				// moved by an inert declaration delta (REQ-result-stale).
-				added, grows, gerr := evidenceSetCoversGrowthContext(ctx, *rec, targetView, oracleViews, engine.OperatorSet, opts.OracleTimeout.String())
+				added, grows, gerr := evidenceSetCoversGrowthContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String())
 				if gerr != nil {
 					return nil, gerr
 				}
