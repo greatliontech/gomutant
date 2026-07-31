@@ -22,3 +22,25 @@ whose hardening landed as the derived-oracle direct-parse cross-check
   post-commit.
 - `probeOracleInstability` (`run.go:293+`) without spawning probes.
 - A spin in the final serve/splice path.
+
+## Probe (2026-08-01, did not reproduce)
+
+An instrumented library-level campaign (54 targets, `Force`, jobs=4, one
+package, gofresh v0.42.1 pins) returned 0.00s after the last commit — no
+tail. A reusable watchdog harness now exists for arming on future
+campaigns: it stamps every Progress/Decision/AnalysisProgress/Commit event,
+records a whole-run CPU profile, and dumps all goroutine stacks if `Run`
+has not returned 60s after the last committed finding (the reproduction
+signature this issue's `Lands:` wants). Harness: a ~150-line `main`
+importing gomutant with `Options` callbacks + `runtime/pprof`; recoverable
+from the probe session if needed.
+
+Cost-center evidence from the same run, relevant to whatever the spin is:
+in-process CPU averaged 1.8 cores for the whole run; GC accounted for
+roughly a third of samples (allocation pressure under AST walking and
+type-checking), and ~25% of in-process CPU sat under repeated
+`packages.Load` calls issued by gofresh `closure.loadView`/`loadEnv`. The
+suspected per-target observed-capture machinery ran at a steady ~2.7s per
+target post-execution — expensive but bounded and terminating here. The
+original 4-CPU-hour tail remains unexplained; the issue stays parked on
+its profiling trigger.
