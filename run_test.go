@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"unsafe"
 
@@ -2050,6 +2051,62 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 	}
 	if spliced.Generated != spliced.Mutants+spliced.Discarded || spliced.Mutants != spliced.Killed+len(spliced.Survivors) {
 		t.Fatalf("finding totals do not conserve: %+v", spliced)
+	}
+}
+
+// TestServeMatchingBatchesEvidenceChecksPerView pins the serve path's
+// observation economy: a warm cached serve validates the record's target and
+// oracle evidence through one CheckObservedBatch per analysis view — one
+// runtime-input window shared across the view's subjects, observable as
+// exactly two runtime observation passes (the window's open and close) —
+// where a per-subject walk would pay one window per subject.
+func TestServeMatchingBatchesEvidenceChecksPerView(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":   "module example.com/batch\n\ngo 1.26.5\n",
+		"batch.go": "package batch\nfunc Value(x int) int {\n\tif x > 100 {\n\t\treturn x * 3\n\t}\n\treturn x + 1\n}\n",
+		"batch_test.go": "package batch\n\nimport \"testing\"\n\n" +
+			"func TestSmall(t *testing.T) {\n\tif Value(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n\n" +
+			"func TestBig(t *testing.T) {\n\tif Value(200) != 600 {\n\t\tt.Fail()\n\t}\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []Target{{Symbol: "example.com/batch.Value"}}
+	prior, err := tr.Run(context.Background(), targets, Options{Budget: 1})
+	if err != nil || len(prior) != 1 || len(prior[0].OracleEvidence) != 2 {
+		t.Fatalf("seed measurement = %+v, %v; want a two-test derived oracle", prior, err)
+	}
+	warm, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runtimePasses atomic.Int64
+	var decisions []RunDecision
+	served, err := warm.Run(context.Background(), targets, Options{
+		Budget: 1, Prior: prior,
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+		AnalysisProgress: func(phase, _ string) {
+			if phase == "runtime" {
+				runtimePasses.Add(1)
+			}
+		},
+	})
+	if err != nil || len(served) != 1 || !served[0].Cached {
+		t.Fatalf("warm serve = %+v, %v; decisions %+v", served, err, decisions)
+	}
+	// Target plus two oracle tests share one view: one batched check, one
+	// window, two passes. Three per-subject windows would show six.
+	if got := runtimePasses.Load(); got != 2 {
+		t.Fatalf("warm serve paid %d runtime observation passes, want 2 (one batched window)", got)
 	}
 }
 

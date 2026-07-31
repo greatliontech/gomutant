@@ -734,13 +734,18 @@ func TestIncompleteObservationCannotBeFresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if valid, err := view.valid(evidence); err != nil || valid {
+	holds := func(evidence SubjectEvidence) (bool, error) {
+		return evidencePairsValid(context.Background(),
+			[]evidencePair{{subject: view, evidence: evidence, accept: acceptValidVerdict}},
+			runtimeinput.CurrentEnvContext)
+	}
+	if valid, err := holds(evidence); err != nil || valid {
 		t.Fatalf("incomplete evidence valid = %v, err = %v", valid, err)
 	}
 	tampered := evidence
 	tampered.RuntimeUnverifiable = false
 	tampered.RuntimeReason = ""
-	if valid, err := view.valid(tampered); err != nil || valid {
+	if valid, err := holds(tampered); err != nil || valid {
 		t.Fatalf("inconsistent disposition valid = %v, err = %v", valid, err)
 	}
 }

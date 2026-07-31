@@ -219,26 +219,18 @@ func (s *subjectViewSet) validateProducers(ctx context.Context) error {
 	return nil
 }
 
-func (s *subjectView) valid(evidence SubjectEvidence) (bool, error) {
-	return s.validContext(context.Background(), evidence)
+// acceptValidVerdict is the ordinary matching predicate: only a plainly
+// valid gofresh verdict lets a recorded subject stand. The oracle-growth
+// gate additionally tolerates exactly the stale "test variants" verdict its
+// inert ledger diff already explained (REQ-result-stale's growth carve-out).
+func acceptValidVerdict(verdict gofresh.Verdict) bool {
+	return verdict.Status == gofresh.Valid
 }
 
-func (s *subjectView) validContext(ctx context.Context, evidence SubjectEvidence) (bool, error) {
-	return s.validContextWithCurrent(ctx, evidence, runtimeinput.CurrentEnvContext)
-}
-
-func (s *subjectView) validContextWithCurrent(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
-	return s.validUnderVerdict(ctx, evidence, current, func(verdict gofresh.Verdict) bool {
-		return verdict.Status == gofresh.Valid
-	})
-}
-
-// validUnderVerdict runs every evidence check — identity, runtime state,
-// purity — and hands the final gofresh verdict to the caller's predicate:
-// ordinary matching accepts only Valid, while the oracle-growth gate
-// additionally tolerates exactly the stale "test variants" verdict its inert
-// ledger diff already explained (REQ-result-stale's growth carve-out).
-func (s *subjectView) validUnderVerdict(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (runtimeinput.State, error), accept func(gofresh.Verdict) bool) (bool, error) {
+// evidencePrecheck runs the pre-verdict evidence checks — identity, runtime
+// state, purity — shared by the per-subject and batched walks. A record
+// failing here never consults a gofresh verdict at all.
+func (s *subjectView) evidencePrecheck(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
 	if evidence.Symbol != s.symbol || evidence.RuntimeInputs == "" || evidence.RuntimeDigest == "" {
 		return false, nil
 	}
@@ -256,11 +248,77 @@ func (s *subjectView) validUnderVerdict(ctx context.Context, evidence SubjectEvi
 	if evidence.PurityAssertion != s.fp.PurityAssertion {
 		return false, nil
 	}
-	verdict, err := s.checkContext(ctx, evidence.fingerprint())
-	if err != nil {
-		return false, err
+	return true, nil
+}
+
+// evidencePair binds one subject view to its recorded evidence and the
+// verdict predicate its caller accepts for that subject.
+type evidencePair struct {
+	subject  *subjectView
+	evidence SubjectEvidence
+	accept   func(gofresh.Verdict) bool
+}
+
+// evidencePairsValid reports whether every pair's recorded evidence holds
+// against the current tree. The pre-verdict checks run per subject; the
+// gofresh verdicts then resolve through one CheckObservedBatch per view —
+// the batch shares one runtime-input window across the view's subjects where
+// a per-subject walk pays one window per check, and gofresh guarantees each
+// subject's batched verdict equals its single CheckObserved. Evidence
+// without observation facts keeps the per-subject check, as does a subject
+// appearing twice in one view — the batch map cannot carry two recordings
+// for one subject.
+func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
+	for _, pair := range pairs {
+		ok, err := pair.subject.evidencePrecheck(ctx, pair.evidence, current)
+		if err != nil || !ok {
+			return false, err
+		}
 	}
-	return accept(verdict), nil
+	type viewBatch struct {
+		recorded map[gofresh.Subject]gofresh.Fingerprint
+		members  []int
+	}
+	batches := map[*gofresh.View]*viewBatch{}
+	order := make([]*gofresh.View, 0, len(pairs))
+	for i, pair := range pairs {
+		fingerprint := pair.evidence.fingerprint()
+		single := !observedFingerprint(fingerprint)
+		batch := batches[pair.subject.view]
+		if !single && batch != nil {
+			_, single = batch.recorded[pair.subject.subject]
+		}
+		if single {
+			verdict, err := pair.subject.checkContext(ctx, fingerprint)
+			if err != nil {
+				return false, err
+			}
+			if !pair.accept(verdict) {
+				return false, nil
+			}
+			continue
+		}
+		if batch == nil {
+			batch = &viewBatch{recorded: map[gofresh.Subject]gofresh.Fingerprint{}}
+			batches[pair.subject.view] = batch
+			order = append(order, pair.subject.view)
+		}
+		batch.recorded[pair.subject.subject] = fingerprint
+		batch.members = append(batch.members, i)
+	}
+	for _, view := range order {
+		batch := batches[view]
+		verdicts, err := view.CheckObservedBatch(ctx, batch.recorded)
+		if err != nil {
+			return false, err
+		}
+		for _, i := range batch.members {
+			if !pairs[i].accept(verdicts[pairs[i].subject.subject]) {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
 }
 
 func (s *subjectView) inspect(evidence SubjectEvidence) (FindingInspection, error) {
@@ -323,8 +381,16 @@ func movedInputSuffix(ctx context.Context, encoded, moduleDir string, env []stri
 	return ": " + strings.Join(moved, ", ")
 }
 
+// observedFingerprint reports whether a recorded fingerprint carries
+// observation facts and so must be checked under the explicit observed
+// policy — the single routing predicate for the per-subject check and the
+// batched walk.
+func observedFingerprint(fingerprint gofresh.Fingerprint) bool {
+	return fingerprint.ObservationAssertion != "" || fingerprint.ObservationProof != (gofresh.ObservationProof{})
+}
+
 func (s *subjectView) checkContext(ctx context.Context, fingerprint gofresh.Fingerprint) (gofresh.Verdict, error) {
-	if fingerprint.ObservationAssertion != "" || fingerprint.ObservationProof != (gofresh.ObservationProof{}) {
+	if observedFingerprint(fingerprint) {
 		return s.view.CheckObserved(ctx, fingerprint, s.subject)
 	}
 	return s.view.Check(ctx, fingerprint, s.subject)
@@ -635,11 +701,6 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 		return verdict.Status == gofresh.Valid ||
 			(verdict.Status == gofresh.Stale && verdict.Reason == "test variants")
 	}
-	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
-	ok, err := target.validUnderVerdict(ctx, prior.TargetEvidence, memo.once, tolerant)
-	if err != nil || !ok {
-		return nil, false, err
-	}
 	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
 	for _, evidence := range prior.OracleEvidence {
 		if _, duplicate := bySymbol[evidence.Symbol]; duplicate {
@@ -647,6 +708,8 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 		}
 		bySymbol[evidence.Symbol] = evidence
 	}
+	pairs := make([]evidencePair, 0, 1+len(oracle))
+	pairs = append(pairs, evidencePair{subject: target, evidence: prior.TargetEvidence, accept: tolerant})
 	var added []string
 	retained := 0
 	for _, subject := range oracle {
@@ -660,17 +723,19 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 		if subject.subject.Package != target.subject.Package {
 			// The inert diff explains only the target package's
 			// compartment; a subject elsewhere must be plainly valid.
-			accept = func(verdict gofresh.Verdict) bool { return verdict.Status == gofresh.Valid }
+			accept = acceptValidVerdict
 		}
-		valid, err := subject.validUnderVerdict(ctx, evidence, memo.once, accept)
-		if err != nil || !valid {
-			return nil, false, err
-		}
+		pairs = append(pairs, evidencePair{subject: subject, evidence: evidence, accept: accept})
 	}
 	if retained != len(prior.OracleEvidence) || len(added) == 0 {
 		// A recorded oracle absent from the current set is a removal, never
 		// growth; growth with nothing added is not growth.
 		return nil, false, nil
+	}
+	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
+	ok, err := evidencePairsValid(ctx, pairs, memo.once)
+	if err != nil || !ok {
+		return nil, false, err
 	}
 	if ok, err := memo.verify(ctx); err != nil || !ok {
 		return nil, false, err
@@ -687,12 +752,6 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.OracleTimeout != timeout || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
-	memo := newRuntimeMemo(current)
-	currentOnce := memo.once
-	ok, err := target.validContextWithCurrent(ctx, prior.TargetEvidence, currentOnce)
-	if err != nil || !ok {
-		return ok, err
-	}
 	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
 	for _, evidence := range prior.OracleEvidence {
 		if _, duplicate := bySymbol[evidence.Symbol]; duplicate {
@@ -700,15 +759,19 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 		}
 		bySymbol[evidence.Symbol] = evidence
 	}
+	pairs := make([]evidencePair, 0, 1+len(oracle))
+	pairs = append(pairs, evidencePair{subject: target, evidence: prior.TargetEvidence, accept: acceptValidVerdict})
 	for _, subject := range oracle {
 		evidence, ok := bySymbol[subject.symbol]
 		if !ok {
 			return false, nil
 		}
-		valid, err := subject.validContextWithCurrent(ctx, evidence, currentOnce)
-		if err != nil || !valid {
-			return valid, err
-		}
+		pairs = append(pairs, evidencePair{subject: subject, evidence: evidence, accept: acceptValidVerdict})
+	}
+	memo := newRuntimeMemo(current)
+	ok, err := evidencePairsValid(ctx, pairs, memo.once)
+	if err != nil || !ok {
+		return ok, err
 	}
 	return memo.verify(ctx)
 }
