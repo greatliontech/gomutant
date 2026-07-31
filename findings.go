@@ -90,6 +90,63 @@ func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
 	}
 }
 
+// CompartmentDeclaration is one entry of the persisted compartment ledger —
+// gomutant's wire encoding of gofresh's test-variant declaration record.
+type CompartmentDeclaration struct {
+	File     string `json:"file"`
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	Receiver string `json:"receiver,omitempty"`
+	Hash     string `json:"hash"`
+}
+
+// CompartmentFileHeader is one compartment file's persisted header identity.
+type CompartmentFileHeader struct {
+	File     string `json:"file"`
+	Hash     string `json:"hash"`
+	Embedded bool   `json:"embedded,omitempty"`
+}
+
+// CompartmentLedger is the target package's persisted test-variant
+// declaration ledger (REQ-result-record): recorded at measure time from the
+// same view snapshot the compartment hash pinned, and diffed at serve time
+// against the current view's ledger so the oracle-growth carve-out can
+// classify how the compartment moved (REQ-result-stale).
+type CompartmentLedger struct {
+	Declarations []CompartmentDeclaration `json:"declarations,omitempty"`
+	FileHeaders  []CompartmentFileHeader  `json:"fileHeaders,omitempty"`
+}
+
+// compartmentLedgerFromView converts gofresh's ledger to the wire encoding.
+func compartmentLedgerFromView(ledger gofresh.TestVariantLedger) *CompartmentLedger {
+	out := &CompartmentLedger{
+		Declarations: make([]CompartmentDeclaration, 0, len(ledger.Declarations)),
+		FileHeaders:  make([]CompartmentFileHeader, 0, len(ledger.FileHeaders)),
+	}
+	for _, declaration := range ledger.Declarations {
+		out.Declarations = append(out.Declarations, CompartmentDeclaration(declaration))
+	}
+	for _, header := range ledger.FileHeaders {
+		out.FileHeaders = append(out.FileHeaders, CompartmentFileHeader(header))
+	}
+	return out
+}
+
+// ledger converts the wire encoding back to gofresh's ledger type.
+func (l *CompartmentLedger) ledger() gofresh.TestVariantLedger {
+	out := gofresh.TestVariantLedger{
+		Declarations: make([]gofresh.TestVariantDeclaration, 0, len(l.Declarations)),
+		FileHeaders:  make([]gofresh.TestVariantFileHeader, 0, len(l.FileHeaders)),
+	}
+	for _, declaration := range l.Declarations {
+		out.Declarations = append(out.Declarations, gofresh.TestVariantDeclaration(declaration))
+	}
+	for _, header := range l.FileHeaders {
+		out.FileHeaders = append(out.FileHeaders, gofresh.TestVariantFileHeader(header))
+	}
+	return out
+}
+
 // Survivor is one mutant no oracle test noticed.
 type Survivor struct {
 	Position string `json:"position"`
@@ -160,8 +217,13 @@ type Finding struct {
 	OracleEvidence []SubjectEvidence `json:"oracleEvidence"`
 	OracleExplicit bool              `json:"oracleExplicit"`
 	OracleTimeout  string            `json:"oracleTimeout"`
-	Commit         string            `json:"commit,omitempty"`
-	Dirty          bool              `json:"dirty"`
+	// CompartmentLedger is the target package's test-variant declaration
+	// ledger at measure time; the oracle-growth carve-out diffs it against
+	// the current tree, and a record persisted without one (an older
+	// document) re-measures whole rather than growing (REQ-result-stale).
+	CompartmentLedger *CompartmentLedger `json:"compartmentLedger,omitempty"`
+	Commit            string             `json:"commit,omitempty"`
+	Dirty             bool               `json:"dirty"`
 
 	CandidateCount    int                 `json:"candidateCount"`
 	Generated         int                 `json:"generated"`
@@ -314,7 +376,7 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	known := map[string]bool{
 		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
 		"budget": true, "targetEvidence": true, "oracleEvidence": true,
-		"oracleExplicit": true, "oracleTimeout": true, "commit": true, "dirty": true,
+		"oracleExplicit": true, "oracleTimeout": true, "compartmentLedger": true, "commit": true, "dirty": true,
 		"candidateCount": true, "generated": true, "mutants": true, "killed": true,
 		"discarded": true, "operators": true, "survivors": true, "attested": true,
 		"candidateEvidence": true,

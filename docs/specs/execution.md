@@ -285,7 +285,16 @@ A budget extension (REQ-result-stale's budget-extension carve-out) reports
 `measure` with `candidates` counting only the measured suffix and a reason
 naming the served prefix (`served: prefix of N candidates stands; measuring M
 more`, the candidate noun count-aware: a one-candidate prefix reads
-`1 candidate`).
+`1 candidate`). An oracle-growth serve (REQ-result-stale's third carve-out)
+reports `measure` with `candidates` counting the re-measured survivors and
+the reason `served: derived oracle grew by N tests; re-measuring M survivors
+against them` (count-aware nouns); its delta run builds per-package oracle
+groups over only the added test names — each group earning its own baseline
+probe under the ordinary per-group discipline, so a failing added test
+refuses the run before any mutant executes — dispatches only the recorded
+survivors, confirms kills serially like any measured run, and attributes
+kills against the full current oracle set (the run pattern already bounds
+execution to the added tests).
 
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
 caller-context cancellation, including expiry of an operator-supplied command

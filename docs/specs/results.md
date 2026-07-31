@@ -40,7 +40,9 @@ disposition is not observable.
 mutated symbol and record the available inputs that produced it — target subject evidence,
 the oracle as a set of distinct subject evidence records, the operator version,
 whether the oracle was explicit or package-derived, the candidate budget, and the exact effective oracle timeout in the `oracleTimeout` field encoded as a
-canonical Go duration string — carrying the capture commit and dirty provenance,
+canonical Go duration string — carrying the target package's test-variant
+compartment ledger (the declaration-level record the growth carve-out diffs
+at serve time), the capture commit and dirty provenance,
 the mutant count, the kill count, each survivor's position
 and operator, plus per-operator generated, discarded, killed, and survived
 counts whose sums equal the finding totals. The oracle is pinned by identity and complete Gofresh evidence,
@@ -76,7 +78,8 @@ count equation or budget relation is malformed and refused.
 INV-RESULT-CANDIDATE-CONSERVATION: enforced by
 `TestRunConservesCandidateDiscards`,
 `TestSpliceFindingCountsConservesChangedOutcomes`,
-`TestExtendFindingCountsAppendsSuffixOutcomes`, and
+`TestExtendFindingCountsAppendsSuffixOutcomes`,
+`TestGrowFindingCountsReplacesSurvivorOutcomes`, and
 `TestParseFindingsCandidateEvidence`.
 
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
@@ -102,8 +105,9 @@ request for more candidates than a capped record generated invalidates only
 the unmeasured remainder, under the budget-extension carve-out below. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures.
 Measurement pins are never partially trusted: any moved pin remeasures the
-whole target, with exactly two precisely scoped carve-outs — candidate-local
-evidence, and the budget when it is the only pin that fails to cover.
+whole target, with exactly three precisely scoped carve-outs — candidate-local
+evidence, the budget when it is the only pin that fails to cover, and derived
+oracle growth under an inert test-variant delta.
 Candidate evidence is the first narrower axis: a record whose only
 unverifiable runtime evidence is candidate-local serves its covered candidates
 and re-executes exactly the unverifiable ones under a passing current baseline
@@ -146,7 +150,44 @@ pinned preserves the extended outcome but stamps it explicitly non-reusable. A
 forced run re-measures whole regardless. The extension's decision reports the
 served prefix and the measured suffix ("served: prefix of N candidates stands;
 measuring M more", the candidate noun count-aware: a one-candidate prefix
-reads "1 candidate"). When
+reads "1 candidate"). Derived oracle growth is the third carve-out, resting
+on the keystone: every recorded kill names its killer among the recorded
+oracles (REQ-core-attributed-kills), and timeout and package-scope kills rest
+on the same recorded set's behavior, so a grown oracle cannot un-kill
+anything — it can only kill more. When the finding is non-explicit, the
+current derived set is a strict superset of the recorded one, and every other
+pin covers — scalar pins equal; no candidate evidence; the target's and every
+retained oracle's evidence valid, where the one tolerated divergence is
+gofresh's stale "test variants" verdict explained exactly by an inert
+declaration delta: the finding's recorded compartment ledger diffed against
+the current one classifies inert, so the compartment moved by additions no
+unchanged declaration can observe, and anything changed, removed, or
+initialization-bearing re-measures whole — then recorded outcomes stand for
+every candidate except the survivors, which the run re-measures against only
+the added test names: a killed candidate stays killed, a discard stays
+discarded, a survivor an added test kills moves to killed with the kill
+attributed like any other, and a still-surviving candidate keeps its survival
+with its execution bucket re-derived honestly — a never-executed survivor an
+added test executes becomes executed-and-passed. The delta run captures
+evidence for the added oracles; the grown record carries the current tree's
+evidence for every subject — the gate itself proved the retained subjects'
+only movement is the inert compartment delta — and the current compartment
+ledger. Attestations carry for still-surviving attested candidates; a newly
+killed attested candidate loses its attestation — evidence beats
+attestation — with each contradiction reported through the run's
+attestation-contradiction report, naming the survivor, its shed reasoning,
+and the killer. The carve-out is
+bounded fail-closed like its siblings: it never composes with candidate
+evidence or a budget shortfall; deterministic regeneration must re-identify
+the record's candidates and survivors or the target re-measures whole; the
+delta processes' completed union, merged over the record's persisted union,
+must equal that persisted union or the grown finding is preserved but
+explicitly non-reusable; a failing added test on the clean tree refuses at
+the per-group baseline exactly as any baseline failure; a record persisted
+without a compartment ledger re-measures whole; and a forced run re-measures
+whole. The growth decision reports "served: derived oracle grew by N tests;
+re-measuring M survivors against them" (count-aware nouns) with `candidates`
+counting the re-measured survivors. When
 INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may

@@ -228,6 +228,17 @@ func (s *subjectView) validContext(ctx context.Context, evidence SubjectEvidence
 }
 
 func (s *subjectView) validContextWithCurrent(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
+	return s.validUnderVerdict(ctx, evidence, current, func(verdict gofresh.Verdict) bool {
+		return verdict.Status == gofresh.Valid
+	})
+}
+
+// validUnderVerdict runs every evidence check — identity, runtime state,
+// purity — and hands the final gofresh verdict to the caller's predicate:
+// ordinary matching accepts only Valid, while the oracle-growth gate
+// additionally tolerates exactly the stale "test variants" verdict its inert
+// ledger diff already explained (REQ-result-stale's growth carve-out).
+func (s *subjectView) validUnderVerdict(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (runtimeinput.State, error), accept func(gofresh.Verdict) bool) (bool, error) {
 	if evidence.Symbol != s.symbol || evidence.RuntimeInputs == "" || evidence.RuntimeDigest == "" {
 		return false, nil
 	}
@@ -249,7 +260,7 @@ func (s *subjectView) validContextWithCurrent(ctx context.Context, evidence Subj
 	if err != nil {
 		return false, err
 	}
-	return verdict.Status == gofresh.Valid, nil
+	return accept(verdict), nil
 }
 
 func (s *subjectView) inspect(evidence SubjectEvidence) (FindingInspection, error) {
@@ -538,6 +549,136 @@ func derivedOracleDelta(recorded, current []string) string {
 	return "derived oracle changed (" + strings.Join(parts, "; ") + ")"
 }
 
+// runtimeMemo memoizes current-runtime-state evaluations per (manifest,
+// module, environment) and re-verifies any state used more than once, so one
+// matching pass reads each manifest exactly once and a manifest that moved
+// mid-evaluation refuses.
+type runtimeMemo struct {
+	current func(context.Context, string, string, []string) (runtimeinput.State, error)
+	results map[runtimeMemoKey]*runtimeMemoResult
+	order   []runtimeMemoKey
+}
+
+type runtimeMemoKey struct {
+	manifest, moduleDir, environment string
+}
+
+type runtimeMemoResult struct {
+	state runtimeinput.State
+	err   error
+	env   []string
+	uses  int
+}
+
+func newRuntimeMemo(current func(context.Context, string, string, []string) (runtimeinput.State, error)) *runtimeMemo {
+	return &runtimeMemo{current: current, results: map[runtimeMemoKey]*runtimeMemoResult{}}
+}
+
+func (m *runtimeMemo) once(ctx context.Context, manifest, moduleDir string, env []string) (runtimeinput.State, error) {
+	key := runtimeMemoKey{manifest: manifest, moduleDir: moduleDir, environment: sequenceKey(env)}
+	if result, ok := m.results[key]; ok {
+		result.uses++
+		return result.state, result.err
+	}
+	state, err := m.current(ctx, manifest, moduleDir, env)
+	m.results[key] = &runtimeMemoResult{state: state, err: err, env: append([]string(nil), env...), uses: 1}
+	m.order = append(m.order, key)
+	return state, err
+}
+
+// verify re-reads every manifest that was consulted more than once and
+// refuses when any moved during the evaluation.
+func (m *runtimeMemo) verify(ctx context.Context) (bool, error) {
+	for _, key := range m.order {
+		result := m.results[key]
+		if result.uses < 2 {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		state, err := m.current(ctx, key.manifest, key.moduleDir, result.env)
+		if err != nil && ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		if err != nil || state != result.state {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// evidenceSetCoversGrowthContext reports whether prior's evidence covers the
+// request under the oracle-growth carve-out (REQ-result-stale): the finding
+// is non-explicit with a recorded compartment ledger; scalar pins equal; the
+// current derived oracle is a strict superset of the recorded set; the
+// recorded ledger diffs inert against the current view's — the one movement
+// the carve-out tolerates — and the target's and every retained oracle's
+// evidence is valid, accepting gofresh's stale "test variants" verdict for
+// subjects of the target's own package exactly because the inert diff
+// already explained it. Returns the added oracle symbols, sorted.
+func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, operatorSet, timeout string) ([]string, bool, error) {
+	if prior.OracleExplicit || prior.CompartmentLedger == nil ||
+		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
+		len(prior.OracleEvidence) >= len(oracle) || len(prior.CandidateEvidence) != 0 {
+		return nil, false, nil
+	}
+	currentLedger, err := target.view.TestVariantLedger(target.subject)
+	if err != nil {
+		return nil, false, err
+	}
+	delta := gofresh.DiffTestVariantLedgers(prior.CompartmentLedger.ledger(), currentLedger)
+	if !delta.Inert() {
+		return nil, false, nil
+	}
+	tolerant := func(verdict gofresh.Verdict) bool {
+		return verdict.Status == gofresh.Valid ||
+			(verdict.Status == gofresh.Stale && verdict.Reason == "test variants")
+	}
+	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
+	ok, err := target.validUnderVerdict(ctx, prior.TargetEvidence, memo.once, tolerant)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
+	for _, evidence := range prior.OracleEvidence {
+		if _, duplicate := bySymbol[evidence.Symbol]; duplicate {
+			return nil, false, nil
+		}
+		bySymbol[evidence.Symbol] = evidence
+	}
+	var added []string
+	retained := 0
+	for _, subject := range oracle {
+		evidence, recorded := bySymbol[subject.symbol]
+		if !recorded {
+			added = append(added, subject.symbol)
+			continue
+		}
+		retained++
+		accept := tolerant
+		if subject.subject.Package != target.subject.Package {
+			// The inert diff explains only the target package's
+			// compartment; a subject elsewhere must be plainly valid.
+			accept = func(verdict gofresh.Verdict) bool { return verdict.Status == gofresh.Valid }
+		}
+		valid, err := subject.validUnderVerdict(ctx, evidence, memo.once, accept)
+		if err != nil || !valid {
+			return nil, false, err
+		}
+	}
+	if retained != len(prior.OracleEvidence) || len(added) == 0 {
+		// A recorded oracle absent from the current set is a removal, never
+		// growth; growth with nothing added is not growth.
+		return nil, false, nil
+	}
+	if ok, err := memo.verify(ctx); err != nil || !ok {
+		return nil, false, err
+	}
+	sort.Strings(added)
+	return added, true, nil
+}
+
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
 	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, runtimeinput.CurrentEnvContext)
 }
@@ -546,28 +687,8 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.OracleTimeout != timeout || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
-	type runtimeKey struct {
-		manifest, moduleDir, environment string
-	}
-	type runtimeResult struct {
-		state runtimeinput.State
-		err   error
-		env   []string
-		uses  int
-	}
-	runtimeResults := map[runtimeKey]*runtimeResult{}
-	var runtimeOrder []runtimeKey
-	currentOnce := func(ctx context.Context, manifest, moduleDir string, env []string) (runtimeinput.State, error) {
-		key := runtimeKey{manifest: manifest, moduleDir: moduleDir, environment: sequenceKey(env)}
-		if result, ok := runtimeResults[key]; ok {
-			result.uses++
-			return result.state, result.err
-		}
-		state, err := current(ctx, manifest, moduleDir, env)
-		runtimeResults[key] = &runtimeResult{state: state, err: err, env: append([]string(nil), env...), uses: 1}
-		runtimeOrder = append(runtimeOrder, key)
-		return state, err
-	}
+	memo := newRuntimeMemo(current)
+	currentOnce := memo.once
 	ok, err := target.validContextWithCurrent(ctx, prior.TargetEvidence, currentOnce)
 	if err != nil || !ok {
 		return ok, err
@@ -589,23 +710,7 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 			return valid, err
 		}
 	}
-	for _, key := range runtimeOrder {
-		result := runtimeResults[key]
-		if result.uses < 2 {
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			return false, err
-		}
-		state, err := current(ctx, key.manifest, key.moduleDir, result.env)
-		if err != nil && ctx.Err() != nil {
-			return false, ctx.Err()
-		}
-		if err != nil || state != result.state {
-			return false, nil
-		}
-	}
-	return true, nil
+	return memo.verify(ctx)
 }
 
 func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {

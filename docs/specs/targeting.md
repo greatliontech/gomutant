@@ -89,7 +89,7 @@ package loader's snapshot has been observed lagging the filesystem under
 rapid successive invocations, and a lagging enumeration is a silent coverage
 cap recorded as evidence — new tests absent from the derived set while the
 same run's other evidence reads the current tree. Before a run trusts a
-derived set, it MUST cross-check the enumeration against a direct parse of
+derived set, it cross-checks the enumeration against a direct parse of
 the package's on-disk test files — every on-disk test file the effective
 build configuration selects, the configuration resolved from the tree's own
 environment (a persisted go-env value or a GOFLAGS tag changes which files

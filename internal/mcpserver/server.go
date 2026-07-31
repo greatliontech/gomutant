@@ -151,6 +151,16 @@ type guidanceOut struct {
 	Suggestion    string   `json:"suggestion"`
 }
 
+// contradictionOut is one shed attestation report (a growth serve's added
+// tests killed an attested survivor).
+type contradictionOut struct {
+	Symbol   string `json:"symbol"`
+	Position string `json:"position"`
+	Operator string `json:"operator"`
+	Killer   string `json:"killer,omitempty"`
+	Reason   string `json:"reason"`
+}
+
 // appendGuidance folds a per-target attribution into its oracle set's
 // aggregated entry, keyed by the suggestion and unstable set.
 func appendGuidance(entries *[]guidanceOut, g gomutant.OracleGuidance) {
@@ -328,6 +338,7 @@ type runOut struct {
 	Findings         []findingOut                `json:"findings"`
 	OmittedFindings  int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
 	Guidance         []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
+	Contradictions   []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
 	Residue          []gomutant.Residue          `json:"residue,omitempty"`
 	OmittedResidue   int                         `json:"omittedResidue,omitempty"`
 	Preparation      []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
@@ -464,6 +475,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		Force:         in.Force,
 		BracketPaths:  in.BracketPaths,
 		Guidance:      func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
+		Contradiction: func(c gomutant.AttestationContradiction) {
+			out.Contradictions = append(out.Contradictions, contradictionOut{
+				Symbol: c.Symbol, Position: c.Position, Operator: c.Operator, Killer: c.Killer, Reason: c.Reason,
+			})
+		},
 		Prior:         prior,
 		Decision:      streams.decision,
 		Progress:      streams.progress,

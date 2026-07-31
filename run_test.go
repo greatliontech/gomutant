@@ -2053,6 +2053,197 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 	}
 }
 
+// TestRunServesGrownOracleMeasuringOnlySurvivors pins the oracle-growth
+// carve-out end to end (REQ-result-stale): a sibling test added beside the
+// oracle grows the derived set under an inert compartment delta, so the
+// prior record serves — kills and discards stand — while only the recorded
+// survivors re-execute against the added test alone. Newly killed survivors
+// move to killed (shedding their attestations with the contradiction
+// reported), still-surviving ones keep their survival and recorded buckets,
+// the grown record carries the current tree's evidence and ledger — proven
+// by a follow-up run serving it cached — and a non-inert compartment delta
+// refuses the arm outright.
+func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/grown\n\ngo 1.26\n",
+		"gated.go":      "package gated\n\nfunc Gated(x int) int {\n\ty := x + 1\n\tif y > 100 {\n\t\treturn y * 3\n\t}\n\treturn y\n}\n",
+		"gated_test.go": "package gated\n\nimport \"testing\"\n\nfunc TestSmall(t *testing.T) {\n\tif Gated(5) != 6 {\n\t\tt.Fail()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "example.com/grown.Gated"}
+	first, err := tr.Run(ctx, []Target{target}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := first[0]
+	if len(f.Survivors) < 2 || f.Killed == 0 || f.CompartmentLedger == nil {
+		t.Fatalf("baseline fixture = %+v, want survivors, kills, and a recorded ledger", f)
+	}
+	// Attest one survivor the added test will kill — an arithmetic mutant
+	// inside the never-executed y>100 branch — and one it will not: the
+	// > -> >= guard flip is behavior-identical for both 6 and 201.
+	var doomed, keeper *Survivor
+	for i, survivor := range f.Survivors {
+		switch {
+		case strings.Contains(survivor.Operator, "> -> >="):
+			keeper = &f.Survivors[i]
+		case doomed == nil && strings.HasPrefix(survivor.Operator, "arithmetic:"):
+			doomed = &f.Survivors[i]
+		}
+	}
+	if doomed == nil || keeper == nil {
+		t.Fatalf("fixture survivors lack the two classes: %+v", f.Survivors)
+	}
+	if err := first[0].Attest(doomed.Position, doomed.Operator, "judged equivalent, wrongly"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first[0].Attest(keeper.Position, keeper.Operator, "still equivalent"); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A sibling test exercising the large-x branch: the derived oracle grows
+	// by one, the compartment delta is an inert added test function.
+	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(files["gated_test.go"]+"\nfunc TestBig(t *testing.T) {\n\tif Gated(200) != 603 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grownTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	var dispatched []int
+	var contradictions []AttestationContradiction
+	grownFindings, err := grownTree.Run(ctx, []Target{target}, Options{
+		Prior:         prior,
+		Decision:      func(d RunDecision) { decisions = append(decisions, d) },
+		Contradiction: func(c AttestationContradiction) { contradictions = append(contradictions, c) },
+		dispatched:    func(_ string, mi int) { dispatched = append(dispatched, mi) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	survivorCount := len(prior[0].Survivors)
+	if survivorCount < 2 {
+		t.Fatalf("fixture yielded %d survivors, want several so the plural literal below has teeth", survivorCount)
+	}
+	wantReason := fmt.Sprintf("served: derived oracle grew by 1 test; re-measuring %d survivors against them", survivorCount)
+	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != survivorCount {
+		t.Fatalf("growth decision = %+v, want %q over %d survivors", decisions, wantReason, survivorCount)
+	}
+	if len(dispatched) != survivorCount {
+		t.Fatalf("dispatched %d candidates, want exactly the %d recorded survivors", len(dispatched), survivorCount)
+	}
+	grown := grownFindings[0]
+	if grown.Cached || grown.TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("grown record = cached %v, unverifiable %v; want a verifiable measurement", grown.Cached, grown.TargetEvidence.RuntimeUnverifiable)
+	}
+	if grown.Killed <= prior[0].Killed || len(grown.Survivors) >= survivorCount {
+		t.Fatalf("growth measured nothing: killed %d->%d, survivors %d->%d", prior[0].Killed, grown.Killed, survivorCount, len(grown.Survivors))
+	}
+	if grown.Generated != prior[0].Generated || grown.CandidateCount != prior[0].CandidateCount ||
+		grown.Generated != grown.Mutants+grown.Discarded || grown.Mutants != grown.Killed+len(grown.Survivors) {
+		t.Fatalf("grown totals do not conserve: %+v", grown)
+	}
+	oracleSymbols := make([]string, 0, len(grown.OracleEvidence))
+	for _, evidence := range grown.OracleEvidence {
+		oracleSymbols = append(oracleSymbols, evidence.Symbol)
+	}
+	if !slices.Equal(oracleSymbols, []string{"example.com/grown.TestBig", "example.com/grown.TestSmall"}) {
+		t.Fatalf("grown oracle evidence = %v, want both tests recorded", oracleSymbols)
+	}
+	if len(grown.Attested) != 1 || grown.Attested[0].Position != keeper.Position {
+		t.Fatalf("grown attestations = %+v, want only the still-surviving disposition", grown.Attested)
+	}
+	if len(contradictions) != 1 || contradictions[0].Position != doomed.Position ||
+		contradictions[0].Killer != "example.com/grown.TestBig" || contradictions[0].Reason != "judged equivalent, wrongly" {
+		t.Fatalf("contradictions = %+v, want the doomed attestation shed with its killer named", contradictions)
+	}
+
+	// A covering but smaller budget request grows the same way: regeneration
+	// runs at the record's own budget, so a serviceable exhaustive record is
+	// never destroyed by the request shape, and the grown record keeps its
+	// recorded budget.
+	var cappedDecisions []RunDecision
+	cappedGrown, err := grownTree.Run(ctx, []Target{target}, Options{
+		Budget:   1,
+		Prior:    prior,
+		Decision: func(d RunDecision) { cappedDecisions = append(cappedDecisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cappedDecisions) != 1 || cappedDecisions[0].Reason != wantReason {
+		t.Fatalf("covering-but-smaller budget decision = %+v, want the growth serve %q", cappedDecisions, wantReason)
+	}
+	if cappedGrown[0].Budget != prior[0].Budget || cappedGrown[0].Generated != prior[0].Generated {
+		t.Fatalf("capped growth rewrote the record's selection: budget %d, generated %d", cappedGrown[0].Budget, cappedGrown[0].Generated)
+	}
+
+	// The grown record is current on the grown tree: a follow-up run serves
+	// it without measurement.
+	grownDoc, err := Export(grownFindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reparsed, err := ParseFindings(grownDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var followDecisions []RunDecision
+	followed, err := grownTree.Run(ctx, []Target{target}, Options{Prior: reparsed, Decision: func(d RunDecision) { followDecisions = append(followDecisions, d) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !followed[0].Cached || len(followDecisions) != 1 || followDecisions[0].Action != "cached" {
+		t.Fatalf("grown record did not serve cached on its own tree: %+v, %+v", followed[0].Cached, followDecisions)
+	}
+
+	// A non-inert compartment delta — the added test plus an edited existing
+	// one — refuses the arm: the whole target re-measures.
+	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(strings.Replace(files["gated_test.go"], "t.Fail()", "t.Fail() // edited", 1)+"\nfunc TestBig(t *testing.T) {\n\tif Gated(200) != 603 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	editedTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var editedDecisions []RunDecision
+	var editedDispatched []int
+	edited, err := editedTree.Run(ctx, []Target{target}, Options{
+		Prior:      prior,
+		Decision:   func(d RunDecision) { editedDecisions = append(editedDecisions, d) },
+		dispatched: func(_ string, mi int) { editedDispatched = append(editedDispatched, mi) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited[0].Cached || len(editedDecisions) != 1 || !strings.HasPrefix(editedDecisions[0].Reason, "stale: ") ||
+		len(editedDispatched) != prior[0].Generated {
+		t.Fatalf("non-inert delta = %+v dispatching %d, want a whole re-measure", editedDecisions, len(editedDispatched))
+	}
+}
+
 // TestRunExtensionDivergenceStampsAndAttributes pins the extension's
 // fail-closed divergence path end to end (REQ-result-stale's fail-closed
 // bound, REQ-exec-oracle-guidance, REQ-exec-survivor-evidence): a suffix
@@ -2137,6 +2328,159 @@ func TestRunExtensionDivergenceStampsAndAttributes(t *testing.T) {
 	}
 	if len(guided) == 0 || guided[0].Symbol != target.Symbol {
 		t.Fatalf("guidance = %+v, want the partial measurement's oracle-instability attribution", guided)
+	}
+}
+
+// TestEvidenceSetCoversGrowthRefusesIneligibleRecords pins the growth
+// gate's pre-checks (REQ-result-stale's growth carve-out): an explicit
+// oracle, a missing compartment ledger, a moved scalar pin, a non-grown
+// set, or candidate evidence each refuse before any evidence is consulted.
+func TestEvidenceSetCoversGrowthRefusesIneligibleRecords(t *testing.T) {
+	ledger := &CompartmentLedger{}
+	base := Finding{
+		OperatorSet: "go/12", OracleTimeout: "1m0s", CompartmentLedger: ledger,
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.TestA"}},
+	}
+	oracle := make([]*subjectView, 2)
+	ctx := context.Background()
+	for name, prior := range map[string]Finding{
+		"explicit oracle": func() Finding { f := base; f.OracleExplicit = true; return f }(),
+		"missing ledger":  func() Finding { f := base; f.CompartmentLedger = nil; return f }(),
+		"operator set":    func() Finding { f := base; f.OperatorSet = "go/1"; return f }(),
+		"oracle timeout":  func() Finding { f := base; f.OracleTimeout = "2m0s"; return f }(),
+		"candidate evidence": func() Finding {
+			f := base
+			f.CandidateEvidence = []CandidateEvidence{{Position: "f.go:1:1", Operator: "op", Reason: "r", Disposition: "survived"}}
+			return f
+		}(),
+	} {
+		added, ok, err := evidenceSetCoversGrowthContext(ctx, prior, nil, oracle, "go/12", "1m0s")
+		if err != nil || ok || added != nil {
+			t.Fatalf("%s: growth gate = %v %v %v, want a refusal before any evidence check", name, added, ok, err)
+		}
+	}
+	// Not strictly grown: recorded set size equals the current one.
+	equal := base
+	if added, ok, err := evidenceSetCoversGrowthContext(ctx, equal, nil, oracle[:1], "go/12", "1m0s"); err != nil || ok || added != nil {
+		t.Fatalf("non-grown set = %v %v %v, want a refusal", added, ok, err)
+	}
+}
+
+// TestGrowFindingCountsReplacesSurvivorOutcomes pins the growth splice
+// accounting under INV-RESULT-CANDIDATE-CONSERVATION: every non-survivor
+// keeps its recorded disposition, each re-executed survivor's fresh outcome
+// replaces its survival per operator and in the totals, still-surviving
+// candidates carry their recorded buckets (unstable-oracle under a
+// divergence stamp), and a newly killed attested survivor's attestation is
+// shed and returned while a still-surviving one's carries.
+func TestGrowFindingCountsReplacesSurvivorOutcomes(t *testing.T) {
+	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
+	candidates := []engine.Candidate{
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable}, // recorded kill, stands
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:2:2", Replacements: runnable}, // survivor -> killed by added test
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:3:3", Replacements: runnable}, // survivor -> still surviving
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:4:4", Replacements: runnable}, // recorded discard, stands
+	}
+	rec := Finding{
+		Symbol: "p.F", CandidateCount: 4, Generated: 4, Mutants: 3, Killed: 1, Discarded: 1,
+		Operators: []OperatorSummary{
+			{Operator: "op-a", Generated: 2, Killed: 1, Survived: 1},
+			{Operator: "op-b", Generated: 2, Discarded: 1, Survived: 1},
+		},
+		Survivors: []Survivor{
+			{Position: "f.go:2:2", Operator: "op-a", Execution: "never-executed"},
+			{Position: "f.go:3:3", Operator: "op-b", Execution: "executed-and-passed"},
+		},
+		Attested: []Attestation{
+			{Position: "f.go:2:2", Operator: "op-a", Reason: "wrongly judged"},
+			{Position: "f.go:3:3", Operator: "op-b", Reason: "still equivalent"},
+		},
+	}
+	survivors := map[int]bool{1: true, 2: true}
+	outcomes := []engine.MutantOutcome{0, engine.MutantKilled, engine.MutantSurvived, 0}
+	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, survivors, outcomes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grown.Killed != 2 || grown.Discarded != 1 || grown.Mutants != 3 ||
+		grown.Generated != 4 || grown.CandidateCount != 4 {
+		t.Fatalf("grown totals = %+v, want the killed survivor rescored", grown)
+	}
+	wantOperators := []OperatorSummary{
+		{Operator: "op-a", Generated: 2, Killed: 2},
+		{Operator: "op-b", Generated: 2, Discarded: 1, Survived: 1},
+	}
+	if !slices.Equal(grown.Operators, wantOperators) {
+		t.Fatalf("grown operators = %+v, want %+v", grown.Operators, wantOperators)
+	}
+	if len(grown.Survivors) != 1 || grown.Survivors[0].Position != "f.go:3:3" || grown.Survivors[0].Execution != "executed-and-passed" {
+		t.Fatalf("grown survivors = %+v, want the still-surviving candidate with its recorded bucket", grown.Survivors)
+	}
+	if len(grown.Attested) != 1 || grown.Attested[0].Position != "f.go:3:3" {
+		t.Fatalf("grown attestations = %+v, want only the still-surviving disposition", grown.Attested)
+	}
+	if len(shed) != 1 || shed[0].Position != "f.go:2:2" || shed[0].Reason != "wrongly judged" {
+		t.Fatalf("shed attestations = %+v, want the newly killed disposition", shed)
+	}
+
+	// A divergence-stamped record classifies its re-executed survivors
+	// unstable rather than carrying buckets measured under a stable run.
+	stamped := rec
+	stamped.TargetEvidence = SubjectEvidence{RuntimeUnverifiable: true}
+	grownStamped, _, err := growFindingCounts(context.Background(), stamped, candidates, survivors, outcomes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grownStamped.Survivors[0].Execution != "unstable-oracle" {
+		t.Fatalf("stamped grown survivor = %+v, want unstable-oracle", grownStamped.Survivors)
+	}
+}
+
+// TestGrownSurvivorIndexesFallsBackOnMismatch pins the growth serve's
+// regeneration bound (REQ-result-stale): the complete count and selection
+// length unchanged, identities unique, every recorded survivor re-identified
+// and runnable — any mismatch refuses so the whole target re-measures.
+func TestGrownSurvivorIndexesFallsBackOnMismatch(t *testing.T) {
+	runnable := []engine.Replacement{{File: "a.go", Source: []byte("x")}}
+	generation := engine.Generation{
+		CandidateCount: 2,
+		Candidates: []engine.Candidate{
+			{Position: "a.go:1:1", Operator: "op-a", Replacements: runnable},
+			{Position: "a.go:2:1", Operator: "op-b", Replacements: runnable},
+		},
+	}
+	rec := Finding{
+		CandidateCount: 2, Generated: 2,
+		Survivors: []Survivor{{Position: "a.go:2:1", Operator: "op-b"}},
+	}
+	survivors, ok := grownSurvivorIndexes(generation, rec)
+	if !ok || len(survivors) != 1 || !survivors[1] {
+		t.Fatalf("matching regeneration = %v %v, want survivor index 1", survivors, ok)
+	}
+	drifted := generation
+	drifted.CandidateCount = 3
+	if _, ok := grownSurvivorIndexes(drifted, rec); ok {
+		t.Fatal("candidate-count drift accepted")
+	}
+	shrunk := generation
+	shrunk.Candidates = shrunk.Candidates[:1]
+	if _, ok := grownSurvivorIndexes(shrunk, rec); ok {
+		t.Fatal("selection-length drift accepted")
+	}
+	duplicated := generation
+	duplicated.Candidates = []engine.Candidate{generation.Candidates[1], generation.Candidates[1]}
+	if _, ok := grownSurvivorIndexes(duplicated, rec); ok {
+		t.Fatal("duplicate identity accepted")
+	}
+	missing := rec
+	missing.Survivors = []Survivor{{Position: "a.go:9:9", Operator: "op-b"}}
+	if _, ok := grownSurvivorIndexes(generation, missing); ok {
+		t.Fatal("unidentifiable survivor accepted")
+	}
+	unrunnable := generation
+	unrunnable.Candidates = []engine.Candidate{generation.Candidates[0], {Position: "a.go:2:1", Operator: "op-b"}}
+	if _, ok := grownSurvivorIndexes(unrunnable, rec); ok {
+		t.Fatal("unrunnable survivor accepted")
 	}
 }
 

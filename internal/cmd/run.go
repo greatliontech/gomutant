@@ -156,6 +156,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 		Guidance: func(g gomutant.OracleGuidance) {
 			fmt.Fprintf(out, "guidance  %s  unstable oracle evidence (%s): %s\n", g.Symbol, g.Reason, g.Suggestion)
 		},
+		Contradiction: func(c gomutant.AttestationContradiction) {
+			fmt.Fprintf(out, "contradiction  %s  attested survivor %s (%s) killed by %s; attestation shed (was: %s)\n", c.Symbol, c.Position, c.Operator, c.Killer, c.Reason)
+		},
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).

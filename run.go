@@ -85,10 +85,17 @@ type Options struct {
 	// attempt (1, then 2 on the bounded retry) — a test seam pinning the
 	// retry, like producer above.
 	proofAttempt func(symbol string, attempt int)
+	// Contradiction receives each attested survivor a growth serve's added
+	// tests killed: the attestation is shed — evidence beats attestation —
+	// and the contradiction is worth a human's attention, because a mutant
+	// judged equivalent was just distinguished (REQ-attest-survivor,
+	// REQ-result-stale's growth carve-out). Nil drops the reports; the
+	// shed itself is unconditional.
+	Contradiction func(AttestationContradiction)
 	// dispatched observes each candidate index handed to the worker pool —
-	// a test seam pinning suffix-only dispatch under a budget extension and
-	// flagged-only dispatch under a candidate-evidence serve, like producer
-	// above.
+	// a test seam pinning suffix-only dispatch under a budget extension,
+	// flagged-only dispatch under a candidate-evidence serve, and
+	// survivor-only dispatch under a growth serve, like producer above.
 	dispatched func(symbol string, mi int)
 }
 
@@ -340,6 +347,17 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 	return attr, nil
 }
 
+// AttestationContradiction reports one attested survivor a growth serve's
+// added tests killed, with the shed attestation's reasoning and the killer
+// so the re-judgment starts from the evidence.
+type AttestationContradiction struct {
+	Symbol   string
+	Position string
+	Operator string
+	Killer   string
+	Reason   string
+}
+
 // work is one target's resolved measurement state across the run's
 // three phases.
 type work struct {
@@ -366,6 +384,16 @@ type work struct {
 	// three splices the suffix outcomes onto the record.
 	extend     *Finding
 	extendFrom int
+	// grow is the prior record served under the oracle-growth carve-out
+	// (REQ-result-stale): the derived oracle grew by growAdded while the
+	// compartment delta classified inert, so only the recorded survivors
+	// (growSurvivors, by candidate index) re-execute — against oracle
+	// groups built over the added tests alone — and phase three splices
+	// their fresh outcomes into the record under the current tree's
+	// evidence.
+	grow          *Finding
+	growSurvivors map[int]bool
+	growAdded     []string
 }
 
 // executeMutant runs one mutant through its oracle groups and merges
@@ -443,30 +471,16 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 		}
 		return nil
 	}
-	coverPkg := w.targetView.subject.Package
-	coverage := engine.Coverage{}
-	for _, g := range w.groups {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		key := g.pkgs[0] + "\x00" + g.runRegex + "\x00" + coverPkg
-		got, ok := cache[key]
-		if !ok {
-			probed, err := engine.CoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.OracleTimeout, g.flags, runEnv)
-			if err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				// Best-effort: an unprobeable oracle leaves the bucket
-				// empty rather than failing a run whose measurement is
-				// already sound.
-				return nil
-			}
-			got = probed
-			cache[key] = got
-		}
-		coverage = coverage.Merge(got)
+	coverage, probed, err := t.oracleCoverage(ctx, w, opts, runEnv, cache)
+	if err != nil {
+		return err
 	}
+	if !probed {
+		// Best-effort: an unprobeable oracle leaves the bucket empty
+		// rather than failing a run whose measurement is already sound.
+		return nil
+	}
+	coverPkg := w.targetView.subject.Package
 	for si := from; si < len(f.Survivors); si++ {
 		file, line, col, ok := splitSurvivorPosition(f.Survivors[si].Position)
 		if !ok {
@@ -679,23 +693,46 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 		var serve *Finding
+		var grow *Finding
+		var growAdded []string
 		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
 			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String())
 			if err != nil {
 				return nil, err
 			}
 			if !matches {
-				// The moved pin is named so a caller who just wrote
-				// kill-tests sees the tool noticing them instead of
-				// forcing defensively (REQ-result-stale). The class comes
-				// from the inspection, not an assumed "stale": an
-				// unverifiable prior is not stale.
-				reason = t.movedPinAttribution(ctx, *rec, views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
+				// A mismatch may be exactly the growth the third carve-out
+				// serves: the derived oracle grew while the compartment
+				// moved by an inert declaration delta (REQ-result-stale).
+				added, grows, gerr := evidenceSetCoversGrowthContext(ctx, *rec, targetView, oracleViews, engine.OperatorSet, opts.OracleTimeout.String())
+				if gerr != nil {
+					return nil, gerr
+				}
+				if grows {
+					snapshot := snapshotFindings([]Finding{*rec})[0]
+					grow = &snapshot
+					growAdded = added
+				} else {
+					// The moved pin is named so a caller who just wrote
+					// kill-tests sees the tool noticing them instead of
+					// forcing defensively (REQ-result-stale). The class comes
+					// from the inspection, not an assumed "stale": an
+					// unverifiable prior is not stale.
+					reason = t.movedPinAttribution(ctx, *rec, views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
+				}
 			}
 			if matches && len(rec.CandidateEvidence) == 0 {
 				cached := *rec
 				cached.Labels = append([]string(nil), tg.Labels...)
 				cached.Cached = true
+				// Matched pins make the current view's ledger identical to
+				// the record's; stamping it is the conformance upgrade for a
+				// record that predates the ledger (REQ-result-record).
+				if ledger, lerr := targetView.view.TestVariantLedger(targetView.subject); lerr == nil {
+					cached.CompartmentLedger = compartmentLedgerFromView(ledger)
+				} else {
+					return nil, lerr
+				}
 				findings[i] = cached
 				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: "served: body, oracle closure, and runtime inputs unchanged"}
 				if err := commitFinding(ctx, repository, opts.Commit, cached); err != nil {
@@ -809,7 +846,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for _, module := range producerViews.modules {
 			module.producer = true
 		}
-		pending = append(pending, work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, serve: serve, extend: extend})
+		pending = append(pending, work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, serve: serve, extend: extend, grow: grow, growAdded: growAdded})
 	}
 	for wi := range pending {
 		w := &pending[wi]
@@ -824,6 +861,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// Regenerate the served record's exact selected prefix so its
 			// flagged candidates re-identify deterministically.
 			budget = w.serve.Budget
+		}
+		if w.grow != nil {
+			// Same discipline for growth: the record's own selection is what
+			// its survivors re-identify against — a covering but different
+			// request budget must not manufacture a refusal that would
+			// destroy a serviceable record (REQ-result-stale's growth
+			// carve-out); the grown record keeps its recorded budget, which
+			// covers the request by the arm's own gate.
+			budget = w.grow.Budget
 		}
 		generation, err := t.eng.CandidatesContext(ctx, tg.Symbol, budget)
 		if err != nil {
@@ -861,7 +907,30 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				w.reason += "; deterministic regeneration cannot re-identify the measured prefix"
 			}
 		}
-		if w.serve == nil && w.extend == nil {
+		if w.grow != nil {
+			if survivors, ok := grownSurvivorIndexes(generation, *w.grow); ok {
+				w.candidates = generation.Candidates
+				w.growSurvivors = survivors
+				decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure",
+					Reason:     fmt.Sprintf("served: derived oracle grew by %s; re-measuring %s against them", testNoun(len(w.growAdded)), survivorNoun(len(survivors))),
+					Candidates: len(survivors)}
+			} else {
+				// Deterministic regeneration cannot re-identify the recorded
+				// candidates and survivors, so the record cannot grow: the
+				// whole target re-measures under the request's own budget,
+				// with the reason naming what actually happened — the record
+				// is not stale, its oracle grew (REQ-result-stale).
+				w.grow = nil
+				w.reason = fmt.Sprintf("derived oracle grew by %s, but deterministic regeneration cannot re-identify the recorded candidates and survivors", testNoun(len(w.growAdded)))
+				if budget != opts.Budget {
+					generation, err = t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
+					if err != nil {
+						return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
+					}
+				}
+			}
+		}
+		if w.serve == nil && w.extend == nil && w.grow == nil {
 			w.candidates = generation.Candidates
 			decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason, Candidates: len(generation.Candidates)}
 			f.Budget = opts.Budget
@@ -870,8 +939,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		// Per-package oracle scoping (REQ-exec-oracle-run), with the rapid
 		// failfile flag only in front of binaries that register it
-		// (REQ-mut-overlay).
-		runs := pkgRuns(w.oracle)
+		// (REQ-mut-overlay). A growth serve builds its groups over the added
+		// tests alone — the recorded kills already rest on the recorded set
+		// (REQ-core-attributed-kills) — each delta group earning its own
+		// baseline below, so a failing added test refuses the run.
+		groupOracle := w.oracle
+		if w.grow != nil {
+			groupOracle = w.growAdded
+		}
+		runs := pkgRuns(groupOracle)
 		rapid, err := preparation.rapidPackages(ctx, oraclePackages)
 		if err != nil {
 			return nil, err
@@ -1004,6 +1080,13 @@ dispatching:
 				// carve-out).
 				continue
 			}
+			if pending[wi].grow != nil && !pending[wi].growSurvivors[mi] {
+				// A grown record's kills and discards stand — a grown oracle
+				// can only kill more — so only the recorded survivors
+				// re-execute, against the added tests alone
+				// (REQ-result-stale's growth carve-out).
+				continue
+			}
 			if opts.dispatched != nil {
 				opts.dispatched(pending[wi].candidates[mi].Symbol, mi)
 			}
@@ -1115,6 +1198,71 @@ dispatching:
 			}
 			continue
 		}
+		if w.grow != nil {
+			grown, union, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+			if err != nil {
+				return nil, err
+			}
+			observations[wi] = nil
+			if err := w.producer.validateProducers(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+				continue
+			}
+			// The grown record carries the current tree's evidence, so its
+			// commit and dirty provenance are recomputed like a fresh
+			// measure's rather than carried from the served record.
+			if err := t.stampProvenance(ctx, repository, w, &grown, union); err != nil {
+				return nil, err
+			}
+			// Advisory buckets re-derived honestly under the delta oracle:
+			// an added test executing a previously never-executed survivor
+			// upgrades its bucket; downgrades never happen — the recorded
+			// bucket was measured under the full oracle — and a
+			// divergence-stamped record's survivors were already classified
+			// unstable by the counts fold.
+			if !grown.TargetEvidence.RuntimeUnverifiable {
+				coverage, probed, err := t.oracleCoverage(ctx, w, opts, runEnv, coverageCache)
+				if err != nil {
+					return nil, err
+				}
+				if probed {
+					coverPkg := w.targetView.subject.Package
+					for si := range grown.Survivors {
+						if grown.Survivors[si].Execution == "executed-and-passed" {
+							continue
+						}
+						file, line, col, ok := splitSurvivorPosition(grown.Survivors[si].Position)
+						if ok && coverage.Covered(coverPkg+"/"+file, line, col) {
+							grown.Survivors[si].Execution = "executed-and-passed"
+						}
+					}
+				}
+			}
+			if err := commitAndAttribute(ctx, grown, w); err != nil {
+				return nil, err
+			}
+			// Evidence beats attestation: each shed disposition names its
+			// killer so the contradiction — a mutant judged equivalent was
+			// just distinguished — reaches a human (REQ-attest-survivor,
+			// REQ-result-stale's growth carve-out).
+			if opts.Contradiction != nil && len(shed) != 0 {
+				byIdentity, _ := candidateIdentityIndex(w.candidates)
+				for _, attestation := range shed {
+					killer := ""
+					if mi, ok := byIdentity[survivorKey{attestation.Position, attestation.Operator}]; ok {
+						killer = killers[wi][mi]
+					}
+					opts.Contradiction(AttestationContradiction{
+						Symbol: targets[w.target].Symbol, Position: attestation.Position,
+						Operator: attestation.Operator, Killer: killer, Reason: attestation.Reason,
+					})
+				}
+			}
+			continue
+		}
 		if w.extend != nil {
 			extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget)
 			if err != nil {
@@ -1162,6 +1310,11 @@ dispatching:
 		}
 		f.TargetEvidence = targetEvidence
 		f.OracleEvidence = oracleEvidence
+		currentLedger, err := w.targetView.view.TestVariantLedger(w.targetView.subject)
+		if err != nil {
+			return nil, err
+		}
+		f.CompartmentLedger = compartmentLedgerFromView(currentLedger)
 		if err := w.producer.validateProducers(ctx); err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -1169,26 +1322,7 @@ dispatching:
 			drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 			continue
 		}
-		f.Commit = repository.commit
-		sourceFiles := append([]string(nil), w.targetView.sourceFiles...)
-		for _, oracleView := range w.oracleViews {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			sourceFiles = append(sourceFiles, oracleView.sourceFiles...)
-		}
-		historical, err := repository.historicalPackageFilesContext(ctx, sourceFiles)
-		if err != nil {
-			return nil, err
-		}
-		sourceFiles = append(sourceFiles, historical...)
-		sourceFiles = withModuleSelectionPaths(sourceFiles)
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		sourceFiles = append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum"))
-		f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, state.State)
-		if err != nil {
+		if err := t.stampProvenance(ctx, repository, w, f, state); err != nil {
 			return nil, err
 		}
 		f.Operators = summarizeOperators(w.candidates, outcomes[wi])
@@ -1441,6 +1575,202 @@ func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol
 	return nil
 }
 
+// stampProvenance records the current tree's provenance on a measured or
+// grown finding: the capture commit, and dirty computed over the finding's
+// subject source files, their historical package files, module selection,
+// and workspace inputs, against the observation's runtime state.
+func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, w work, f *Finding, observation runtimeinput.Observation) error {
+	f.Commit = repository.commit
+	sourceFiles := append([]string(nil), w.targetView.sourceFiles...)
+	for _, oracleView := range w.oracleViews {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		sourceFiles = append(sourceFiles, oracleView.sourceFiles...)
+	}
+	historical, err := repository.historicalPackageFilesContext(ctx, sourceFiles)
+	if err != nil {
+		return err
+	}
+	sourceFiles = append(sourceFiles, historical...)
+	sourceFiles = withModuleSelectionPaths(sourceFiles)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sourceFiles = append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum"))
+	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, observation.State)
+	return err
+}
+
+// spliceGrownFinding serves a record under the oracle-growth carve-out
+// (REQ-result-stale): recorded kills and discards stand, the re-executed
+// survivors' fresh outcomes replace their dispositions, and the grown record
+// carries the current tree's evidence for every subject — the gate proved
+// the retained subjects' only movement is the inert compartment delta, and
+// the delta run captured the added oracles' evidence — plus the current
+// compartment ledger. The delta processes' completed union is reconciled
+// over the record's persisted union exactly as the budget extension's: a
+// read beyond the recorded pins preserves the grown outcome but stamps it
+// explicitly non-reusable. Returns the reconciled union (for provenance)
+// and the shed attestations of newly killed survivors.
+func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding, w work, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, runtimeinput.Observation, []Attestation, error) {
+	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.growSurvivors, w.baselines, w.targetView, w.oracleViews, outcomes, observations, incompletes, labels, true, false)
+	if err != nil {
+		return Finding{}, runtimeinput.Observation{}, nil, err
+	}
+	rec = spliced.rec
+	// The grown record carries the current tree's evidence for every
+	// subject — the gate proved the retained subjects' only movement is the
+	// inert compartment delta, and the delta run captured the added
+	// oracles' — with a divergence stamp transferred onto it.
+	diverged := rec.TargetEvidence.RuntimeUnverifiable
+	divergenceReason := rec.TargetEvidence.RuntimeReason
+	rec.TargetEvidence = spliced.targetEvidence
+	rec.OracleEvidence = spliced.oracleEvidence
+	if diverged {
+		rec.TargetEvidence.RuntimeUnverifiable, rec.TargetEvidence.RuntimeReason = true, divergenceReason
+		for i := range rec.OracleEvidence {
+			rec.OracleEvidence[i].RuntimeUnverifiable, rec.OracleEvidence[i].RuntimeReason = true, divergenceReason
+		}
+	}
+	grown, shed, err := growFindingCounts(ctx, rec, w.candidates, w.growSurvivors, outcomes, spliced.fresh)
+	return grown, spliced.union, shed, err
+}
+
+// growFindingCounts replaces each re-executed survivor's disposition with
+// its fresh outcome — per operator and in the finding totals — while every
+// other candidate keeps its recorded one (INV-RESULT-CANDIDATE-CONSERVATION;
+// the growth serve re-executes exactly the recorded survivors). A survivor
+// surviving the added tests keeps its recorded advisory bucket (upgraded by
+// the caller's delta coverage probe), classifying unstable-oracle when the
+// spliced evidence landed non-reusable; a newly killed attested survivor's
+// attestation is shed and returned — evidence beats attestation
+// (REQ-attest-survivor).
+func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, survivors map[int]bool, outcomes []engine.MutantOutcome, freshEvidence []CandidateEvidence) (Finding, []Attestation, error) {
+	operators := append([]OperatorSummary(nil), rec.Operators...)
+	byOperator := make(map[string]int, len(operators))
+	for i := range operators {
+		byOperator[operators[i].Operator] = i
+	}
+	priorBuckets := make(map[survivorKey]string, len(rec.Survivors))
+	for _, survivor := range rec.Survivors {
+		priorBuckets[survivorKey{survivor.Position, survivor.Operator}] = survivor.Execution
+	}
+	stamp := rec.TargetEvidence.RuntimeUnverifiable
+	var stillSurviving []Survivor
+	for mi := range candidates {
+		if err := ctx.Err(); err != nil {
+			return Finding{}, nil, err
+		}
+		if !survivors[mi] {
+			continue
+		}
+		candidate := candidates[mi]
+		i, ok := byOperator[candidate.Operator]
+		if !ok {
+			return Finding{}, nil, fmt.Errorf("gomutant: grown survivor %s %s has no operator summary", candidate.Position, candidate.Operator)
+		}
+		applyDisposition(&operators[i], "survived", -1)
+		disposition := outcomeDisposition(outcomes[mi])
+		applyDisposition(&operators[i], disposition, 1)
+		if disposition == "survived" {
+			execution := priorBuckets[survivorKey{candidate.Position, candidate.Operator}]
+			if stamp {
+				execution = "unstable-oracle"
+			}
+			stillSurviving = append(stillSurviving, Survivor{Position: candidate.Position, Operator: candidate.Operator, Execution: execution})
+		}
+	}
+	for _, summary := range operators {
+		if summary.Killed < 0 || summary.Discarded < 0 || summary.Survived < 0 {
+			return Finding{}, nil, fmt.Errorf("gomutant: grown operator %s counts do not reconcile", summary.Operator)
+		}
+	}
+	killed, discarded, survived := sumOperatorTotals(operators)
+	rec.Operators = operators
+	rec.Killed = killed
+	rec.Discarded = discarded
+	rec.Mutants = killed + survived
+	rec.Survivors = stillSurviving
+	rec.CandidateEvidence = freshEvidence
+	open := make(map[survivorKey]bool, len(stillSurviving))
+	for _, survivor := range stillSurviving {
+		open[survivorKey{survivor.Position, survivor.Operator}] = true
+	}
+	var kept []Attestation
+	var shed []Attestation
+	for _, attestation := range rec.Attested {
+		if open[survivorKey{attestation.Position, attestation.Operator}] {
+			kept = append(kept, attestation)
+		} else {
+			shed = append(shed, attestation)
+		}
+	}
+	rec.Attested = kept
+	return rec, shed, nil
+}
+
+// oracleCoverage merges the baseline coverage probes of a work item's oracle
+// groups over the target's package, cached per (package, run pattern, cover
+// package) across the run; probed reports false when any group cannot be
+// probed (best-effort advisory data, never a refusal).
+func (t *Tree) oracleCoverage(ctx context.Context, w work, opts Options, runEnv []string, cache map[string]engine.Coverage) (engine.Coverage, bool, error) {
+	coverPkg := w.targetView.subject.Package
+	coverage := engine.Coverage{}
+	for _, g := range w.groups {
+		if err := ctx.Err(); err != nil {
+			return engine.Coverage{}, false, err
+		}
+		key := g.pkgs[0] + "\x00" + g.runRegex + "\x00" + coverPkg
+		got, ok := cache[key]
+		if !ok {
+			probed, err := engine.CoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.OracleTimeout, g.flags, runEnv)
+			if err != nil {
+				if ctx.Err() != nil {
+					return engine.Coverage{}, false, ctx.Err()
+				}
+				return engine.Coverage{}, false, nil
+			}
+			got = probed
+			cache[key] = got
+		}
+		coverage = coverage.Merge(got)
+	}
+	return coverage, true, nil
+}
+
+func testNoun(n int) string { return countNoun(n, "test") }
+
+func survivorNoun(n int) string { return countNoun(n, "survivor") }
+
+// grownSurvivorIndexes deterministically re-identifies a grown record's
+// candidates and survivors within the regenerated set: the complete count
+// and selection length unchanged, every identity unique, and every recorded
+// survivor re-identified and still runnable. Any failure refuses the growth
+// serve so the whole target re-measures (REQ-result-stale's growth
+// carve-out).
+func grownSurvivorIndexes(generation engine.Generation, rec Finding) (map[int]bool, bool) {
+	if generation.CandidateCount != rec.CandidateCount || len(generation.Candidates) != rec.Generated {
+		return nil, false
+	}
+	byIdentity, unique := candidateIdentityIndex(generation.Candidates)
+	if !unique {
+		return nil, false
+	}
+	survivors := make(map[int]bool, len(rec.Survivors))
+	for _, survivor := range rec.Survivors {
+		i, ok := byIdentity[survivorKey{survivor.Position, survivor.Operator}]
+		if !ok {
+			return nil, false
+		}
+		if _, runnable := generation.Candidates[i].Mutant(); !runnable {
+			return nil, false
+		}
+		survivors[i] = true
+	}
+	return survivors, true
+}
+
 // movedPinAttribution names why a prior finding's pins no longer cover the
 // request, via the freshness inspection — the class comes from the
 // inspection, never an assumed "stale" (an unverifiable prior is not stale) —
@@ -1497,13 +1827,15 @@ func candidateIdentityIndex(candidates []engine.Candidate) (map[survivorKey]int,
 	return byIdentity, true
 }
 
-// candidateNoun counts candidates grammatically for decision reasons.
-func candidateNoun(n int) string {
+// countNoun counts grammatically for decision reasons.
+func countNoun(n int, singular string) string {
 	if n == 1 {
-		return "1 candidate"
+		return "1 " + singular
 	}
-	return fmt.Sprintf("%d candidates", n)
+	return fmt.Sprintf("%d %ss", n, singular)
 }
+
+func candidateNoun(n int) string { return countNoun(n, "candidate") }
 
 // flaggedCandidateIndexes deterministically re-identifies a served record's
 // flagged candidates and recorded survivors within the regenerated candidate
@@ -1595,45 +1927,67 @@ func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Find
 	}
 	// The recorded union folds into the suffix union before reconciliation,
 	// and the extension reports a measurement, never a cached serve.
-	rec, freshEvidence, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, suffix, baselines, targetView, oracleViews, outcomes, observations, incompletes, labels, true, false)
+	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, suffix, baselines, targetView, oracleViews, outcomes, observations, incompletes, labels, true, false)
 	if err != nil {
 		return Finding{}, err
 	}
-	return extendFindingCounts(ctx, rec, candidates, from, outcomes, freshEvidence, budget)
+	return extendFindingCounts(ctx, spliced.rec, candidates, from, outcomes, spliced.fresh, budget)
+}
+
+// splicedEvidence is one splice's evidence outcome: the record after
+// fail-closed union reconciliation, the re-executed candidates' fresh
+// evidence, the reconciled union (for provenance), and the current attach
+// results — kept by the growth arm, whose gate justifies upgrading every
+// subject to the current tree's evidence, and discarded by the flagged and
+// extension splices, whose cached proof is never upgraded by a partial
+// measurement (REQ-exec-observation).
+type splicedEvidence struct {
+	rec            Finding
+	fresh          []CandidateEvidence
+	union          runtimeinput.Observation
+	targetEvidence SubjectEvidence
+	oracleEvidence []SubjectEvidence
 }
 
 // spliceRecordedEvidence is the shared evidence spine of every record splice
-// (the flagged-candidate re-execution and the budget extension): union the
-// re-executed processes' observations, optionally fold the record's persisted
-// union in first (the extension compares "recorded pins plus suffix reads"
-// against the recorded pins), reconcile against the record fail-closed
-// (applySplicedUnion), and attach the fresh union so post-execution producer
-// validation re-establishes the observation bracket around the re-executed
-// processes. The persisted subject evidence stays the served record's: cached
-// proof is never upgraded by a partial measurement (REQ-exec-observation).
-// Counts folding stays with each arm — replacement and append are different
-// truths over the same spine.
-func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, reExecuted map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, foldRecorded, cached bool) (Finding, []CandidateEvidence, error) {
+// (the flagged-candidate re-execution, the budget extension, and the
+// oracle-growth serve): union the re-executed processes' observations,
+// optionally fold the record's persisted union in first (comparing "recorded
+// pins plus fresh reads" against the recorded pins), reconcile against the
+// record fail-closed (applySplicedUnion), attach the fresh union so
+// post-execution producer validation re-establishes the observation bracket,
+// and stamp the current view's compartment ledger — identical to the
+// record's whenever the pins matched, and the record's conformance upgrade
+// when it predates the ledger (REQ-result-record). Counts folding stays with
+// each arm — replacement, append, and survivor-rescore are different truths
+// over the same spine.
+func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, reExecuted map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, foldRecorded, cached bool) (splicedEvidence, error) {
 	union, freshEvidence, err := completedObservationUnion(ctx, t.dir, env, baselines, candidates, outcomes, observations, incompletes, reExecuted)
 	if err != nil {
-		return Finding{}, nil, err
+		return splicedEvidence{}, err
 	}
 	if foldRecorded {
 		union, err = t.foldRecordedUnion(ctx, env, rec, targetView.moduleDir, union)
 		if err != nil {
-			return Finding{}, nil, err
+			return splicedEvidence{}, err
 		}
 	}
 	union, rec, err = t.applySplicedUnion(ctx, env, rec, union)
 	if err != nil {
-		return Finding{}, nil, err
+		return splicedEvidence{}, err
 	}
-	if _, _, err := attachEvidence(targetView, oracleViews, union); err != nil {
-		return Finding{}, nil, err
+	targetEvidence, oracleEvidence, err := attachEvidence(targetView, oracleViews, union)
+	if err != nil {
+		return splicedEvidence{}, err
 	}
+	currentLedger, err := targetView.view.TestVariantLedger(targetView.subject)
+	if err != nil {
+		return splicedEvidence{}, err
+	}
+	rec.CompartmentLedger = compartmentLedgerFromView(currentLedger)
 	rec.Labels = append([]string(nil), labels...)
 	rec.Cached = cached
-	return rec, freshEvidence, nil
+	return splicedEvidence{rec: rec, fresh: freshEvidence, union: union, targetEvidence: targetEvidence, oracleEvidence: oracleEvidence}, nil
 }
 
 // foldRecordedUnion merges the served record's persisted completed-process
@@ -1724,11 +2078,11 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 // information the record never pinned, so the spliced outcome is preserved but
 // explicitly non-reusable (REQ-exec-observation).
 func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, error) {
-	rec, freshEvidence, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, flagged, baselines, targetView, oracleViews, outcomes, observations, incompletes, labels, false, true)
+	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, flagged, baselines, targetView, oracleViews, outcomes, observations, incompletes, labels, false, true)
 	if err != nil {
 		return Finding{}, err
 	}
-	return spliceFindingCounts(ctx, rec, candidates, flagged, outcomes, freshEvidence)
+	return spliceFindingCounts(ctx, spliced.rec, candidates, flagged, outcomes, spliced.fresh)
 }
 
 // applySplicedUnion reconciles the re-executed processes' completed union with
