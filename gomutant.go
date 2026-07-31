@@ -210,18 +210,12 @@ func LoadContext(ctx context.Context, dir string) (*Tree, error) {
 	return &Tree{eng: e, dir: abs}, nil
 }
 
-// Discover targets every top-level function and method declared in the
+// DiscoverContext targets every top-level function and method declared in the
 // tree's non-test, non-generated source files — package initializers
 // excepted: the language keeps init unreferencable, so it can never be a
 // resolvable target — oracles left to the default
 // (REQ-target-producers): whole-package discovery is a usable run without a
 // caller enumerating anything.
-func (t *Tree) Discover() []Target {
-	targets, _ := t.DiscoverContext(context.Background())
-	return targets
-}
-
-// DiscoverContext is Discover with cooperative cancellation.
 func (t *Tree) DiscoverContext(ctx context.Context) ([]Target, error) {
 	syms, err := t.eng.DeclaredSymbolsContext(ctx)
 	if err != nil {
@@ -237,7 +231,7 @@ func (t *Tree) DiscoverContext(ctx context.Context) ([]Target, error) {
 	return out, nil
 }
 
-// DiscoverChanged targets only the symbols whose bodies differ from a
+// DiscoverChangedContext targets only the symbols whose bodies differ from a
 // reference version (REQ-target-changed): paths are the tree-relative
 // changed files, and ref supplies a path's reference content (ok=false for a
 // path absent at the reference, so a new file reads as all changed). Beside
@@ -246,12 +240,9 @@ func (t *Tree) DiscoverContext(ctx context.Context) ([]Target, error) {
 // whole changed surface, never a silently narrowed one — except paths under
 // gomutant's own state directory, which are outside the changed source
 // surface entirely (REQ-target-changed).
-func (t *Tree) DiscoverChanged(paths []string, ref func(path string) ([]byte, bool)) ([]Target, []Residue) {
-	targets, residue, _ := t.DiscoverChangedContext(context.Background(), paths, ref)
-	return targets, residue
-}
-
-// DiscoverChangedContext is DiscoverChanged with cooperative cancellation.
+// A mid-scan tree mutation fails the discovery with the unreadable
+// declaration named: the whole changed surface or an error, never a
+// silently narrowed surface (REQ-target-changed).
 func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref func(path string) ([]byte, bool)) ([]Target, []Residue, error) {
 	var targets []Target
 	var residue []Residue

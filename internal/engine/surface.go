@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -46,7 +47,7 @@ type FileSurface struct {
 	Symbols []string
 }
 
-// Surface classifies the given tree-relative, slash-separated paths by Go
+// SurfaceContext classifies the given tree-relative, slash-separated paths by Go
 // content, reporting only the symbols whose body actually changed: head
 // supplies a path's reference bytes (ok=false when the path is new, so every
 // symbol reads as changed). A symbol's body hash is compared against the
@@ -57,12 +58,9 @@ type FileSurface struct {
 // new-but-unloadable .go file reads as Go with no declared symbols rather
 // than vanishing. Test files carry IsTest and no symbols — test sources are
 // oracles, never targets.
-func (t *Tree) Surface(paths []string, ref func(path string) ([]byte, bool)) []FileSurface {
-	surface, _ := t.SurfaceContext(context.Background(), paths, ref)
-	return surface
-}
-
-// SurfaceContext is Surface with cooperative cancellation.
+// A declaration whose body bytes cannot be re-read fails the scan with
+// the path and declaration named (a tree mutating mid-scan), never a
+// silent drop that would misread as a deletion.
 func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path string) ([]byte, bool)) ([]FileSurface, error) {
 	// Working-side declarations per tree-relative path: each declaration's
 	// full resolver symbol and its body hash, keyed by short name so the
@@ -120,7 +118,16 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 				}
 				src, err := t.sourceOfContext(ctx, pkg, bodyNode(fn))
 				if err != nil {
-					continue
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					// A declaration the load parsed but whose body bytes
+					// cannot be re-read is a tree mutating mid-scan, never
+					// a deletion: silently dropping it would orphan the
+					// reference-side key, and the file could report "only
+					// deleted symbols" for code that exists. The scan fails
+					// closed instead (REQ-target-changed).
+					return nil, fmt.Errorf("engine: changed-surface scan: read %s declaration %q: %w", rel, key, err)
 				}
 				fdecls.byKey[key] = decl{symbol: sym, hash: canonHash(string(src))}
 			}

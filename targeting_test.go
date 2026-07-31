@@ -109,7 +109,10 @@ func TestTargetPreparationContextCancellation(t *testing.T) {
 // oracle; test functions and generated symbols are not.
 func TestDiscover(t *testing.T) {
 	tr := fixtureTree(t)
-	targets := tr.Discover()
+	targets, err := tr.DiscoverContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := map[string]bool{}
 	for _, tg := range targets {
 		got[tg.Symbol] = true
@@ -138,7 +141,10 @@ func TestDiscover(t *testing.T) {
 
 func TestFilterTargets(t *testing.T) {
 	tr := fixtureTree(t)
-	targets := tr.Discover()
+	targets, err := tr.DiscoverContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	selected, err := tr.FilterTargets(targets,
 		[]string{"example.com/fixture/{lib,dot.x}"},
 		[]string{"{example.com/fixture/lib.Add,example.com/fixture/dot.x.F}"},
@@ -277,13 +283,16 @@ func TestDiscoverChanged(t *testing.T) {
 	}
 	paths := []string{"lib/lib.go", "lib/opsites.go", "genp/gen.go", "lib/lib_test.go", "README.md", "dot.x/dotx.go", "dot/dot.go", "lib/doc.go", "lib/removed.go",
 		".gomutant/findings.json", ".gomutant/targets/extra.json", ".gomutant2/note.md"}
-	targets, residue := tr.DiscoverChanged(paths, func(p string) ([]byte, bool) {
+	targets, residue, err := tr.DiscoverChangedContext(context.Background(), paths, func(p string) ([]byte, bool) {
 		b, ok := refs[p]
 		if p == "dot.x/dotx.go" {
 			return nil, false // absent at the reference: a new file, all changed
 		}
 		return b, ok && b != nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	syms := map[string]bool{}
 	for _, tg := range targets {

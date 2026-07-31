@@ -7,7 +7,6 @@ is deleted (git holds history).
 | slug | summary | Lands |
 |------|---------|-------|
 | [init-functions-as-subjects](init-functions-as-subjects.md) | init bodies (registry wiring - classic silent-fault carrier) are loudly excluded from mutation, not measured | init bodies become measurable subjects end-to-end, or the exclusion is settled permanent in the targeting spec |
-| [surface-read-failure-mislabels-decl-deleted](surface-read-failure-mislabels-decl-deleted.md) | A body-source read failure mid-scan silently classes the declaration as deleted | Unreadable working-side declarations report as unreadable or fail the scan |
 | [runtime-input-provenance](runtime-input-provenance.md) | Prove reusable runtime evidence across producer-created outputs | Observation-time object provenance distinguishes produced outputs from external inputs on every supported host |
 | [staged-snapshot-run-mode](staged-snapshot-run-mode.md) | Measure staged/index snapshots as clean content before commit | Gomutant can run against the staged index or another explicit content snapshot and produce clean evidence for it |
 | [structural-mutation-class](structural-mutation-class.md) | Structural mutants (forbidden import, broken method set) so analyzer-shaped oracles get a teeth check | A caller needs adequacy evidence for a structural assertion's oracle |

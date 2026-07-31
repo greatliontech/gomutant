@@ -159,7 +159,7 @@ The CLI is a thin shell over the root package:
 
 ```go
 tree, _ := gomutant.Load(".")
-targets := tree.Discover() // or DiscoverChanged, ParseTargets
+targets, _ := tree.DiscoverContext(ctx) // or DiscoverChangedContext, ParseTargets
 findings, _ := tree.Run(ctx, targets, gomutant.Options{Budget: 5, Prior: prior})
 doc, _ := gomutant.Export(findings)
 ```
