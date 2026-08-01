@@ -1,7 +1,7 @@
 # No preflight phase: precondition findings surface hours into a run
 
-Lands: when gomutant work resumes after gofresh's analysis-simplification
-plan closes.
+Lands: gomutant train, first item — immediately after the pew bench
+evidence path.
 
 ## Observed (field runs)
 

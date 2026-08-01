@@ -1,7 +1,7 @@
 # CLI runs silent for hours between the measure list and completion
 
-Lands: when gomutant work resumes after gofresh's analysis-simplification
-plan closes.
+Lands: gomutant train, beside the preflight (one run-loop pass wires
+both).
 
 ## Observed (field run)
 

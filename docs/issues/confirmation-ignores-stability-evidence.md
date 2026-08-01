@@ -1,7 +1,7 @@
 # Kill confirmation re-executes serially, ignoring the stability evidence it guards with
 
-Lands: when gomutant work resumes after gofresh's analysis-simplification
-plan closes.
+Lands: gomutant train, second item — after the preflight/progress
+pass.
 
 ## Observed (field run)
 

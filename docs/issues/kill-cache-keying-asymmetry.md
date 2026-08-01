@@ -1,7 +1,7 @@
 # Cache invalidation is coarser than verdict dependencies: kills keyed package-wide
 
-Lands: when gomutant work resumes after gofresh's analysis-simplification
-plan closes.
+Lands: gomutant train, third item — it builds on the compartment
+ledger the preflight surfaces.
 
 ## Observed (field run)
 
