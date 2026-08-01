@@ -3,9 +3,17 @@
 Lands: when gomutant work resumes after gofresh's analysis-simplification
 plan closes.
 
-## Observed (field run, raftstore corpus)
+## Observed (field runs)
 
-Targets known unverifiable from cached stability evidence produced their
+A whole-tree budget slice (budget 3, 2h timeout) on a second corpus spent
+its entire two hours in the prepare phase and exited on one target's
+observation-proof deadline — zero targets measured, nothing durable
+produced. The preflight would have surfaced the per-target proof cost
+before committing the budget; prepare-phase durability (partial proof
+results surviving a deadline) is the companion gofresh-side lever,
+slotted in its analysis plan's memo chunk.
+
+On the raftstore corpus: targets known unverifiable from cached stability evidence produced their
 guidance line ~2 hours into the run instead of at minute zero. Every input
 for a dry-run already exists: changed-surface analysis, candidate counts,
 oracle-stability records, cache-serve checks.
