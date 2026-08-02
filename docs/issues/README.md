@@ -23,3 +23,9 @@ is deleted (git holds history).
   preparation phase is serial against an idle oracle pool; measured warm headroom is
   ~120-165s of a 388s campaign. *Lands: gomutant train, fourth item — after the
   kill-cache keying, on gofresh >= v0.43.4.*
+- **[observation-pass-cardinality](observation-pass-cardinality.md)** — gomutant constructs
+  a fresh gofresh View per target per step, multiplying the full observation pass ~270×
+  per campaign (~40% of measured warm wall-clock); one multi-subject View per phase is
+  evidence-identical by REQ-closure-batch-equivalence.
+  *Lands: the gomutant train — evidence-ranked first by wall-clock; ordering is the user's
+  call at train opening.*
