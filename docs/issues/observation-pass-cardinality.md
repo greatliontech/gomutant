@@ -23,6 +23,21 @@ quiescent for the whole campaign — would collapse ~273 passes to a
 handful, an evidence-identical ~40% wall-clock cut on the measured
 campaign.
 
+Design addendum (2026-08-03, from the fix attempt's own failures): the
+union view alone collides with gofresh's view lifecycle — a View is one
+producer transaction (capture, execute, AttachObservation once per
+subject, Validate seals against captures), while the campaign runs one
+transaction per target over shared subjects. Two contract refusals
+surfaced live: ErrViewSealed once any sibling validated, and
+one-attachment-per-subject for shared oracles. The pre-validate view
+READS (compartment ledgers) hoist to preparation time on the work item;
+the attach/validate cycle needs a gofresh sibling-view API — derive a
+per-target view over a subject subset sharing the parent's observation
+(the struct-copy shape newSeededValidationView already uses
+internally), fresh attach/seal state, so per-target transactions keep
+their exact semantics while the observation is paid once. gofresh
+lands Sibling first; gomutant's union then narrows through it.
+
 Diagnosed (2026-08-02, code-confirmed): the decision pass is already
 batched (run.go:652, one view set over all subjects), and the
 multiplication lives in the target loop — run.go:788 builds a fresh
