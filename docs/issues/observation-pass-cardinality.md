@@ -23,13 +23,22 @@ quiescent for the whole campaign — would collapse ~273 passes to a
 handful, an evidence-identical ~40% wall-clock cut on the measured
 campaign.
 
-Shape sketch: resolve builds one View over all targets' subjects and
-reads every decision from it; capture/confirm reuse one View per tree
-generation (the campaign holds one generation; a View is immutable, so
-reuse is exactly the contract). Interacts with
+Diagnosed (2026-08-02, code-confirmed): the decision pass is already
+batched (run.go:652, one view set over all subjects), and the
+multiplication lives in the target loop — run.go:788 builds a fresh
+observed view set per target over {target}+oracle, plus the retry
+variant at :802, once per target per phase. Fix shape: hoist one
+observed view set over the union of targets and oracles before the
+loop (REQ-closure-batch-equivalence makes per-subject evidence
+identical, and subjectViewSet.bySymbol already serves per-subject
+reads); the design-bearing constraint is failure granularity — a
+per-target proof failure skips only its target today, so the union
+build must keep per-symbol failure locality instead of turning a
+resolution fault into a campaign abort. Interacts with
 pipeline-preparation-with-execution.md only at the seam where
-preparation emits ready targets — a shared View is phase-scoped either
-way.
+preparation emits ready targets — a shared view is phase-scoped either
+way. Stipulator's check path shares the fix family
+(check-view-cardinality there: 24 passes, 86% of the warm floor).
 
 Lands: the gomutant train — evidence-ranked first by wall-clock among
 the train's items (~40% of the measured warm campaign); final ordering
