@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -81,9 +82,10 @@ type Options struct {
 	afterExecution func()
 	aggregate      func()
 	producer       func(string)
-	// proofAttempt observes each per-target freshness-proof construction
-	// attempt (1, then 2 on the bounded retry) — a test seam pinning the
-	// retry, like producer above.
+	// proofAttempt observes each freshness-proof construction attempt —
+	// ("", 1) before the shared union pass, then (symbol, 2) before a
+	// faulted target's bounded per-target retry — a test seam pinning
+	// the union/retry split, like producer above.
 	proofAttempt func(symbol string, attempt int)
 	// Contradiction receives each attested survivor a growth serve's added
 	// tests killed: the attestation is shed — evidence beats attestation —
@@ -370,7 +372,13 @@ type work struct {
 	targetView  *subjectView
 	oracleViews []*subjectView
 	producer    *subjectViewSet
-	baselines   []runtimeinput.Observation
+	// currentLedger is the target package's compartment ledger, read from
+	// the view's observation at preparation time: the value is fixed at
+	// view build (every sibling narrowing serves the union's one
+	// observation), so one read here keeps phase three free of
+	// per-finding view reads.
+	currentLedger gofresh.TestVariantLedger
+	baselines     []runtimeinput.Observation
 	// serve is the prior record being served with candidate-local
 	// re-execution (REQ-result-stale): only the candidate indexes in
 	// flagged execute, and phase three splices their fresh outcomes and
@@ -654,6 +662,32 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, fmt.Errorf("freshness: %w", err)
 		}
 	}
+	// One observed union over every target and oracle replaces the
+	// per-target proof builds the campaign previously paid (the measured
+	// ~270 observation passes per warm campaign): per-subject evidence is
+	// identical by gofresh's batch-equivalence contract, per-symbol
+	// faults stay target-local, and the per-target build survives only
+	// as the bounded retry (REQ-exec-quiescence). The union is built at
+	// the first target that needs a proof: a fully-cached warm run —
+	// every target served — pays no observation pass at all.
+	producerUnion := &subjectViewSet{bySymbol: map[string]*subjectView{}}
+	producerFaults := map[string]error{}
+	producerUnionBuilt := false
+	buildProducerUnion := func() error {
+		if producerUnionBuilt {
+			return nil
+		}
+		producerUnionBuilt = true
+		if opts.proofAttempt != nil {
+			opts.proofAttempt("", 1)
+		}
+		var err error
+		producerUnion, producerFaults, err = t.newObservedUnionViews(ctx, subjectSymbols, preparation.packageContext, engines)
+		if err != nil {
+			return fmt.Errorf("freshness proofs (union over %d subjects): %w", len(subjectSymbols), err)
+		}
+		return nil
+	}
 	var oraclePackages []string
 	seenOraclePackage := map[string]bool{}
 	for _, resolved := range resolvedTargets {
@@ -782,33 +816,27 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 
-		if opts.proofAttempt != nil {
-			opts.proofAttempt(tg.Symbol, 1)
+		if err := buildProducerUnion(); err != nil {
+			return nil, err
 		}
-		producerViews, err := t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
+		producerViews, err := producerUnion.forTarget(tg.Symbol, oracle, producerFaults)
 		if err != nil && ctx.Err() == nil {
-			// One bounded retry: the field failure mode is transient
-			// pressure (a concurrent full-suite run against the same
-			// tree) canceling one target's proof construction, gone by
-			// the time anyone reads the error. The retry re-runs the
-			// full build; preparation.packageContext memoizes error
-			// results, but the batch build's success has already warmed
-			// every context this build reads, so no memoized failure can
-			// be replayed today — revisit if this site's symbol set ever
-			// diverges from the batch set.
+			// One bounded retry (REQ-exec-quiescence): the field failure
+			// mode is transient pressure faulting one symbol or module
+			// group out of the shared union, gone by the time anyone
+			// reads the fault. The retry rebuilds this target's own proof
+			// surface — the demoted per-target build — so a transient
+			// union fault costs one extra pass for one target, never a
+			// skip.
 			if opts.proofAttempt != nil {
 				opts.proofAttempt(tg.Symbol, 2)
 			}
 			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
 		}
 		if err != nil {
-			if ctx.Err() != nil {
-				// The campaign itself is canceled: abort is the answer,
-				// and the wrap names the target and its oracle so the
-				// failure is actionable without re-deriving which
-				// subject the view was built for (REQ-exec-quiescence's
-				// legibility arm).
-				return nil, fmt.Errorf("freshness proof for target %s (oracle %s): %w", tg.Symbol, strings.Join(oracle, ", "), err)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				// The campaign itself is canceled: abort is the answer.
+				return nil, proofAbortError(tg.Symbol, oracle, err, ctxErr)
 			}
 			// A per-target evidence condition, target-local by the same
 			// rule as drift refusal (REQ-exec-quiescence): this target
@@ -846,7 +874,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for _, module := range producerViews.modules {
 			module.producer = true
 		}
-		pending = append(pending, work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, serve: serve, extend: extend, grow: grow, growAdded: growAdded})
+		currentLedger, err := targetView.view.TestVariantLedger(targetView.subject)
+		if err != nil {
+			return nil, err
+		}
+		pending = append(pending, work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, currentLedger: currentLedger, serve: serve, extend: extend, grow: grow, growAdded: growAdded})
 	}
 	for wi := range pending {
 		w := &pending[wi]
@@ -1178,7 +1210,7 @@ dispatching:
 		}
 		f := &findings[w.target]
 		if w.serve != nil {
-			spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+			spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
 			if err != nil {
 				return nil, err
 			}
@@ -1264,7 +1296,7 @@ dispatching:
 			continue
 		}
 		if w.extend != nil {
-			extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget)
+			extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget)
 			if err != nil {
 				return nil, err
 			}
@@ -1310,11 +1342,7 @@ dispatching:
 		}
 		f.TargetEvidence = targetEvidence
 		f.OracleEvidence = oracleEvidence
-		currentLedger, err := w.targetView.view.TestVariantLedger(w.targetView.subject)
-		if err != nil {
-			return nil, err
-		}
-		f.CompartmentLedger = compartmentLedgerFromView(currentLedger)
+		f.CompartmentLedger = compartmentLedgerFromView(w.currentLedger)
 		if err := w.producer.validateProducers(ctx); err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -1614,7 +1642,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 // explicitly non-reusable. Returns the reconciled union (for provenance)
 // and the shed attestations of newly killed survivors.
 func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding, w work, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, runtimeinput.Observation, []Attestation, error) {
-	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.growSurvivors, w.baselines, w.targetView, w.oracleViews, outcomes, observations, incompletes, labels, true, false)
+	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.growSurvivors, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes, observations, incompletes, labels, true, false)
 	if err != nil {
 		return Finding{}, runtimeinput.Observation{}, nil, err
 	}
@@ -1771,6 +1799,17 @@ func grownSurvivorIndexes(generation engine.Generation, rec Finding) (map[int]bo
 	return survivors, true
 }
 
+// proofAbortError names a canceled campaign's in-flight proof abort:
+// the wrap carries the target and its oracle so the failure is
+// actionable without re-deriving which subject's view was being built
+// (REQ-exec-quiescence's legibility arm), and the join keeps the
+// cancellation class inspectable when err is a stored union fault that
+// predates the cancellation — the bounded retry is skipped on a
+// canceled campaign, so err alone may carry no cancellation.
+func proofAbortError(target string, oracle []string, err, ctxErr error) error {
+	return fmt.Errorf("freshness proof for target %s (oracle %s): %w", target, strings.Join(oracle, ", "), errors.Join(err, ctxErr))
+}
+
 // movedPinAttribution names why a prior finding's pins no longer cover the
 // request, via the freshness inspection — the class comes from the
 // inspection, never an assumed "stale" (an unverifiable prior is not stale) —
@@ -1920,14 +1959,14 @@ func extendedPrefixStands(generation engine.Generation, rec Finding) bool {
 // while a read beyond the record's pins is runtime information it never
 // pinned, so the extended outcome is preserved but explicitly non-reusable
 // (REQ-result-stale's fail-closed bound).
-func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int) (Finding, error) {
+func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int) (Finding, error) {
 	suffix := make(map[int]bool, len(candidates)-from)
 	for mi := from; mi < len(candidates); mi++ {
 		suffix[mi] = true
 	}
 	// The recorded union folds into the suffix union before reconciliation,
 	// and the extension reports a measurement, never a cached serve.
-	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, suffix, baselines, targetView, oracleViews, outcomes, observations, incompletes, labels, true, false)
+	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, suffix, baselines, targetView, oracleViews, currentLedger, outcomes, observations, incompletes, labels, true, false)
 	if err != nil {
 		return Finding{}, err
 	}
@@ -1961,7 +2000,7 @@ type splicedEvidence struct {
 // when it predates the ledger (REQ-result-record). Counts folding stays with
 // each arm — replacement, append, and survivor-rescore are different truths
 // over the same spine.
-func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, reExecuted map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, foldRecorded, cached bool) (splicedEvidence, error) {
+func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, reExecuted map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, foldRecorded, cached bool) (splicedEvidence, error) {
 	union, freshEvidence, err := completedObservationUnion(ctx, t.dir, env, baselines, candidates, outcomes, observations, incompletes, reExecuted)
 	if err != nil {
 		return splicedEvidence{}, err
@@ -1977,10 +2016,6 @@ func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Fin
 		return splicedEvidence{}, err
 	}
 	targetEvidence, oracleEvidence, err := attachEvidence(targetView, oracleViews, union)
-	if err != nil {
-		return splicedEvidence{}, err
-	}
-	currentLedger, err := targetView.view.TestVariantLedger(targetView.subject)
 	if err != nil {
 		return splicedEvidence{}, err
 	}
@@ -2077,8 +2112,8 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 // process's pinned runtime inputs; fresh observations that diverge are runtime
 // information the record never pinned, so the spliced outcome is preserved but
 // explicitly non-reusable (REQ-exec-observation).
-func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, error) {
-	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, flagged, baselines, targetView, oracleViews, outcomes, observations, incompletes, labels, false, true)
+func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, error) {
+	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, flagged, baselines, targetView, oracleViews, currentLedger, outcomes, observations, incompletes, labels, false, true)
 	if err != nil {
 		return Finding{}, err
 	}

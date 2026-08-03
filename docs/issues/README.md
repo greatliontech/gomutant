@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [decision-build-locality](decision-build-locality.md) | decision-view build and body-hash abort campaign-wide on one target's persistent breakage; interlocked with folding the decision batch and the observed proof union into one pass | user decision |
 | [init-functions-as-subjects](init-functions-as-subjects.md) | init bodies (registry wiring - classic silent-fault carrier) are loudly excluded from mutation, not measured | init bodies become measurable subjects end-to-end, or the exclusion is settled permanent in the targeting spec |
 | [runtime-input-provenance](runtime-input-provenance.md) | Prove reusable runtime evidence across producer-created outputs | Observation-time object provenance distinguishes produced outputs from external inputs on every supported host |
 | [staged-snapshot-run-mode](staged-snapshot-run-mode.md) | Measure staged/index snapshots as clean content before commit | Gomutant can run against the staged index or another explicit content snapshot and produce clean evidence for it |
@@ -23,9 +24,3 @@ is deleted (git holds history).
   preparation phase is serial against an idle oracle pool; measured warm headroom is
   ~120-165s of a 388s campaign. *Lands: gomutant train, fourth item — after the
   kill-cache keying, on gofresh >= v0.43.4.*
-- **[observation-pass-cardinality](observation-pass-cardinality.md)** — gomutant constructs
-  a fresh gofresh View per target per step, multiplying the full observation pass ~270×
-  per campaign (~40% of measured warm wall-clock); one multi-subject View per phase is
-  evidence-identical by REQ-closure-batch-equivalence.
-  *Lands: the gomutant train — evidence-ranked first by wall-clock; ordering is the user's
-  call at train opening.*

@@ -3181,10 +3181,12 @@ func TestRunStaleReasonReusesTheRunsViews(t *testing.T) {
 }
 
 // A per-target freshness-proof failure is target-local (the exact rule
-// drift refusal follows, REQ-exec-quiescence): the target skips with the
-// cause on its decision line and the campaign completes — one target's
-// broken evidence never exits the run. The proof site retries once
-// (transient-load failure mode) before degrading.
+// drift refusal follows, REQ-exec-quiescence): a broken package faults
+// its module group out of the shared union pass instead of failing the
+// campaign, every faulted target funnels into its own bounded retry,
+// and the target whose breakage persists skips with the cause on its
+// decision line while a recovered sibling measures — one target's
+// broken evidence never exits the run.
 func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -3207,12 +3209,12 @@ func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decisions []RunDecision
+	var attempts []string
 	findings, err := tr.Run(context.Background(), targets, Options{
 		Budget: 1,
 		// Decisions emit after the prepare loop: restoring here puts the
 		// byte-identical tree back before measurement and revalidation,
-		// so the induced failure stays scoped to the second target's
-		// proof construction.
+		// so the induced failure stays scoped to proof construction.
 		Decision: func(d RunDecision) {
 			decisions = append(decisions, d)
 			if d.Symbol == targets[1].Symbol {
@@ -3221,11 +3223,24 @@ func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 				}
 			}
 		},
-		// After the first target's proof capture, break the SECOND
-		// target's package so its producer-view build fails (twice —
-		// the deletion persists through the bounded retry).
-		producer: func(symbol string) {
-			if symbol == targets[0].Symbol {
+		proofAttempt: func(symbol string, attempt int) {
+			attempts = append(attempts, fmt.Sprintf("%s@%d", symbol, attempt))
+			switch {
+			case symbol == "" && attempt == 1:
+				// Break one package before the union pass: the fixture
+				// is one module, so the whole group faults and both
+				// targets funnel into their bounded retries.
+				if rmErr := os.Remove(libPath); rmErr != nil {
+					t.Fatal(rmErr)
+				}
+			case symbol == targets[0].Symbol && attempt == 2:
+				// The healthy target's retry finds the transient gone...
+				if wErr := os.WriteFile(libPath, libSource, 0o644); wErr != nil {
+					t.Fatal(wErr)
+				}
+			case symbol == targets[1].Symbol && attempt == 2:
+				// ...and the broken target's breakage persists through
+				// its retry.
 				if rmErr := os.Remove(libPath); rmErr != nil {
 					t.Fatal(rmErr)
 				}
@@ -3234,6 +3249,10 @@ func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("one target's proof failure escalated to a campaign abort: %v", err)
+	}
+	wantAttempts := []string{"@1", targets[0].Symbol + "@2", targets[1].Symbol + "@2"}
+	if !slices.Equal(attempts, wantAttempts) {
+		t.Fatalf("proof attempts = %v, want %v (union, then each faulted target's retry)", attempts, wantAttempts)
 	}
 	bySym := map[string]Finding{}
 	for _, f := range findings {
@@ -3305,17 +3324,20 @@ func TestFreshnessProofRetriesOnceBeforeSkipping(t *testing.T) {
 	}
 }
 
-// Cancellation of the campaign itself during a proof build stays an
-// abort — and the error keeps its target-naming wrap, so the caller
-// learns which subject's view was in flight (REQ-exec-quiescence's
-// legibility arm; the skip degrade is only for target-local conditions
-// under a live campaign).
+// Cancellation of the campaign itself during proof construction stays
+// an abort with a legible name (REQ-exec-quiescence's legibility arm;
+// the skip degrade is only for target-local conditions under a live
+// campaign): the shared union pass names the union and its subject
+// count — every subject is in flight — and a faulted target's bounded
+// retry names the exact subject whose view was being built.
 func TestFreshnessProofCancellationAbortsWithNamedTarget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds producer views")
 	}
-	tr := fixtureTree(t)
 	target := Target{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}}
+
+	// Cancellation at the union pass names the union.
+	tr := fixtureTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	findings, err := tr.Run(ctx, []Target{target}, Options{
 		Budget:       1,
@@ -3327,8 +3349,43 @@ func TestFreshnessProofCancellationAbortsWithNamedTarget(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error class lost: %v", err)
 	}
+	if !strings.Contains(err.Error(), "freshness proofs (union over") {
+		t.Fatalf("cancellation during the union pass lost its union-naming wrap: %v", err)
+	}
+
+	// Cancellation inside a faulted target's retry names the target.
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	retryTree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainPath := filepath.Join(tmp, "plain", "plain.go")
+	retryCtx, retryCancel := context.WithCancel(context.Background())
+	defer retryCancel()
+	findings, err = retryTree.Run(retryCtx, []Target{target}, Options{
+		Budget: 1,
+		proofAttempt: func(symbol string, attempt int) {
+			if attempt == 1 {
+				// Fault the union so the bounded retry runs at all.
+				if rmErr := os.Remove(plainPath); rmErr != nil {
+					t.Fatal(rmErr)
+				}
+				return
+			}
+			retryCancel()
+		},
+	})
+	if err == nil || findings != nil {
+		t.Fatalf("canceled campaign completed: findings %v, err %v", findings, err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error class lost: %v", err)
+	}
 	if !strings.Contains(err.Error(), "freshness proof for target "+target.Symbol) {
-		t.Fatalf("cancellation during the proof build lost its target-naming wrap: %v", err)
+		t.Fatalf("cancellation during the retry lost its target-naming wrap: %v", err)
 	}
 }
 
@@ -3355,11 +3412,12 @@ func TestFreshnessProofSkipDoesNotEnrollItsModules(t *testing.T) {
 	}
 	findings, err := tr.Run(context.Background(), targets, Options{
 		Budget: 1,
-		// Break the SECOND target's module after the first's proof
-		// capture — and never restore: with the broken module never
+		// Break the SECOND target's module before the union pass — and
+		// never restore: its own module group faults while the sibling
+		// member's group builds, and with the broken module never
 		// enrolled, final validation covers only the measured member.
-		producer: func(symbol string) {
-			if symbol == targets[0].Symbol {
+		proofAttempt: func(symbol string, attempt int) {
+			if symbol == "" && attempt == 1 {
 				if rmErr := os.Remove(filepath.Join(tmp, "root.go")); rmErr != nil {
 					t.Fatal(rmErr)
 				}
@@ -3378,6 +3436,43 @@ func TestFreshnessProofSkipDoesNotEnrollItsModules(t *testing.T) {
 	}
 	if healthy := bySym[targets[0].Symbol]; healthy.Skipped != "" || healthy.Generated == 0 {
 		t.Fatalf("sibling member did not measure: %+v", healthy)
+	}
+}
+
+// The strict view build refuses an unresolvable symbol with an error —
+// never a silently smaller set: every strict caller indexes the result
+// by the symbols it asked for, so a dropped symbol would surface as a
+// nil dereference far from its cause. (The union build is the one
+// tolerant path; its faults are recorded per symbol and re-checked at
+// narrowing time.)
+func TestStrictViewBuildRefusesUnresolvableSymbol(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds views")
+	}
+	tr := fixtureTree(t)
+	if _, err := tr.newSubjectViews(context.Background(), []string{"example.com/fixture/nosuchpackage.F"}); err == nil {
+		t.Fatal("strict view build tolerated an unresolvable symbol, want refusal")
+	}
+}
+
+// A canceled campaign's proof abort keeps both its legibility wrap and
+// the cancellation class even when the underlying error is a stored
+// union fault predating the cancellation (the bounded retry is skipped
+// on a canceled campaign, so the fault alone carries no cancellation).
+// Only an asynchronous cancellation landing between one target's
+// context checks reaches that shape — no test seam sits inside the
+// window — so the construction is pinned directly.
+func TestProofAbortErrorKeepsCancellationClass(t *testing.T) {
+	staleFault := errors.New("go list: exit status 1")
+	err := proofAbortError("example.com/fixture/lib.Add", []string{"example.com/fixture/lib.TestAdd"}, staleFault, context.Canceled)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("stored-fault abort lost the cancellation class: %v", err)
+	}
+	if !errors.Is(err, staleFault) {
+		t.Fatalf("abort lost the stored fault: %v", err)
+	}
+	if !strings.Contains(err.Error(), "freshness proof for target example.com/fixture/lib.Add (oracle example.com/fixture/lib.TestAdd)") {
+		t.Fatalf("abort lost its target-naming wrap: %v", err)
 	}
 }
 
