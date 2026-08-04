@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [oracle-deadline-aborts-run-nothing-persisted](oracle-deadline-aborts-run-nothing-persisted.md) | one mutant's oracle deadline aborts the whole run, and zero completed verdicts are persisted mid-run — a 5.5h campaign lost to one slow mutant | a run survives any single oracle outcome and flushes completed targets as it goes |
 | [decision-build-locality](decision-build-locality.md) | decision-view build and body-hash abort campaign-wide on one target's persistent breakage; interlocked with folding the decision batch and the observed proof union into one pass | user decision |
 | [init-functions-as-subjects](init-functions-as-subjects.md) | init bodies (registry wiring - classic silent-fault carrier) are loudly excluded from mutation, not measured | init bodies become measurable subjects end-to-end, or the exclusion is settled permanent in the targeting spec |
 | [runtime-input-provenance](runtime-input-provenance.md) | Prove reusable runtime evidence across producer-created outputs | Observation-time object provenance distinguishes produced outputs from external inputs on every supported host |
