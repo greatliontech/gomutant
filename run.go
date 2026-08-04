@@ -1427,12 +1427,7 @@ func snapshotTargets(targets []Target) []Target {
 func snapshotFindings(findings []Finding) []Finding {
 	snapshot := slices.Clone(findings)
 	for i := range snapshot {
-		snapshot[i].Labels = slices.Clone(snapshot[i].Labels)
-		snapshot[i].OracleEvidence = slices.Clone(snapshot[i].OracleEvidence)
-		snapshot[i].Operators = slices.Clone(snapshot[i].Operators)
-		snapshot[i].Survivors = slices.Clone(snapshot[i].Survivors)
-		snapshot[i].Attested = slices.Clone(snapshot[i].Attested)
-		snapshot[i].CandidateEvidence = slices.Clone(snapshot[i].CandidateEvidence)
+		snapshot[i] = cloneFinding(snapshot[i])
 	}
 	return snapshot
 }

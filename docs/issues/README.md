@@ -20,7 +20,6 @@ is deleted (git holds history).
 | [confirmation-ignores-stability-evidence](confirmation-ignores-stability-evidence.md) | every non-timeout kill re-executes solo/serially though oracle stability is already measured - the dominant run cost | gomutant train (concrete order in each doc), immediately after the pew bench evidence path |
 | [kill-cache-keying-asymmetry](kill-cache-keying-asymmetry.md) | kills are invalidated package-wide though they depend only on mutated code + killing-oracle content (~90% of a swept cache was carryable) | gomutant train (concrete order in each doc), immediately after the pew bench evidence path |
 | [silent-execution-no-progress](silent-execution-no-progress.md) | CLI emits nothing between the measure list and completion; library progress events are dropped | gomutant train (concrete order in each doc), immediately after the pew bench evidence path |
-| [store-update-reparses-whole-overlay](store-update-reparses-whole-overlay.md) | every finding commit re-parses the entire per-symbol overlay (O(overlay) per commit, quadratic campaigns), and bloat-era residue entries (447-886 MB each) pass the hygiene check forever | overlay reads per-symbol or cached per run, plus an entry-size/provenance quarantine |
 - **[pipeline-preparation-with-execution](pipeline-preparation-with-execution.md)** — Run's
   preparation phase is serial against an idle oracle pool; measured warm headroom is
   ~120-165s of a 388s campaign. *Lands: gomutant train, fourth item — after the

@@ -239,7 +239,25 @@ inherit soundly. Every other record — dirty-worktree measurements,
 unverifiable observations, machine-local input identities — lives in a
 machine-local overlay under the user cache directory keyed by the resolved
 module root, one atomically written entry per symbol; a malformed overlay entry
-is discarded, never surfaced — the overlay is a cache, not a record. A read
+is discarded, never surfaced — the overlay is a cache, not a record. An
+overlay entry larger than 64 MiB is discarded the same way, judged by the
+size of the content a read would consume (symlinks followed) before any of
+its bytes are read: a cache's cost discipline is a content discipline —
+healthy per-symbol evidence sits orders of magnitude under the ceiling, so
+only pathological residue such as the bloat of an abandoned format
+regression crosses it, and an eviction costs at most a re-measure, never a
+lost record of note. A merged
+read re-reads and re-parses only overlay entries whose stat identity — size
+and modification time of the content a read would consume — differs from the
+last parse the reading store holds, so a run's incremental commits re-parse
+only the entries that moved between commits, never the overlay's total
+bytes; the per-symbol entry layout exists exactly so an unchanged entry
+needs no re-read. Stat identity is deliberately approximate in the
+already-tolerated direction: a rewrite it cannot distinguish — same size,
+same modification time — serves the prior parse, a stale winner exactly like
+the install-order races above, costing at most a re-measure and never a
+wrong verdict, because the served record still carries and revalidates its
+own evidence. A read
 merges both layers with the overlay winning per symbol. Overlay-wins is
 install-order recency, not measurement recency: a crash between the repo write
 and the overlay delete — or a slower writer's post-lock overlay install racing
@@ -264,8 +282,14 @@ meaning repo, while MCP rows carry the layer explicitly.
 
 REQ-result-layers: enforced by `TestCommittableDrawsThePortableLine`,
 `TestStoreSplitsUpdatesAcrossLayers`,
-`TestStoreUpdateDecidesMembershipUnderTheDocumentLock`, and
-`TestRunCommandStatesMachineLocalRouting`.
+`TestStoreUpdateDecidesMembershipUnderTheDocumentLock`,
+`TestRunCommandStatesMachineLocalRouting`,
+`TestOverlayEvictsEntriesOverTheEvidenceCeiling`,
+`TestOverlayCeilingFollowsSymlinkedEntries`,
+`TestOverlayServesUnchangedEntriesWithoutReparsing`,
+`TestOverlayInstallWarmsTheParseCache`,
+`TestOverlayReloadTracksRewrittenAndDeletedEntries`, and
+`TestOverlayMergedViewIsIsolatedFromCallerMutation`.
 
 A survivor carries optional execution evidence — `never-executed`,
 `executed-and-passed`, or `unstable-oracle` per REQ-exec-survivor-evidence in

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
@@ -243,6 +244,26 @@ type Finding struct {
 	// was measured ("no oracle", "not a function - ..." with the methodology hint).
 	Cached  bool   `json:"-"`
 	Skipped string `json:"-"`
+}
+
+// cloneFinding returns a Finding sharing no mutable state with f, so an
+// in-place edit of one copy — an attestation appended into a shared
+// backing array, a survivor field rewritten — can never surface through
+// the other.
+func cloneFinding(f Finding) Finding {
+	f.Labels = slices.Clone(f.Labels)
+	f.OracleEvidence = slices.Clone(f.OracleEvidence)
+	f.Operators = slices.Clone(f.Operators)
+	f.Survivors = slices.Clone(f.Survivors)
+	f.Attested = slices.Clone(f.Attested)
+	f.CandidateEvidence = slices.Clone(f.CandidateEvidence)
+	if f.CompartmentLedger != nil {
+		f.CompartmentLedger = &CompartmentLedger{
+			Declarations: slices.Clone(f.CompartmentLedger.Declarations),
+			FileHeaders:  slices.Clone(f.CompartmentLedger.FileHeaders),
+		}
+	}
+	return f
 }
 
 // Open returns the finding's open survivors — survivors less attested

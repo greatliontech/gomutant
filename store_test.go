@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -181,6 +182,298 @@ func TestStoreSplitsUpdatesAcrossLayers(t *testing.T) {
 	repoCount, localOnly, err := store.Committability(ctx)
 	if err != nil || repoCount != 1 || localOnly != 0 {
 		t.Fatalf("committability = %d/%d, %v", repoCount, localOnly, err)
+	}
+}
+
+// survivorFinding is a machine-local (dirty) finding carrying one open
+// survivor, satisfying the candidate-conservation equations.
+func survivorFinding(symbol string) Finding {
+	return storeFinding(symbol, func(f *Finding) {
+		f.Dirty = true
+		f.Killed = 0
+		f.Labels = []string{"requirement"}
+		f.Survivors = []Survivor{{Position: "a.go:1:1", Operator: "zero return"}}
+		f.Operators = []OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}}
+		f.Attested = []Attestation{{Position: "a.go:1:1", Operator: "zero return", Reason: "equivalent"}}
+	})
+}
+
+// paddedEntryDoc builds a valid single-finding overlay document padded
+// with an unknown field (dropped per REQ-result-tolerant) to exactly
+// size bytes.
+func paddedEntryDoc(t *testing.T, symbol string, size int) []byte {
+	t.Helper()
+	doc, err := Export([]Finding{survivorFinding(symbol)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := size - (len(doc) - 1) - len(`,"pad":"`) - len(`"}`)
+	if pad < 0 {
+		t.Fatalf("padding target %d smaller than the base document", size)
+	}
+	return []byte(string(doc[:len(doc)-1]) + `,"pad":"` + strings.Repeat("A", pad) + `"}`)
+}
+
+// writePaddedEntry writes a padded valid entry at the symbol's overlay
+// path.
+func writePaddedEntry(t *testing.T, store *Store, symbol string, size int) {
+	t.Helper()
+	if err := os.MkdirAll(store.overlayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.entryPath(symbol), paddedEntryDoc(t, symbol, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// loadSymbols maps the merged view by symbol.
+func loadSymbols(t *testing.T, store *Store) map[string]Finding {
+	t.Helper()
+	merged, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make(map[string]Finding, len(merged))
+	for _, f := range merged {
+		out[f.Symbol] = f
+	}
+	return out
+}
+
+// An overlay entry over the evidence ceiling is discarded like a
+// malformed one — well-formed residue must not tax every later read —
+// while an entry exactly at the ceiling remains served evidence
+// (REQ-result-layers).
+func TestOverlayEvictsEntriesOverTheEvidenceCeiling(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePaddedEntry(t, store, "p.Over", overlayEntryCeiling+1)
+	writePaddedEntry(t, store, "p.At", overlayEntryCeiling)
+
+	got := loadSymbols(t, store)
+	if _, ok := got["p.Over"]; ok {
+		t.Fatal("an over-ceiling overlay entry was served")
+	}
+	if _, ok := got["p.At"]; !ok {
+		t.Fatal("an at-ceiling overlay entry was evicted")
+	}
+	if _, err := os.Stat(store.entryPath("p.Over")); !os.IsNotExist(err) {
+		t.Fatalf("the over-ceiling entry survived on disk: %v", err)
+	}
+	if _, err := os.Stat(store.entryPath("p.At")); err != nil {
+		t.Fatalf("the at-ceiling entry left disk: %v", err)
+	}
+}
+
+// The ceiling judges the content a read would consume: a small symlink
+// at an over-ceiling target is evicted unread, never parsed and served
+// (REQ-result-layers).
+func TestOverlayCeilingFollowsSymlinkedEntries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on windows")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "target.json")
+	if err := os.WriteFile(target, paddedEntryDoc(t, "p.Linked", overlayEntryCeiling+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(store.overlayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, store.entryPath("p.Linked")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loadSymbols(t, store)["p.Linked"]; ok {
+		t.Fatal("an over-ceiling symlinked entry was parsed and served")
+	}
+	if _, err := os.Lstat(store.entryPath("p.Linked")); !os.IsNotExist(err) {
+		t.Fatalf("the over-ceiling symlinked entry survived in the overlay: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("eviction reached through the symlink to its target: %v", err)
+	}
+}
+
+// An overlay entry whose file identity is unchanged is served without a
+// re-read: same-size corruption behind an unchanged stat still serves
+// the prior parse (the tolerated stale-winner shape), and a moved stat
+// re-reads and judges the current bytes (REQ-result-layers).
+func TestOverlayServesUnchangedEntriesWithoutReparsing(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+		return []Finding{survivorFinding("p.A")}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loadSymbols(t, store)["p.A"]; !ok {
+		t.Fatal("installed overlay entry not served")
+	}
+
+	entry := store.entryPath("p.A")
+	info, err := os.Stat(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	garbage := strings.Repeat("X", int(info.Size()))
+	if err := os.WriteFile(entry, []byte(garbage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(entry, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := loadSymbols(t, store)["p.A"]; !ok || got.BodyHash != "h" {
+		t.Fatalf("unchanged-stat entry not served from the prior parse: %+v ok=%v", got, ok)
+	}
+	if data, err := os.ReadFile(entry); err != nil || string(data) != garbage {
+		t.Fatalf("unchanged-stat entry was re-read and judged: %v", err)
+	}
+
+	if err := os.Chtimes(entry, info.ModTime().Add(2*time.Second), info.ModTime().Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loadSymbols(t, store)["p.A"]; ok {
+		t.Fatal("a moved stat served the stale parse instead of judging the current bytes")
+	}
+	if _, err := os.Stat(entry); !os.IsNotExist(err) {
+		t.Fatalf("the malformed re-read entry survived on disk: %v", err)
+	}
+}
+
+// An install primes the parse cache with exactly the bytes it wrote, so
+// a run's own incremental commits never re-parse their own installs
+// (REQ-result-layers).
+func TestOverlayInstallWarmsTheParseCache(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) {
+		served := survivorFinding("p.A")
+		served.Cached = true
+		return []Finding{served}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	entry := store.entryPath("p.A")
+	info, err := os.Stat(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entry, []byte(strings.Repeat("X", int(info.Size()))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(entry, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := loadSymbols(t, store)["p.A"]
+	if !ok || got.BodyHash != "h" {
+		t.Fatalf("first read after install re-parsed instead of serving the install's parse: %+v ok=%v", got, ok)
+	}
+	// The warm entry mirrors a parse of the written bytes: run metadata
+	// like the served-from-cache marker never survives persistence.
+	if got.Cached {
+		t.Fatal("never-persisted run metadata served from the install-warmed parse")
+	}
+}
+
+// The directory listing stays the membership authority over the parse
+// cache: a rewritten entry serves its current bytes and a deleted entry
+// leaves the merged view (REQ-result-layers).
+func TestOverlayReloadTracksRewrittenAndDeletedEntries(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) {
+		return []Finding{survivorFinding("p.A")}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loadSymbols(t, store)["p.A"]; !ok {
+		t.Fatal("installed overlay entry not served")
+	}
+
+	rewritten := survivorFinding("p.A")
+	rewritten.BodyHash = "h2"
+	doc, err := Export([]Finding{rewritten})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.entryPath("p.A"), doc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadSymbols(t, store)["p.A"]; got.BodyHash != "h2" {
+		t.Fatalf("rewritten entry served a stale parse: %+v", got)
+	}
+
+	if err := os.Remove(store.entryPath("p.A")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loadSymbols(t, store)["p.A"]; ok {
+		t.Fatal("deleted entry served from the parse cache")
+	}
+}
+
+// A caller's in-place edit of a merged view never alters what a later
+// read serves: an aborted update's mutations — a rewritten survivor, an
+// attestation appended into a shared backing array — must not surface
+// as persisted evidence (REQ-result-layers, REQ-attest-survivor).
+func TestOverlayMergedViewIsIsolatedFromCallerMutation(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+		return []Finding{survivorFinding("p.A")}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	abort := fmt.Errorf("abort after mutating the merged view")
+	if err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
+		for i := range all {
+			if all[i].Symbol == "p.A" {
+				all[i].Labels[0] = "corrupted"
+				all[i].OracleEvidence[0].Symbol = "corrupted"
+				all[i].Operators[0].Operator = "corrupted"
+				all[i].Survivors[0].Operator = "corrupted"
+				all[i].Attested[0].Reason = "corrupted"
+			}
+		}
+		return nil, abort
+	}); err != abort {
+		t.Fatalf("aborted update returned %v", err)
+	}
+	got, ok := loadSymbols(t, store)["p.A"]
+	if !ok {
+		t.Fatal("finding lost after aborted update")
+	}
+	intact := got.Labels[0] == "requirement" && got.OracleEvidence[0].Symbol == "p.ATest" &&
+		got.Operators[0].Operator == "zero return" && got.Survivors[0].Operator == "zero return" &&
+		got.Attested[0].Reason == "equivalent"
+	if !intact {
+		t.Fatalf("aborted update's mutations surfaced in a later read: %+v", got)
 	}
 }
 

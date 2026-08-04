@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -29,7 +31,36 @@ type Store struct {
 	path       string
 	moduleDir  string
 	overlayDir string
+
+	// mu guards the stat-keyed overlay parse cache. The overlay's
+	// per-symbol layout makes each entry independently cacheable: a read
+	// serves an entry's cached parse while its file's size and mtime are
+	// unchanged, so a run's incremental commits re-parse only what moved
+	// since the previous read instead of the whole overlay
+	// (REQ-result-layers). Cached findings are served as clones — a
+	// caller's in-place edit of a merged view must never leak into a
+	// later read. The residual stat-key race (an entry replaced with
+	// same-size content within mtime granularity) serves a stale parse,
+	// which is the overlay's already-tolerated stale-winner shape: it
+	// costs a re-measure, never a wrong verdict.
+	mu    sync.Mutex
+	cache map[string]overlayCacheEntry
 }
+
+// overlayCacheEntry is one overlay file's cached parse, valid while the
+// file's stat identity is unchanged.
+type overlayCacheEntry struct {
+	size    int64
+	modTime time.Time
+	finding Finding
+}
+
+// overlayEntryCeiling is the overlay's evidence-size ceiling
+// (REQ-result-layers): an entry larger than this is discarded at stat
+// time, before any read — orders of magnitude above healthy evidence,
+// so only a format regression's residue ever crosses it, and eviction
+// costs at most a re-measure.
+const overlayEntryCeiling = 64 << 20
 
 // OpenStore opens the two-layer store for the findings document at path
 // inside the module rooted at moduleDir.
@@ -48,7 +79,7 @@ func OpenStore(path, moduleDir string) (*Store, error) {
 	}
 	key := sha256.Sum256([]byte(abs))
 	overlay := filepath.Join(cache, "gomutant", "repos", hex.EncodeToString(key[:12]), "findings")
-	return &Store{path: path, moduleDir: abs, overlayDir: overlay}, nil
+	return &Store{path: path, moduleDir: abs, overlayDir: overlay, cache: map[string]overlayCacheEntry{}}, nil
 }
 
 // Committable reports whether a finding is portable repo evidence, and
@@ -86,9 +117,14 @@ func (s *Store) entryPath(symbol string) string {
 	return filepath.Join(s.overlayDir, hex.EncodeToString(sum[:12])+".json")
 }
 
-// loadOverlay reads every overlay entry; a malformed entry is skipped
-// with its removal attempted — the overlay is a cache, never a record
-// of note.
+// loadOverlay reads every overlay entry through the stat-keyed parse
+// cache; a malformed or over-ceiling entry is skipped with its removal
+// attempted — the overlay is a cache, never a record of note, and its
+// cost discipline is its content discipline (REQ-result-layers). An
+// over-ceiling entry is judged by stat alone, so its bytes are never
+// read; the directory listing is the membership authority, so a cached
+// parse whose file vanished or changed is dropped, re-parsed, or
+// retained unserved (a transient stat failure), never served.
 func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 	entries, err := os.ReadDir(s.overlayDir)
 	if os.IsNotExist(err) {
@@ -97,6 +133,9 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	retained := make(map[string]bool, len(entries))
 	var out []Finding
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
@@ -105,16 +144,44 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(s.overlayDir, entry.Name()))
+		name := entry.Name()
+		path := filepath.Join(s.overlayDir, name)
+		// os.Stat, not entry.Info(): the ceiling and the cache key must
+		// judge the content a read would consume, so a symlinked entry is
+		// sized and keyed by its target, never by the link.
+		info, err := os.Stat(path)
+		if err != nil {
+			// The entry may still exist (transient stat failure); keep its
+			// warm parse for the next read rather than sweeping it.
+			retained[name] = true
+			continue
+		}
+		if info.Size() > overlayEntryCeiling {
+			_ = os.Remove(path)
+			continue
+		}
+		if cached, ok := s.cache[name]; ok && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
+			retained[name] = true
+			out = append(out, cloneFinding(cached.finding))
+			continue
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
 		findings, err := ParseFindings(data)
 		if err != nil || len(findings) != 1 {
-			_ = os.Remove(filepath.Join(s.overlayDir, entry.Name()))
+			_ = os.Remove(path)
 			continue
 		}
-		out = append(out, findings[0])
+		s.cache[name] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: findings[0]}
+		retained[name] = true
+		out = append(out, cloneFinding(findings[0]))
+	}
+	for name := range s.cache {
+		if !retained[name] {
+			delete(s.cache, name)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
 	return out, nil
@@ -182,7 +249,25 @@ func (s *Store) installEntry(f Finding) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, s.entryPath(f.Symbol))
+	// Warm the parse cache from the temp file's stat, taken before the
+	// rename so the key names exactly the bytes this install wrote: a
+	// run's own commits then never re-parse their own installs, and a
+	// concurrent writer's later replacement carries a different stat and
+	// re-parses as usual.
+	info, statErr := os.Stat(tmpPath)
+	if err := os.Rename(tmpPath, s.entryPath(f.Symbol)); err != nil {
+		return err
+	}
+	if statErr == nil {
+		// The cache must hold what a parse of the written bytes yields, so
+		// the never-persisted run metadata is zeroed before warming.
+		parsed := cloneFinding(f)
+		parsed.Cached, parsed.Skipped = false, ""
+		s.mu.Lock()
+		s.cache[filepath.Base(s.entryPath(f.Symbol))] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: parsed}
+		s.mu.Unlock()
+	}
+	return nil
 }
 
 // Update applies update to the merged layer view and writes the split
