@@ -64,7 +64,7 @@ func (s *Server) MCP() *mcp.Server {
 	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
-		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a document (gomutant's or stipulator's export), changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure, and each finished target commits incrementally so an interrupted run keeps completed targets. Survivors are findings awaiting disposition, never verdicts. Each mutant's oracle executes once, bracketing runtime-input observation. With a progress token: phase notifications plus a heartbeat. Preparation and decision streams leave the response when streamed; long lists cap with the remainder counted. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited); use the CLI for work that may exceed the MCP client's request timeout.",
+		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a targets document, changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure, and each finished target commits incrementally so an interrupted run keeps completed targets. Survivors are findings awaiting disposition, never verdicts. Each mutant's oracle executes once, bracketing runtime-input observation. With a progress token: phase notifications plus a heartbeat. Preparation and decision streams leave the response when streamed; long lists cap with the remainder counted. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited); use the CLI for work that may exceed the MCP client's request timeout.",
 	}, s.toolRun)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "discover",
@@ -310,7 +310,7 @@ func (s *Server) loadFindingsContext(ctx context.Context, override string) ([]go
 }
 
 type runIn struct {
-	TargetsPath      string   `json:"targets_path,omitempty" jsonschema:"path to a targets document (gomutant's format or stipulator's export); overrides discovery"`
+	TargetsPath      string   `json:"targets_path,omitempty" jsonschema:"path to a gomutant targets document; overrides discovery"`
 	TargetsJSON      string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
 	Changed          string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
 	Budget           int      `json:"budget,omitempty" jsonschema:"candidates per symbol; 0 means exhaustive"`

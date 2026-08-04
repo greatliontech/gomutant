@@ -223,7 +223,7 @@ disposition with its reason, and the per-operator disposition summary. A version
 it does not understand. This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
-stipulator recovering findings by label — consumes gomutant's contract, never
+a spec-driven producer recovering findings by label — consumes gomutant's contract, never
 its internal store. A field that narrows reuse — candidate evidence is the precedent — always
 rides a version bump, because field tolerance in an older consumer would
 otherwise serve the record with the narrowing silently dropped. A clean break

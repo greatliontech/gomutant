@@ -25,12 +25,10 @@ target says *what* to break and *what catches it*, never *how* to break it.
 **REQ-target-producers** (behavior): gomutant MUST reduce every source of
 targets to one internal model — auto-discovery, a config file, and an
 external producer's document are parsed onto the same target set, never three
-code paths downstream of the parse. A producer emits its own format and
-gomutant parses it; no producer is required to speak a gomutant-defined
-schema, and none is privileged. Stipulator is the reference external producer:
-it owns its binding-surface wire format while gomutant owns the strict adapter
-from that format, keeping the producer ignorant of mutation semantics while
-gomutant stays complete standalone.
+code paths downstream of the parse. An external producer emits the
+gomutant-owned config-file document below — one schema, one parse, no
+producer privileged over another — keeping producers ignorant of mutation
+semantics while gomutant stays complete standalone.
 
 The gomutant-owned config-file encoding is one valid UTF-8 JSON object with a required,
 non-null `targets` array. Each array entry is a non-null object with required
@@ -39,24 +37,6 @@ string array, and boolean `oracleExplicit`. Field spelling is exact and
 case-sensitive. Unknown or duplicate fields at
 either object level, null structural fields, and trailing JSON are malformed
 and rejected rather than silently changing the target or oracle.
-
-**REQ-target-stipulator** (behavior): The Stipulator adapter MUST use the
-version-matched Stipulator binding-surface Go wire module to parse and validate
-`stipulator.binding-surfaces/v1` reports before reducing compatible surfaces to
-the ordinary target model. Any format, ProtoJSON, required-field, ordering,
-uniqueness, value-domain, or identifier error from the producer-owned module
-refuses the whole document rather than being repaired or partially mapped. A
-valid empty report maps to an empty target set.
-
-A compatible surface and every one of its bindings use backend `go`; an
-incompatible surface refuses the document with its identifier, backend, and
-symbol rather than being silently omitted. Its implementation symbol becomes
-the target symbol. The distinct sorted symbols of both binding roles become
-the explicit oracle, including an explicitly empty oracle. Its sorted labels
-are the raw requirement identifiers plus
-`stipulator:surface:<surface-id>`; labels form a distinct set sorted
-lexicographically over UTF-8 bytes. The producer document supplies no build
-flags, race mode, operators, budgets, timeouts, or other run-wide policy.
 
 **REQ-target-oracle** (behavior): A target's oracle MUST be the sole arbiter
 of a kill: a mutant of the target is killed only when a test in that oracle
@@ -80,8 +60,8 @@ admitting it would derive an oracle that executes nothing and every mutant
 would survive an empty run) — so a bare list of symbols, or whole-package
 discovery, is a usable run without a caller enumerating tests. An explicit
 oracle overrides the default — including an explicitly *empty* one: a
-producer whose document is a complete statement of who vouches (stipulator's
-export) marks its oracles explicit, and an unwitnessed target then reports
+producer whose document is a complete statement of who vouches marks its
+oracles explicit, and an unwitnessed target then reports
 as measurable by nothing rather than inheriting package tests it never
 claimed, which would launder unbound kills into the producer's labels.
 A derived oracle is a measurement pin only if it is provably fresh: the
@@ -142,10 +122,7 @@ every finding it produces, unmodified and uninterpreted, so a finding can be
 grouped by a caller's own vocabulary. gomutant reads no meaning from a label;
 a requirement identifier, a subsystem name, or a ticket number are all just
 strings it groups and prints by, which is what keeps the tool domain-agnostic
-while letting a spec-driven producer recover requirement-scoped findings. A
-caller correlating Stipulator results accepts a finding for a current binding
-relationship only when its labels contain that relationship's current
-`stipulator:surface:<surface-id>` value.
+while letting a spec-driven producer recover findings in its own vocabulary.
 
 **REQ-target-inspection** (behavior): Target inspection MUST render the exact
 effective target set a run would consume without running mutants: each symbol,

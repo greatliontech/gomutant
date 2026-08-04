@@ -171,7 +171,7 @@ func TestToolRunWholeTreePrunesAlongsideCurrentMeasurement(t *testing.T) {
 }
 
 // TestToolRunFindingsAttest drives the measuring loop end to end over the
-// protocol handlers (REQ-mcp-tools, REQ-mcp-findings-doc): a stipulator-form
+// protocol handlers (REQ-mcp-tools, REQ-mcp-findings-doc): a producer-form
 // inline document measures with labels riding through, the findings document
 // lands on disk, the findings tool groups by label, attest closes a
 // survivor, and a rerun serves from cache with the disposition intact.
@@ -183,7 +183,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	ctx := context.Background()
 
 	_, out, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON:      `{"surfaces":[{"id":"0f78123e19ecd70d242eb3a9d66d61b39aef6a22ce29e5c58a692e66813aabd9","backend":"go","symbol":"example.com/fixture/lib.Weak","requirementIds":["REQ-weak"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"example.com/fixture/lib.TestWeak"}]}],"format":"stipulator.binding-surfaces/v1"}`,
+		TargetsJSON:      `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"labels":["REQ-weak"],"oracleExplicit":true}]}`,
 		Budget:           1,
 		OracleTimeoutSec: 120,
 	})
@@ -259,7 +259,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 
 	_, out2, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON:      `{"surfaces":[{"id":"88f70f1253489fdbb40ad694ce44c2a43e63678b133980bcd7773ea5f73302eb","backend":"go","symbol":"example.com/fixture/lib.Weak","requirementIds":["REQ-current"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"example.com/fixture/lib.TestWeak"}]}],"format":"stipulator.binding-surfaces/v1"}`,
+		TargetsJSON:      `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"labels":["REQ-current","run:current"],"oracleExplicit":true}]}`,
 		Budget:           1,
 		OracleTimeoutSec: 120,
 	})
@@ -271,7 +271,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 	if !slices.Equal(out2.Findings[0].Labels, []string{
 		"REQ-current",
-		"stipulator:surface:88f70f1253489fdbb40ad694ce44c2a43e63678b133980bcd7773ea5f73302eb",
+		"run:current",
 	}) {
 		t.Fatalf("cached finding labels = %v, want current surface labels", out2.Findings[0].Labels)
 	}
@@ -436,15 +436,15 @@ func TestToolDiscover(t *testing.T) {
 		explicit.OracleSets[explicit.Targets[0].OracleSet].Oracle[0] != "example.com/fixture/lib.TestAdd" || explicit.Targets[0].Labels[0] != "a" {
 		t.Fatalf("explicit discover = %+v", explicit)
 	}
-	_, stipulatorEmpty, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"surfaces":[{"id":"7e1693c30271ffb09fdb6d8a42d84fe07ab2a7c51a7c1d1232caebe220fb6885","backend":"go","symbol":"example.com/fixture/lib.Add","requirementIds":["REQ-empty"],"bindings":[]}],"format":"stipulator.binding-surfaces/v1"}`})
+	_, explicitEmpty, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"labels":["REQ-empty"],"oracleExplicit":true}]}`})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stipulatorEmpty.Targets) != 1 || !stipulatorEmpty.Targets[0].OracleExplicit ||
-		stipulatorEmpty.Targets[0].Skipped != "no oracle" ||
-		len(stipulatorEmpty.OracleSets[stipulatorEmpty.Targets[0].OracleSet].Oracle) != 0 ||
-		stipulatorEmpty.Targets[0].Labels[0] != "REQ-empty" {
-		t.Fatalf("Stipulator explicit-empty discover = %+v", stipulatorEmpty)
+	if len(explicitEmpty.Targets) != 1 || !explicitEmpty.Targets[0].OracleExplicit ||
+		explicitEmpty.Targets[0].Skipped != "no oracle" ||
+		len(explicitEmpty.OracleSets[explicitEmpty.Targets[0].OracleSet].Oracle) != 0 ||
+		explicitEmpty.Targets[0].Labels[0] != "REQ-empty" {
+		t.Fatalf("Stipulator explicit-empty discover = %+v", explicitEmpty)
 	}
 	encoded, err := json.Marshal(out)
 	if err != nil {

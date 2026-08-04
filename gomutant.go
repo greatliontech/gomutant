@@ -487,17 +487,8 @@ func splitTestSymbol(symbol string) (pkg, fn string) {
 }
 
 // LoadTargets parses a targets document of any producer gomutant understands
-// (REQ-target-producers), sniffed by Stipulator's format field.
+// (REQ-target-producers).
 func LoadTargets(data []byte) ([]Target, error) {
-	var probe struct {
-		Format *string `json:"format"`
-	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return nil, fmt.Errorf("gomutant: parse targets document: %w", err)
-	}
-	if probe.Format != nil {
-		return ParseStipulatorTargets(data)
-	}
 	return ParseTargets(data)
 }
 

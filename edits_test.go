@@ -216,12 +216,12 @@ func TestUpdateDocument(t *testing.T) {
 }
 
 // TestLoadTargetsSniffs pins the producer sniffer (REQ-target-producers):
-// stipulator's export and gomutant's own document both load through one
+// an external producer's document and a hand-written one both load through one
 // entry point, keyed by the producer's format field.
 func TestLoadTargetsSniffs(t *testing.T) {
-	st, err := LoadTargets([]byte(`{"surfaces":[{"id":"ed0330a6f616587e4597de19c3b9681a255f452e5c1eeee96860aab92f4997f9","backend":"go","symbol":"p.F","requirementIds":["REQ-a"],"bindings":[{"backend":"go","role":"BINDING_ROLE_TESTS","symbol":"p.TestF"}]}],"format":"stipulator.binding-surfaces/v1"}`))
+	st, err := LoadTargets([]byte(`{"targets":[{"symbol":"p.F","oracle":["p.TestF"],"labels":["REQ-a"],"oracleExplicit":true}]}`))
 	if err != nil || len(st) != 1 || st[0].Oracle[0] != "p.TestF" || st[0].Labels[0] != "REQ-a" {
-		t.Fatalf("stipulator export: %+v %v", st, err)
+		t.Fatalf("producer document: %+v %v", st, err)
 	}
 	own, err := LoadTargets([]byte(`{"targets":[{"symbol":"p.F","oracle":["p.TestF"]}]}`))
 	if err != nil || len(own) != 1 || own[0].Oracle[0] != "p.TestF" {
