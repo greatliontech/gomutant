@@ -797,3 +797,42 @@ func TestRunMutantForgedBuildFailureOutputStaysAKill(t *testing.T) {
 		t.Fatal("no mutant was killed; the boolean flip should die printing the forged marker")
 	}
 }
+
+// A baseline probe that cannot complete within the oracle timeout
+// proves nothing about a package-scope failure: the candidate discards
+// with its diagnostic riding the candidate-local channel and the
+// campaign continues — the field shape where one slow probe aborted a
+// 5.5-hour run with "context deadline exceeded"
+// (REQ-exec-attribution's unclassifiable arm).
+func TestBaselineProbeTimeoutDiscardsAsUnclassifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	tr := fixtureTree(t)
+	ms, err := tr.Mutants("example.com/fixture/lib.StallGuard", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_BASELINE_STALL=1")
+	unclassifiable := 0
+	for _, m := range ms {
+		out, killer, _, incomplete, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
+			[]string{"example.com/fixture/lib"}, "^TestBaselineStall$", 4*time.Second, nil, moduleDir, packageDir, nil, env)
+		if err != nil {
+			t.Fatalf("mutant %s %s aborted the campaign: %v", m.Position, m.Operator, err)
+		}
+		if out == MutantDiscarded && strings.Contains(incomplete, "baseline probe exceeded the oracle timeout") {
+			if killer != "" {
+				t.Fatalf("unclassifiable discard carries killer %q", killer)
+			}
+			unclassifiable++
+		}
+	}
+	if unclassifiable == 0 {
+		t.Fatal("no mutant reached the stalling baseline probe; the zeroed StallGuard should")
+	}
+}

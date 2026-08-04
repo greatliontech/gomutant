@@ -317,7 +317,19 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		if mergeErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", mergeErr
 		}
-		return MutantDiscarded, "", state, mutantIncomplete, "", baseCtx.Err()
+		// A cancelled parent is campaign cancellation and stays fatal
+		// (REQ-exec-cancellation). The probe hitting the ORACLE timeout
+		// is a per-mutant outcome: the package-scope failure cannot be
+		// proven mutant-caused, so the candidate discards with its
+		// diagnostic riding the incomplete channel — never a kill, never
+		// a campaign abort (REQ-exec-attribution's noise arm; an abort
+		// that discards completed measurements is reserved for corrupted
+		// orchestration state).
+		if parent.Err() != nil {
+			return MutantDiscarded, "", state, mutantIncomplete, "", parent.Err()
+		}
+		diagnostic := fmt.Sprintf("unclassifiable mutant-run failure: the baseline probe exceeded the oracle timeout (%s), so the failure is not provably mutant-caused: %v: %s", timeout, runErr, tail(stderr.String()+stdout.String(), 400))
+		return MutantDiscarded, "", state, diagnostic, "", nil
 	}
 	if baseErr == nil {
 		baselineState, _, err := processObservationContext(ctx, baseTestlog, moduleDir, packageDir, "", env, capture, oracleBracket, oracleBracketReason)

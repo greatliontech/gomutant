@@ -79,3 +79,8 @@ func Guarded(n int) int {
 	}()
 	return <-ch
 }
+
+// StallGuard returns true; its zeroed mutant selects the fast
+// package-crash arm of TestBaselineStall while the unmutated baseline
+// probe stalls past the oracle timeout.
+func StallGuard() bool { return true }

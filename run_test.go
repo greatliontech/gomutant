@@ -4082,3 +4082,88 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 		t.Fatalf("unadoptable recorded manifest left the evidence reusable: %+v", stamped.TargetEvidence)
 	}
 }
+
+// Each execution window's findings COMMIT before the next window
+// dispatches, so an interrupted campaign keeps every earlier window's
+// verdicts instead of losing hours of completed work to one late abort
+// (REQ-exec-cancellation's incremental-commit clause).
+func TestRunCommitsEarlierWindowsBeforeLaterOnesDispatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	old := runWindowCandidates
+	runWindowCandidates = 1
+	t.Cleanup(func() { runWindowCandidates = old })
+	tree := fixtureTree(t)
+	targets := []Target{
+		{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}},
+		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+	}
+	var mu sync.Mutex
+	var events []string
+	findings, err := tree.Run(context.Background(), targets, Options{
+		Budget: 1, Jobs: 2,
+		Commit: func(f Finding) error {
+			mu.Lock()
+			events = append(events, "commit:"+f.Symbol)
+			mu.Unlock()
+			return nil
+		},
+		dispatched: func(symbol string, mi int) {
+			mu.Lock()
+			events = append(events, "dispatch:"+symbol)
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("findings = %+v", findings)
+	}
+	firstCommit := -1
+	var firstCommitted string
+	for i, e := range events {
+		if rest, ok := strings.CutPrefix(e, "commit:"); ok {
+			firstCommit, firstCommitted = i, rest
+			break
+		}
+	}
+	if firstCommit == -1 {
+		t.Fatalf("no commits observed: %v", events)
+	}
+	for i, e := range events {
+		if rest, ok := strings.CutPrefix(e, "dispatch:"); ok && rest != firstCommitted && i < firstCommit {
+			t.Fatalf("a later window dispatched before the first window committed: %v", events)
+		}
+	}
+}
+
+// A fully-cached run still owes the campaign epilogue — the closing
+// validation and its hook run even when no target re-measured. With
+// nothing produced the validation is vacuous, so the observable pin is
+// the epilogue firing at all; a drift with live producers keeps its own
+// pins in the drift tests (REQ-exec-quiescence).
+func TestRunFullyCachedStillRunsCampaignEpilogue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	tree := fixtureTree(t)
+	targets := []Target{{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}}}
+	first, err := tree.Run(context.Background(), targets, Options{Budget: 1, Jobs: 1})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("measuring run = %+v, %v", first, err)
+	}
+	second := fixtureTree(t)
+	fired := false
+	cached, err := second.Run(context.Background(), targets, Options{
+		Budget: 1, Jobs: 1, Prior: first,
+		afterExecution: func() { fired = true },
+	})
+	if err != nil || len(cached) != 1 || !cached[0].Cached {
+		t.Fatalf("cached run = %+v, %v, want a fully served target", cached, err)
+	}
+	if !fired {
+		t.Fatal("fully-cached run skipped the campaign epilogue")
+	}
+}

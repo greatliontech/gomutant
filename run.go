@@ -1053,147 +1053,31 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 	interner := &manifestInterner{byDigest: map[string]string{}}
 	type job struct{ wi, mi int }
-	jobCh := make(chan job)
-	poolCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var wg sync.WaitGroup
-	var errOnce sync.Once
-	var poolErr error
-	for range jobs {
-		if err := poolCtx.Err(); err != nil {
-			break
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := range jobCh {
-				if poolCtx.Err() != nil {
-					return
-				}
-				w := pending[j.wi]
-				m, runnable := w.candidates[j.mi].Mutant()
-				if !runnable {
-					continue
-				}
-				outcome, killer, state, incompleteReason, err := t.executeMutant(poolCtx, w, m, opts, runEnv)
-				if err != nil {
-					if poolCtx.Err() != nil {
-						return
-					}
-					errOnce.Do(func() {
-						poolErr = err
-						cancel()
-					})
-					return
-				}
-				observations[j.wi][j.mi] = interner.intern(state)
-				incompletes[j.wi][j.mi] = incompleteReason
-				killers[j.wi][j.mi] = killer
-				outcomes[j.wi][j.mi] = outcome
-			}
-		}()
+	// Execution proceeds in bounded target windows: each window's pool
+	// drains, its kills confirm serially against an idle pool, and its
+	// findings aggregate and COMMIT before the next window dispatches
+	// (REQ-exec-cancellation's incremental-commit clause). One
+	// campaign-global pool would hold every target's observations
+	// resident until the end and commit nothing for hours, so a single
+	// late abort cost the whole campaign's verdicts. Serial
+	// confirmation's isolation contract is "alone after the pool
+	// drains", which the per-window drain preserves.
+	windowBudget := jobs * 8
+	if windowBudget < 64 {
+		windowBudget = 64
 	}
-dispatching:
-	for wi := range pending {
-		for mi, candidate := range pending[wi].candidates {
-			if _, runnable := candidate.Mutant(); !runnable {
-				continue
-			}
-			if pending[wi].serve != nil && !pending[wi].flagged[mi] {
-				// A served record's covered candidates keep their recorded
-				// outcomes; only the flagged ones re-execute
-				// (REQ-result-stale).
-				continue
-			}
-			if pending[wi].extend != nil && mi < pending[wi].extendFrom {
-				// An extended record's measured prefix keeps its recorded
-				// outcomes; only the unmeasured suffix executes
-				// (REQ-mut-budget, REQ-result-stale's budget-extension
-				// carve-out).
-				continue
-			}
-			if pending[wi].grow != nil && !pending[wi].growSurvivors[mi] {
-				// A grown record's kills and discards stand — a grown oracle
-				// can only kill more — so only the recorded survivors
-				// re-execute, against the added tests alone
-				// (REQ-result-stale's growth carve-out).
-				continue
-			}
-			if opts.dispatched != nil {
-				opts.dispatched(pending[wi].candidates[mi].Symbol, mi)
-			}
-			select {
-			case jobCh <- job{wi, mi}:
-			case <-poolCtx.Done():
-				break dispatching
-			}
-		}
+	if runWindowCandidates > 0 {
+		windowBudget = runWindowCandidates
 	}
-	close(jobCh)
-	wg.Wait()
-	if poolErr != nil {
-		return nil, poolErr
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	// Serial kill confirmation (REQ-exec-attribution): a test-attributed
-	// or package-scope kill measured beside sibling mutants re-executes
-	// alone, and the serial execution is the scored one - outcome,
-	// observation, and candidate evidence replaced wholesale - so
-	// interference from a sibling never reads as a kill. Timeout kills
-	// are excluded: confirming one costs the full timeout again, and the
-	// hang bound is the caller's own budget - the named residual.
-	if jobs > 1 {
-		for wi := range pending {
-			for mi := range pending[wi].candidates {
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				if outcomes[wi][mi] != engine.MutantKilled || killers[wi][mi] == engine.TimeoutKiller {
-					continue
-				}
-				m, runnable := pending[wi].candidates[mi].Mutant()
-				if !runnable {
-					continue
-				}
-				outcome, killer, state, incomplete, err := t.executeMutant(ctx, pending[wi], m, opts, runEnv)
-				if err != nil {
-					return nil, err
-				}
-				outcomes[wi][mi] = outcome
-				killers[wi][mi] = killer
-				observations[wi][mi] = interner.intern(state)
-				incompletes[wi][mi] = incomplete
-			}
-		}
-	}
-	if opts.afterExecution != nil {
-		opts.afterExecution()
-	}
-	// A drifted producer view refuses target-locally, not campaign-wide:
-	// the per-target validations below decide which findings still bind,
-	// so a concurrent edit costs only the affected targets
-	// (REQ-exec-quiescence).
 	var treeDrift error
 	var drifted []TargetDrift
-	if err := views.validateProducers(ctx); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		treeDrift = err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	// Phase three, sequential: aggregate in target and mutant order.
 	// commitAndAttribute is the one epilogue every measured or spliced
-	// finding leaves phase three through: install, persist, and — when the
-	// evidence landed unverifiable under a package-derived oracle — emit the
-	// oracle-instability attribution (REQ-exec-oracle-guidance). One exit
-	// keeps the attribution structurally coupled to the commit: no serve arm
-	// can persist an unverifiable record silently.
+	// finding leaves aggregation through: install, persist, and — when
+	// the evidence landed unverifiable under a package-derived oracle —
+	// emit the oracle-instability attribution
+	// (REQ-exec-oracle-guidance). One exit keeps the attribution
+	// structurally coupled to the commit: no serve arm can persist an
+	// unverifiable record silently.
 	commitAndAttribute := func(ctx context.Context, f Finding, w work) error {
 		findings[w.target] = f
 		if err := commitFinding(ctx, repository, opts.Commit, f); err != nil {
@@ -1201,108 +1085,294 @@ dispatching:
 		}
 		return t.emitOracleGuidance(ctx, f, w, targets[w.target].Symbol, opts, runEnv, guidanceCache)
 	}
-	for wi, w := range pending {
+	for windowStart := 0; windowStart < len(pending); {
+		windowEnd := windowStart
+		for budget := 0; windowEnd < len(pending) && (budget == 0 || budget < windowBudget); windowEnd++ {
+			budget += len(pending[windowEnd].candidates)
+		}
+		jobCh := make(chan job)
+		poolCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		var wg sync.WaitGroup
+		var errOnce sync.Once
+		var poolErr error
+		for range jobs {
+			if err := poolCtx.Err(); err != nil {
+				break
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := range jobCh {
+					if poolCtx.Err() != nil {
+						return
+					}
+					w := pending[j.wi]
+					m, runnable := w.candidates[j.mi].Mutant()
+					if !runnable {
+						continue
+					}
+					outcome, killer, state, incompleteReason, err := t.executeMutant(poolCtx, w, m, opts, runEnv)
+					if err != nil {
+						if poolCtx.Err() != nil {
+							return
+						}
+						errOnce.Do(func() {
+							poolErr = err
+							cancel()
+						})
+						return
+					}
+					observations[j.wi][j.mi] = interner.intern(state)
+					incompletes[j.wi][j.mi] = incompleteReason
+					killers[j.wi][j.mi] = killer
+					outcomes[j.wi][j.mi] = outcome
+				}
+			}()
+		}
+	dispatching:
+		for wi := windowStart; wi < windowEnd; wi++ {
+			for mi, candidate := range pending[wi].candidates {
+				if _, runnable := candidate.Mutant(); !runnable {
+					continue
+				}
+				if pending[wi].serve != nil && !pending[wi].flagged[mi] {
+					// A served record's covered candidates keep their recorded
+					// outcomes; only the flagged ones re-execute
+					// (REQ-result-stale).
+					continue
+				}
+				if pending[wi].extend != nil && mi < pending[wi].extendFrom {
+					// An extended record's measured prefix keeps its recorded
+					// outcomes; only the unmeasured suffix executes
+					// (REQ-mut-budget, REQ-result-stale's budget-extension
+					// carve-out).
+					continue
+				}
+				if pending[wi].grow != nil && !pending[wi].growSurvivors[mi] {
+					// A grown record's kills and discards stand — a grown oracle
+					// can only kill more — so only the recorded survivors
+					// re-execute, against the added tests alone
+					// (REQ-result-stale's growth carve-out).
+					continue
+				}
+				if opts.dispatched != nil {
+					opts.dispatched(pending[wi].candidates[mi].Symbol, mi)
+				}
+				select {
+				case jobCh <- job{wi, mi}:
+				case <-poolCtx.Done():
+					break dispatching
+				}
+			}
+		}
+		close(jobCh)
+		wg.Wait()
+		if poolErr != nil {
+			return nil, poolErr
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if opts.aggregate != nil {
-			opts.aggregate()
-		}
-		f := &findings[w.target]
-		if w.serve != nil {
-			spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
-			if err != nil {
-				return nil, err
+		// Serial kill confirmation (REQ-exec-attribution): a test-attributed
+		// or package-scope kill measured beside sibling mutants re-executes
+		// alone, and the serial execution is the scored one - outcome,
+		// observation, and candidate evidence replaced wholesale - so
+		// interference from a sibling never reads as a kill. Timeout kills
+		// are excluded: confirming one costs the full timeout again, and the
+		// hang bound is the caller's own budget - the named residual.
+		if jobs > 1 {
+			for wi := windowStart; wi < windowEnd; wi++ {
+				for mi := range pending[wi].candidates {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+					if outcomes[wi][mi] != engine.MutantKilled || killers[wi][mi] == engine.TimeoutKiller {
+						continue
+					}
+					m, runnable := pending[wi].candidates[mi].Mutant()
+					if !runnable {
+						continue
+					}
+					outcome, killer, state, incomplete, err := t.executeMutant(ctx, pending[wi], m, opts, runEnv)
+					if err != nil {
+						return nil, err
+					}
+					outcomes[wi][mi] = outcome
+					killers[wi][mi] = killer
+					observations[wi][mi] = interner.intern(state)
+					incompletes[wi][mi] = incomplete
+				}
 			}
-			// The aggregated work item's retained observations are dead past
-			// this point; releasing them per item keeps the run's peak at the
-			// in-flight items rather than the whole campaign.
-			observations[wi] = nil
-			if err := w.producer.validateProducers(ctx); err != nil {
+		}
+		if windowEnd == len(pending) {
+			if opts.afterExecution != nil {
+				opts.afterExecution()
+			}
+			// A drifted producer view refuses target-locally, not
+			// campaign-wide: the per-target validations below decide which
+			// findings still bind, so a concurrent edit costs only the
+			// affected targets (REQ-exec-quiescence). The campaign-wide
+			// check runs once, after the last window's execution, exactly
+			// as it did before windows existed; earlier windows' commits
+			// are gated by their own per-target validations.
+			if err := views.validateProducers(ctx); err != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
-				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
-				continue
+				treeDrift = err
 			}
-			if err := commitAndAttribute(ctx, spliced, w); err != nil {
-				return nil, err
-			}
-			continue
 		}
-		if w.grow != nil {
-			grown, union, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
-			if err != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		// Phase three, per window and sequential: aggregate in target and
+		// mutant order and commit each finding before the next window
+		// dispatches.
+		for wi := windowStart; wi < windowEnd; wi++ {
+			w := pending[wi]
+			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			observations[wi] = nil
-			if err := w.producer.validateProducers(ctx); err != nil {
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
-				continue
+			if opts.aggregate != nil {
+				opts.aggregate()
 			}
-			// The grown record carries the current tree's evidence, so its
-			// commit and dirty provenance are recomputed like a fresh
-			// measure's rather than carried from the served record.
-			if err := t.stampProvenance(ctx, repository, w, &grown, union); err != nil {
-				return nil, err
-			}
-			// Advisory buckets re-derived honestly under the delta oracle:
-			// an added test executing a previously never-executed survivor
-			// upgrades its bucket; downgrades never happen — the recorded
-			// bucket was measured under the full oracle — and a
-			// divergence-stamped record's survivors were already classified
-			// unstable by the counts fold.
-			if !grown.TargetEvidence.RuntimeUnverifiable {
-				coverage, probed, err := t.oracleCoverage(ctx, w, opts, runEnv, coverageCache)
+			f := &findings[w.target]
+			if w.serve != nil {
+				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
 				if err != nil {
 					return nil, err
 				}
-				if probed {
-					coverPkg := w.targetView.subject.Package
-					for si := range grown.Survivors {
-						if grown.Survivors[si].Execution == "executed-and-passed" {
-							continue
-						}
-						file, line, col, ok := splitSurvivorPosition(grown.Survivors[si].Position)
-						if ok && coverage.Covered(coverPkg+"/"+file, line, col) {
-							grown.Survivors[si].Execution = "executed-and-passed"
+				// The aggregated work item's retained observations are dead past
+				// this point; releasing them per item keeps the run's peak at the
+				// in-flight items rather than the whole campaign.
+				observations[wi] = nil
+				if err := w.producer.validateProducers(ctx); err != nil {
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+					continue
+				}
+				if err := commitAndAttribute(ctx, spliced, w); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if w.grow != nil {
+				grown, union, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+				if err != nil {
+					return nil, err
+				}
+				observations[wi] = nil
+				if err := w.producer.validateProducers(ctx); err != nil {
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+					continue
+				}
+				// The grown record carries the current tree's evidence, so its
+				// commit and dirty provenance are recomputed like a fresh
+				// measure's rather than carried from the served record.
+				if err := t.stampProvenance(ctx, repository, w, &grown, union); err != nil {
+					return nil, err
+				}
+				// Advisory buckets re-derived honestly under the delta oracle:
+				// an added test executing a previously never-executed survivor
+				// upgrades its bucket; downgrades never happen — the recorded
+				// bucket was measured under the full oracle — and a
+				// divergence-stamped record's survivors were already classified
+				// unstable by the counts fold.
+				if !grown.TargetEvidence.RuntimeUnverifiable {
+					coverage, probed, err := t.oracleCoverage(ctx, w, opts, runEnv, coverageCache)
+					if err != nil {
+						return nil, err
+					}
+					if probed {
+						coverPkg := w.targetView.subject.Package
+						for si := range grown.Survivors {
+							if grown.Survivors[si].Execution == "executed-and-passed" {
+								continue
+							}
+							file, line, col, ok := splitSurvivorPosition(grown.Survivors[si].Position)
+							if ok && coverage.Covered(coverPkg+"/"+file, line, col) {
+								grown.Survivors[si].Execution = "executed-and-passed"
+							}
 						}
 					}
 				}
-			}
-			if err := commitAndAttribute(ctx, grown, w); err != nil {
-				return nil, err
-			}
-			// Evidence beats attestation: each shed disposition names its
-			// killer so the contradiction — a mutant judged equivalent was
-			// just distinguished — reaches a human (REQ-attest-survivor,
-			// REQ-result-stale's growth carve-out).
-			if opts.Contradiction != nil && len(shed) != 0 {
-				byIdentity, _ := candidateIdentityIndex(w.candidates)
-				for _, attestation := range shed {
-					killer := ""
-					if mi, ok := byIdentity[survivorKey{attestation.Position, attestation.Operator}]; ok {
-						killer = killers[wi][mi]
-					}
-					opts.Contradiction(AttestationContradiction{
-						Symbol: targets[w.target].Symbol, Position: attestation.Position,
-						Operator: attestation.Operator, Killer: killer, Reason: attestation.Reason,
-					})
+				if err := commitAndAttribute(ctx, grown, w); err != nil {
+					return nil, err
 				}
+				// Evidence beats attestation: each shed disposition names its
+				// killer so the contradiction — a mutant judged equivalent was
+				// just distinguished — reaches a human (REQ-attest-survivor,
+				// REQ-result-stale's growth carve-out).
+				if opts.Contradiction != nil && len(shed) != 0 {
+					byIdentity, _ := candidateIdentityIndex(w.candidates)
+					for _, attestation := range shed {
+						killer := ""
+						if mi, ok := byIdentity[survivorKey{attestation.Position, attestation.Operator}]; ok {
+							killer = killers[wi][mi]
+						}
+						opts.Contradiction(AttestationContradiction{
+							Symbol: targets[w.target].Symbol, Position: attestation.Position,
+							Operator: attestation.Operator, Killer: killer, Reason: attestation.Reason,
+						})
+					}
+				}
+				continue
 			}
-			continue
-		}
-		if w.extend != nil {
-			extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget)
+			if w.extend != nil {
+				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget)
+				if err != nil {
+					return nil, err
+				}
+				// Same release as the served branch: the splice is computed, the
+				// per-candidate observations are dead.
+				observations[wi] = nil
+				if err := w.producer.validateProducers(ctx); err != nil {
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+					continue
+				}
+				// Advisory execution buckets: a verifiable extension's suffix
+				// survivors earn theirs from the current probe like any measured
+				// run's, while carried prefix survivors keep their recorded
+				// buckets verbatim; a divergence-stamped extension's suffix
+				// survivors were already classified unstable by the splice.
+				if !extended.TargetEvidence.RuntimeUnverifiable {
+					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
+						return nil, err
+					}
+				}
+				if err := commitAndAttribute(ctx, extended, w); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			state, candidateEvidence, err := completedObservationUnion(ctx, t.dir, runEnv, w.baselines, w.candidates, outcomes[wi], observations[wi], incompletes[wi], nil)
 			if err != nil {
 				return nil, err
 			}
-			// Same release as the served branch: the splice is computed, the
+			// Same release as the served branch: the union is computed, the
 			// per-candidate observations are dead.
 			observations[wi] = nil
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			f.CandidateEvidence = candidateEvidence
+			targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, state)
+			if err != nil {
+				return nil, err
+			}
+			f.TargetEvidence = targetEvidence
+			f.OracleEvidence = oracleEvidence
+			f.CompartmentLedger = compartmentLedgerFromView(w.currentLedger)
 			if err := w.producer.validateProducers(ctx); err != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
@@ -1310,89 +1380,67 @@ dispatching:
 				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 				continue
 			}
-			// Advisory execution buckets: a verifiable extension's suffix
-			// survivors earn theirs from the current probe like any measured
-			// run's, while carried prefix survivors keep their recorded
-			// buckets verbatim; a divergence-stamped extension's suffix
-			// survivors were already classified unstable by the splice.
-			if !extended.TargetEvidence.RuntimeUnverifiable {
-				if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
-					return nil, err
-				}
-			}
-			if err := commitAndAttribute(ctx, extended, w); err != nil {
+			if err := t.stampProvenance(ctx, repository, w, f, state); err != nil {
 				return nil, err
 			}
-			continue
-		}
-		state, candidateEvidence, err := completedObservationUnion(ctx, t.dir, runEnv, w.baselines, w.candidates, outcomes[wi], observations[wi], incompletes[wi], nil)
-		if err != nil {
-			return nil, err
-		}
-		// Same release as the served branch: the union is computed, the
-		// per-candidate observations are dead.
-		observations[wi] = nil
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		f.CandidateEvidence = candidateEvidence
-		targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, state)
-		if err != nil {
-			return nil, err
-		}
-		f.TargetEvidence = targetEvidence
-		f.OracleEvidence = oracleEvidence
-		f.CompartmentLedger = compartmentLedgerFromView(w.currentLedger)
-		if err := w.producer.validateProducers(ctx); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
-			continue
-		}
-		if err := t.stampProvenance(ctx, repository, w, f, state); err != nil {
-			return nil, err
-		}
-		f.Operators = summarizeOperators(w.candidates, outcomes[wi])
-		for _, summary := range f.Operators {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			f.Discarded += summary.Discarded
-			f.Mutants += summary.Killed + summary.Survived
-			f.Killed += summary.Killed
-		}
-		for mi, candidate := range w.candidates {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			switch outcomes[wi][mi] {
-			case engine.MutantSurvived:
-				f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator})
-			}
-		}
-		if err := t.bucketSurvivorExecution(ctx, f, w, opts, runEnv, coverageCache, 0); err != nil {
-			return nil, err
-		}
-		// A re-measure with unchanged pins keeps prior attestations that
-		// still name the exact survivor; changed pins shed them, so every
-		// evidence version's equivalences are re-judged (REQ-attest-survivor).
-		if rec, ok := prior[targets[w.target].Symbol]; ok && sameAttestationPins(*rec, *f) {
-			open := map[survivorKey]bool{}
-			for _, s := range f.Survivors {
-				open[survivorKey{s.Position, s.Operator}] = true
-			}
-			for _, a := range rec.Attested {
+			f.Operators = summarizeOperators(w.candidates, outcomes[wi])
+			for _, summary := range f.Operators {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				if open[survivorKey{a.Position, a.Operator}] {
-					f.Attested = append(f.Attested, a)
+				f.Discarded += summary.Discarded
+				f.Mutants += summary.Killed + summary.Survived
+				f.Killed += summary.Killed
+			}
+			for mi, candidate := range w.candidates {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				switch outcomes[wi][mi] {
+				case engine.MutantSurvived:
+					f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator})
 				}
 			}
+			if err := t.bucketSurvivorExecution(ctx, f, w, opts, runEnv, coverageCache, 0); err != nil {
+				return nil, err
+			}
+			// A re-measure with unchanged pins keeps prior attestations that
+			// still name the exact survivor; changed pins shed them, so every
+			// evidence version's equivalences are re-judged (REQ-attest-survivor).
+			if rec, ok := prior[targets[w.target].Symbol]; ok && sameAttestationPins(*rec, *f) {
+				open := map[survivorKey]bool{}
+				for _, s := range f.Survivors {
+					open[survivorKey{s.Position, s.Operator}] = true
+				}
+				for _, a := range rec.Attested {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+					if open[survivorKey{a.Position, a.Operator}] {
+						f.Attested = append(f.Attested, a)
+					}
+				}
+			}
+			if err := commitAndAttribute(ctx, *f, w); err != nil {
+				return nil, err
+			}
 		}
-		if err := commitAndAttribute(ctx, *f, w); err != nil {
-			return nil, err
+		cancel()
+		windowStart = windowEnd
+	}
+	// A run with nothing pending — every target fully served, or no
+	// targets at all — still owes the campaign epilogue: a transient
+	// global drift no surviving target's evidence reflects is reported,
+	// never silently absorbed (REQ-exec-quiescence).
+	if len(pending) == 0 {
+		if opts.afterExecution != nil {
+			opts.afterExecution()
+		}
+		if err := views.validateProducers(ctx); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			treeDrift = err
 		}
 	}
 	moved, err := repository.headMovedContext(ctx)
@@ -1431,6 +1479,10 @@ func snapshotFindings(findings []Finding) []Finding {
 	}
 	return snapshot
 }
+
+// runWindowCandidates overrides the execution window candidate budget
+// when positive - a test seam; zero means the jobs-derived default.
+var runWindowCandidates int
 
 // commitFinding delivers one finished finding to the caller's incremental
 // commit callback. The pre-delivery HEAD check mirrors the run's final one so

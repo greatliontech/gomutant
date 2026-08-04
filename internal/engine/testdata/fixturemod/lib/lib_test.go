@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 //gofresh:pure
@@ -240,4 +241,15 @@ func FuzzAdd(f *testing.F) {
 			t.Fatal("Add not commutative")
 		}
 	})
+}
+
+func TestBaselineStall(t *testing.T) {
+	if os.Getenv("GOMUTANT_BASELINE_STALL") == "" {
+		t.Skip("exercised only by the baseline-probe-timeout engine test")
+	}
+	if StallGuard() {
+		time.Sleep(30 * time.Second)
+		return
+	}
+	os.Exit(3)
 }

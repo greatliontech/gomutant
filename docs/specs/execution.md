@@ -41,7 +41,13 @@ whose differential baseline also fails is environmental noise: never a kill,
 and never a campaign abort — the one candidate records as a discard carrying
 the diagnostic as candidate-local evidence and the run continues, because an
 abort that discards completed measurements is reserved for corrupted
-orchestration state. A run that fails in any
+orchestration state. A baseline probe that cannot complete within the oracle
+timeout proves nothing either way — the package-scope failure is not provably
+mutant-caused, and calling it noise would need the probe's verdict — so the
+candidate discards carrying the probe-timeout diagnostic as candidate-local
+evidence and the run continues: the deadline is a per-mutant outcome, never a
+campaign abort, while caller-context cancellation remains fatal as
+REQ-exec-cancellation requires. A run that fails in any
 other way — a build error the overlay should have prevented, a killer test
 outside the oracle, output that does not parse — aborts without recording a
 finding, because a corrupted measurement read as a sound one inflates kills
