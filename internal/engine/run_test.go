@@ -506,6 +506,13 @@ func TestProbeBaselineRecordsRuntimeInputDriftAsUnverifiable(t *testing.T) {
 	}
 }
 
+// Self-cleaned in-module scratch with a fresh name each run — absent at
+// both bracket endpoints — binds as completed evidence carrying the
+// missing-arm identity beside the stable input; the churn surfaces as
+// digest movement ACROSS runs (stale, re-measure), never as a served
+// stale record and never as blanket unverifiability. Mid-run drift of a
+// pre-existing input keeps its own unverifiable pin in the sibling test
+// above.
 func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	moduleDir, err := filepath.Abs("testdata/fixturemod")
 	if err != nil {
@@ -519,8 +526,7 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	t.Cleanup(func() { os.Remove(stable) })
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_STABLE_INPUT="+stable)
 	ran, passed, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, nil, env)
-	drifty := strings.Contains(state.Reason, "repeated baseline executions") || strings.Contains(state.Reason, "observation bracket moved")
-	if err != nil || ran != 1 || !passed || !state.OK || !state.Unverifiable || !drifty {
+	if err != nil || ran != 1 || !passed || !state.OK || state.Unverifiable {
 		t.Fatalf("changing identities = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
 	}
 	paths, err := runtimeinput.Paths(state.Manifest, moduleDir)
@@ -529,6 +535,24 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	}
 	if !slices.Contains(paths, stable) {
 		t.Fatalf("runtime paths = %v, missing stable input %s", paths, stable)
+	}
+	changing := 0
+	for _, p := range paths {
+		if strings.Contains(filepath.Base(p), ".changing-identity-") {
+			changing++
+		}
+	}
+	if changing == 0 {
+		t.Fatalf("runtime paths = %v, missing the per-run changing identity", paths)
+	}
+	// The per-run identity makes the evidence stale across runs — the
+	// honest direction: a fresh probe re-measures rather than serving.
+	ran2, passed2, second, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, nil, env)
+	if err != nil || ran2 != 1 || !passed2 || !second.OK {
+		t.Fatalf("second changing-identity probe = ran %d, passed %v, state %+v, error %v", ran2, passed2, second, err)
+	}
+	if second.Digest == state.Digest {
+		t.Fatal("per-run changing identity did not move the evidence digest across runs")
 	}
 }
 

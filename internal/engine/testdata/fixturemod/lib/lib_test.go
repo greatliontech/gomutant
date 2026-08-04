@@ -90,7 +90,14 @@ func TestChangingIdentity(t *testing.T) {
 }
 
 func TestGeneratedFixture(t *testing.T) {
-	dir, err := os.MkdirTemp(".", ".generated-fixture-")
+	// The generated per-run path lives OUTSIDE the module tree (the
+	// system temp dir, which the ingest declares no root for), so its
+	// identities are covered by no observation bracket and the completed
+	// evidence stays content-unverifiable by contract — the shape the
+	// finding-wide remeasure pin needs. In-module self-cleaned scratch no
+	// longer seals: absent at both bracket endpoints, it records
+	// missing-arm identities and binds.
+	dir, err := os.MkdirTemp("", ".generated-fixture-")
 	if err != nil {
 		t.Fatal(err)
 	}
