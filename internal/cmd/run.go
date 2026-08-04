@@ -21,7 +21,7 @@ type runOptions struct {
 	packages, symbols                       []string
 	budget, jobs                            int
 	timeout, oracleTimeout                  time.Duration
-	force                                   bool
+	force, plan                             bool
 	bracketPaths                            []string
 	output                                  io.Writer
 }
@@ -44,6 +44,7 @@ func newRunCommand() *cobra.Command {
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read and update")
 	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
 	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
+	f.BoolVar(&o.plan, "plan", false, "preflight only: run the full preparation sequence and print every target decision — cached, skipped with reason, or measure with candidate count — then stop before baseline probes and mutant execution, persisting nothing; precondition holes surface before any budget is spent")
 	return cmd
 }
 
@@ -125,6 +126,13 @@ func runCommand(ctx context.Context, o runOptions) error {
 		}
 		fmt.Fprintln(&terminal, "no targets")
 		renderRunSummary(&terminal, gomutant.RunSummary{})
+		if o.plan {
+			// The plan clause's no-write guarantee covers the empty
+			// whole-tree reconciliation too: a plan never prunes.
+			fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
+			_, err := io.Copy(out, &terminal)
+			return err
+		}
 		if wholeTree {
 			if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
@@ -145,9 +153,31 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	var planMeasure, planCandidates, planCached, planSkipped int
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		Budget: o.budget, OracleTimeout: o.oracleTimeout, Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, Prior: prior,
+		PlanOnly: o.plan,
+		Executing: func(event gomutant.ExecutionEvent) {
+			line := fmt.Sprintf("%-9s target %d/%d %s  candidates %d/%d", event.Phase, event.TargetIndex, event.TargetCount, event.Symbol, event.CandidatesDone, event.CandidatesTotal)
+			if event.ConfirmationsTotal > 0 {
+				line += fmt.Sprintf("  confirmations %d/%d", event.ConfirmationsDone, event.ConfirmationsTotal)
+			}
+			fmt.Fprintln(out, line)
+		},
 		Decision: func(decision gomutant.RunDecision) {
+			if !o.plan {
+				renderRunDecision(out, decision)
+				return
+			}
+			switch decision.Action {
+			case "measure":
+				planMeasure++
+				planCandidates += decision.Candidates
+			case "cached":
+				planCached++
+			case "skipped":
+				planSkipped++
+			}
 			renderRunDecision(out, decision)
 		},
 		Progress: func(event gomutant.PreparationEvent) {
@@ -162,6 +192,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
+		// Plan mode suppresses this at the library boundary — the run owns
+		// the plan clause's no-write guarantee.
 		Commit: func(finding gomutant.Finding) error {
 			return docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
@@ -218,7 +250,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if classes, skips := skipClasses(findings); skips > 1 {
 		fmt.Fprintf(&terminal, "skipped   %s\n", classes)
 	}
-	if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+	if o.plan {
+		fmt.Fprintf(&terminal, "plan      %d measure (%d candidates), %d cached, %d skipped\n", planMeasure, planCandidates, planCached, planSkipped)
+		fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
+	} else if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

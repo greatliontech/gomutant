@@ -520,3 +520,40 @@ func TestInspectFindingsCarriesCandidateEvidence(t *testing.T) {
 		t.Fatalf("candidate reason lost: %+v", views[0].Candidates[0])
 	}
 }
+
+// TestRunCommandPlanNeverPrunesEmptyWholeTree pins the plan clause's
+// no-write guarantee on the zero-target whole-tree path: the executing
+// run's empty-discovery reconciliation deliberately prunes, and a plan
+// must not — a deleted target surveyed under --plan keeps its record.
+func TestRunCommandPlanNeverPrunesEmptyWholeTree(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evidence := func(symbol string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
+	path := findingsAt(dir, defaultFindings)
+	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, plan: true, output: &output}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "plan only: no baselines probed, no mutants executed, nothing persisted") {
+		t.Fatalf("plan output = %q, want the plan line", output.String())
+	}
+	retained, err := loadFindings(dir, path)
+	if err != nil || len(retained) != 1 {
+		t.Fatalf("plan-mode empty whole-tree pruned findings: %+v, %v", retained, err)
+	}
+}

@@ -4167,3 +4167,164 @@ func TestRunFullyCachedStillRunsCampaignEpilogue(t *testing.T) {
 		t.Fatal("fully-cached run skipped the campaign epilogue")
 	}
 }
+
+// TestRunPlanOnlyStopsBeforeExecution pins the plan clause
+// (REQ-exec-run-status): the full preparation sequence runs and every
+// decision is delivered with exact candidate counts, but no baseline
+// probes, no mutant executes, nothing commits, and only execution-free
+// findings return.
+func TestRunPlanOnlyStopsBeforeExecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a module tree")
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	targets := []Target{
+		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+		{Symbol: "example.com/fixture/lib.I", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+	}
+	var decisions []RunDecision
+	var events []PreparationEvent
+	commits := 0
+	findings, err := tr.Run(ctx, targets, Options{
+		PlanOnly: true,
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+		Progress: func(e PreparationEvent) { events = append(events, e) },
+		Commit:   func(Finding) error { commits++; return nil },
+		Executing: func(ExecutionEvent) {
+			t.Error("plan-only run reported execution progress")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 2 || decisions[0].Action != "measure" || decisions[0].Candidates == 0 || decisions[0].Reason != "no-prior" || decisions[1].Action != "skipped" {
+		t.Fatalf("plan decisions = %+v, want exact measure count and the skip", decisions)
+	}
+	for _, e := range events {
+		if e.Stage == PreparationBaseline {
+			t.Fatalf("plan-only run probed a baseline: %+v", e)
+		}
+	}
+	if commits != 0 {
+		t.Fatalf("plan-only run committed %d findings", commits)
+	}
+	if len(findings) != 1 || findings[0].Skipped == "" {
+		t.Fatalf("plan findings = %+v, want only the skip (no partially enumerated measure target)", findings)
+	}
+
+	// A cached serve in plan mode returns as plan output but commits
+	// nothing: the no-write guarantee is the library's own.
+	measured, err := tr.Run(ctx, []Target{{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}}, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cachedDecisions []RunDecision
+	planned, err := tr.Run(ctx, []Target{{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}}, Options{
+		Budget: 1, PlanOnly: true, Prior: measured,
+		Decision: func(d RunDecision) { cachedDecisions = append(cachedDecisions, d) },
+		Commit:   func(Finding) error { commits++; return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cachedDecisions) != 1 || cachedDecisions[0].Action != "cached" {
+		t.Fatalf("cached plan decisions = %+v", cachedDecisions)
+	}
+	if commits != 0 {
+		t.Fatalf("plan-only cached serve committed %d findings", commits)
+	}
+	if len(planned) != 1 || !planned[0].Cached {
+		t.Fatalf("cached plan findings = %+v", planned)
+	}
+}
+
+// TestRunExecutingEventsAdvisory pins the advisory execution-progress
+// class (REQ-exec-run-status): both window phases report, tallies are
+// exact, and the final done count equals the total.
+func TestRunExecutingEventsAdvisory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	targets := []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}
+	var events []ExecutionEvent
+	findings, err := tr.Run(ctx, targets, Options{
+		Jobs: 2,
+		Executing: func(e ExecutionEvent) { events = append(events, e) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Mutants == 0 {
+		t.Fatalf("findings = %+v", findings)
+	}
+	var executing, confirming int
+	lastConfirmed := -1
+	for _, e := range events {
+		switch e.Phase {
+		case "executing":
+			executing++
+			if e.TargetIndex != 1 || e.TargetCount != 1 || e.Symbol != "example.com/fixture/lib.Add" {
+				t.Fatalf("executing event = %+v", e)
+			}
+		case "confirming":
+			confirming++
+			if e.CandidatesDone != e.CandidatesTotal || e.CandidatesTotal == 0 {
+				t.Fatalf("confirming event tallies = %+v, want the window's candidates counted done", e)
+			}
+			if e.ConfirmationsTotal == 0 || e.ConfirmationsDone >= e.ConfirmationsTotal || e.ConfirmationsDone <= lastConfirmed {
+				t.Fatalf("confirmation progress = %+v after %d, want monotonic k/m with k < m", e, lastConfirmed)
+			}
+			lastConfirmed = e.ConfirmationsDone
+		default:
+			t.Fatalf("unknown phase %q", e.Phase)
+		}
+	}
+	if executing == 0 || confirming == 0 {
+		t.Fatalf("phases = %d executing, %d confirming, want both reported", executing, confirming)
+	}
+	if confirming < 2 {
+		t.Fatalf("confirming events = %d, want one per confirmed kill", confirming)
+	}
+}
+
+// TestRunPlanOnlyRefusesOnTreeDrift pins the plan clause's tree-motion
+// arm: a plan is a decision about committing budget, so it refuses on
+// the same producer-drift evidence an executing run's epilogue refuses
+// on, instead of returning a clean plan for a tree that moved under it.
+func TestRunPlanOnlyRefusesOnTreeDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a module tree")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	libPath := filepath.Join(dir, "lib", "lib.go")
+	src, err := os.ReadFile(libPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := strings.Replace(string(src), "return a + b", "return b + a + 0", 1)
+	if moved == string(src) {
+		t.Fatal("fixture body not found")
+	}
+	_, err = tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}, Options{
+		PlanOnly: true,
+		proofAttempt: func(string, int) {
+			if err := os.WriteFile(libPath, []byte(moved), 0o644); err != nil {
+				t.Error(err)
+			}
+		},
+	})
+	var drift *TreeDriftError
+	if !errors.As(err, &drift) {
+		t.Fatalf("drifted plan error = %v, want a TreeDriftError", err)
+	}
+}

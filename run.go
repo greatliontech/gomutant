@@ -58,6 +58,26 @@ type Options struct {
 	// Decision receives each target's deterministic pre-execution disposition
 	// in target order (REQ-exec-run-status).
 	Decision func(RunDecision)
+	// PlanOnly stops the run after the deterministic preparation sequence
+	// and target decisions: mutants are enumerated and every decision is
+	// computed and delivered, but no baseline probes, no mutant executes,
+	// and nothing new is persisted (cached serves already committed are
+	// idempotent re-merges of existing records). The return carries only
+	// the findings complete without execution — cached serves and skips —
+	// so the decisions are the plan and precondition holes surface before
+	// any budget is spent (REQ-exec-run-status's plan clause).
+	PlanOnly bool
+	// PlanOnly also suppresses Commit at the library boundary — the
+	// no-write guarantee is the run's, not each caller's to re-implement.
+	// Executing must be safe for synchronous invocation from the run loop
+	// and receives advisory execution-phase progress: which target window
+	// is dispatching or confirming, exact campaign-wide candidate
+	// tallies, and per-kill confirmation progress while confirming.
+	// Events are diagnostic, carry no ordering or completion
+	// guarantee beyond target-window boundaries, and never enter a
+	// decision or finding (REQ-exec-run-status's advisory classes). The
+	// callback must return normally.
+	Executing func(ExecutionEvent)
 	// Progress synchronously receives deterministic preparation events before
 	// terminal target decisions and mutant execution. It must return normally
 	// (REQ-exec-run-status).
@@ -111,6 +131,26 @@ const (
 	PreparationMutants   PreparationStage = "mutants"
 	PreparationBaseline  PreparationStage = "baseline"
 )
+
+// ExecutionEvent is one advisory execution-phase progress report: the
+// window's phase (executing or confirming), the 1-based index and count
+// of targets whose candidates the campaign has dispatched, exact
+// campaign-wide candidate tallies (carried and non-runnable candidates
+// included — the plan's own counting), and, while confirming, the
+// window's serial confirmation progress. Advisory only —
+// timing-dependent, outside the deterministic run-status sequence.
+type ExecutionEvent struct {
+	Phase           string
+	TargetIndex     int
+	TargetCount     int
+	Symbol          string
+	CandidatesDone  int
+	CandidatesTotal int
+	// ConfirmationsDone/Total report the window's serial kill
+	// confirmation progress; zero totals outside confirming phases.
+	ConfirmationsDone  int
+	ConfirmationsTotal int
+}
 
 // PreparationEvent reports one operation before it begins. Symbol is set for
 // target-scoped operations; Package is additionally set for baseline probes.
@@ -550,6 +590,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if opts.Budget < 0 {
 		return nil, fmt.Errorf("gomutant: budget must be non-negative")
 	}
+	if opts.PlanOnly {
+		// The plan clause's no-write guarantee is the run's own: even a
+		// cached serve's incremental commit is suppressed here, so no
+		// caller has to re-implement the suppression.
+		opts.Commit = nil
+	}
 	if opts.OracleTimeout < 0 {
 		return nil, fmt.Errorf("gomutant: oracle timeout must be non-negative")
 	}
@@ -975,6 +1021,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// tests alone — the recorded kills already rest on the recorded set
 		// (REQ-core-attributed-kills) — each delta group earning its own
 		// baseline below, so a failing added test refuses the run.
+		if opts.PlanOnly {
+			// The plan needs candidate counts and decisions, never
+			// baseline probes: group construction and probing are
+			// execution cost the plan exists to preview.
+			continue
+		}
 		groupOracle := w.oracle
 		if w.grow != nil {
 			groupOracle = w.growAdded
@@ -1038,6 +1090,33 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 	}
 
+	if opts.PlanOnly {
+		// A plan is a decision about committing budget, so it refuses
+		// on the same tree-motion evidence an executing run's epilogue
+		// checks — neither is a baseline probe or a mutant execution.
+		if err := views.validateProducers(ctx); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, &TreeDriftError{Transient: err.Error()}
+		}
+		if moved, err := repository.headMovedContext(ctx); err != nil {
+			return nil, err
+		} else if moved {
+			return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
+		}
+		// Only findings complete without execution return (cached
+		// serves and skips), so a partially-enumerated measure target
+		// never escapes as evidence.
+		var planned []Finding
+		for i := range findings {
+			if findings[i].Cached || findings[i].Skipped != "" {
+				planned = append(planned, findings[i])
+			}
+		}
+		return planned, nil
+	}
+
 	// Phase two: the pool. Outcomes land in a preallocated matrix so
 	// aggregation is deterministic regardless of completion order; the first
 	// error cancels everything in flight.
@@ -1085,11 +1164,24 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		return t.emitOracleGuidance(ctx, f, w, targets[w.target].Symbol, opts, runEnv, guidanceCache)
 	}
+	// Advisory execution progress rides window boundaries: totals are
+	// exact, per-window timing is not part of the deterministic sequence
+	// (REQ-exec-run-status's advisory classes).
+	mutantsTotal, mutantsDone := 0, 0
+	for wi := range pending {
+		mutantsTotal += len(pending[wi].candidates)
+	}
 	for windowStart := 0; windowStart < len(pending); {
 		windowEnd := windowStart
 		for budget := 0; windowEnd < len(pending) && (budget == 0 || budget < windowBudget); windowEnd++ {
 			budget += len(pending[windowEnd].candidates)
 		}
+		reportExecuting(opts.Executing, ExecutionEvent{
+			Phase:       "executing",
+			TargetIndex: windowStart + 1, TargetCount: len(pending),
+			Symbol:         targets[pending[windowStart].target].Symbol,
+			CandidatesDone: mutantsDone, CandidatesTotal: mutantsTotal,
+		})
 		jobCh := make(chan job)
 		poolCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -1181,7 +1273,24 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// interference from a sibling never reads as a kill. Timeout kills
 		// are excluded: confirming one costs the full timeout again, and the
 		// hang bound is the caller's own budget - the named residual.
+		for wi := windowStart; wi < windowEnd; wi++ {
+			mutantsDone += len(pending[wi].candidates)
+		}
 		if jobs > 1 {
+			// Each confirmation re-runs a full oracle, so per-confirmation
+			// events are naturally sparse; a window with nothing to
+			// confirm reports nothing.
+			confirmTotal := 0
+			for wi := windowStart; wi < windowEnd; wi++ {
+				for mi := range pending[wi].candidates {
+					if outcomes[wi][mi] == engine.MutantKilled && killers[wi][mi] != engine.TimeoutKiller {
+						if _, runnable := pending[wi].candidates[mi].Mutant(); runnable {
+							confirmTotal++
+						}
+					}
+				}
+			}
+			confirmDone := 0
 			for wi := windowStart; wi < windowEnd; wi++ {
 				for mi := range pending[wi].candidates {
 					if err := ctx.Err(); err != nil {
@@ -1194,10 +1303,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if !runnable {
 						continue
 					}
+					reportExecuting(opts.Executing, ExecutionEvent{
+						Phase:       "confirming",
+						TargetIndex: windowStart + 1, TargetCount: len(pending),
+						Symbol:         targets[pending[wi].target].Symbol,
+						CandidatesDone: mutantsDone, CandidatesTotal: mutantsTotal,
+						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
+					})
 					outcome, killer, state, incomplete, err := t.executeMutant(ctx, pending[wi], m, opts, runEnv)
 					if err != nil {
 						return nil, err
 					}
+					confirmDone++
 					outcomes[wi][mi] = outcome
 					killers[wi][mi] = killer
 					observations[wi][mi] = interner.intern(state)
@@ -1506,6 +1623,12 @@ func commitFinding(ctx context.Context, repository repositoryState, commit func(
 }
 
 func reportPreparation(callback func(PreparationEvent), event PreparationEvent) {
+	if callback != nil {
+		callback(event)
+	}
+}
+
+func reportExecuting(callback func(ExecutionEvent), event ExecutionEvent) {
 	if callback != nil {
 		callback(event)
 	}

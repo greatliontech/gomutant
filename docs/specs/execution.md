@@ -266,7 +266,16 @@ MCP face's rows are data for the caller's own joins, not rendering: dedup is
 a CLI concern. Advisory freshness-analysis
 keep-alive events may accompany the deterministic sequence; they are
 diagnostic, carry no ordering or completion guarantee, and never enter a
-decision or finding. Event data never enters a run
+decision or finding. Advisory execution-phase progress events join the
+same class: at each execution window boundary the run may report the
+window's phase (executing, then one confirming event per serially
+confirmed kill with the window's confirmation progress), the 1-based
+index and count of measure targets dispatched, a representative symbol,
+and exact campaign-wide candidate tallies — counts of selected
+candidates, carried and non-runnable ones included, exactly as the
+decisions count them — timing-dependent by nature, outside the
+deterministic sequence, never entering a decision or finding, so an
+operator can read phase and progress from the log alone. Event data never enters a run
 decision or finding, and run inputs are snapshotted before delivery. Callbacks
 execute synchronously as trusted caller code and must return normally; their
 external side effects have ordinary process semantics. An error or cancellation
@@ -290,6 +299,23 @@ face as `layer`/`layerReason` row fields — so a run whose record the store
 routes to the local overlay never reads as a healthy repo-document write.
 Open survivors remain
 advisory and do not change successful exit semantics.
+
+A plan-only run MUST perform the full deterministic preparation
+sequence and deliver every target decision exactly as an executing run
+would — mutants enumerated, candidate counts and reasons exact — then
+stop: no baseline probes, no mutant executes, and nothing new persists
+(a cached serve's incremental commit is suppressed alongside the final
+merge; re-merging existing records was already idempotent, and the
+plan-only return carries only findings complete without execution —
+cached serves and skips — never a partially enumerated measure target).
+The decisions are the plan: every precondition hole recorded evidence
+already names — stale pins, unverifiable or unstable oracle evidence
+from prior-record inspection, skip classes preparation itself decides —
+surfaces mechanically before any execution budget is committed,
+splitting the workflow into plan, fix preconditions, execute; a hole
+only execution can discover keeps surfacing at execution, and a plan
+refuses on the same tree-motion evidence (producer drift, a moved
+repository HEAD) an executing run's epilogue refuses on.
 
 Under INV-RESULT-CANDIDATE-CONSERVATION in [results.md](results.md), a measure
 decision reports its selected candidate count as
