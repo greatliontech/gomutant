@@ -29,7 +29,10 @@ event — attribution requiring a well-formed stream would make exactly the
 strongest kills unmeasurable; a passing probe with no attributable package
 admits the kill as an unattributed package crash. A test-attributed or
 package-scope kill measured while sibling mutants could run concurrently
-(worker count above one) re-executes alone after the pool drains, and the
+(worker count above one) re-executes alone after its execution window's
+pool drains — no sibling mutant in flight; execution may proceed in
+bounded target windows, and the isolation obligation attaches to the
+drained window exactly as it did to a campaign-wide pool — and the
 serial execution is the scored measurement - outcome, killer, observation,
 and candidate evidence replaced wholesale - so a sibling-induced collision
 never reads as a kill and a kill that does not reproduce alone scores as the
