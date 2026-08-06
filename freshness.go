@@ -924,6 +924,302 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 	return added, true, nil
 }
 
+// killerDriftAttributable reports whether a compartment delta is one the
+// referenced-name walk can fully attribute (REQ-result-stale's killer-drift
+// carve-out): every added, changed, or removed declaration is a plain
+// function (never TestMain), a method of a compartment-declared receiver
+// type, a const, or a type — kinds whose only route to an unchanged test is
+// a reference chain the walk follows. The rejected kinds each reach
+// unchanged code without any reference: a package var's initializer and an
+// init function run during test-binary initialization, TestMain wraps every
+// test, a directive is behavior-bearing from any position, a method of a
+// receiver type declared outside the compartment can flip interface
+// satisfaction observed by production code the ledger cannot see, and an
+// embedded member's bytes feed unchanged code as data.
+func killerDriftAttributable(delta gofresh.TestVariantDelta, recorded, current gofresh.TestVariantLedger) bool {
+	// Types are keyed by declaring package: a method's receiver resolves
+	// within its own package only, and the two compartment packages (the
+	// in-package and external variants) may declare same-named types, so a
+	// name-only match would let a method on a production type ride a
+	// collision with the other variant's type. An entry without a package
+	// (a recorded ledger persisted before the field) certifies nothing.
+	compartmentTypes := map[string]bool{}
+	noteTypes := func(declarations []gofresh.TestVariantDeclaration) {
+		for _, declaration := range declarations {
+			if declaration.Kind == "type" && declaration.Package != "" {
+				compartmentTypes[declaration.Package+"\x00"+declaration.Name] = true
+			}
+		}
+	}
+	noteTypes(recorded.Declarations)
+	noteTypes(current.Declarations)
+	attributable := func(declaration gofresh.TestVariantDeclaration) bool {
+		switch declaration.Kind {
+		case "func":
+			return declaration.Name != "TestMain"
+		case "method":
+			return declaration.Package != "" && compartmentTypes[declaration.Package+"\x00"+receiverBaseName(declaration.Receiver)]
+		case "const", "type":
+			return true
+		default:
+			return false
+		}
+	}
+	for _, declaration := range delta.Added {
+		if !attributable(declaration) {
+			return false
+		}
+	}
+	for _, declaration := range delta.Removed {
+		if !attributable(declaration) {
+			return false
+		}
+	}
+	for _, change := range delta.Changed {
+		if !attributable(change.Before) || !attributable(change.After) {
+			return false
+		}
+	}
+	for _, header := range delta.HeaderChanges {
+		if header.Embedded {
+			return false
+		}
+	}
+	return true
+}
+
+// receiverBaseName reduces a receiver type's source text to its base type
+// name: pointer markers, generic parameter lists, and surrounding space
+// stripped ("*suite", "suite[T]", "*suite[K, V]" all reduce to "suite").
+func receiverBaseName(receiver string) string {
+	base := strings.TrimSpace(receiver)
+	base = strings.TrimPrefix(base, "(")
+	base = strings.TrimSuffix(base, ")")
+	base = strings.TrimSpace(strings.TrimPrefix(base, "*"))
+	if i := strings.IndexByte(base, '['); i >= 0 {
+		base = base[:i]
+	}
+	return strings.TrimSpace(base)
+}
+
+// compartmentReach is the reference graph the killer-drift walk traverses:
+// the current ledger's declarations (whose referenced-name lists speak for
+// every unchanged declaration — equal hashes pin equal bytes) plus the
+// delta's removed declarations as terminal nodes, so a walk reaching a
+// removed method through its receiver type still observes the removal.
+type compartmentReach struct {
+	entries           []gofresh.TestVariantDeclaration
+	byName            map[string][]int
+	methodsByReceiver map[string][]int
+	touchedEntries    map[int]bool
+}
+
+func newCompartmentReach(current gofresh.TestVariantLedger, delta gofresh.TestVariantDelta) *compartmentReach {
+	reach := &compartmentReach{
+		byName:            map[string][]int{},
+		methodsByReceiver: map[string][]int{},
+		touchedEntries:    map[int]bool{},
+	}
+	type identity struct{ file, kind, receiver, name, hash string }
+	touched := map[identity]bool{}
+	note := func(declaration gofresh.TestVariantDeclaration) {
+		touched[identity{declaration.File, declaration.Kind, declaration.Receiver, declaration.Name, declaration.Hash}] = true
+	}
+	for _, declaration := range delta.Added {
+		note(declaration)
+	}
+	for _, declaration := range delta.Removed {
+		note(declaration)
+	}
+	for _, change := range delta.Changed {
+		note(change.Before)
+		note(change.After)
+	}
+	add := func(declaration gofresh.TestVariantDeclaration) {
+		i := len(reach.entries)
+		reach.entries = append(reach.entries, declaration)
+		reach.byName[declaration.Name] = append(reach.byName[declaration.Name], i)
+		if declaration.Kind == "method" {
+			base := receiverBaseName(declaration.Receiver)
+			reach.methodsByReceiver[base] = append(reach.methodsByReceiver[base], i)
+		}
+		if touched[identity{declaration.File, declaration.Kind, declaration.Receiver, declaration.Name, declaration.Hash}] {
+			reach.touchedEntries[i] = true
+		}
+	}
+	for _, declaration := range current.Declarations {
+		add(declaration)
+	}
+	for _, declaration := range delta.Removed {
+		add(declaration)
+	}
+	return reach
+}
+
+// reaches reports whether the test function fn can observe any delta
+// declaration. One detection mechanism: the walk visits graph nodes — by
+// referenced name, and through every method of a receiver type it reaches,
+// reflection's only route to a compartment function — and flags on visiting
+// a touched entry. Every delta declaration is a visitable node (removed
+// ones ride in as terminal nodes), so name-level matching would be a
+// redundant second mechanism, not extra coverage. known is false when fn
+// has no compartment "func" declaration to start from — the walk cannot
+// attribute and the caller must refuse. A visited function or method entry
+// with no recorded references is treated as reaching (fail closed): every
+// compiled declaration references at least its own name, so an empty list
+// is a reference surface the current view did not serve — including every
+// removed function or method, whose recorded ledger carries no references.
+func (r *compartmentReach) reaches(fn string) (reached, known bool) {
+	var seeds []int
+	for _, i := range r.byName[fn] {
+		if r.entries[i].Kind == "func" {
+			seeds = append(seeds, i)
+		}
+	}
+	if len(seeds) == 0 {
+		return false, false
+	}
+	return r.walk(seeds), true
+}
+
+// unconditionalRootReaches reports whether any declaration that runs or
+// wraps every test regardless of references — a package var's initializer,
+// an init function, or TestMain — can reach a delta declaration. The
+// license bars those kinds from the delta itself, but an unchanged
+// initializer calling a changed plain function mutates state every test
+// observes without any oracle's walk naming the change, so a reaching root
+// refuses the carve-out outright.
+func (r *compartmentReach) unconditionalRootReaches() bool {
+	var seeds []int
+	for i, entry := range r.entries {
+		if entry.Kind == "var" || entry.Kind == "init" || (entry.Kind == "func" && entry.Name == "TestMain") {
+			seeds = append(seeds, i)
+		}
+	}
+	return r.walk(seeds)
+}
+
+func (r *compartmentReach) walk(seeds []int) bool {
+	var queue []int
+	visited := map[int]bool{}
+	push := func(i int) {
+		if !visited[i] {
+			visited[i] = true
+			queue = append(queue, i)
+		}
+	}
+	for _, i := range seeds {
+		push(i)
+	}
+	for len(queue) > 0 {
+		i := queue[0]
+		queue = queue[1:]
+		entry := r.entries[i]
+		if r.touchedEntries[i] {
+			return true
+		}
+		if (entry.Kind == "func" || entry.Kind == "method") && len(entry.References) == 0 {
+			return true
+		}
+		for _, name := range entry.References {
+			for _, j := range r.byName[name] {
+				push(j)
+			}
+			for _, j := range r.methodsByReceiver[name] {
+				push(j)
+			}
+		}
+	}
+	return false
+}
+
+// evidenceSetCoversKillerDriftContext reports whether prior's evidence covers
+// the request under the killer-drift carve-out (REQ-result-stale): the record
+// carries complete kill attribution and a compartment ledger; scalar pins and
+// the oracle identity set are equal; no candidate evidence; the compartment
+// delta is attributable; and the target's evidence checks plainly valid with
+// its compartment pin refreshed to the current one — the refresh licensed by
+// the attributable delta, whose every movement the per-oracle walk accounts
+// for. Each oracle then classifies moved or unmoved: moved when its own
+// evidence no longer checks plainly valid (target-package subjects checked
+// with the same refresh, any other subject as recorded — its own package's
+// compartment pin is untouched by this target's delta) or when its reference
+// walk over the current ledger reaches a delta declaration. Returns the
+// moved oracle symbols, sorted.
+func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) ([]string, bool, error) {
+	if prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
+		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
+		len(prior.OracleEvidence) != len(oracle) || len(prior.CandidateEvidence) != 0 ||
+		len(prior.Kills) != prior.Killed {
+		return nil, false, nil
+	}
+	currentLedger, err := target.view.TestVariantLedger(target.subject)
+	if err != nil {
+		return nil, false, err
+	}
+	recordedLedger := prior.CompartmentLedger.ledger()
+	delta := gofresh.DiffTestVariantLedgers(recordedLedger, currentLedger)
+	if !killerDriftAttributable(delta, recordedLedger, currentLedger) {
+		return nil, false, nil
+	}
+	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
+	for _, evidence := range prior.OracleEvidence {
+		if _, duplicate := bySymbol[evidence.Symbol]; duplicate {
+			return nil, false, nil
+		}
+		bySymbol[evidence.Symbol] = evidence
+	}
+	refreshed := func(subject *subjectView, evidence SubjectEvidence) SubjectEvidence {
+		if subject.subject.Package == target.subject.Package && subject.fp.TestVariantClosure != "" {
+			evidence.TestVariantClosure = subject.fp.TestVariantClosure
+		}
+		return evidence
+	}
+	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
+	ok, err := evidencePairsValid(ctx, []evidencePair{{subject: target, evidence: refreshed(target, prior.TargetEvidence), accept: acceptValidVerdict}}, memo.once)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	reach := newCompartmentReach(currentLedger, delta)
+	if reach.unconditionalRootReaches() {
+		// An unchanged var initializer, init function, or TestMain reaching
+		// the delta runs changed code around every test: no per-oracle
+		// partition is sound, so the whole target re-measures.
+		return nil, false, nil
+	}
+	var moved []string
+	for _, subject := range oracle {
+		evidence, recorded := bySymbol[subject.symbol]
+		if !recorded {
+			// A recorded oracle absent from the current set (or vice versa,
+			// caught by the length pin above) is growth's or the general
+			// rule's domain, never drift's.
+			return nil, false, nil
+		}
+		valid, err := evidencePairsValid(ctx, []evidencePair{{subject: subject, evidence: refreshed(subject, evidence), accept: acceptValidVerdict}}, memo.once)
+		if err != nil {
+			return nil, false, err
+		}
+		movedHere := !valid
+		if !movedHere && subject.subject.Package == target.subject.Package {
+			_, fn := splitTestSymbol(subject.symbol)
+			reachesDelta, known := reach.reaches(fn)
+			if !known {
+				return nil, false, nil
+			}
+			movedHere = reachesDelta
+		}
+		if movedHere {
+			moved = append(moved, subject.symbol)
+		}
+	}
+	if ok, err := memo.verify(ctx); err != nil || !ok {
+		return nil, false, err
+	}
+	sort.Strings(moved)
+	return moved, true, nil
+}
+
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
 	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, runtimeinput.CurrentEnvContext)
 }

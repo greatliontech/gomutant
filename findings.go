@@ -102,6 +102,11 @@ type CompartmentDeclaration struct {
 	Name     string `json:"name"`
 	Receiver string `json:"receiver,omitempty"`
 	Hash     string `json:"hash"`
+	// Package is the declaring file's package clause name; the killer-drift
+	// license resolves a method's receiver type within its own package
+	// only, and a recorded entry without one (an older document) leaves
+	// method deltas unattributable, fail-closed (REQ-result-stale).
+	Package string `json:"package,omitempty"`
 }
 
 // CompartmentFileHeader is one compartment file's persisted header identity.
@@ -128,7 +133,17 @@ func compartmentLedgerFromView(ledger gofresh.TestVariantLedger) *CompartmentLed
 		FileHeaders:  make([]CompartmentFileHeader, 0, len(ledger.FileHeaders)),
 	}
 	for _, declaration := range ledger.Declarations {
-		out.Declarations = append(out.Declarations, CompartmentDeclaration(declaration))
+		// Field-by-field: the view's declaration also carries its
+		// referenced-name list, which is serve-time input for the
+		// killer-drift walk and never persisted — the current view's list
+		// speaks for every unchanged declaration: equal hashes pin equal
+		// bytes, and the one exception (an omitted-list const spec tracking
+		// its governing list) always folds the governing entry's own name,
+		// whose movement is the change the walk must observe.
+		out.Declarations = append(out.Declarations, CompartmentDeclaration{
+			File: declaration.File, Kind: declaration.Kind, Name: declaration.Name,
+			Receiver: declaration.Receiver, Hash: declaration.Hash, Package: declaration.Package,
+		})
 	}
 	for _, header := range ledger.FileHeaders {
 		out.FileHeaders = append(out.FileHeaders, CompartmentFileHeader(header))
@@ -143,7 +158,10 @@ func (l *CompartmentLedger) ledger() gofresh.TestVariantLedger {
 		FileHeaders:  make([]gofresh.TestVariantFileHeader, 0, len(l.FileHeaders)),
 	}
 	for _, declaration := range l.Declarations {
-		out.Declarations = append(out.Declarations, gofresh.TestVariantDeclaration(declaration))
+		out.Declarations = append(out.Declarations, gofresh.TestVariantDeclaration{
+			File: declaration.File, Kind: declaration.Kind, Name: declaration.Name,
+			Receiver: declaration.Receiver, Hash: declaration.Hash, Package: declaration.Package,
+		})
 	}
 	for _, header := range l.FileHeaders {
 		out.FileHeaders = append(out.FileHeaders, gofresh.TestVariantFileHeader(header))
@@ -165,6 +183,20 @@ type Survivor struct {
 	// records measured before bucketing existed; advisory, never a
 	// measurement pin.
 	Execution string `json:"execution,omitempty"`
+}
+
+// Kill is one killed candidate's attribution: the keystone — every reported
+// kill rests on an attributed event (REQ-core-attributed-kills) — persisted,
+// so reuse can key a kill to its killer's content rather than the whole
+// oracle surface (REQ-result-stale's killer-drift carve-out). Killer is the
+// killing oracle test's symbol, the timeout marker, or the package-failure
+// marker; position and operator identify the candidate under the same
+// occurrence discipline as survivors. A record carries either every kill's
+// attribution or none (older records): a partial list is refused at parse.
+type Kill struct {
+	Position string `json:"position"`
+	Operator string `json:"operator"`
+	Killer   string `json:"killer"`
 }
 
 // CandidateEvidence is one candidate's explicit unverifiable runtime
@@ -229,12 +261,17 @@ type Finding struct {
 	Commit            string             `json:"commit,omitempty"`
 	Dirty             bool               `json:"dirty"`
 
-	CandidateCount    int                 `json:"candidateCount"`
-	Generated         int                 `json:"generated"`
-	Mutants           int                 `json:"mutants"`
-	Killed            int                 `json:"killed"`
-	Discarded         int                 `json:"discarded"`
-	Operators         []OperatorSummary   `json:"operators"`
+	CandidateCount int               `json:"candidateCount"`
+	Generated      int               `json:"generated"`
+	Mutants        int               `json:"mutants"`
+	Killed         int               `json:"killed"`
+	Discarded      int               `json:"discarded"`
+	Operators      []OperatorSummary `json:"operators"`
+	// Kills attributes every killed candidate when present (complete: one
+	// entry per kill), and is absent on records measured before attribution
+	// was persisted — those re-measure whole under the killer-drift
+	// carve-out rather than serving (REQ-result-stale).
+	Kills             []Kill              `json:"kills,omitempty"`
 	Survivors         []Survivor          `json:"survivors,omitempty"`
 	Attested          []Attestation       `json:"attested,omitempty"`
 	CandidateEvidence []CandidateEvidence `json:"candidateEvidence,omitempty"`
@@ -254,6 +291,7 @@ func cloneFinding(f Finding) Finding {
 	f.Labels = slices.Clone(f.Labels)
 	f.OracleEvidence = slices.Clone(f.OracleEvidence)
 	f.Operators = slices.Clone(f.Operators)
+	f.Kills = slices.Clone(f.Kills)
 	f.Survivors = slices.Clone(f.Survivors)
 	f.Attested = slices.Clone(f.Attested)
 	f.CandidateEvidence = slices.Clone(f.CandidateEvidence)
@@ -402,7 +440,7 @@ func ParseFindings(data []byte) ([]Finding, error) {
 		"budget": true, "targetEvidence": true, "oracleEvidence": true,
 		"oracleExplicit": true, "oracleTimeout": true, "compartmentLedger": true, "commit": true, "dirty": true,
 		"candidateCount": true, "generated": true, "mutants": true, "killed": true,
-		"discarded": true, "operators": true, "survivors": true, "attested": true,
+		"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true,
 		"candidateEvidence": true,
 	}
 	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "oracleTimeout", "dirty", "candidateCount", "generated", "mutants", "killed", "discarded", "operators"}
@@ -503,6 +541,32 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 	if finding.CandidateCount < 0 || finding.Generated < 0 || finding.Mutants < 0 || finding.Killed < 0 || finding.Discarded < 0 ||
 		finding.Killed > finding.Mutants || len(finding.Survivors) != finding.Mutants-finding.Killed {
 		return false, fmt.Errorf("mutant counts do not match killed and survivor records")
+	}
+	if len(finding.Kills) != 0 {
+		// Kill attribution is all-or-nothing (REQ-core-attributed-kills):
+		// a partial list could serve some kills under the killer-drift
+		// carve-out while silently dropping others from its accounting.
+		if len(finding.Kills) != finding.Killed {
+			return false, fmt.Errorf("kill attributions do not cover the killed count")
+		}
+		survivorIdentities := make(map[survivorKey]bool, len(finding.Survivors))
+		for _, survivor := range finding.Survivors {
+			survivorIdentities[survivorKey{survivor.Position, survivor.Operator}] = true
+		}
+		seenKills := make(map[survivorKey]bool, len(finding.Kills))
+		for _, kill := range finding.Kills {
+			if kill.Position == "" || kill.Operator == "" || kill.Killer == "" {
+				return false, fmt.Errorf("kill attribution is missing its position, operator, or killer")
+			}
+			key := survivorKey{kill.Position, kill.Operator}
+			if seenKills[key] {
+				return false, fmt.Errorf("duplicate kill attribution %s %s", kill.Position, kill.Operator)
+			}
+			seenKills[key] = true
+			if survivorIdentities[key] {
+				return false, fmt.Errorf("kill attribution %s %s names a survivor", kill.Position, kill.Operator)
+			}
+		}
 	}
 	generatedTotal, countsSafe := addNonnegative(finding.Mutants, finding.Discarded)
 	expectedGenerated := finding.CandidateCount

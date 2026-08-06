@@ -523,8 +523,18 @@ func TestFresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(remeasured) != 1 || remeasured[0].Cached || len(oldProofDecisions) != 1 || !strings.HasPrefix(oldProofDecisions[0].Reason, "unverifiable: ") {
+	// The superseded oracle proof classifies that oracle moved under the
+	// killer-drift carve-out: with no kills standing, the record's whole
+	// mutant content re-measures — never a cached serve — and the
+	// re-measured record carries only current-tree evidence
+	// (REQ-result-stale's killer-drift carve-out).
+	if len(remeasured) != 1 || remeasured[0].Cached || len(oldProofDecisions) != 1 ||
+		oldProofDecisions[0].Reason != "served: 0 kills stand on unmoved oracles; re-measuring 1 candidate against the current oracle" ||
+		oldProofDecisions[0].Candidates != 1 {
 		t.Fatalf("superseded observation proof run = %+v, decisions %+v", remeasured, oldProofDecisions)
+	}
+	if remeasured[0].TargetEvidence.ObservationStrategy != f.TargetEvidence.ObservationStrategy {
+		t.Fatalf("re-measured record kept a superseded strategy: %+v", remeasured[0].TargetEvidence)
 	}
 	other := Target{Symbol: "example.com/fixture/lib.Weak"}
 	if _, err := tr.Fresh(f, other, 1); err == nil || !strings.Contains(err.Error(), "checked against") {

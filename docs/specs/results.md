@@ -43,7 +43,11 @@ whether the oracle was explicit or package-derived, the candidate budget, and th
 canonical Go duration string — carrying the target package's test-variant
 compartment ledger (the declaration-level record the growth carve-out diffs
 at serve time), the capture commit and dirty provenance,
-the mutant count, the kill count, each survivor's position
+the mutant count, the kill count, each kill's candidate identity and killer
+(the killing oracle test's symbol, the timeout marker, or the package-failure
+marker — REQ-core-attributed-kills made durable; a record carries either
+every kill's attribution or none, and a partial list is malformed and
+refused), each survivor's position
 and operator, plus per-operator generated, discarded, killed, and survived
 counts whose sums equal the finding totals. The oracle is pinned by identity and complete Gofresh evidence,
 not merely by name: strengthening a test or any source it
@@ -105,9 +109,10 @@ request for more candidates than a capped record generated invalidates only
 the unmeasured remainder, under the budget-extension carve-out below. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures.
 Measurement pins are never partially trusted: any moved pin remeasures the
-whole target, with exactly three precisely scoped carve-outs — candidate-local
-evidence, the budget when it is the only pin that fails to cover, and derived
-oracle growth under an inert test-variant delta.
+whole target, with exactly four precisely scoped carve-outs — candidate-local
+evidence, the budget when it is the only pin that fails to cover, derived
+oracle growth under an inert test-variant delta, and killer-scoped oracle
+drift under an attributable test-variant delta.
 Candidate evidence is the first narrower axis: a record whose only
 unverifiable runtime evidence is candidate-local serves its covered candidates
 and re-executes exactly the unverifiable ones under a passing current baseline
@@ -194,7 +199,76 @@ the per-group baseline exactly as any baseline failure; a record persisted
 without a compartment ledger re-measures whole; and a forced run re-measures
 whole. The growth decision reports "served: derived oracle grew by N tests;
 re-measuring M survivors against them" (count-aware nouns) with `candidates`
-counting the re-measured survivors. When
+counting the re-measured survivors. Killer-scoped oracle drift is the fourth
+carve-out, resting on the keystone made durable: every recorded kill names
+its killer beside the kill, so when the target package's compartment moves
+in a way the declaration ledger can attribute — or holds still while some
+oracle's own evidence moves; the partition is by what each kill rests on,
+and an empty delta partitions by the evidence signal alone — an edit a
+killer provably
+cannot observe cannot un-kill its kill. The delta is attributable exactly
+when every added, changed, or removed declaration is a plain function (never
+TestMain), a method of a receiver type declared as a compartment type in
+the same compartment package (receiver types resolve within their own
+package, so a name-only match against the other variant's type certifies
+nothing, and an entry recorded without its package clause certifies
+nothing), a const, or a
+type, and no embedded member's header moved — the rejected kinds each reach
+unchanged tests without any reference (a package var's initializer and an
+init function run at test-binary initialization, TestMain wraps every test,
+a directive is behavior-bearing from any position, a method of a receiver
+type declared outside the compartment can flip interface satisfaction
+observed by code the ledger cannot see, and an embedded member's bytes feed
+unchanged code as data) — and additionally no unchanged unconditional
+root — a package var's initializer, an init function, or TestMain — can
+reach a delta declaration through the same reference walk: such a root runs
+changed code around every test without any oracle naming it, so a reaching
+root re-measures the whole target. Under an attributable delta each oracle classifies
+moved or unmoved by two independent signals: its own evidence checking
+plainly valid — target-package subjects with their compartment pin refreshed
+to the current one, the refresh licensed by the attributable delta; any
+other subject's evidence as recorded, its own package's compartment being
+untouched by this delta — and, for target-package oracles, a reference walk
+over the current ledger's referenced-name lists (the current ledger's lists
+speak for every unchanged declaration: equal hashes pin equal bytes, and
+the ledger's one stated fold exception always carries the governing entry's
+own name, whose movement is what the walk must observe): from the oracle
+test's own declaration through every name it
+references, every same-named declaration, and every method of a receiver
+type it reaches — reflection's only route to a compartment function — with
+the walk observing a delta declaration, an unknown starting declaration, or
+a served declaration with no reference list each classifying the oracle
+moved, fail-closed. When the record carries complete kill attribution and a
+compartment ledger, the oracle identity sets are equal (an added or removed
+oracle identity is growth's or the general rule's domain, never drift's),
+the scalar pins are equal, there is no candidate evidence, and the target's
+evidence checks plainly valid under the same refresh: kills whose recorded
+killer is an unmoved oracle stand, and every other candidate re-measures
+against the full current oracle — kills whose killer moved (the other
+oracles' outcomes on that candidate were never recorded), timeout and
+package-scope kills whenever any oracle moved (they rest on the whole
+recorded set's behavior), and, whenever any oracle moved, every survivor (a
+moved test may now kill it; with nothing moved, survivals stand exactly like
+kills) — with re-measured survivors' advisory buckets re-derived from the
+current probe, a newly killed attested survivor shedding its attestation
+through the same contradiction report as growth, and discards standing (a
+compile rejection is a pure function of the mutant source under the
+toolchain and build-configuration pins). The drifted record carries the
+current tree's evidence for every subject and the current compartment
+ledger, its provenance recomputed like a fresh measure's. The carve-out is
+bounded fail-closed like its siblings: it never composes with candidate
+evidence or a budget shortfall; a record without complete kill attribution
+or without a compartment ledger re-measures whole; deterministic
+regeneration must re-identify the record's candidates, kills, and survivors
+or the target re-measures whole; the re-measure processes' completed union,
+merged over the record's persisted union, must equal that persisted union or
+the drifted finding is preserved but explicitly non-reusable; and a forced
+run re-measures whole. A delta reaching no recorded oracle serves the whole
+record with nothing re-measured. The drift decision reports "served: N kills
+stand on unmoved oracles; re-measuring M candidates against the current
+oracle" (count-aware nouns; a delta reaching no oracle reports "served:
+compartment delta reaches no recorded oracle; nothing re-measures") with
+`candidates` counting the re-measured candidates. When
 INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
@@ -217,7 +291,12 @@ symbol, the pins that scope the record (target and oracle subject evidence,
 each carrying its package's test-variant compartment hash beside the maximal
 closure;
 oracle selection mode; operator version; budget; oracle timeout; commit and dirty provenance), the mutant and
-kill counts, each survivor's position and operator, the candidate-evidence
+kill counts, the kill-attribution list when the record carries one (its
+absence is tolerated in the anti-flattering direction: a record without it
+re-measures whole under the killer-drift carve-out rather than serving, so
+the field widens reuse and rides the current version without a bump — the
+inverse of candidate evidence's narrowing precedent), each survivor's
+position and operator, the candidate-evidence
 list when any candidate carries one, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
 it does not understand. This is the inverse of the targeting seam: gomutant
@@ -298,7 +377,8 @@ bucketing existed; it is location metadata's sibling, never a measurement pin.
 
 A survivor position is `file.go:line:column`. When distinct generated mutants
 share that position and operator, the second and later identities append
-`#<source-order occurrence>`. The discriminator is part of the survivor and
+`#<source-order occurrence>`. The discriminator is part of the survivor,
+kill-attribution, and
 attestation identity so overlapping syntax-tree mutation sites cannot collapse
 into one disposition.
 Under INV-RESULT-CANDIDATE-CONSERVATION, occurrence suffixes are assigned over
