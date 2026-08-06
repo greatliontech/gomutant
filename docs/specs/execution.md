@@ -29,17 +29,46 @@ event — attribution requiring a well-formed stream would make exactly the
 strongest kills unmeasurable; a passing probe with no attributable package
 admits the kill as an unattributed package crash. A test-attributed or
 package-scope kill measured while sibling mutants could run concurrently
-(worker count above one) re-executes alone after its execution window's
-pool drains — no sibling mutant in flight; execution may proceed in
-bounded target windows, and the isolation obligation attaches to the
-drained window exactly as it did to a campaign-wide pool — and the
-serial execution is the scored measurement - outcome, killer, observation,
-and candidate evidence replaced wholesale - so a sibling-induced collision
-never reads as a kill and a kill that does not reproduce alone scores as the
-serial run says (a survivor is a finding, the anti-flattering direction). A
-timeout kill is excluded from confirmation: re-executing one costs the full
-timeout again, and the residual - a load-induced timeout - is bounded by the
-caller's own oracle budget. An unattributable failure
+(worker count above one) is subject to solo confirmation after its
+execution window's pool drains — no sibling mutant in flight; execution
+may proceed in bounded target windows, and the isolation obligation
+attaches to the drained window exactly as it did to a campaign-wide
+pool — and wherever a confirmation runs, the serial execution is the
+scored measurement - outcome, killer, observation, and candidate
+evidence replaced wholesale - so a sibling-induced collision never
+reads as a kill and a kill that does not reproduce alone scores as the
+serial run says (a survivor is a finding, the anti-flattering
+direction). Confirmation is stride-gated on evidence from the same
+window under the same load: per target, the first
+confirmations run serially in deterministic candidate order, and after
+a run of consecutive reproductions every further kill confirms at a
+fixed deterministic stride — worker completion order can affect none of
+it. The flip signal is the execution window's, not the target's,
+because every target of the window shared the pool whose load the gate
+samples against: any flip — a confirmed kill not reproducing alone —
+retroactively restores full confirmation for every stride-skipped kill
+of every target in the window, before aggregation reads any of them,
+and later targets of that window never sample; a collision observed
+while draining counts exactly the same. An observed collision erases
+the window's sampling residual outright. A target whose window
+evidence is unverifiable — its baselines, any pool observation, or
+serial evidence arriving unverifiable mid-walk, which re-arms the gate
+and confirms that target's own skips — never samples (volatile inputs
+are load sensitivity's signature; merged-tier unverifiability that
+only aggregation can decide lands in the finding as evidence
+regardless). A timeout
+is excluded from confirmation in both directions: a timeout kill never
+enters confirmation (re-executing one costs the full timeout again,
+and the residual - a load-induced timeout - is bounded by the
+caller's own oracle budget), and a serial confirmation that itself
+times out is no gate evidence either way — it neither extends a streak
+nor flips; a serial confirmation landing as a discard is the same
+non-evidence, by the discard clauses' own "proves nothing" terms — a
+flip is a serial run scoring the mutant a survivor, nothing weaker. The accepted residual of the stride gate is
+exactly this: a collision kill survives only when zero sampled
+confirmations anywhere in its execution window flip while an unsampled
+collision exists — evidence-bounded, window-scoped, and any flip
+converts the whole window back to the absolute guarantee. An unattributable failure
 whose differential baseline also fails is environmental noise: never a kill,
 and never a campaign abort — the one candidate records as a discard carrying
 the diagnostic as candidate-local evidence and the run continues, because an

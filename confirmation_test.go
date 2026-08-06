@@ -11,7 +11,11 @@ import (
 // A kill measured under a concurrent pool re-executes alone and the
 // serial execution is the scored one (REQ-exec-attribution): kills run
 // twice at Jobs>1, once at Jobs=1, and a kill that does not reproduce
-// serially scores from the serial run.
+// serially scores from the serial run. The counting oracle writes its
+// counter outside the observation bracket, so this window's evidence is
+// volatile and the stride gate never samples — the every-kill formula
+// below is exactly the volatile arm's pin; the clean-fixture stride is
+// pinned by TestRunExecutingEventsAdvisory's formula.
 func TestRunConfirmsKillsSerially(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")

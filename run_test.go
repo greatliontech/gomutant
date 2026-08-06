@@ -4251,7 +4251,7 @@ func TestRunExecutingEventsAdvisory(t *testing.T) {
 	targets := []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}
 	var events []ExecutionEvent
 	findings, err := tr.Run(ctx, targets, Options{
-		Jobs: 2,
+		Jobs:      2,
 		Executing: func(e ExecutionEvent) { events = append(events, e) },
 	})
 	if err != nil {
@@ -4286,7 +4286,23 @@ func TestRunExecutingEventsAdvisory(t *testing.T) {
 		t.Fatalf("phases = %d executing, %d confirming, want both reported", executing, confirming)
 	}
 	if confirming < 2 {
-		t.Fatalf("confirming events = %d, want one per confirmed kill", confirming)
+		t.Fatalf("confirming events = %d, want per-confirmation events", confirming)
+	}
+	// The clean fixture must actually engage the stride: with total
+	// confirmable kills T (from the events) and no flips, serial
+	// confirmations are the opening streak plus every strideth kill.
+	var total int
+	for _, e := range events {
+		if e.Phase == "confirming" {
+			total = e.ConfirmationsTotal
+		}
+	}
+	wantConfirms := total
+	if total > confirmStreak {
+		wantConfirms = confirmStreak + (total-confirmStreak)/confirmStride
+	}
+	if confirming != wantConfirms {
+		t.Fatalf("confirming events = %d with total %d, want %d (stride gate engaged)", confirming, total, wantConfirms)
 	}
 }
 
@@ -4326,5 +4342,220 @@ func TestRunPlanOnlyRefusesOnTreeDrift(t *testing.T) {
 	var drift *TreeDriftError
 	if !errors.As(err, &drift) {
 		t.Fatalf("drifted plan error = %v, want a TreeDriftError", err)
+	}
+}
+
+// TestConfirmationGateStrides pins the stride gate's decision surface
+// (REQ-exec-attribution): the opening streak confirms serially, clean
+// streaks stride-skip at the fixed cadence, a flip pins full
+// confirmation, an inconclusive result (a serial timeout) is no
+// evidence either way, and volatile gates never sample.
+func TestConfirmationGateStrides(t *testing.T) {
+	g := confirmationGate{}
+	var pattern []bool
+	for i := 0; i < 12; i++ {
+		now := g.confirmNow()
+		pattern = append(pattern, now)
+		if now {
+			if g.observe(confirmReproduced) {
+				t.Fatalf("clean confirmation %d demanded retroaction", i)
+			}
+		}
+	}
+	want := []bool{true, true, true, false, false, false, true, false, false, false, true, false}
+	for i := range want {
+		if pattern[i] != want[i] {
+			t.Fatalf("stride pattern = %v, want %v", pattern, want)
+		}
+	}
+
+	// Inconclusive results extend nothing: a gate fed only timeouts
+	// never completes its streak and never samples.
+	stall := confirmationGate{}
+	for i := 0; i < 6; i++ {
+		if !stall.confirmNow() {
+			t.Fatal("inconclusive-fed gate sampled")
+		}
+		if stall.observe(confirmInconclusive) {
+			t.Fatal("inconclusive demanded retroaction")
+		}
+	}
+
+	flip := confirmationGate{}
+	for i := 0; i < 3; i++ {
+		if !flip.confirmNow() {
+			t.Fatal("opening streak sampled")
+		}
+		flip.observe(confirmReproduced)
+	}
+	sampledOnce := false
+	for i := 0; i < confirmStride; i++ {
+		if flip.confirmNow() {
+			sampledOnce = true
+			break
+		}
+	}
+	if !sampledOnce {
+		t.Fatal("stride never confirmed within one cadence")
+	}
+	if !flip.observe(confirmFlipped) {
+		t.Fatal("first flip did not demand retroactive confirmation")
+	}
+	if flip.observe(confirmFlipped) {
+		t.Fatal("second flip demanded retroaction twice")
+	}
+	for i := 0; i < 8; i++ {
+		if !flip.confirmNow() {
+			t.Fatal("flipped gate sampled")
+		}
+		flip.observe(confirmReproduced)
+	}
+
+	volatile := confirmationGate{volatile: true}
+	for i := 0; i < 8; i++ {
+		if !volatile.confirmNow() {
+			t.Fatal("volatile gate sampled")
+		}
+		volatile.observe(confirmReproduced)
+	}
+}
+
+// TestConfirmWindowKillsFlipDrainsWholeWindow pins the window-wide flip
+// scoping: the pool load was shared, so a flip in one target confirms
+// every stride-skipped kill of every target, and later targets of the
+// window never sample.
+func TestConfirmWindowKillsFlipDrainsWholeWindow(t *testing.T) {
+	var kills []windowKill
+	for mi := 0; mi < 8; mi++ {
+		kills = append(kills, windowKill{target: 0, mi: mi})
+	}
+	for mi := 0; mi < 4; mi++ {
+		kills = append(kills, windowKill{target: 1, mi: mi})
+	}
+	var confirmed []windowKill
+	err := confirmWindowKills(
+		func(int) bool { return false },
+		kills,
+		func(k windowKill) (confirmOutcome, error) {
+			confirmed = append(confirmed, k)
+			if k.target == 0 && k.mi == 6 {
+				return confirmFlipped, nil // the stride-confirmed kill collides
+			}
+			return confirmReproduced, nil
+		},
+		func(windowKill) bool { return false },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Target 0: streak 0-2, skip 3-5, 6 confirms and flips, drains 3-5;
+	// 7 confirms (flipped). Target 1: constructed flipped, all confirm.
+	want := []windowKill{{0, 0}, {0, 1}, {0, 2}, {0, 6}, {0, 3}, {0, 4}, {0, 5}, {0, 7}, {1, 0}, {1, 1}, {1, 2}, {1, 3}}
+	if !slices.Equal(confirmed, want) {
+		t.Fatalf("confirmation order = %v, want %v", confirmed, want)
+	}
+}
+
+// TestConfirmWindowKillsCrossTargetRetroaction pins the drain across an
+// already-walked sibling: target 0 finishes with stride-skipped kills,
+// target 1's confirmation flips, and target 0's skips confirm before
+// the walk continues.
+func TestConfirmWindowKillsCrossTargetRetroaction(t *testing.T) {
+	var kills []windowKill
+	for mi := 0; mi < 6; mi++ {
+		kills = append(kills, windowKill{target: 0, mi: mi})
+	}
+	kills = append(kills, windowKill{target: 1, mi: 0})
+	var confirmed []windowKill
+	err := confirmWindowKills(
+		func(int) bool { return false },
+		kills,
+		func(k windowKill) (confirmOutcome, error) {
+			confirmed = append(confirmed, k)
+			if k.target == 1 {
+				return confirmFlipped, nil
+			}
+			return confirmReproduced, nil
+		},
+		func(windowKill) bool { return false },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Target 0: streak 0-2, skip 3-5. Target 1 flips at its first kill
+	// (fresh gate, streak phase) and drains target 0's skips.
+	want := []windowKill{{0, 0}, {0, 1}, {0, 2}, {1, 0}, {0, 3}, {0, 4}, {0, 5}}
+	if !slices.Equal(confirmed, want) {
+		t.Fatalf("confirmation order = %v, want %v", confirmed, want)
+	}
+}
+
+// TestConfirmWindowKillsVolatileReArm pins the mid-walk volatility
+// re-arm: serial evidence arriving unverifiable confirms the target's
+// own skips and stops its sampling, without flipping siblings.
+func TestConfirmWindowKillsVolatileReArm(t *testing.T) {
+	var kills []windowKill
+	for mi := 0; mi < 8; mi++ {
+		kills = append(kills, windowKill{target: 0, mi: mi})
+	}
+	kills = append(kills, windowKill{target: 1, mi: 0}, windowKill{target: 1, mi: 1}, windowKill{target: 1, mi: 2}, windowKill{target: 1, mi: 3}, windowKill{target: 1, mi: 4})
+	var confirmed []windowKill
+	err := confirmWindowKills(
+		func(int) bool { return false },
+		kills,
+		func(k windowKill) (confirmOutcome, error) {
+			confirmed = append(confirmed, k)
+			return confirmReproduced, nil
+		},
+		func(k windowKill) bool {
+			return k.target == 0 && k.mi == 6 // the stride confirmation's serial evidence is unverifiable
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Target 0: streak 0-2, skip 3-5, 6 confirms and re-arms volatile,
+	// drains its own 3-5, then 7 confirms (volatile). Target 1 is
+	// untouched by the re-arm: streak 0-2, skip 3, confirm nothing
+	// further (4 stride-skips too).
+	want := []windowKill{{0, 0}, {0, 1}, {0, 2}, {0, 6}, {0, 3}, {0, 4}, {0, 5}, {0, 7}, {1, 0}, {1, 1}, {1, 2}}
+	if !slices.Equal(confirmed, want) {
+		t.Fatalf("confirmation order = %v, want %v", confirmed, want)
+	}
+}
+
+// TestWindowEvidenceVolatileArms pins both volatility signals
+// independently: an unverifiable baseline alone, or any unverifiable
+// mutant observation alone, marks the window volatile.
+func TestWindowEvidenceVolatileArms(t *testing.T) {
+	unver := runtimeinput.Observation{}
+	unver.Unverifiable = true
+	clean := runtimeinput.Observation{}
+	if windowEvidenceVolatile(&work{}, nil) {
+		t.Fatal("empty window read volatile")
+	}
+	if !windowEvidenceVolatile(&work{baselines: []runtimeinput.Observation{clean, unver}}, nil) {
+		t.Fatal("unverifiable baseline not volatile")
+	}
+	if !windowEvidenceVolatile(&work{}, []runtimeinput.Observation{clean, unver}) {
+		t.Fatal("unverifiable mutant observation not volatile")
+	}
+}
+
+// TestClassifyConfirmation pins the evidence mapping's three arms: a
+// serial timeout is no evidence either way, a reproduced kill extends
+// the streak, a non-kill is a demonstrated collision.
+func TestClassifyConfirmation(t *testing.T) {
+	if got := classifyConfirmation(engine.MutantKilled, engine.TimeoutKiller); got != confirmInconclusive {
+		t.Fatalf("serial timeout = %v, want inconclusive", got)
+	}
+	if got := classifyConfirmation(engine.MutantKilled, "TestX"); got != confirmReproduced {
+		t.Fatalf("reproduced kill = %v, want reproduced", got)
+	}
+	if got := classifyConfirmation(engine.MutantSurvived, ""); got != confirmFlipped {
+		t.Fatalf("non-reproducing kill = %v, want flipped", got)
+	}
+	if got := classifyConfirmation(engine.MutantDiscarded, ""); got != confirmInconclusive {
+		t.Fatalf("serial discard = %v, want inconclusive (proves nothing either way)", got)
 	}
 }

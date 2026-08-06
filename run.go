@@ -148,6 +148,8 @@ type ExecutionEvent struct {
 	CandidatesTotal int
 	// ConfirmationsDone/Total report the window's serial kill
 	// confirmation progress; zero totals outside confirming phases.
+	// Total is the upper bound (every confirmable kill) — the stride
+	// gate finishes below it in every clean window.
 	ConfirmationsDone  int
 	ConfirmationsTotal int
 }
@@ -1291,18 +1293,41 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 			}
 			confirmDone := 0
+			var kills []windowKill
 			for wi := windowStart; wi < windowEnd; wi++ {
 				for mi := range pending[wi].candidates {
-					if err := ctx.Err(); err != nil {
-						return nil, err
-					}
 					if outcomes[wi][mi] != engine.MutantKilled || killers[wi][mi] == engine.TimeoutKiller {
 						continue
 					}
-					m, runnable := pending[wi].candidates[mi].Mutant()
-					if !runnable {
+					if _, runnable := pending[wi].candidates[mi].Mutant(); !runnable {
 						continue
 					}
+					kills = append(kills, windowKill{target: wi, mi: mi})
+				}
+			}
+			// Volatile evidence anywhere in a target's window — the
+			// baseline or any mutant observation — is load sensitivity's
+			// signature: that target's gate never samples. Snapshots are
+			// per target at walk start; serial evidence arriving
+			// unverifiable re-arms mid-walk through the walk's own
+			// callback.
+			volatileMemo := map[int]bool{}
+			err := confirmWindowKills(
+				func(wi int) bool {
+					v, ok := volatileMemo[wi]
+					if !ok {
+						v = windowEvidenceVolatile(&pending[wi], observations[wi])
+						volatileMemo[wi] = v
+					}
+					return v
+				},
+				kills,
+				func(k windowKill) (confirmOutcome, error) {
+					if err := ctx.Err(); err != nil {
+						return confirmInconclusive, err
+					}
+					wi := k.target
+					m, _ := pending[wi].candidates[k.mi].Mutant()
 					reportExecuting(opts.Executing, ExecutionEvent{
 						Phase:       "confirming",
 						TargetIndex: windowStart + 1, TargetCount: len(pending),
@@ -1312,14 +1337,21 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					})
 					outcome, killer, state, incomplete, err := t.executeMutant(ctx, pending[wi], m, opts, runEnv)
 					if err != nil {
-						return nil, err
+						return confirmInconclusive, err
 					}
 					confirmDone++
-					outcomes[wi][mi] = outcome
-					killers[wi][mi] = killer
-					observations[wi][mi] = interner.intern(state)
-					incompletes[wi][mi] = incomplete
-				}
+					outcomes[wi][k.mi] = outcome
+					killers[wi][k.mi] = killer
+					observations[wi][k.mi] = interner.intern(state)
+					incompletes[wi][k.mi] = incomplete
+					return classifyConfirmation(outcome, killer), nil
+				},
+				func(k windowKill) bool {
+					return observations[k.target][k.mi].Unverifiable
+				},
+			)
+			if err != nil {
+				return nil, err
 			}
 		}
 		if windowEnd == len(pending) {
@@ -1626,6 +1658,73 @@ func reportPreparation(callback func(PreparationEvent), event PreparationEvent) 
 	if callback != nil {
 		callback(event)
 	}
+}
+
+// Confirmation stride gating (REQ-exec-attribution): after
+// confirmStreak consecutive reproductions within one target's window,
+// further kills confirm at every confirmStrideth candidate; any flip
+// restores full confirmation retroactively. The constants realize the
+// contract's "run of consecutive reproductions" and "fixed
+// deterministic stride" — the spec deliberately leaves the numbers
+// code-side (nothing persisted or wire-visible depends on them).
+const (
+	confirmStreak = 3
+	confirmStride = 4
+)
+
+// confirmationGate is the per-target, per-window stride gate over
+// serial kill confirmation. Deterministic by construction: its inputs
+// are the candidate-ordered reproduction results, never worker timing.
+// A volatile gate (unverifiable evidence in the window) never samples.
+type confirmationGate struct {
+	volatile    bool
+	streak      int
+	sinceSample int
+	flipped     bool
+}
+
+// confirmNow reports whether the next kill confirms serially. A gate
+// that is volatile, flipped, or still inside the opening streak always
+// confirms; otherwise every confirmStrideth kill confirms and the rest
+// stride-skip.
+func (g *confirmationGate) confirmNow() bool {
+	if g.volatile || g.flipped || g.streak < confirmStreak {
+		return true
+	}
+	g.sinceSample++
+	if g.sinceSample >= confirmStride {
+		g.sinceSample = 0
+		return true
+	}
+	return false
+}
+
+// confirmOutcome classifies one serial confirmation as gate evidence:
+// a reproduction extends the streak, a flip is a demonstrated
+// collision, and an inconclusive result — a serial timeout, excluded
+// from confirmation in both directions — is no evidence either way.
+type confirmOutcome int
+
+const (
+	confirmReproduced confirmOutcome = iota
+	confirmFlipped
+	confirmInconclusive
+)
+
+// observe records a serial confirmation's evidence and reports whether
+// a flip just demanded retroactive confirmation of stride-skipped
+// kills.
+func (g *confirmationGate) observe(outcome confirmOutcome) (retroactive bool) {
+	switch outcome {
+	case confirmReproduced:
+		g.streak++
+		return false
+	case confirmInconclusive:
+		return false
+	}
+	first := !g.flipped
+	g.flipped = true
+	return first
 }
 
 func reportExecuting(callback func(ExecutionEvent), event ExecutionEvent) {
@@ -2481,3 +2580,112 @@ const (
 	TimeoutKiller       = engine.TimeoutKiller
 	PackageKillerPrefix = engine.PackageKillerPrefix
 )
+
+// windowKill names one confirmable kill: the window-local target index
+// and the candidate index within it.
+type windowKill struct{ target, mi int }
+
+// confirmWindowKills walks every confirmable kill of one execution
+// window — targets in order, candidates in order within each — under
+// per-target stride gates sharing the window's flip signal, because the
+// pool load the gate samples against was shared by every target of the
+// window (REQ-exec-attribution's stride-gate clause). Evidence flows
+// where it binds: a flip anywhere marks every gate flipped and confirms
+// every stride-skipped kill of the whole window; serial evidence
+// arriving unverifiable re-arms that target's gate volatile and
+// confirms its own skips (they were sampled under a clean assumption
+// the serial run just withdrew); drained kills feed the same evidence
+// path, so a collision observed during a drain still un-samples the
+// window. Deterministic by construction: candidate order in, explicit
+// FIFO processing, no worker-timing input.
+func confirmWindowKills(volatile func(target int) bool, kills []windowKill, confirm func(windowKill) (confirmOutcome, error), unverifiable func(windowKill) bool) error {
+	gates := map[int]*confirmationGate{}
+	windowFlipped := false
+	var skipped []windowKill
+	gateFor := func(target int) *confirmationGate {
+		g := gates[target]
+		if g == nil {
+			g = &confirmationGate{volatile: volatile(target), flipped: windowFlipped}
+			gates[target] = g
+		}
+		return g
+	}
+	takeSkips := func(target int, all bool) []windowKill {
+		var taken, kept []windowKill
+		for _, k := range skipped {
+			if all || k.target == target {
+				taken = append(taken, k)
+			} else {
+				kept = append(kept, k)
+			}
+		}
+		skipped = kept
+		return taken
+	}
+	for _, k := range kills {
+		if !gateFor(k.target).confirmNow() {
+			skipped = append(skipped, k)
+			continue
+		}
+		queue := []windowKill{k}
+		for len(queue) > 0 {
+			next := queue[0]
+			queue = queue[1:]
+			outcome, err := confirm(next)
+			if err != nil {
+				return err
+			}
+			g := gateFor(next.target)
+			if !g.volatile && unverifiable(next) {
+				g.volatile = true
+				queue = append(queue, takeSkips(next.target, false)...)
+			}
+			if g.observe(outcome) && !windowFlipped {
+				// Kills walk in target order, so already-walked gates
+				// are never consulted again: seeding windowFlipped into
+				// every later-constructed gate is the whole sibling
+				// propagation.
+				windowFlipped = true
+				queue = append(queue, takeSkips(0, true)...)
+			}
+		}
+	}
+	return nil
+}
+
+// classifyConfirmation maps one serial confirmation's scored result to
+// gate evidence: a serial timeout is excluded from confirmation in
+// both directions (no evidence either way), a reproduced kill extends
+// the streak, anything else is a demonstrated collision.
+func classifyConfirmation(outcome engine.MutantOutcome, killer string) confirmOutcome {
+	switch {
+	case outcome == engine.MutantKilled && killer == engine.TimeoutKiller:
+		return confirmInconclusive
+	case outcome == engine.MutantKilled:
+		return confirmReproduced
+	case outcome == engine.MutantDiscarded:
+		// A discard proves nothing either way by its own clauses —
+		// noise and probe-timeout discards are not demonstrated
+		// collisions.
+		return confirmInconclusive
+	}
+	return confirmFlipped
+}
+
+// windowEvidenceVolatile reports whether a target's window carries any
+// unverifiable runtime evidence — in its baselines or any completed
+// mutant observation — the signature of load-sensitive inputs the
+// stride gate must not sample across (REQ-exec-attribution).
+func windowEvidenceVolatile(w *work, observations []runtimeinput.Observation) bool {
+	for _, b := range w.baselines {
+		if b.Unverifiable {
+			return true
+		}
+	}
+	for _, o := range observations {
+		if o.Unverifiable {
+			return true
+		}
+	}
+	return false
+}
