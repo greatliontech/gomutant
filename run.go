@@ -24,6 +24,49 @@ import (
 
 var findingObservationSequence atomic.Uint64
 
+// lockCallbacks wraps every caller callback in one mutex so pipelined
+// preparation and execution — which invoke callbacks from two goroutines —
+// preserve the synchronous-caller-code contract: no two callbacks ever run
+// concurrently (REQ-exec-run-status). AnalysisProgress is exempt by its own
+// documented contract (safe for concurrent invocation).
+func lockCallbacks(opts Options) Options {
+	var mu sync.Mutex
+	if fn := opts.Guidance; fn != nil {
+		opts.Guidance = func(g OracleGuidance) { mu.Lock(); defer mu.Unlock(); fn(g) }
+	}
+	if fn := opts.Decision; fn != nil {
+		opts.Decision = func(d RunDecision) { mu.Lock(); defer mu.Unlock(); fn(d) }
+	}
+	if fn := opts.Executing; fn != nil {
+		opts.Executing = func(e ExecutionEvent) { mu.Lock(); defer mu.Unlock(); fn(e) }
+	}
+	if fn := opts.Progress; fn != nil {
+		opts.Progress = func(e PreparationEvent) { mu.Lock(); defer mu.Unlock(); fn(e) }
+	}
+	if fn := opts.Commit; fn != nil {
+		opts.Commit = func(f Finding) error { mu.Lock(); defer mu.Unlock(); return fn(f) }
+	}
+	if fn := opts.Contradiction; fn != nil {
+		opts.Contradiction = func(c AttestationContradiction) { mu.Lock(); defer mu.Unlock(); fn(c) }
+	}
+	if fn := opts.afterExecution; fn != nil {
+		opts.afterExecution = func() { mu.Lock(); defer mu.Unlock(); fn() }
+	}
+	if fn := opts.aggregate; fn != nil {
+		opts.aggregate = func() { mu.Lock(); defer mu.Unlock(); fn() }
+	}
+	if fn := opts.producer; fn != nil {
+		opts.producer = func(s string) { mu.Lock(); defer mu.Unlock(); fn(s) }
+	}
+	if fn := opts.proofAttempt; fn != nil {
+		opts.proofAttempt = func(s string, attempt int) { mu.Lock(); defer mu.Unlock(); fn(s, attempt) }
+	}
+	if fn := opts.dispatched; fn != nil {
+		opts.dispatched = func(s string, mi int) { mu.Lock(); defer mu.Unlock(); fn(s, mi) }
+	}
+	return opts
+}
+
 // Options bound a run.
 type Options struct {
 	// Budget caps selected candidates per symbol; 0 means all (REQ-mut-budget).
@@ -55,8 +98,10 @@ type Options struct {
 	// Prior findings (a parsed document): a target whose pins all hold is
 	// served from here instead of re-measured (REQ-result-stale).
 	Prior []Finding
-	// Decision receives each target's deterministic pre-execution disposition
-	// in target order (REQ-exec-run-status).
+	// Decision receives each target's deterministic disposition, streaming
+	// in target order as each target's preparation completes — before that
+	// target's own mutants execute, possibly after earlier targets began
+	// executing (REQ-exec-run-status).
 	Decision func(RunDecision)
 	// PlanOnly stops the run after the deterministic preparation sequence
 	// and target decisions: mutants are enumerated and every decision is
@@ -71,15 +116,19 @@ type Options struct {
 	// no-write guarantee is the run's, not each caller's to re-implement.
 	// Executing must be safe for synchronous invocation from the run loop
 	// and receives advisory execution-phase progress: which target window
-	// is dispatching or confirming, exact campaign-wide candidate
-	// tallies, and per-kill confirmation progress while confirming.
+	// is dispatching or confirming, exact candidate tallies over the
+	// targets prepared so far (growing to campaign-wide as pipelined
+	// preparation completes), and per-kill confirmation progress while
+	// confirming.
 	// Events are diagnostic, carry no ordering or completion
 	// guarantee beyond target-window boundaries, and never enter a
 	// decision or finding (REQ-exec-run-status's advisory classes). The
 	// callback must return normally.
 	Executing func(ExecutionEvent)
-	// Progress synchronously receives deterministic preparation events before
-	// terminal target decisions and mutant execution. It must return normally
+	// Progress synchronously receives deterministic preparation events; a
+	// target's own events precede its decision and its execution, while
+	// preparation pipelined behind earlier targets' execution may interleave
+	// with their advisory execution events. It must return normally
 	// (REQ-exec-run-status).
 	Progress func(PreparationEvent)
 	// AnalysisProgress must be safe for concurrent invocation and synchronously receives advisory keep-alive events from
@@ -97,7 +146,9 @@ type Options struct {
 	// (REQ-exec-cancellation). The caller's final merge of the returned
 	// findings remains the authority; re-merging a committed finding is
 	// idempotent. A returned error aborts the run. Skipped targets measure
-	// nothing and are never delivered.
+	// nothing and are never delivered. Like every callback, it may run on
+	// the run's preparation goroutine: a callback that panics is
+	// process-fatal rather than an unwind Run's caller can recover.
 	Commit         func(Finding) error
 	afterExecution func()
 	aggregate      func()
@@ -133,10 +184,12 @@ const (
 )
 
 // ExecutionEvent is one advisory execution-phase progress report: the
-// window's phase (executing or confirming), the 1-based index and count
-// of targets whose candidates the campaign has dispatched, exact
-// campaign-wide candidate tallies (carried and non-runnable candidates
-// included — the plan's own counting), and, while confirming, the
+// window's phase (executing or confirming), the 1-based index of the
+// window's first measure target among those dispatched and the count of
+// measure targets prepared so far, exact candidate tallies over the
+// prepared targets (carried and non-runnable candidates included — the
+// plan's own counting — growing to campaign-wide as pipelined
+// preparation completes), and, while confirming, the
 // window's serial confirmation progress. Advisory only —
 // timing-dependent, outside the deterministic run-status sequence.
 type ExecutionEvent struct {
@@ -620,6 +673,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if opts.OracleTimeout == 0 {
 		opts.OracleTimeout = 60 * time.Second
 	}
+	opts = lockCallbacks(opts)
 	targets = snapshotTargets(targets)
 	opts.Prior = snapshotFindings(opts.Prior)
 	repository, err := captureRepositoryStateContext(ctx, t.dir)
@@ -657,7 +711,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 
 	findings := make([]Finding, len(targets))
-	var pending []work
 	type resolvedTarget struct {
 		index  int
 		oracle []string
@@ -734,6 +787,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	producerUnion := &subjectViewSet{bySymbol: map[string]*subjectView{}}
 	producerFaults := map[string]error{}
 	producerUnionBuilt := false
+	// The union build runs observed captures (test processes) without the
+	// probe gate: it is always triggered by the first measure target's
+	// preparation, strictly before that target's work item is emitted, so
+	// no execution window — and no serial confirmation — can be in flight
+	// yet. The per-target retry build below has no such ordering and holds
+	// the gate shared like any probe.
 	buildProducerUnion := func() error {
 		if producerUnionBuilt {
 			return nil
@@ -762,7 +821,28 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 	}
-	for _, resolved := range resolvedTargets {
+	// preparedTargets and preparedCandidates are the pipelined campaign's
+	// running tallies: written by the preparation goroutine as each measure
+	// target readies, read by the advisory execution events, which grow to
+	// the campaign-wide totals as preparation completes
+	// (REQ-exec-run-status's advisory classes).
+	var preparedTargets, preparedCandidates atomic.Int64
+	// probeGate serializes producer-side oracle probes against serial kill
+	// confirmations: a confirmation's scored run shares no process with any
+	// preparation probe, so a probe's test-level side effects (an exclusive
+	// port, a file lock) can never manufacture a false reproduction or a
+	// false flip. Probes hold it shared among themselves; each confirmation
+	// holds it exclusively (REQ-exec-attribution).
+	var probeGate sync.RWMutex
+	// prepareTarget runs one target's whole preparation — reuse gates,
+	// candidate generation, decision, oracle groups, and baseline probes —
+	// and returns its work item, or nil when the target completed without
+	// execution (skipped, cached, plan-only). Its decision is delivered
+	// after the target's own preparation events, streaming in target order
+	// (REQ-exec-run-status); the caller drives it serially, either inline
+	// (plan-only) or from the preparation goroutine pipelined with the
+	// execution windows.
+	prepareTarget := func(ctx context.Context, resolved resolvedTarget) (*work, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -840,11 +920,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					return nil, lerr
 				}
 				findings[i] = cached
-				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: "served: body, oracle closure, and runtime inputs unchanged"}
+				// Commit precedes the decision: a caller canceling at the
+				// decision callback still holds the persisted finding
+				// (REQ-exec-cancellation's incremental-commit clause).
 				if err := commitFinding(ctx, repository, opts.Commit, cached); err != nil {
 					return nil, err
 				}
-				continue
+				if opts.Decision != nil {
+					opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: "served: body, oracle closure, and runtime inputs unchanged"})
+				}
+				return nil, nil
 			}
 			if matches {
 				// The record's only unverifiable runtime evidence is
@@ -903,7 +988,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if opts.proofAttempt != nil {
 				opts.proofAttempt(tg.Symbol, 2)
 			}
+			probeGate.RLock()
 			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
+			probeGate.RUnlock()
 		}
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -915,8 +1002,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// skips with the cause on its decision line — a skip never
 			// overwrites a prior record — and the campaign proceeds.
 			f.Skipped = fmt.Sprintf("freshness proof unavailable (oracle %s): %v", strings.Join(oracle, ", "), err)
-			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
-			continue
+			if opts.Decision != nil {
+				opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped})
+			}
+			return nil, nil
 		}
 		// Producer enrollment happens only for targets whose proof
 		// exists: enrolling before the build would put a skipped
@@ -950,12 +1039,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err != nil {
 			return nil, err
 		}
-		pending = append(pending, work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, currentLedger: currentLedger, serve: serve, extend: extend, grow: grow, growAdded: growAdded, drift: drift, driftMoved: driftMoved})
-	}
-	for wi := range pending {
-		w := &pending[wi]
-		tg := targets[w.target]
-		f := &findings[w.target]
+		item := work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, currentLedger: currentLedger, serve: serve, extend: extend, grow: grow, growAdded: growAdded, drift: drift, driftMoved: driftMoved}
+		w := &item
+		var decision RunDecision
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -989,7 +1075,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if flagged, ok := flaggedCandidateIndexes(generation, *w.serve); ok {
 				w.candidates = generation.Candidates
 				w.flagged = flagged
-				decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: fmt.Sprintf("served: pins unchanged; re-executing %s", candidateNoun(len(flagged))), Candidates: len(flagged)}
+				decision = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: fmt.Sprintf("served: pins unchanged; re-executing %s", candidateNoun(len(flagged))), Candidates: len(flagged)}
 			} else {
 				// Deterministic regeneration cannot re-identify every flagged
 				// candidate and recorded survivor, so the record cannot be
@@ -1008,7 +1094,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				w.candidates = generation.Candidates
 				w.extendFrom = w.extend.Generated
 				suffix := len(generation.Candidates) - w.extendFrom
-				decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: fmt.Sprintf("served: prefix of %s stands; measuring %d more", candidateNoun(w.extendFrom), suffix), Candidates: suffix}
+				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: fmt.Sprintf("served: prefix of %s stands; measuring %d more", candidateNoun(w.extendFrom), suffix), Candidates: suffix}
 			} else {
 				// Deterministic regeneration cannot re-identify the recorded
 				// prefix, so the record cannot be extended: the whole target
@@ -1021,7 +1107,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if survivors, ok := grownSurvivorIndexes(generation, *w.grow); ok {
 				w.candidates = generation.Candidates
 				w.growSurvivors = survivors
-				decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure",
+				decision = RunDecision{Symbol: tg.Symbol, Action: "measure",
 					Reason:     fmt.Sprintf("served: derived oracle grew by %s; re-measuring %s against them", testNoun(len(w.growAdded)), survivorNoun(len(survivors))),
 					Candidates: len(survivors)}
 			} else {
@@ -1048,7 +1134,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if len(w.driftMoved) == 0 {
 					reason = "served: compartment delta reaches no recorded oracle; nothing re-measures"
 				}
-				decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Candidates: len(remeasure)}
+				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Candidates: len(remeasure)}
 			} else {
 				// Deterministic regeneration cannot re-identify the recorded
 				// candidates, kills, and survivors, so the record cannot
@@ -1066,7 +1152,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		if w.serve == nil && w.extend == nil && w.grow == nil && w.drift == nil {
 			w.candidates = generation.Candidates
-			decisions[w.target] = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason, Candidates: len(generation.Candidates)}
+			decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason, Candidates: len(generation.Candidates)}
 			f.Budget = opts.Budget
 			f.CandidateCount = generation.CandidateCount
 			f.Generated = len(generation.Candidates)
@@ -1081,7 +1167,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// The plan needs candidate counts and decisions, never
 			// baseline probes: group construction and probing are
 			// execution cost the plan exists to preview.
-			continue
+			if opts.Decision != nil {
+				opts.Decision(decision)
+			}
+			return nil, nil
 		}
 		groupOracle := w.oracle
 		if w.grow != nil {
@@ -1112,7 +1201,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
+				probeGate.RLock()
 				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, runEnv)
+				probeGate.RUnlock()
 				if err != nil {
 					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
 				}
@@ -1130,23 +1221,47 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			w.baselines = append(w.baselines, state)
 		}
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if opts.Decision != nil {
-		for _, decision := range decisions {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
+		// The target's own preparation events — mutants and baselines —
+		// all precede its decision (REQ-exec-run-status).
+		if opts.Decision != nil {
 			opts.Decision(decision)
 		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		preparedTargets.Add(1)
+		preparedCandidates.Add(int64(len(w.candidates)))
+		return w, nil
+	}
+
+	// deliverPrepared walks every target in order — streaming resolve-phase
+	// skip decisions and preparing resolved targets — so the decision
+	// stream's order is exactly the preparation sequence's target order
+	// (REQ-exec-run-status). emit receives each measure target's work item.
+	deliverPrepared := func(ctx context.Context, emit func(work) error) error {
+		next := 0
+		for i := range targets {
+			if next < len(resolvedTargets) && resolvedTargets[next].index == i {
+				w, err := prepareTarget(ctx, resolvedTargets[next])
+				next++
+				if err != nil {
+					return err
+				}
+				if w != nil && emit != nil {
+					if err := emit(*w); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if decisions[i].Action != "" && opts.Decision != nil {
+				opts.Decision(decisions[i])
+			}
 		}
+		return nil
 	}
 
 	if opts.PlanOnly {
+		if err := deliverPrepared(ctx, nil); err != nil {
+			return nil, err
+		}
 		// A plan is a decision about committing budget, so it refuses
 		// on the same tree-motion evidence an executing run's epilogue
 		// checks — neither is a baseline probe or a mutant execution.
@@ -1173,19 +1288,40 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		return planned, nil
 	}
 
-	// Phase two: the pool. Outcomes land in a preallocated matrix so
-	// aggregation is deterministic regardless of completion order; the first
-	// error cancels everything in flight.
-	outcomes := make([][]engine.MutantOutcome, len(pending))
-	observations := make([][]runtimeinput.Observation, len(pending))
-	incompletes := make([][]string, len(pending))
-	killers := make([][]string, len(pending))
-	for wi := range pending {
-		outcomes[wi] = make([]engine.MutantOutcome, len(pending[wi].candidates))
-		observations[wi] = make([]runtimeinput.Observation, len(pending[wi].candidates))
-		incompletes[wi] = make([]string, len(pending[wi].candidates))
-		killers[wi] = make([]string, len(pending[wi].candidates))
-	}
+	// Phase two: preparation pipelined with the pool. A single preparation
+	// goroutine drives prepareTarget serially in target order — the
+	// deterministic preparation-and-decision sequence is its alone — and
+	// feeds ready work items to the window loop below, so execution
+	// overlaps only later targets' preparation (REQ-exec-run-status). The
+	// buffer holds every possible item, so preparation never blocks behind
+	// execution; clean-tree probes beside executing mutants are sound
+	// because a mutant runs through its own overlay and never touches the
+	// tree (REQ-mut-overlay).
+	items := make(chan work, len(targets))
+	var prepErr error
+	prepDone := make(chan struct{})
+	runCtx, cancelRun := context.WithCancel(ctx)
+	// The join runs on every return path: no caller callback may fire
+	// after Run returns (the synchronous-caller-code contract), and a
+	// canceled run still waits for producer-side probe cleanup
+	// (REQ-exec-cancellation). Receiving from the closed prepDone is
+	// idempotent, so the deferred join composes with the loop's own read.
+	defer func() {
+		cancelRun()
+		<-prepDone
+	}()
+	go func() {
+		defer close(prepDone)
+		defer close(items)
+		prepErr = deliverPrepared(runCtx, func(w work) error {
+			select {
+			case items <- w:
+				return nil
+			case <-runCtx.Done():
+				return runCtx.Err()
+			}
+		})
+	}()
 	interner := &manifestInterner{byDigest: map[string]string{}}
 	type job struct{ wi, mi int }
 	// Execution proceeds in bounded target windows: each window's pool
@@ -1223,20 +1359,30 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// Advisory execution progress rides window boundaries: totals are
 	// exact, per-window timing is not part of the deterministic sequence
 	// (REQ-exec-run-status's advisory classes).
-	mutantsTotal, mutantsDone := 0, 0
-	for wi := range pending {
-		mutantsTotal += len(pending[wi].candidates)
+	dispatchedTargets, mutantsDone := 0, 0
+	type executedWindow struct {
+		window       []work
+		outcomes     [][]engine.MutantOutcome
+		observations [][]runtimeinput.Observation
+		incompletes  [][]string
+		killers      [][]string
 	}
-	for windowStart := 0; windowStart < len(pending); {
-		windowEnd := windowStart
-		for budget := 0; windowEnd < len(pending) && (budget == 0 || budget < windowBudget); windowEnd++ {
-			budget += len(pending[windowEnd].candidates)
+	executeWindow := func(window []work) (*executedWindow, error) {
+		outcomes := make([][]engine.MutantOutcome, len(window))
+		observations := make([][]runtimeinput.Observation, len(window))
+		incompletes := make([][]string, len(window))
+		killers := make([][]string, len(window))
+		for wi := range window {
+			outcomes[wi] = make([]engine.MutantOutcome, len(window[wi].candidates))
+			observations[wi] = make([]runtimeinput.Observation, len(window[wi].candidates))
+			incompletes[wi] = make([]string, len(window[wi].candidates))
+			killers[wi] = make([]string, len(window[wi].candidates))
 		}
 		reportExecuting(opts.Executing, ExecutionEvent{
 			Phase:       "executing",
-			TargetIndex: windowStart + 1, TargetCount: len(pending),
-			Symbol:         targets[pending[windowStart].target].Symbol,
-			CandidatesDone: mutantsDone, CandidatesTotal: mutantsTotal,
+			TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
+			Symbol:         targets[window[0].target].Symbol,
+			CandidatesDone: mutantsDone, CandidatesTotal: int(preparedCandidates.Load()),
 		})
 		jobCh := make(chan job)
 		poolCtx, cancel := context.WithCancel(ctx)
@@ -1255,7 +1401,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if poolCtx.Err() != nil {
 						return
 					}
-					w := pending[j.wi]
+					w := window[j.wi]
 					m, runnable := w.candidates[j.mi].Mutant()
 					if !runnable {
 						continue
@@ -1279,32 +1425,32 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}()
 		}
 	dispatching:
-		for wi := windowStart; wi < windowEnd; wi++ {
-			for mi, candidate := range pending[wi].candidates {
+		for wi := range window {
+			for mi, candidate := range window[wi].candidates {
 				if _, runnable := candidate.Mutant(); !runnable {
 					continue
 				}
-				if pending[wi].serve != nil && !pending[wi].flagged[mi] {
+				if window[wi].serve != nil && !window[wi].flagged[mi] {
 					// A served record's covered candidates keep their recorded
 					// outcomes; only the flagged ones re-execute
 					// (REQ-result-stale).
 					continue
 				}
-				if pending[wi].extend != nil && mi < pending[wi].extendFrom {
+				if window[wi].extend != nil && mi < window[wi].extendFrom {
 					// An extended record's measured prefix keeps its recorded
 					// outcomes; only the unmeasured suffix executes
 					// (REQ-mut-budget, REQ-result-stale's budget-extension
 					// carve-out).
 					continue
 				}
-				if pending[wi].grow != nil && !pending[wi].growSurvivors[mi] {
+				if window[wi].grow != nil && !window[wi].growSurvivors[mi] {
 					// A grown record's kills and discards stand — a grown oracle
 					// can only kill more — so only the recorded survivors
 					// re-execute, against the added tests alone
 					// (REQ-result-stale's growth carve-out).
 					continue
 				}
-				if pending[wi].drift != nil && !pending[wi].driftRemeasure[mi] {
+				if window[wi].drift != nil && !window[wi].driftRemeasure[mi] {
 					// A drifted record's kills keyed to unmoved oracles and its
 					// discards stand; only moved-killer kills, set-wide kills
 					// under any movement, and survivors re-execute, against the
@@ -1313,7 +1459,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					continue
 				}
 				if opts.dispatched != nil {
-					opts.dispatched(pending[wi].candidates[mi].Symbol, mi)
+					opts.dispatched(window[wi].candidates[mi].Symbol, mi)
 				}
 				select {
 				case jobCh <- job{wi, mi}:
@@ -1337,18 +1483,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// interference from a sibling never reads as a kill. Timeout kills
 		// are excluded: confirming one costs the full timeout again, and the
 		// hang bound is the caller's own budget - the named residual.
-		for wi := windowStart; wi < windowEnd; wi++ {
-			mutantsDone += len(pending[wi].candidates)
+		for wi := range window {
+			mutantsDone += len(window[wi].candidates)
 		}
 		if jobs > 1 {
 			// Each confirmation re-runs a full oracle, so per-confirmation
 			// events are naturally sparse; a window with nothing to
 			// confirm reports nothing.
 			confirmTotal := 0
-			for wi := windowStart; wi < windowEnd; wi++ {
-				for mi := range pending[wi].candidates {
+			for wi := range window {
+				for mi := range window[wi].candidates {
 					if outcomes[wi][mi] == engine.MutantKilled && killers[wi][mi] != engine.TimeoutKiller {
-						if _, runnable := pending[wi].candidates[mi].Mutant(); runnable {
+						if _, runnable := window[wi].candidates[mi].Mutant(); runnable {
 							confirmTotal++
 						}
 					}
@@ -1356,12 +1502,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			confirmDone := 0
 			var kills []windowKill
-			for wi := windowStart; wi < windowEnd; wi++ {
-				for mi := range pending[wi].candidates {
+			for wi := range window {
+				for mi := range window[wi].candidates {
 					if outcomes[wi][mi] != engine.MutantKilled || killers[wi][mi] == engine.TimeoutKiller {
 						continue
 					}
-					if _, runnable := pending[wi].candidates[mi].Mutant(); !runnable {
+					if _, runnable := window[wi].candidates[mi].Mutant(); !runnable {
 						continue
 					}
 					kills = append(kills, windowKill{target: wi, mi: mi})
@@ -1378,7 +1524,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				func(wi int) bool {
 					v, ok := volatileMemo[wi]
 					if !ok {
-						v = windowEvidenceVolatile(&pending[wi], observations[wi])
+						v = windowEvidenceVolatile(&window[wi], observations[wi])
 						volatileMemo[wi] = v
 					}
 					return v
@@ -1389,15 +1535,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						return confirmInconclusive, err
 					}
 					wi := k.target
-					m, _ := pending[wi].candidates[k.mi].Mutant()
+					m, _ := window[wi].candidates[k.mi].Mutant()
 					reportExecuting(opts.Executing, ExecutionEvent{
 						Phase:       "confirming",
-						TargetIndex: windowStart + 1, TargetCount: len(pending),
-						Symbol:         targets[pending[wi].target].Symbol,
-						CandidatesDone: mutantsDone, CandidatesTotal: mutantsTotal,
+						TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
+						Symbol:         targets[window[wi].target].Symbol,
+						CandidatesDone: mutantsDone, CandidatesTotal: int(preparedCandidates.Load()),
 						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
 					})
-					outcome, killer, state, incomplete, err := t.executeMutant(ctx, pending[wi], m, opts, runEnv)
+					probeGate.Lock()
+					outcome, killer, state, incomplete, err := t.executeMutant(ctx, window[wi], m, opts, runEnv)
+					probeGate.Unlock()
 					if err != nil {
 						return confirmInconclusive, err
 					}
@@ -1416,35 +1564,29 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				return nil, err
 			}
 		}
-		if windowEnd == len(pending) {
-			if opts.afterExecution != nil {
-				opts.afterExecution()
-			}
-			// A drifted producer view refuses target-locally, not
-			// campaign-wide: the per-target validations below decide which
-			// findings still bind, so a concurrent edit costs only the
-			// affected targets (REQ-exec-quiescence). The campaign-wide
-			// check runs once, after the last window's execution, exactly
-			// as it did before windows existed; earlier windows' commits
-			// are gated by their own per-target validations.
-			if err := views.validateProducers(ctx); err != nil {
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				treeDrift = err
-			}
-		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		// Phase three, per window and sequential: aggregate in target and
-		// mutant order and commit each finding before the next window
-		// dispatches.
-		for wi := windowStart; wi < windowEnd; wi++ {
-			w := pending[wi]
+		cancel()
+		dispatchedTargets += len(window)
+		return &executedWindow{window: window, outcomes: outcomes, observations: observations, incompletes: incompletes, killers: killers}, nil
+	}
+	// aggregateWindow folds one executed window into findings and commits
+	// each one — always before the next window dispatches
+	// (REQ-exec-cancellation's incremental-commit clause): the main loop
+	// aggregates window N right after gathering window N+1, so in the
+	// common case (preparation running ahead of execution) commits land
+	// immediately, and only a preparation-bound campaign holds one
+	// window's aggregation until the next window's items arrive — which is
+	// what lets the campaign epilogue fire between the LAST window's
+	// execution and its aggregation, exactly where it always sat.
+	aggregateWindow := func(st *executedWindow) error {
+		window, outcomes, observations, incompletes, killers := st.window, st.outcomes, st.observations, st.incompletes, st.killers
+		for wi := range window {
+			w := window[wi]
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return err
 			}
 			if opts.aggregate != nil {
 				opts.aggregate()
@@ -1453,7 +1595,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if w.serve != nil {
 				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				// The aggregated work item's retained observations are dead past
 				// this point; releasing them per item keeps the run's peak at the
@@ -1461,25 +1603,25 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				observations[wi] = nil
 				if err := w.producer.validateProducers(ctx); err != nil {
 					if ctx.Err() != nil {
-						return nil, ctx.Err()
+						return ctx.Err()
 					}
 					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 					continue
 				}
 				if err := commitAndAttribute(ctx, spliced, w); err != nil {
-					return nil, err
+					return err
 				}
 				continue
 			}
 			if w.grow != nil {
 				grown, union, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				observations[wi] = nil
 				if err := w.producer.validateProducers(ctx); err != nil {
 					if ctx.Err() != nil {
-						return nil, ctx.Err()
+						return ctx.Err()
 					}
 					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 					continue
@@ -1488,7 +1630,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// commit and dirty provenance are recomputed like a fresh
 				// measure's rather than carried from the served record.
 				if err := t.stampProvenance(ctx, repository, w, &grown, union); err != nil {
-					return nil, err
+					return err
 				}
 				// Advisory buckets re-derived honestly under the delta oracle:
 				// an added test executing a previously never-executed survivor
@@ -1499,7 +1641,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if !grown.TargetEvidence.RuntimeUnverifiable {
 					coverage, probed, err := t.oracleCoverage(ctx, w, opts, runEnv, coverageCache)
 					if err != nil {
-						return nil, err
+						return err
 					}
 					if probed {
 						coverPkg := w.targetView.subject.Package
@@ -1515,7 +1657,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					}
 				}
 				if err := commitAndAttribute(ctx, grown, w); err != nil {
-					return nil, err
+					return err
 				}
 				// Evidence beats attestation: each shed disposition names its
 				// killer so the contradiction — a mutant judged equivalent was
@@ -1539,12 +1681,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if w.drift != nil {
 				spliced, union, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				observations[wi] = nil
 				if err := w.producer.validateProducers(ctx); err != nil {
 					if ctx.Err() != nil {
-						return nil, ctx.Err()
+						return ctx.Err()
 					}
 					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 					continue
@@ -1554,7 +1696,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// compartment delta — so provenance is recomputed like a fresh
 				// measure's (REQ-result-stale's killer-drift carve-out).
 				if err := t.stampProvenance(ctx, repository, w, &spliced, union); err != nil {
-					return nil, err
+					return err
 				}
 				// With any oracle moved, every surviving candidate was
 				// re-measured against the full current oracle, so advisory
@@ -1564,11 +1706,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// coverage probe.
 				if len(w.driftMoved) != 0 && !spliced.TargetEvidence.RuntimeUnverifiable {
 					if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
-						return nil, err
+						return err
 					}
 				}
 				if err := commitAndAttribute(ctx, spliced, w); err != nil {
-					return nil, err
+					return err
 				}
 				// Evidence beats attestation, exactly as under growth: a
 				// re-measured attested survivor a moved test now kills sheds
@@ -1591,14 +1733,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if w.extend != nil {
 				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				// Same release as the served branch: the splice is computed, the
 				// per-candidate observations are dead.
 				observations[wi] = nil
 				if err := w.producer.validateProducers(ctx); err != nil {
 					if ctx.Err() != nil {
-						return nil, ctx.Err()
+						return ctx.Err()
 					}
 					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 					continue
@@ -1610,46 +1752,46 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// survivors were already classified unstable by the splice.
 				if !extended.TargetEvidence.RuntimeUnverifiable {
 					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
-						return nil, err
+						return err
 					}
 				}
 				if err := commitAndAttribute(ctx, extended, w); err != nil {
-					return nil, err
+					return err
 				}
 				continue
 			}
 			state, candidateEvidence, err := completedObservationUnion(ctx, t.dir, runEnv, w.baselines, w.candidates, outcomes[wi], observations[wi], incompletes[wi], nil)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			// Same release as the served branch: the union is computed, the
 			// per-candidate observations are dead.
 			observations[wi] = nil
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return err
 			}
 			f.CandidateEvidence = candidateEvidence
 			targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, state)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			f.TargetEvidence = targetEvidence
 			f.OracleEvidence = oracleEvidence
 			f.CompartmentLedger = compartmentLedgerFromView(w.currentLedger)
 			if err := w.producer.validateProducers(ctx); err != nil {
 				if ctx.Err() != nil {
-					return nil, ctx.Err()
+					return ctx.Err()
 				}
 				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 				continue
 			}
 			if err := t.stampProvenance(ctx, repository, w, f, state); err != nil {
-				return nil, err
+				return err
 			}
 			f.Operators = summarizeOperators(w.candidates, outcomes[wi])
 			for _, summary := range f.Operators {
 				if err := ctx.Err(); err != nil {
-					return nil, err
+					return err
 				}
 				f.Discarded += summary.Discarded
 				f.Mutants += summary.Killed + summary.Survived
@@ -1657,7 +1799,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			for mi, candidate := range w.candidates {
 				if err := ctx.Err(); err != nil {
-					return nil, err
+					return err
 				}
 				switch outcomes[wi][mi] {
 				case engine.MutantSurvived:
@@ -1671,7 +1813,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 			}
 			if err := t.bucketSurvivorExecution(ctx, f, w, opts, runEnv, coverageCache, 0); err != nil {
-				return nil, err
+				return err
 			}
 			// A re-measure with unchanged pins keeps prior attestations that
 			// still name the exact survivor; changed pins shed them, so every
@@ -1683,7 +1825,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				for _, a := range rec.Attested {
 					if err := ctx.Err(); err != nil {
-						return nil, err
+						return err
 					}
 					if open[survivorKey{a.Position, a.Operator}] {
 						f.Attested = append(f.Attested, a)
@@ -1691,25 +1833,92 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 			}
 			if err := commitAndAttribute(ctx, *f, w); err != nil {
-				return nil, err
+				return err
 			}
 		}
-		cancel()
-		windowStart = windowEnd
+		return nil
 	}
-	// A run with nothing pending — every target fully served, or no
-	// targets at all — still owes the campaign epilogue: a transient
-	// global drift no surviving target's evidence reflects is reported,
-	// never silently absorbed (REQ-exec-quiescence).
-	if len(pending) == 0 {
-		if opts.afterExecution != nil {
-			opts.afterExecution()
+	// The window gather is deterministic: items arrive in target order from
+	// the serial preparation goroutine, and window boundaries follow the
+	// same budget rule as ever — blocking until each next item is prepared
+	// keeps membership independent of execution timing, so the
+	// window-scoped confirmation flip signal covers the same kills on
+	// every run (REQ-exec-attribution).
+	var held *executedWindow
+	// aggregateHeld folds the previously executed window on the exit
+	// paths: measured evidence is never discarded by a later preparation
+	// failure — an abort that discards completed measurements is reserved
+	// for corrupted orchestration state (REQ-exec-attribution's abort
+	// terms) — while a canceled context refuses inside aggregation as
+	// ever, cancellation discarding unfinished work whole.
+	aggregateHeld := func() error {
+		if held == nil {
+			return nil
 		}
-		if err := views.validateProducers(ctx); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
+		err := aggregateWindow(held)
+		held = nil
+		return err
+	}
+	for {
+		window, ok := gatherWindow(items, windowBudget)
+		if !ok {
+			break
+		}
+		// A failed preparation surfaces before the next window executes,
+		// not after every buffered item is paid for: gathered-but-unmeasured
+		// items are just preparation, dropped without loss.
+		select {
+		case <-prepDone:
+			if prepErr != nil {
+				if err := aggregateHeld(); err != nil {
+					return nil, err
+				}
+				return nil, prepErr
 			}
-			treeDrift = err
+		default:
+		}
+		// The previously executed window aggregates only now, after the
+		// next window's items arrived and proved it was not the last:
+		// its commits still land before this window dispatches
+		// (REQ-exec-cancellation's incremental-commit clause), and in the
+		// common case — preparation running ahead of execution through the
+		// buffered channel — the gather returns instantly, so the hold
+		// costs nothing.
+		if err := aggregateHeld(); err != nil {
+			return nil, err
+		}
+		executed, err := executeWindow(window)
+		if err != nil {
+			return nil, err
+		}
+		held = executed
+	}
+	<-prepDone
+	if prepErr != nil {
+		if err := aggregateHeld(); err != nil {
+			return nil, err
+		}
+		return nil, prepErr
+	}
+	// The campaign epilogue fires between the last window's execution and
+	// its aggregation, exactly where it always sat: preparation and every
+	// mutant are done, the last findings fold has not happened, so a
+	// transient global drift no surviving target's evidence reflects is
+	// reported rather than silently absorbed (REQ-exec-quiescence), and an
+	// edit landing at this seam is refused by the last window's own
+	// per-target validations.
+	if opts.afterExecution != nil {
+		opts.afterExecution()
+	}
+	if err := views.validateProducers(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		treeDrift = err
+	}
+	if held != nil {
+		if err := aggregateWindow(held); err != nil {
+			return nil, err
 		}
 	}
 	moved, err := repository.headMovedContext(ctx)
@@ -1752,6 +1961,30 @@ func snapshotFindings(findings []Finding) []Finding {
 // runWindowCandidates overrides the execution window candidate budget
 // when positive - a test seam; zero means the jobs-derived default.
 var runWindowCandidates int
+
+// gatherWindow blocks for the next prepared work item and keeps blocking
+// until the window's candidate budget is met or preparation ends. Blocking —
+// never draining just what is buffered — is what keeps window boundaries a
+// pure function of target order and the budget rule, independent of
+// execution timing, so the window-scoped confirmation flip signal covers
+// the same kills on every run (REQ-exec-attribution). ok is false when no
+// item remains.
+func gatherWindow(items <-chan work, budget int) ([]work, bool) {
+	first, ok := <-items
+	if !ok {
+		return nil, false
+	}
+	window := []work{first}
+	for total := len(first.candidates); total < budget; {
+		next, ok := <-items
+		if !ok {
+			break
+		}
+		window = append(window, next)
+		total += len(next.candidates)
+	}
+	return window, true
+}
 
 // commitFinding delivers one finished finding to the caller's incremental
 // commit callback. The pre-delivery HEAD check mirrors the run's final one so

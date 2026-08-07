@@ -285,7 +285,27 @@ measurement, and `baseline` before each package-scoped oracle group actually
 probed rather than reused within the run. Resolution and freshness events
 follow target order before module-batched view construction; subsequent mutant
 and baseline events follow target order, with baseline events in canonical
-package-group order. Worker count cannot affect the sequence. The CLI streams these events as they occur; the
+package-group order. Worker count cannot affect the sequence's content or
+order. Preparation is pipelined with execution: once a target's preparation
+completes and its decision is reported, it may enter execution while later
+targets still prepare, so later targets' preparation events and decisions may
+follow earlier targets' execution-phase events — the preparation-and-decision
+sequence itself stays deterministic, target-ordered, and worker-independent,
+only its interleaving with the advisory execution-phase events is
+timing-dependent. A window's serial confirmations exclude preparation probes
+outright: a confirmation's scored run shares no process with any preparation
+probe, so a probe's test-level side effects — an exclusive port, a file
+lock — can never manufacture a false reproduction or a false flip; beyond
+that exclusion the confirmation isolation obligation names sibling mutants,
+none of which are in flight once the window drains, and preparation load is
+ambient like any other process, covered by the stride gate's volatility
+arm. The named residual is the baseline probe itself: a probe of one
+package's tests may run beside executing mutants of that package — exactly
+the concurrency worker parallelism already implies for a suite holding
+cross-process-exclusive resources — or beside the advisory coverage and
+guidance probes; a collision fails the probe
+loudly and aborts the run, or skews an advisory bucket, never entering a
+verdict. The CLI streams these events as they occur; the
 MCP face carries them per REQ-mcp-envelope in [mcp.md](mcp.md) — streamed to
 progress notifications or inline-capped, totals always exact. The CLI reports
 each skipped target once, as its decision line, and aggregates skip classes
@@ -299,10 +319,13 @@ decision or finding. Advisory execution-phase progress events join the
 same class: at each execution window boundary the run may report the
 window's phase (executing, then one confirming event per serially
 confirmed kill with the window's confirmation progress), the 1-based
-index and count of measure targets dispatched, a representative symbol,
-and exact campaign-wide candidate tallies — counts of selected
-candidates, carried and non-runnable ones included, exactly as the
-decisions count them — timing-dependent by nature, outside the
+index of the window's first measure target among those dispatched and the
+count of measure targets prepared so far (growing to campaign-wide as
+pipelined preparation completes), a representative symbol,
+and exact candidate tallies over the targets prepared so far — counts of
+selected candidates, carried and non-runnable ones included, exactly as the
+decisions count them, growing to the campaign-wide totals as pipelined
+preparation completes — timing-dependent by nature, outside the
 deterministic sequence, never entering a decision or finding, so an
 operator can read phase and progress from the log alone. Event data never enters a run
 decision or finding, and run inputs are snapshotted before delivery. Callbacks
@@ -310,7 +333,8 @@ execute synchronously as trusted caller code and must return normally; their
 external side effects have ordinary process semantics. An error or cancellation
 may leave a rendered prefix, but never a partial finding or decision.
 
-Before executing mutants, a run reports one target decision in target
+Before a target's own mutants execute, the run reports that target's
+decision, decisions streaming in target
 order: `cached` when reusable prior evidence is
 served, `skipped` with the skip reason when no measurement can run, or
 `measure` with the selected candidate count and one reason from `no-prior`,
@@ -318,8 +342,9 @@ served, `skipped` with the skip reason when no measurement can run, or
 existing record; budget when the requested budget exceeds that record's
 coverage; stale when another reuse pin fails. Concurrent worker completion
 order never changes these decisions or the final per-target and aggregate
-summary. CLI progress renders the ordered decisions before mutant execution;
-all preparation events precede every decision. CLI and MCP final results expose
+summary. CLI progress renders each decision before that target's mutants
+execute; a target's own preparation events precede its decision, and the
+decision sequence is exactly the preparation sequence's target order. CLI and MCP final results expose
 the same preparation sequence, decisions, and totals. Each measured or cached
 result row also states its persistence layer when the record stays
 machine-local, with the disqualifying reason (REQ-result-layers in
