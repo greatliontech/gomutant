@@ -1088,7 +1088,10 @@ func TestRunReportsSharedBaselineOnce(t *testing.T) {
 	if !slices.Equal(preparation, wantStages) {
 		t.Fatalf("batched preparation = %+v, want %+v", preparation, wantStages)
 	}
-	wantLifecycle := []string{"capture:" + targets[0].Symbol, "capture:" + targets[1].Symbol, "baseline:" + targets[0].Symbol}
+	// Pipelined preparation completes each target — capture through
+	// baseline — before the next target's capture; the shared baseline
+	// still probes exactly once, served from the cache for the sibling.
+	wantLifecycle := []string{"capture:" + targets[0].Symbol, "baseline:" + targets[0].Symbol, "capture:" + targets[1].Symbol}
 	if !slices.Equal(lifecycle, wantLifecycle) {
 		t.Fatalf("shared-baseline lifecycle = %v, want %v", lifecycle, wantLifecycle)
 	}

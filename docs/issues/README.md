@@ -17,7 +17,6 @@ is deleted (git holds history).
 | [env-input-oracle-policy](env-input-oracle-policy.md) | Getwd-to-go.mod repo-root idiom classes as unstable env input; settled direction: per-repo reviewed exemption record (classification refinement rejected - unsound failure direction) | A consuming repository needs committable witness evidence under a deliberately kept environment-reading idiom |
 | [post-completion-cpu-tail](post-completion-cpu-tail.md) | After the last target committed, the run burned ~100% of one core for 30+ minutes (futex wait, no children, no writes) until externally killed | The tail is profiled via SIGQUIT dump and the spin closed, or shown benign and bounded |
 | [oracle-scratch-namespaces](oracle-scratch-namespaces.md) | oracle tests' in-module scratch records missing-arm noise defeating union-equality across runs; needs a declaration surface like pew's directive | with the runtimeinput producer facade |
-- **[pipeline-preparation-with-execution](pipeline-preparation-with-execution.md)** — Run's
   preparation phase is serial against an idle oracle pool; measured warm headroom is
   ~120-165s of a 388s campaign. *Lands: gomutant train, fourth item — after the
   kill-cache keying, on gofresh >= v0.43.4.*
