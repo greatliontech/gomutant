@@ -10,3 +10,17 @@ that defeats union-equality across runs (the serve carve-outs'
 persisted-union comparisons) exactly as it did for pew benches. pew's
 answer is the //pew:scratch directive; gomutant needs an equivalent
 declaration surface for oracle packages.
+
+Second field report, requirements input for the declaration surface:
+
+- A declared --bracket-path over a transient per-test directory
+  completed a full 100-candidate measurement, then failed with
+  "observation bracket unverifiable: unhashable runtime directory" —
+  the subdirectory was deleted by test cleanup before hashing. Declared
+  bracket paths MUST preflight (existence + hashability) before mutant
+  execution, refusing up front instead of burning the campaign.
+- The declaration this surface provides must be able to express "this
+  in-module path legitimately churns" — a transient scratch namespace,
+  not a stable hashable input; until it can, affected targets are
+  permanently machine-local.
+

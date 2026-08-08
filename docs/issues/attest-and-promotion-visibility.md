@@ -17,3 +17,13 @@ Field report (agent consumer), two halves of one visibility gap:
 
 Lands: cross-tool train chunk 30 (gomutant consumer-surface bounds and
 visibility).
+
+Third moment of the same gap (second field report): attesting against an
+already-moved oracle succeeds silently — the test files had been edited
+(oracle closure moved) before re-measuring, attest_survivor accepted the
+judgment against the old pins, and the next run's pin comparison shed it
+silently; the judgment had to be re-made. Shedding is correct by design;
+accepting a birth-stale attestation without warning is the gap — attest
+has the tree in hand to compare pins and warn (or require a flag).
+Repro: measure, touch the test file, attest a survivor, re-run.
+
