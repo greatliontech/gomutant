@@ -4562,3 +4562,324 @@ func TestClassifyConfirmation(t *testing.T) {
 		t.Fatalf("serial discard = %v, want inconclusive (proves nothing either way)", got)
 	}
 }
+
+// TestServedDirtyRecordPromotesToRepoDocumentOnCleanTree: a record
+// measured on a dirty worktree serves on the later clean tree with
+// provenance recomputed like a fresh measure's (REQ-result-stale), so it
+// promotes to the repo findings document — its attestation riding
+// along — and its machine-local overlay entry is deleted
+// (REQ-result-layers). This is the attest-before-commit dev loop: the
+// disposition must reach the committable document once the content it
+// judged lands at a clean commit.
+func TestServedDirtyRecordPromotesToRepoDocumentOnCleanTree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	tmp, runGit := gitFixtureRepo(t)
+	dirtyUncommittedComment(t, filepath.Join(tmp, "lib", "doc.go"))
+
+	docPath := filepath.Join(tmp, ".gomutant", "findings.json")
+	store, err := OpenStore(docPath, tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	commit := func(finding Finding) error {
+		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
+			return MergeFindings(current, []Finding{finding}), nil
+		})
+	}
+	target := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
+
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := tr.Run(ctx, []Target{target}, Options{Commit: commit})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("dirty-tree run = findings %+v, error %v", first, err)
+	}
+	if !first[0].Dirty || len(first[0].Survivors) == 0 {
+		t.Fatalf("dirty-tree finding = dirty %v with %d survivors, want a dirty record with survivors", first[0].Dirty, len(first[0].Survivors))
+	}
+	if raw, readErr := os.ReadFile(docPath); readErr == nil {
+		if parsed, parseErr := ParseFindings(raw); parseErr == nil {
+			for _, f := range parsed {
+				if f.Symbol == target.Symbol {
+					t.Fatal("a dirty-provenance record reached the repo document")
+				}
+			}
+		}
+	}
+
+	// The dev loop's disposition, recorded before any commit exists.
+	s0 := first[0].Survivors[0]
+	if err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
+		for i := range all {
+			if all[i].Symbol == target.Symbol {
+				return all, all[i].Attest(s0.Position, s0.Operator, "equivalent: untested branch is dead code in this corpus")
+			}
+		}
+		return nil, errors.New("no finding to attest")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "content lands")
+	cleanHead := gitHead(t, tmp)
+
+	prior, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr2, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	second, err := tr2.Run(ctx, []Target{target}, Options{Prior: prior, Commit: commit, Decision: func(d RunDecision) {
+		decisions = append(decisions, d)
+	}})
+	if err != nil || len(second) != 1 {
+		t.Fatalf("clean-tree run = findings %+v, error %v", second, err)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "cached" {
+		t.Fatalf("clean-tree decisions = %+v, want one cached serve", decisions)
+	}
+	if second[0].Dirty || second[0].Commit != cleanHead {
+		t.Fatalf("served provenance = commit %q dirty %v, want clean at %q - the serve carried the recorded provenance instead of re-stamping", second[0].Commit, second[0].Dirty, cleanHead)
+	}
+	raw, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("repo document missing after the clean serve: %v", err)
+	}
+	parsed, err := ParseFindings(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promoted := false
+	for _, f := range parsed {
+		if f.Symbol == target.Symbol {
+			promoted = true
+			if len(f.Attested) != 1 || f.Attested[0].Position != s0.Position {
+				t.Fatalf("promoted record's attestations = %+v, want the dev-loop disposition riding the promotion", f.Attested)
+			}
+		}
+	}
+	if !promoted {
+		t.Fatal("the served record did not promote to the repo document")
+	}
+	entries, err := filepath.Glob(filepath.Join(cacheDir, "gomutant", "repos", "*", "findings", "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("overlay entries after promotion = %v, want the shadowing entry deleted", entries)
+	}
+}
+
+// gitFixtureRepo copies the fixture module into a temp dir, initializes a
+// git repository there, and commits everything as the base.
+func gitFixtureRepo(t *testing.T) (string, func(...string)) {
+	t.Helper()
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tmp
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=gomutant", "GIT_AUTHOR_EMAIL=gomutant@example.invalid",
+			"GIT_COMMITTER_NAME=gomutant", "GIT_COMMITTER_EMAIL=gomutant@example.invalid",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "base")
+	return tmp, runGit
+}
+
+// dirtyUncommittedComment appends an uncommitted comment to path, making
+// the tree dirty for any record whose evidence covers the file.
+func dirtyUncommittedComment(t *testing.T, path string) {
+	t.Helper()
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(original, []byte("\n// uncommitted edit\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func gitHead(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestExtendedDirtyRecordPromotesOnCleanTree: the budget extension is a
+// serve rewrite like any other — the served prefix plus measured suffix
+// re-stamp provenance from the current tree, so a dirty-born capped
+// record promotes once its content lands at a clean commit
+// (REQ-result-stale, REQ-result-layers).
+func TestExtendedDirtyRecordPromotesOnCleanTree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	tmp, runGit := gitFixtureRepo(t)
+	dirtyUncommittedComment(t, filepath.Join(tmp, "lib", "doc.go"))
+
+	docPath := filepath.Join(tmp, ".gomutant", "findings.json")
+	store, err := OpenStore(docPath, tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	commit := func(finding Finding) error {
+		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
+			return MergeFindings(current, []Finding{finding}), nil
+		})
+	}
+	target := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := tr.Run(ctx, []Target{target}, Options{Budget: 1, Commit: commit})
+	if err != nil || len(first) != 1 || !first[0].Dirty {
+		t.Fatalf("dirty capped run = findings %+v, error %v, want a dirty record", first, err)
+	}
+
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "content lands")
+	cleanHead := gitHead(t, tmp)
+
+	prior, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr2, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	second, err := tr2.Run(ctx, []Target{target}, Options{Budget: 2, Prior: prior, Commit: commit, Decision: func(d RunDecision) {
+		decisions = append(decisions, d)
+	}})
+	if err != nil || len(second) != 1 {
+		t.Fatalf("extension run = findings %+v, error %v", second, err)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.HasPrefix(decisions[0].Reason, "served: prefix") {
+		t.Fatalf("extension decisions = %+v, want the served-prefix measure", decisions)
+	}
+	if second[0].Dirty || second[0].Commit != cleanHead {
+		t.Fatalf("extended provenance = commit %q dirty %v, want clean at %q", second[0].Commit, second[0].Dirty, cleanHead)
+	}
+	raw, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("repo document missing after the extension serve: %v", err)
+	}
+	parsed, err := ParseFindings(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promoted := false
+	for _, f := range parsed {
+		promoted = promoted || f.Symbol == target.Symbol
+	}
+	if !promoted {
+		t.Fatal("the extended record did not promote to the repo document")
+	}
+}
+
+// TestCandidateSpliceDirtyRecordPromotesOnCleanTree: the candidate
+// re-execution splice is a serve rewrite like any other — served
+// candidates plus re-executed flagged ones re-stamp provenance from the
+// current tree, so a dirty-born candidate-evidence record promotes once
+// its content lands at a clean commit (REQ-result-stale,
+// REQ-result-layers).
+func TestCandidateSpliceDirtyRecordPromotesOnCleanTree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	tmp, runGit := gitFixtureRepo(t)
+	dirtyUncommittedComment(t, filepath.Join(tmp, "candlocal", "candlocal.go"))
+
+	docPath := filepath.Join(tmp, ".gomutant", "findings.json")
+	store, err := OpenStore(docPath, tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	commit := func(finding Finding) error {
+		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
+			return MergeFindings(current, []Finding{finding}), nil
+		})
+	}
+	target := Target{Symbol: "example.com/fixture/candlocal.Value", Oracle: []string{"example.com/fixture/candlocal.TestValue"}}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := tr.Run(ctx, []Target{target}, Options{Commit: commit})
+	if err != nil || len(first) != 1 || !first[0].Dirty || len(first[0].CandidateEvidence) == 0 {
+		t.Fatalf("dirty candidate-evidence run = findings %+v, error %v, want a dirty record with candidate evidence", first, err)
+	}
+
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "content lands")
+	cleanHead := gitHead(t, tmp)
+
+	prior, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr2, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	second, err := tr2.Run(ctx, []Target{target}, Options{Prior: prior, Commit: commit, Decision: func(d RunDecision) {
+		decisions = append(decisions, d)
+	}})
+	if err != nil || len(second) != 1 {
+		t.Fatalf("splice run = findings %+v, error %v", second, err)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "cached" || !strings.HasPrefix(decisions[0].Reason, "served: pins unchanged; re-executing") {
+		t.Fatalf("splice decisions = %+v, want the flagged re-execution serve", decisions)
+	}
+	if second[0].Dirty || second[0].Commit != cleanHead {
+		t.Fatalf("spliced provenance = commit %q dirty %v, want clean at %q", second[0].Commit, second[0].Dirty, cleanHead)
+	}
+	raw, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("repo document missing after the splice serve: %v", err)
+	}
+	parsed, err := ParseFindings(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promoted := false
+	for _, f := range parsed {
+		promoted = promoted || f.Symbol == target.Symbol
+	}
+	if !promoted {
+		t.Fatal("the spliced record did not promote to the repo document")
+	}
+}

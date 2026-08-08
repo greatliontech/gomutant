@@ -135,3 +135,98 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 		t.Fatal("untracked selected runtime input reported clean")
 	}
 }
+
+// TestStampServedProvenanceCoversEvidenceRuntimeInputs: the served
+// re-stamp derives runtime-input paths from the record's own subject
+// evidence — a dirty manifest path keeps the record machine-local even
+// when every source file is clean — and an unreadable manifest stamps
+// dirty, fail-closed (REQ-result-stale, REQ-result-layers).
+func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
+	root := t.TempDir()
+	// The module sits BELOW the repository root, the package in a
+	// subdirectory of the module, and the runtime input outside the
+	// package: manifest identities are module-relative, so resolving
+	// them against the git toplevel instead of the subject's module
+	// directory materializes a path that does not exist — and the
+	// historical package-file sweep must not cover the input either, or
+	// the evidence-derived paths are unobservable and the case is
+	// vacuous.
+	moduleDir := filepath.Join(root, "m")
+	goMod := filepath.Join(moduleDir, "go.mod")
+	source := filepath.Join(moduleDir, "pkg", "source.go")
+	input := filepath.Join(moduleDir, "data", "input.txt")
+	for path, content := range map[string]string{
+		goMod:  "module example.com/provenance\n\ngo 1.26\n",
+		source: "package provenance\n",
+		input:  "runtime\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=gomutant", "GIT_AUTHOR_EMAIL=gomutant@example.invalid",
+			"GIT_COMMITTER_NAME=gomutant", "GIT_COMMITTER_EMAIL=gomutant@example.invalid",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "fixture")
+	repository := captureRepositoryState(root)
+	if !repository.available || repository.commit == "" {
+		t.Fatalf("repository state = %+v", repository)
+	}
+	observed, err := runtimeinput.FromTestLog([]byte("open data/input.txt\n"), moduleDir, moduleDir, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := &Tree{dir: root}
+	const symbol = "example.com/provenance.F"
+	view := &subjectView{symbol: symbol, moduleDir: moduleDir, sourceFiles: []string{source}}
+	ctx := context.Background()
+
+	clean := Finding{Commit: "stale", Dirty: true, TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	if err := tree.stampServedProvenance(ctx, repository, view, nil, &clean); err != nil {
+		t.Fatal(err)
+	}
+	if clean.Dirty || clean.Commit != repository.commit {
+		t.Fatalf("clean re-stamp = commit %q dirty %v, want the current HEAD and clean", clean.Commit, clean.Dirty)
+	}
+
+	if err := os.WriteFile(input, []byte("runtime moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	if err := tree.stampServedProvenance(ctx, repository, view, nil, &dirtied); err != nil {
+		t.Fatal(err)
+	}
+	if !dirtied.Dirty {
+		t.Fatal("a moved evidence runtime input re-stamped clean - the served stamp ignored the record's manifest paths or resolved them against the wrong base")
+	}
+
+	unreadable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: "not-a-manifest"}}
+	if err := tree.stampServedProvenance(ctx, repository, view, nil, &unreadable); err != nil {
+		t.Fatal(err)
+	}
+	if !unreadable.Dirty {
+		t.Fatal("an unreadable evidence manifest re-stamped clean, want fail-closed dirty")
+	}
+
+	unknown := Finding{TargetEvidence: SubjectEvidence{Symbol: "example.com/provenance.Ghost", RuntimeInputs: observed.State.Manifest}}
+	if err := tree.stampServedProvenance(ctx, repository, view, nil, &unknown); err != nil {
+		t.Fatal(err)
+	}
+	if !unknown.Dirty {
+		t.Fatal("evidence naming a subject with no view re-stamped clean, want fail-closed dirty")
+	}
+}

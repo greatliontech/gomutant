@@ -255,7 +255,7 @@ through the same contradiction report as growth, and discards standing (a
 compile rejection is a pure function of the mutant source under the
 toolchain and build-configuration pins). The drifted record carries the
 current tree's evidence for every subject and the current compartment
-ledger, its provenance recomputed like a fresh measure's. The carve-out is
+ledger. The carve-out is
 bounded fail-closed like its siblings: it never composes with candidate
 evidence or a budget shortfall; a record without complete kill attribution
 or without a compartment ledger re-measures whole; deterministic
@@ -272,7 +272,20 @@ compartment delta reaches no recorded oracle; nothing re-measures") with
 INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
-serve a weaker request without remeasurement. Serve and re-measure decisions
+serve a weaker request without remeasurement. Every serve rewrite — the
+cached serve, the candidate re-execution splice, the budget extension,
+derived-oracle growth, and killer-scoped drift — records commit and dirty
+provenance recomputed from the current tree, exactly as a fresh measure
+stamps them: the proof that licensed the serve validated every subject's
+evidence and runtime manifest against the current tree, so a record
+measured under dirty provenance becomes portable (REQ-result-layers) the
+first time it serves with those paths clean, its attestations riding the
+promotion. Each subject's manifest resolves against that subject's own
+module directory — the base its validation used; an unreadable manifest,
+or evidence naming a subject the run carries no view for, stamps dirty,
+fail-closed. An explicitly non-reusable rewrite re-stamps like any other
+but never promotes — its unverifiable subject evidence fails the
+portable line regardless of provenance. Serve and re-measure decisions
 state their reason: a served record names the pins that held ("served: body,
 oracle closure, and runtime inputs unchanged"; a splice adds its re-executed
 candidate count), and a non-matching record names its inspection class

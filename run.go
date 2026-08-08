@@ -919,6 +919,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				} else {
 					return nil, lerr
 				}
+				// The serve's freshness proof just validated every subject's
+				// evidence against the current tree, so provenance recomputes
+				// like a fresh measure's - a dirty-born record promotes to
+				// the portable layer once its paths are clean
+				// (REQ-result-stale, REQ-result-layers).
+				if err := t.stampServedProvenance(ctx, repository, targetView, oracleViews, &cached); err != nil {
+					return nil, err
+				}
 				findings[i] = cached
 				// Commit precedes the decision: a caller canceling at the
 				// decision callback still holds the persisted finding
@@ -1608,6 +1616,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 					continue
 				}
+				// Served prefix + re-executed candidates both validated
+				// against the current tree; provenance recomputes like a
+				// fresh measure's (REQ-result-stale, REQ-result-layers).
+				if err := t.stampServedProvenance(ctx, repository, w.targetView, w.oracleViews, &spliced); err != nil {
+					return err
+				}
 				if err := commitAndAttribute(ctx, spliced, w); err != nil {
 					return err
 				}
@@ -1754,6 +1768,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
 						return err
 					}
+				}
+				// Served prefix + measured suffix both validated against the
+				// current tree; provenance recomputes like a fresh measure's
+				// (REQ-result-stale, REQ-result-layers).
+				if err := t.stampServedProvenance(ctx, repository, w.targetView, w.oracleViews, &extended); err != nil {
+					return err
 				}
 				if err := commitAndAttribute(ctx, extended, w); err != nil {
 					return err
@@ -2225,30 +2245,86 @@ func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol
 	return nil
 }
 
+// provenancePaths assembles the source-file set provenance is computed
+// over: the subject views' source files, their historical package files,
+// module selection, and workspace inputs.
+func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView) ([]string, error) {
+	sourceFiles := append([]string(nil), targetView.sourceFiles...)
+	for _, oracleView := range oracleViews {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		sourceFiles = append(sourceFiles, oracleView.sourceFiles...)
+	}
+	historical, err := repository.historicalPackageFilesContext(ctx, sourceFiles)
+	if err != nil {
+		return nil, err
+	}
+	sourceFiles = append(sourceFiles, historical...)
+	sourceFiles = withModuleSelectionPaths(sourceFiles)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum")), nil
+}
+
 // stampProvenance records the current tree's provenance on a measured or
 // grown finding: the capture commit, and dirty computed over the finding's
 // subject source files, their historical package files, module selection,
 // and workspace inputs, against the observation's runtime state.
 func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, w work, f *Finding, observation runtimeinput.Observation) error {
 	f.Commit = repository.commit
-	sourceFiles := append([]string(nil), w.targetView.sourceFiles...)
-	for _, oracleView := range w.oracleViews {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		sourceFiles = append(sourceFiles, oracleView.sourceFiles...)
-	}
-	historical, err := repository.historicalPackageFilesContext(ctx, sourceFiles)
+	sourceFiles, err := t.provenancePaths(ctx, repository, w.targetView, w.oracleViews)
 	if err != nil {
 		return err
 	}
-	sourceFiles = append(sourceFiles, historical...)
-	sourceFiles = withModuleSelectionPaths(sourceFiles)
-	if err := ctx.Err(); err != nil {
+	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, observation.State)
+	return err
+}
+
+// stampServedProvenance recomputes commit and dirty provenance on a
+// served record from the current tree, deriving runtime-input paths from
+// the record's own subject evidence: the freshness proof that licensed
+// the serve validated that evidence against the current tree, so the
+// served record's provenance is exactly a fresh measure's - a record
+// measured under dirty provenance becomes portable the first time it
+// serves with those paths clean, its attestations riding the promotion
+// (REQ-result-stale, REQ-result-layers). Manifest identities are
+// module-relative, so each subject's manifest resolves against that
+// subject's own module directory - the base the serve license validated
+// it under. An unreadable evidence manifest, or evidence naming a
+// subject no view carries, stamps dirty terminally - later evidence
+// goes unexamined, fail-closed.
+func (t *Tree) stampServedProvenance(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, f *Finding) error {
+	f.Commit = repository.commit
+	sourceFiles, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
+	if err != nil {
 		return err
 	}
-	sourceFiles = append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum"))
-	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, observation.State)
+	moduleDirs := map[string]string{targetView.symbol: targetView.moduleDir}
+	for _, oracleView := range oracleViews {
+		moduleDirs[oracleView.symbol] = oracleView.moduleDir
+	}
+	for _, evidence := range append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if evidence.RuntimeInputs == "" {
+			continue
+		}
+		base := moduleDirs[evidence.Symbol]
+		if base == "" {
+			f.Dirty = true
+			return nil
+		}
+		paths, perr := runtimeinput.Paths(evidence.RuntimeInputs, base)
+		if perr != nil {
+			f.Dirty = true
+			return nil
+		}
+		sourceFiles = append(sourceFiles, paths...)
+	}
+	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, runtimeinput.State{})
 	return err
 }
 
