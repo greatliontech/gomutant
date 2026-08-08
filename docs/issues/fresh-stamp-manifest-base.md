@@ -25,5 +25,4 @@ dirtiness computation (the observation knows its module) and into
 `Committable`'s path enumeration (evidence would need to carry or
 derive its subject's module-relative base).
 
-Lands: with the first monorepo or workspace corpus consuming
-committable findings, or when provenance path resolution next changes.
+Lands: cross-tool train chunk 31.

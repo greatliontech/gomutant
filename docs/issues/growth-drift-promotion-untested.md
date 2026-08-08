@@ -11,5 +11,4 @@ dirty-born record, content committed, then an oracle-growth (added
 derived test) and a killer-drift (attributable compartment delta) serve
 each asserting the re-stamped provenance and the repo-document row.
 
-Lands: when the growth or drift serve next changes, or with the first
-field report of a growth or drift serve failing to promote.
+Lands: cross-tool train chunk 31.
