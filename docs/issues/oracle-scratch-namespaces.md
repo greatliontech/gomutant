@@ -1,9 +1,6 @@
 # Oracle tests' in-module scratch records as manifest noise
 
-**Lands:** with the runtimeinput producer facade (gofresh
-docs/issues/runtimeinput-producer-facade.md) — the facade is where the
-declaration surface for all three consumers collapses.
-
+**Lands: cross-tool train chunk 37.
 gofresh's scratch-namespace admission (REQ-inputs-scratch-namespace)
 drops reads proven absent at both observation-bracket endpoints, but
 only inside a caller-declared namespace. gomutant's oracle ingest

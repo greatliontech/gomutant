@@ -1,9 +1,6 @@
 # Staged snapshot mutation mode
 
-Lands: when gomutant can run against the staged index or another explicit
-content snapshot and produce clean evidence for that snapshot before a commit
-exists.
-
+Lands: cross-tool train chunk 38.
 ## Observed
 
 The consuming repository's change-review workflow stages the whole change set

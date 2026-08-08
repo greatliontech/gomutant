@@ -1,9 +1,6 @@
 # Post-completion CPU-burning tail after the last target commits
 
-Lands: the post-commit tail is profiled (SIGQUIT stack dump at reproduction
-rather than an external kill) and the spin is closed — or shown benign and
-bounded, with the bound stated.
-
+Lands: cross-tool train chunk 39.
 ## Observed
 
 After the last of 49 targets committed to the findings document, the

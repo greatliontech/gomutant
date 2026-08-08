@@ -21,7 +21,4 @@ external targets reached through symlinks and hardlinks, follow created objects
 through rename and deletion, detect incomplete tracing, and refuse reuse on
 unsupported hosts rather than excluding paths by naming convention.
 
-Lands: when runtime observation can attribute filesystem object creation and
-access across the measured process tree on every supported execution host, and
-findings from producer-created temporary outputs remain reusable while changes
-to genuine external inputs still stale them.
+Lands: cross-tool train chunk 38.

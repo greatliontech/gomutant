@@ -1,8 +1,6 @@
 # MCP long-running runs
 
-Lands: when a stable go-sdk release carries the io.modelcontextprotocol/tasks
-extension and a consuming agent client (Claude Code or OpenCode) speaks it.
-
+Lands: cross-tool train chunk 41.
 ## Observed
 
 An exhaustive `gomutant_run` over eight symbols exceeded the MCP client's approximately

@@ -1,11 +1,6 @@
 # func init() bodies are excluded from mutation instead of measured
 
-Lands: when init bodies become measurable subjects — package-scoped
-ordinal identity resolvable end-to-end (candidate generation, oracle
-freshness proofs through gofresh, kill attribution), or a settled
-decision that the exclusion is permanent, recorded in the targeting
-spec.
-
+Lands: cross-tool train chunk 40.
 ## Context
 
 Changed-scope and whole-tree discovery exclude `func init()` loudly (the

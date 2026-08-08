@@ -1,9 +1,6 @@
 # Ephemeral replacements outside the oracle's import closure measure unexercised
 
-Lands: when the engine's package load gains dependency data
-(NeedImports/NeedDeps) so closure membership is computable, or when ephemeral
-results gain execution buckets that expose the unexercised case.
-
+Lands: cross-tool train chunk 39.
 ## Observed
 
 Ephemeral validation refuses replacements the loaded build does not compile,

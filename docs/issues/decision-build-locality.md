@@ -36,4 +36,4 @@ parallel except fault routing): a fold deletes or reshapes the strict
 observed arm's callers; a no-fold outcome makes that duplication a
 free-standing consolidation candidate again.
 
-Lands: user decision.
+Lands: cross-tool train chunk 39.

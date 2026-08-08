@@ -1,9 +1,6 @@
 # Deterministic module-root discovery is classified as an unstable env input
 
-Lands: when a consuming repository needs committable witness evidence under a
-deliberately kept environment-reading idiom (the reporting corpus migrated its
-repo-root helper to a source-anchored root, so no current consumer demands it).
-
+Lands: cross-tool train chunk 38.
 ## Observed
 
 A consuming corpus (`candosa/cerebro`) used one repo-root idiom in roughly ten
