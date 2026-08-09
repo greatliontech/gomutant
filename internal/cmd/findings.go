@@ -16,6 +16,7 @@ import (
 type findingsOptions struct {
 	dir, findingsFile, label string
 	json                     bool
+	vouches []string
 }
 
 type findingView struct {
@@ -45,6 +46,7 @@ func newFindingsCommand() *cobra.Command {
 	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read")
 	f.StringVar(&o.label, "label", "", "show only findings carrying this label")
+	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); inspection judges under the same acceptances the run used")
 	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable findings")
 	return cmd
 }
@@ -71,6 +73,13 @@ func findingsCommand(ctx context.Context, o findingsOptions) error {
 	tree, err := gomutant.LoadContext(ctx, o.dir)
 	if err != nil {
 		return err
+	}
+	if len(o.vouches) > 0 {
+		identities, err := gomutant.ParseDynamicStateVouches(o.vouches)
+		if err != nil {
+			return err
+		}
+		tree.SetDynamicStateVouches(identities...)
 	}
 	views, err := inspectFindings(ctx, tree, store, all, o.label)
 	if err != nil {

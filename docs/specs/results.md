@@ -14,7 +14,15 @@ oracle subject: its identity, maximal Gofresh source-closure hash, its
 package's test-variant compartment hash, code-result
 toolchain and build-configuration guards, attributable observation-completeness
 assertion, complete per-subject observability proof data, attributable purity
-assertion, and the completed processes' merged runtime-input manifest, digest,
+assertion, the recorded dynamic-state vouches (the caller acceptances that
+discharged shared-dynamic-state culprits reachable from the subject at
+capture — audit riding the evidence, never a serve input: verdicts derive
+from the current engine's own vouch set, so a withdrawn vouch resurfaces
+its culprit without any comparison here, and like labels the record is
+correlation metadata excluded from the attestation-pin comparison — a
+vouch-set change alone never sheds a disposition whose every measured
+pin still holds), and the completed processes'
+merged runtime-input manifest, digest,
 and explicit unverifiable disposition.
 
 **candidate evidence** (term): the per-candidate runtime-evidence disposition: a
@@ -312,7 +320,10 @@ inverse of candidate evidence's narrowing precedent), each survivor's
 position and operator, the candidate-evidence
 list when any candidate carries one, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
-it does not understand. This is the inverse of the targeting seam: gomutant
+it does not understand. A subject's recorded dynamic-state vouches ride the evidence as audit and
+never narrow reuse — an old consumer dropping the field changes no
+verdict — so the field rides the current version without a bump, the
+kill-attribution precedent. This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 a spec-driven producer recovering findings by label — consumes gomutant's contract, never

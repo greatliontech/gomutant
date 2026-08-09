@@ -54,7 +54,12 @@ func (s *Server) loadTreeContext(ctx context.Context) (*gomutant.Tree, error) {
 		s.mu.Lock()
 		s.tree, s.treeKey = nil, ""
 		s.mu.Unlock()
-		return gomutant.LoadContext(ctx, s.dir)
+		tree, err := gomutant.LoadContext(ctx, s.dir)
+		if err != nil {
+			return nil, err
+		}
+		tree.SetDynamicStateVouches(s.vouches...)
+		return tree, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -62,6 +67,9 @@ func (s *Server) loadTreeContext(ctx context.Context) (*gomutant.Tree, error) {
 		return s.tree, nil
 	}
 	tree, err := gomutant.LoadContext(ctx, s.dir)
+	if tree != nil {
+		tree.SetDynamicStateVouches(s.vouches...)
+	}
 	if err != nil {
 		s.tree, s.treeKey = nil, ""
 		return nil, err

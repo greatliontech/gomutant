@@ -34,11 +34,29 @@ type Server struct {
 	mu      sync.Mutex
 	tree    *gomutant.Tree
 	treeKey string
+	vouches []string
 }
 
 // New builds a server rooted at dir.
-func New(dir string) *Server {
-	return &Server{dir: dir}
+func New(dir string, opts ...Option) *Server {
+	s := &Server{dir: dir}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// Option configures the server at construction.
+type Option func(*Server)
+
+// WithDynamicStateVouches installs the caller's reviewed dynamic-state
+// vouch set on every tree the server loads: the loaded tree is shared
+// across concurrent tool calls, so the set is a server input, never a
+// per-call one.
+func WithDynamicStateVouches(identities ...string) Option {
+	return func(s *Server) {
+		s.vouches = append([]string(nil), identities...)
+	}
 }
 
 func (s *Server) update(ctx context.Context, path string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {

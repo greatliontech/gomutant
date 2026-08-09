@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/greatliontech/glob"
@@ -186,6 +187,64 @@ type Residue struct {
 type Tree struct {
 	eng *engine.Tree
 	dir string
+	// vouches is the caller's reviewed dynamic-state vouch set in
+	// gofresh's canonical "<import path>.<Variable>" form, installed on
+	// every analysis engine the tree constructs so run verdicts,
+	// findings inspection, and explain judge under the same
+	// acceptances.
+	vouches []string
+}
+
+// SetDynamicStateVouches installs the caller's reviewed dynamic-state
+// vouch set — canonical identities from ParseDynamicStateVouches — on
+// every analysis engine this tree constructs. The vouches that
+// discharged culprits ride each record's subject evidence, so
+// acceptance is auditable in the findings document.
+// Not synchronized: install before the tree is shared across
+// goroutines or calls, never on a live shared tree.
+func (t *Tree) SetDynamicStateVouches(identities ...string) {
+	t.vouches = append([]string(nil), identities...)
+}
+
+// DynamicStateVouches reports the installed vouch set — introspection
+// for callers auditing which acceptances the tree judges under.
+func (t *Tree) DynamicStateVouches() []string {
+	return append([]string(nil), t.vouches...)
+}
+
+// ParseDynamicStateVouches parses caller vouch entries of the form
+// "<import path>:<Variable>" — the colon cannot appear in an import
+// path, so the pair is unambiguous and a bare package never parses as
+// a vouch — into gofresh's canonical identities, refusing control or
+// space characters (unmatchable, and they collide config surfaces) and
+// a variable that is not one Go identifier.
+func ParseDynamicStateVouches(entries []string) ([]string, error) {
+	var identities []string
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		pkg, name, ok := strings.Cut(entry, ":")
+		if !ok || pkg == "" || name == "" {
+			return nil, fmt.Errorf("gomutant: vouch %q is not <import path>:<Variable>", entry)
+		}
+		for _, r := range pkg {
+			if r <= ' ' || r == 0x7f || unicode.IsControl(r) {
+				return nil, fmt.Errorf("gomutant: vouch package %q carries a control or space character", pkg)
+			}
+		}
+		for i, r := range name {
+			letter := unicode.IsLetter(r) || r == '_'
+			if (i == 0 && !letter) || (i > 0 && !letter && !unicode.IsDigit(r)) {
+				return nil, fmt.Errorf("gomutant: vouch variable %q is not one Go identifier", name)
+			}
+		}
+		identity := pkg + "." + name
+		if !seen[identity] {
+			seen[identity] = true
+			identities = append(identities, identity)
+		}
+	}
+	sort.Strings(identities)
+	return identities, nil
 }
 
 // Load loads the Go tree rooted at dir: a module, or a workspace whose

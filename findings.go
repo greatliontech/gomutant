@@ -48,10 +48,19 @@ type SubjectEvidence struct {
 	ObservationReason         string `json:"observationReason,omitempty"`
 	ObservationEvidence       string `json:"observationEvidence"`
 	PurityAssertion           string `json:"purityAssertion,omitempty"`
-	RuntimeInputs             string `json:"runtimeInputs"`
-	RuntimeDigest             string `json:"runtimeDigest"`
-	RuntimeUnverifiable       bool   `json:"runtimeUnverifiable,omitempty"`
-	RuntimeReason             string `json:"runtimeReason,omitempty"`
+	// DynamicStateVouches names the caller vouches that discharged
+	// shared-dynamic-state culprits reachable from this subject at
+	// capture (gofresh's sorted comma-joined identities): the
+	// acceptance is auditable in the record, never silent. Audit only —
+	// serving derives from the current engine's own vouch set, so a
+	// withdrawn vouch resurfaces its culprit without any comparison
+	// here, and the field rides the current document version (an old
+	// reader dropping it changes no verdict).
+	DynamicStateVouches string `json:"dynamicStateVouches,omitempty"`
+	RuntimeInputs       string `json:"runtimeInputs"`
+	RuntimeDigest       string `json:"runtimeDigest"`
+	RuntimeUnverifiable bool   `json:"runtimeUnverifiable,omitempty"`
+	RuntimeReason       string `json:"runtimeReason,omitempty"`
 }
 
 func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtimeinput.State) SubjectEvidence {
@@ -69,6 +78,7 @@ func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtim
 		ObservationReason:         fp.ObservationProof.Reason,
 		ObservationEvidence:       fp.ObservationProof.Evidence,
 		PurityAssertion:           fp.PurityAssertion,
+		DynamicStateVouches:       fp.DynamicStateVouches,
 		RuntimeInputs:             fp.RuntimeInputs,
 		RuntimeDigest:             fp.RuntimeDigest,
 		RuntimeUnverifiable:       state.Unverifiable,
@@ -82,6 +92,7 @@ func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
 		TestVariantClosure:   e.TestVariantClosure,
 		Guards:               guard.Guards{Toolchain: e.Toolchain, BuildConfig: e.BuildConfig},
 		PurityAssertion:      e.PurityAssertion,
+		DynamicStateVouches:  e.DynamicStateVouches,
 		ObservationAssertion: e.ObservationAssertion,
 		ObservationProof: gofresh.ObservationProof{
 			Strategy:   e.ObservationStrategy,

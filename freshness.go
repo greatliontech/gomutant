@@ -65,12 +65,13 @@ type subjectViewSet struct {
 // transaction is per subject set and cannot be shared across targets.
 type subjectEngines struct {
 	env      []string
+	vouches  []string
 	progress func(phase, pkg string)
 	byDir    map[string]*gofresh.Engine
 }
 
 func (t *Tree) newSubjectEngines(progress func(phase, pkg string)) *subjectEngines {
-	return &subjectEngines{env: t.eng.GoEnv(), progress: progress, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{env: t.eng.GoEnv(), vouches: t.vouches, progress: progress, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
@@ -78,6 +79,9 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 		return engine, nil
 	}
 	opts := []gofresh.Option{gofresh.WithDir(dir), gofresh.WithEnv(e.env...)}
+	if len(e.vouches) > 0 {
+		opts = append(opts, gofresh.WithDynamicStateVouches(e.vouches...))
+	}
 	if e.progress != nil {
 		progress := e.progress
 		opts = append(opts, gofresh.WithProgress(func(p gofresh.Progress) { progress(p.Phase, p.Package) }))
@@ -714,10 +718,20 @@ func sortedSubjectEvidence(evidence []SubjectEvidence) []SubjectEvidence {
 	return sorted
 }
 
+// attestationPinView strips audit-only metadata from subject evidence
+// before the attestation-pin comparison: the recorded dynamic-state
+// vouches are the labels precedent - correlation and audit data, never
+// a measurement pin - so a vouch-set change alone never sheds a
+// disposition whose every measured pin still holds.
+func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
+	evidence.DynamicStateVouches = ""
+	return evidence
+}
+
 func sameAttestationPins(prior, current Finding) bool {
 	if prior.OperatorSet != current.OperatorSet || prior.OracleExplicit != current.OracleExplicit || prior.Budget != current.Budget ||
 		prior.CandidateCount != current.CandidateCount || prior.Generated != current.Generated ||
-		prior.OracleTimeout != current.OracleTimeout || prior.TargetEvidence != current.TargetEvidence ||
+		prior.OracleTimeout != current.OracleTimeout || attestationPinView(prior.TargetEvidence) != attestationPinView(current.TargetEvidence) ||
 		len(prior.OracleEvidence) != len(current.OracleEvidence) {
 		return false
 	}
@@ -734,7 +748,7 @@ func sameAttestationPins(prior, current Finding) bool {
 			return false
 		}
 		seen[evidence.Symbol] = true
-		if priorEvidence, ok := bySymbol[evidence.Symbol]; !ok || priorEvidence != evidence {
+		if priorEvidence, ok := bySymbol[evidence.Symbol]; !ok || attestationPinView(priorEvidence) != attestationPinView(evidence) {
 			return false
 		}
 	}
