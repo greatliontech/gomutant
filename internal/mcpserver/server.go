@@ -60,7 +60,7 @@ func (s *Server) Run(ctx context.Context) error {
 // MCP builds the protocol server (REQ-mcp-tools).
 func (s *Server) MCP() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, &mcp.ServerOptions{
-		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
+		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
 	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
@@ -74,6 +74,10 @@ func (s *Server) MCP() *mcp.Server {
 		Name:        "findings",
 		Description: "Inspect every findings record as current, stale, unverifiable, or detached, with its open survivors, attested dispositions, and per-candidate unverifiable runtime evidence (candidateEvidence). Each record states its persistence layer: repo (portable, in the committed findings document) or local (machine-local overlay, with the reason it is not committable). Filter by opaque label; inspection runs no tests.",
 	}, s.toolFindings)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "explain",
+		Description: "Why a record stands as it does. With a symbol: its inspection state and cause, every portable-line clause keeping it machine-local (not only the first), and each open survivor's execution bucket with the action it prescribes. Without a symbol: the promotion triage - counts first, machine-local records grouped by failing clause - so an empty committed findings document explains itself in one call. Reads the findings document and the current tree; runs no tests.",
+	}, s.toolExplain)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "attest_survivor",
 		Description: "Disposition a surviving mutant as equivalent, with the reasoning on record. Refused unless the mutant is among the finding's current survivors; shed automatically when any pin moves, so every body version is re-judged.",
@@ -811,6 +815,149 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		})
 	}
 	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].Symbol < out.Findings[j].Symbol })
+	return nil, out, nil
+}
+
+type explainIn struct {
+	Symbol   string `json:"symbol,omitempty" jsonschema:"the mutated symbol to explain; empty explains the whole document's promotion state"`
+	Label    string `json:"label,omitempty" jsonschema:"with no symbol, restrict the promotion triage to findings carrying this label"`
+	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+}
+
+type explainedSurvivor struct {
+	Position  string `json:"position"`
+	Operator  string `json:"operator"`
+	Execution string `json:"execution,omitempty"`
+	Advice    string `json:"advice" jsonschema:"the action the execution bucket prescribes"`
+}
+
+type promotionGroup struct {
+	Reason         string   `json:"reason"`
+	Count          int      `json:"count"`
+	Symbols        []string `json:"symbols"`
+	OmittedSymbols int      `json:"omittedSymbols,omitempty"`
+}
+
+type explainOut struct {
+	Symbol              string                `json:"symbol,omitempty"`
+	State               gomutant.FindingState `json:"state,omitempty"`
+	Reason              string                `json:"reason,omitempty"`
+	Layer               string                `json:"layer,omitempty"`
+	LayerReasons        []string              `json:"layerReasons,omitempty" jsonschema:"every portable-line clause the record fails, not only the first"`
+	OmittedLayerReasons int                   `json:"omittedLayerReasons,omitempty"`
+	Open                []explainedSurvivor   `json:"open,omitempty"`
+	OmittedOpen         int                   `json:"omittedOpen,omitempty"`
+	Attested            int                   `json:"attested,omitempty"`
+	RepoCommittable     *int                  `json:"repoCommittable,omitempty" jsonschema:"document arm: records portable enough for the committed findings document"`
+	LocalOnly           *int                  `json:"localOnly,omitempty" jsonschema:"document arm: records held in the machine-local overlay"`
+	Promotion           []promotionGroup      `json:"promotion,omitempty" jsonschema:"document arm: machine-local records grouped by failing portable-line clause"`
+	OmittedGroups       int                   `json:"omittedGroups,omitempty"`
+}
+
+// toolExplain answers why: a symbol's record explained causally (state,
+// full machine-local clause list, per-survivor prescriptions), or the
+// document's promotion triage. Projection only - no tests run, and the
+// advisory stance holds: causes and prescriptions, never a verdict.
+func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in explainIn) (*mcp.CallToolResult, explainOut, error) {
+	const groupCap, groupSymbolCap, openCap, reasonCap = 50, 10, 20, 20
+	if in.Symbol != "" && in.Label != "" {
+		return nil, explainOut{}, fmt.Errorf("explain: the label filter restricts the triage arm; pass symbol or label, not both")
+	}
+	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	if err != nil {
+		return nil, explainOut{}, err
+	}
+	all, err := store.Load(ctx)
+	if err != nil {
+		return nil, explainOut{}, err
+	}
+	if in.Symbol != "" {
+		for _, finding := range all {
+			if err := ctx.Err(); err != nil {
+				return nil, explainOut{}, err
+			}
+			if finding.Symbol != in.Symbol {
+				continue
+			}
+			tree, err := s.loadTreeContext(ctx)
+			if err != nil {
+				return nil, explainOut{}, err
+			}
+			inspection, err := tree.InspectFindingContext(ctx, finding)
+			if err != nil {
+				return nil, explainOut{}, err
+			}
+			layer, layerReasons := store.LayerReasons(finding)
+			out := explainOut{
+				Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
+				Layer: layer, LayerReasons: layerReasons,
+				Attested: len(finding.AttestedDispositions()),
+			}
+			if len(out.LayerReasons) > reasonCap {
+				out.OmittedLayerReasons = len(out.LayerReasons) - reasonCap
+				out.LayerReasons = out.LayerReasons[:reasonCap]
+			}
+			open := finding.Open()
+			for i, survivor := range open {
+				if i == openCap {
+					out.OmittedOpen = len(open) - openCap
+					break
+				}
+				out.Open = append(out.Open, explainedSurvivor{
+					Position: survivor.Position, Operator: survivor.Operator,
+					Execution: survivor.Execution, Advice: gomutant.SurvivorAdvice(survivor.Execution),
+				})
+			}
+			return nil, out, nil
+		}
+		return nil, explainOut{}, fmt.Errorf("explain: no finding for %s; the findings tool lists the recorded symbols", in.Symbol)
+	}
+	repo, local := 0, 0
+	groups := map[string][]string{}
+	for _, finding := range all {
+		if err := ctx.Err(); err != nil {
+			return nil, explainOut{}, err
+		}
+		if in.Label != "" && !containsLabel(finding.Labels, in.Label) {
+			continue
+		}
+		layer, layerReasons := store.LayerReasons(finding)
+		if layer == "repo" {
+			repo++
+			continue
+		}
+		local++
+		for _, reason := range layerReasons {
+			groups[reason] = append(groups[reason], finding.Symbol)
+		}
+	}
+	out := explainOut{RepoCommittable: &repo, LocalOnly: &local}
+	reasons := make([]string, 0, len(groups))
+	for reason := range groups {
+		reasons = append(reasons, reason)
+	}
+	sort.Slice(reasons, func(i, j int) bool {
+		if len(groups[reasons[i]]) != len(groups[reasons[j]]) {
+			return len(groups[reasons[i]]) > len(groups[reasons[j]])
+		}
+		return reasons[i] < reasons[j]
+	})
+	for i, reason := range reasons {
+		if i == groupCap {
+			out.OmittedGroups = len(reasons) - groupCap
+			break
+		}
+		symbols := groups[reason]
+		sort.Strings(symbols)
+		group := promotionGroup{Reason: reason, Count: len(symbols)}
+		if len(symbols) > groupSymbolCap {
+			group.Symbols = symbols[:groupSymbolCap]
+			group.OmittedSymbols = len(symbols) - groupSymbolCap
+		} else {
+			group.Symbols = symbols
+		}
+		out.Promotion = append(out.Promotion, group)
+	}
 	return nil, out, nil
 }
 

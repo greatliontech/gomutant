@@ -185,6 +185,23 @@ type Survivor struct {
 	Execution string `json:"execution,omitempty"`
 }
 
+// SurvivorAdvice maps a survivor's execution bucket to the action it
+// prescribes. The vocabulary is the explain surface's contract: the
+// bucket says why the mutant lived, the advice says what closes it, and
+// both stay advisory — never a verdict (REQ-result-findings).
+func SurvivorAdvice(execution string) string {
+	switch execution {
+	case "never-executed":
+		return "no oracle test executes the mutated position - extend a test to reach it"
+	case "executed-and-passed":
+		return "the position executes and every oracle assertion still passes - sharpen an assertion or attest an equivalence"
+	case "unstable-oracle":
+		return "the finding's runtime evidence is unverifiable - stabilize the oracle's runtime inputs before trusting execution evidence"
+	default:
+		return "execution evidence unavailable - the coverage probe was refused or the record predates bucketing; re-measure to bucket this survivor"
+	}
+}
+
 // Kill is one killed candidate's attribution: the keystone — every reported
 // kill rests on an attributed event (REQ-core-attributed-kills) — persisted,
 // so reuse can key a kill to its killer's content rather than the whole

@@ -9,7 +9,8 @@ stance whole: no tool renders a pass/fail verdict (REQ-result-findings).
 operations as tools — measuring a target set (every producer form: discovery,
 changed scope, a targets document in gomutant's or a parsed producer's
 format), discovering targets without running, inspecting findings with
-optional opaque-label filtering, dispositioning a survivor, and running an ephemeral mutant — each
+optional opaque-label filtering, explaining a record or the document's
+promotion state, dispositioning a survivor, and running an ephemeral mutant — each
 a thin shell over the same library. The server is the primary face: the CLI
 is a subset over the same library, so nothing either face does bypasses the
 engine's rules — but a tool may exist server-side first.
@@ -53,6 +54,32 @@ findings document the CLI maintains — a measuring tool merges fresh findings
 over the prior document by symbol and an attesting tool rewrites it — so an
 agent session and an operator session compose through one record, and
 neither invalidates the other's dispositions.
+
+**REQ-mcp-explain** (behavior): The server MUST expose an explain tool
+answering causally, from the findings document and current-tree
+inspection alone — no tests run, the advisory stance intact: given a
+mutated symbol, the record's inspection state and reason, its
+persistence layer with every portable-line clause it fails
+(REQ-result-layers' line — the full list, never only the first, so
+repairing one clause never surfaces the next as a surprise), each
+open survivor with its execution bucket and the action the bucket
+prescribes, and the attested count; given no symbol, the promotion
+triage — repo and machine-local counts leading, machine-local records
+grouped by failing clause with their symbols, restrictable by opaque
+label — so an empty committed findings document explains itself in one
+call. Every row set caps with counted omissions per REQ-mcp-envelope
+(open survivors and clause rows at 20, clause groups at 50 with 10
+symbols each, groups ordered by count then reason), the clause list
+included — the full-list rule says no clause is silently *replaced*
+by an earlier one, and a counted omission is not silent. Candidate evidence stays drill-down via the findings tool
+(REQ-mcp-envelope); the record-level reason names candidate-local
+evidence when it is the cause. An unknown symbol refuses, naming the
+findings tool as the roster.
+
+REQ-mcp-explain: enforced by `TestToolExplainAnswersSymbolAndTriage`,
+`TestToolExplainCapsEveryRowSet`,
+`TestCommittableReasonsListEveryFailingClause`, and
+`TestSurvivorAdviceVocabulary`.
 
 **REQ-mcp-ephemeral-edits** (behavior): The ephemeral tool MUST accept the
 mutant as a whole replacement source, sequential exact-match edits applied

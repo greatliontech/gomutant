@@ -2,8 +2,10 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -42,6 +44,232 @@ func seededFinding(symbol string) gomutant.Finding {
 	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		CandidateCount: 0, Generated: 0,
 		TargetEvidence: evidence(symbol), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
+}
+
+// The explain tool answers causally without running anything
+// (REQ-mcp-explain): a symbol's record carries its inspection state,
+// every failing portable-line clause, and per-survivor prescriptions;
+// the symbol-less arm leads with layer counts and groups machine-local
+// records by failing clause; an unknown symbol refuses naming the
+// findings roster.
+func TestToolExplainAnswersSymbolAndTriage(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/current\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "current.go"), []byte("package current\n\nfunc Value() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "current_test.go"), []byte("package current\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	s := New(dir)
+	ctx := context.Background()
+
+	_, empty, err := s.toolExplain(ctx, nil, explainIn{})
+	if err != nil || empty.RepoCommittable == nil || empty.LocalOnly == nil ||
+		*empty.RepoCommittable != 0 || *empty.LocalOnly != 0 || len(empty.Promotion) != 0 {
+		t.Fatalf("absent document triage = %+v, %v", empty, err)
+	}
+
+	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":1}`))
+	multi := seededFinding("example.com/current.Gone")
+	multi.Commit = ""
+	multi.TargetEvidence.RuntimeInputs = emptyManifest
+	multi.OracleEvidence[0].RuntimeInputs = emptyManifest
+	multi.Survivors = []gomutant.Survivor{
+		{Position: "a.go:1:1", Operator: "zero return", Execution: "never-executed"},
+		{Position: "a.go:2:2", Operator: "zero return"},
+	}
+	multi.CandidateCount, multi.Generated, multi.Mutants = 2, 2, 2
+	multi.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 2, Survived: 2}}
+	multi.Attested = []gomutant.Attestation{{Position: "a.go:2:2", Operator: "zero return", Reason: "equivalent by inspection"}}
+	single := seededFinding("example.com/current.Value")
+	single.Commit = "abc"
+	single.TargetEvidence.RuntimeInputs = emptyManifest
+	single.OracleEvidence[0].RuntimeInputs = emptyManifest
+	single.Labels = []string{"only"}
+	// Seed through the store so both dirty records land in the
+	// machine-local overlay and the repo document stays empty: the
+	// explain surface must read the merged two-layer view, not the
+	// repo document alone (REQ-result-layers).
+	path := filepath.Join(dir, defaultFindings)
+	st, err := gomutant.OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(ctx, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{multi, single}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if repoData, err := os.ReadFile(path); err == nil {
+		if parsed, err := gomutant.ParseFindings(repoData); err != nil || len(parsed) != 0 {
+			t.Fatalf("dirty fixture leaked into the repo document: %+v, %v", parsed, err)
+		}
+	}
+
+	_, out, err := s.toolExplain(ctx, nil, explainIn{Symbol: "example.com/current.Gone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.State != gomutant.FindingDetached || out.Reason == "" {
+		t.Fatalf("inspection surface = %q %q", out.State, out.Reason)
+	}
+	wantClauses := []string{"dirty worktree provenance", "no commit provenance"}
+	if out.Layer != "local" || len(out.LayerReasons) != len(wantClauses) ||
+		out.LayerReasons[0] != wantClauses[0] || out.LayerReasons[1] != wantClauses[1] {
+		t.Fatalf("layer clauses = %q %v, want %v", out.Layer, out.LayerReasons, wantClauses)
+	}
+	if len(out.Open) != 1 || out.Open[0].Position != "a.go:1:1" ||
+		out.Open[0].Advice != gomutant.SurvivorAdvice("never-executed") {
+		t.Fatalf("survivor prescriptions = %+v; the attested survivor must not read as open", out.Open)
+	}
+	if out.Attested != 1 {
+		t.Fatalf("attested count = %d, want 1", out.Attested)
+	}
+
+	_, triage, err := s.toolExplain(ctx, nil, explainIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if triage.RepoCommittable == nil || triage.LocalOnly == nil || *triage.RepoCommittable != 0 || *triage.LocalOnly != 2 {
+		t.Fatalf("triage counts = %+v", triage)
+	}
+	if len(triage.Promotion) != 2 ||
+		triage.Promotion[0].Reason != "dirty worktree provenance" || triage.Promotion[0].Count != 2 ||
+		len(triage.Promotion[0].Symbols) != 2 || triage.Promotion[0].Symbols[0] != "example.com/current.Gone" ||
+		triage.Promotion[1].Reason != "no commit provenance" || triage.Promotion[1].Count != 1 ||
+		len(triage.Promotion[1].Symbols) != 1 || triage.Promotion[1].Symbols[0] != "example.com/current.Gone" {
+		t.Fatalf("promotion triage = %+v", triage.Promotion)
+	}
+
+	_, labeled, err := s.toolExplain(ctx, nil, explainIn{Label: "only"})
+	if err != nil || *labeled.LocalOnly != 1 || len(labeled.Promotion) != 1 || labeled.Promotion[0].Count != 1 {
+		t.Fatalf("labeled triage = %+v, %v", labeled, err)
+	}
+
+	if _, _, err := s.toolExplain(ctx, nil, explainIn{Symbol: "example.com/current.Missing"}); err == nil || !strings.Contains(err.Error(), "no finding for") {
+		t.Fatalf("unknown symbol = %v", err)
+	}
+	if _, _, err := s.toolExplain(ctx, nil, explainIn{Symbol: "example.com/current.Gone", Label: "only"}); err == nil || !strings.Contains(err.Error(), "symbol or label, not both") {
+		t.Fatalf("symbol+label = %v", err)
+	}
+}
+
+// Every explain row set caps with counted omissions (REQ-mcp-explain,
+// REQ-mcp-envelope): open survivors, the portable-line clause list,
+// triage clause groups, and per-group symbols.
+func TestToolExplainCapsEveryRowSet(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/current\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "current.go"), []byte("package current\n\nfunc Value() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "current_test.go"), []byte("package current\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	s := New(dir)
+	ctx := context.Background()
+
+	entries := make([]string, 55)
+	for i := range entries {
+		entries[i] = fmt.Sprintf(`{"k":"abs","p":"/outside/%02d","d":"0123456789abcdef0123456789abcdef"}`, i)
+	}
+	wideManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":1,"paths":[` + strings.Join(entries, ",") + `]}`))
+	big := seededFinding("example.com/current.Big")
+	big.Commit = "abc"
+	big.TargetEvidence.RuntimeInputs = wideManifest
+	big.OracleEvidence[0].RuntimeInputs = wideManifest
+	big.CandidateCount, big.Generated, big.Mutants = 22, 22, 22
+	big.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 22, Survived: 22}}
+	for i := 0; i < 22; i++ {
+		big.Survivors = append(big.Survivors, gomutant.Survivor{
+			Position: fmt.Sprintf("a.go:%d:1", i+1), Operator: "zero return", Execution: "never-executed",
+		})
+	}
+	seeds := []gomutant.Finding{big}
+	for i := 0; i < 12; i++ {
+		f := seededFinding(fmt.Sprintf("example.com/current.D%02d", i))
+		f.Commit = "abc"
+		f.TargetEvidence.RuntimeInputs = base64.RawURLEncoding.EncodeToString([]byte(`{"v":1}`))
+		f.OracleEvidence[0].RuntimeInputs = f.TargetEvidence.RuntimeInputs
+		seeds = append(seeds, f)
+	}
+	st, err := gomutant.OpenStore(filepath.Join(dir, defaultFindings), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(ctx, func([]gomutant.Finding) ([]gomutant.Finding, error) { return seeds, nil }); err != nil {
+		t.Fatal(err)
+	}
+
+	_, out, err := s.toolExplain(ctx, nil, explainIn{Symbol: "example.com/current.Big"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// dirty + 55 machine-local paths = 56 clauses, capped at 20.
+	if len(out.LayerReasons) != 20 || out.OmittedLayerReasons != 36 || out.LayerReasons[0] != "dirty worktree provenance" {
+		t.Fatalf("clause cap = %d rows, %d omitted, first %q", len(out.LayerReasons), out.OmittedLayerReasons, out.LayerReasons[0])
+	}
+	if len(out.Open) != 20 || out.OmittedOpen != 2 {
+		t.Fatalf("open cap = %d rows, %d omitted", len(out.Open), out.OmittedOpen)
+	}
+
+	_, triage, err := s.toolExplain(ctx, nil, explainIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 13 locals; clause groups: dirty(13) + 55 path clauses = 56, capped
+	// at 50; the dirty group's 13 symbols cap at 10.
+	if *triage.LocalOnly != 13 || len(triage.Promotion) != 50 || triage.OmittedGroups != 6 {
+		t.Fatalf("group cap = local %d, %d groups, %d omitted", *triage.LocalOnly, len(triage.Promotion), triage.OmittedGroups)
+	}
+	dirtyGroup := triage.Promotion[0]
+	if dirtyGroup.Reason != "dirty worktree provenance" || dirtyGroup.Count != 13 ||
+		len(dirtyGroup.Symbols) != 10 || dirtyGroup.OmittedSymbols != 3 {
+		t.Fatalf("symbol cap = %+v", dirtyGroup)
+	}
+	// Equal-count groups order by reason ascending.
+	if triage.Promotion[1].Reason != "machine-local runtime input /outside/00" ||
+		triage.Promotion[2].Reason != "machine-local runtime input /outside/01" {
+		t.Fatalf("group tie-break = %q, %q", triage.Promotion[1].Reason, triage.Promotion[2].Reason)
+	}
+}
+
+// The wire roster exposes explain beside the measuring loop's tools
+// (REQ-mcp-tools, REQ-mcp-explain).
+func TestMCPRosterExposesExplain(t *testing.T) {
+	srv := New(t.TempDir()).MCP()
+	ct, tr := mcp.NewInMemoryTransports()
+	go func() { _ = srv.Run(context.Background(), tr) }()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	sess, err := client.Connect(context.Background(), ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	list, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, tool := range list.Tools {
+		got[tool.Name] = true
+	}
+	want := []string{"run", "discover", "findings", "explain", "attest_survivor", "ephemeral"}
+	for _, w := range want {
+		if !got[w] {
+			t.Fatalf("tool %s missing from the wire list: %v", w, got)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("tool list drifted: %v", got)
+	}
 }
 
 func TestToolTimeoutInputsNameIndependentLimits(t *testing.T) {

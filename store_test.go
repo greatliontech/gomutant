@@ -72,6 +72,74 @@ func TestCommittableDrawsThePortableLine(t *testing.T) {
 	}
 }
 
+// The full portable-line walk names every failing clause, deduplicated,
+// with Committable's single reason as its first element - repairing one
+// clause never surfaces the next as a surprise (REQ-result-layers via
+// the explain surface).
+func TestCommittableReasonsListEveryFailingClause(t *testing.T) {
+	dir := t.TempDir()
+	if reasons := CommittableReasons(storeFinding("p.A", nil), dir); len(reasons) != 0 {
+		t.Fatalf("clean finding carries reasons: %v", reasons)
+	}
+	shared := storeManifest("/etc/hosts")
+	f := storeFinding("p.A", func(f *Finding) {
+		f.Dirty = true
+		f.Commit = ""
+		f.TargetEvidence.RuntimeInputs = shared
+		f.OracleEvidence[0].RuntimeUnverifiable = true
+		f.OracleEvidence[0].RuntimeInputs = shared
+	})
+	want := []string{
+		"dirty worktree provenance",
+		"no commit provenance",
+		"machine-local runtime input /etc/hosts",
+		"runtime-unverifiable evidence for p.ATest",
+	}
+	reasons := CommittableReasons(f, dir)
+	if len(reasons) != len(want) {
+		t.Fatalf("reasons = %v, want %v", reasons, want)
+	}
+	for i := range want {
+		if reasons[i] != want[i] {
+			t.Fatalf("reasons[%d] = %q, want %q (full: %v)", i, reasons[i], want[i], reasons)
+		}
+	}
+	if ok, first := Committable(f, dir); ok || first != reasons[0] {
+		t.Fatalf("Committable = %v %q, want the walk's first clause %q", ok, first, reasons[0])
+	}
+	// An unreadable manifest on one subject never truncates the walk:
+	// the next subject's clauses still surface.
+	torn := storeFinding("p.A", func(f *Finding) {
+		f.TargetEvidence.RuntimeInputs = "!!"
+		f.OracleEvidence[0].RuntimeInputs = storeManifest("/etc/hosts")
+	})
+	want = []string{
+		"unreadable runtime manifest for p.A",
+		"machine-local runtime input /etc/hosts",
+	}
+	reasons = CommittableReasons(torn, dir)
+	if len(reasons) != len(want) || reasons[0] != want[0] || reasons[1] != want[1] {
+		t.Fatalf("torn-manifest walk = %v, want %v", reasons, want)
+	}
+}
+
+// The survivor-advice vocabulary is the explain surface's contract: one
+// prescription per execution bucket, advisory, never a verdict
+// (REQ-result-findings).
+func TestSurvivorAdviceVocabulary(t *testing.T) {
+	want := map[string]string{
+		"never-executed":      "no oracle test executes the mutated position - extend a test to reach it",
+		"executed-and-passed": "the position executes and every oracle assertion still passes - sharpen an assertion or attest an equivalence",
+		"unstable-oracle":     "the finding's runtime evidence is unverifiable - stabilize the oracle's runtime inputs before trusting execution evidence",
+		"":                    "execution evidence unavailable - the coverage probe was refused or the record predates bucketing; re-measure to bucket this survivor",
+	}
+	for bucket, advice := range want {
+		if got := SurvivorAdvice(bucket); got != advice {
+			t.Fatalf("SurvivorAdvice(%q) = %q, want %q", bucket, got, advice)
+		}
+	}
+}
+
 // The write splits by committability, the read merges with the overlay
 // winning, a committable successor evicts its overlay entry, a local
 // successor never evicts portable repo truth, and a pruned symbol
