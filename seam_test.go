@@ -249,14 +249,14 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		calls++
 		return state.State, nil
 	}
-	matches, err := evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), current)
+	matches, err := evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), 0, current)
 	if err != nil || !matches || calls != 2 {
 		t.Fatalf("matches = %v, calls = %d, error = %v", matches, calls, err)
 	}
 	movementCalls := 0
 	moved := state.State
 	moved.Digest = "moved"
-	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), func(context.Context, string, string, []string) (runtimeinput.State, error) {
+	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), 0, func(context.Context, string, string, []string) (runtimeinput.State, error) {
 		movementCalls++
 		if movementCalls == 1 {
 			return state.State, nil
@@ -291,7 +291,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		calls++
 		return workspaceState.State, nil
 	}
-	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), workspacePrior, workspaceTarget, workspaceOracle, true, engine.OperatorSet, time.Minute.String(), current)
+	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), workspacePrior, workspaceTarget, workspaceOracle, true, engine.OperatorSet, time.Minute.String(), 0, current)
 	if err != nil || !matches || calls != 2 {
 		t.Fatalf("cross-module matches = %v, calls = %d, error = %v", matches, calls, err)
 	}
@@ -311,7 +311,7 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	prior := Finding{OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(), TargetEvidence: evidence}
-	matches, err := evidenceSetMatchesContextWithCurrent(ctx, prior, target, nil, true, engine.OperatorSet, time.Minute.String(), func(ctx context.Context, _, _ string, _ []string) (runtimeinput.State, error) {
+	matches, err := evidenceSetMatchesContextWithCurrent(ctx, prior, target, nil, true, engine.OperatorSet, time.Minute.String(), 0, func(ctx context.Context, _, _ string, _ []string) (runtimeinput.State, error) {
 		cancel()
 		return runtimeinput.State{}, ctx.Err()
 	})

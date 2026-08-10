@@ -73,6 +73,11 @@ type Options struct {
 	Budget int
 	// OracleTimeout bounds each oracle process; 0 means 60s.
 	OracleTimeout time.Duration
+	// OracleMemoryBytes ceilings each oracle process tree's memory
+	// (REQ-exec-oracle-memory): 0 derives RAM/(2 x jobs) floored at
+	// 1 GiB, negative disables. A runaway-allocation mutant dies on its
+	// own ceiling as an ordinary kill instead of OOMing the host.
+	OracleMemoryBytes int64
 	// Force re-measures targets whose prior finding's pins still match.
 	Force bool
 	// Guidance receives oracle-instability attribution for a measured
@@ -687,6 +692,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if jobs <= 0 {
 		jobs = max(1, runtime.NumCPU()/2)
 	}
+	engine.SetOracleMemoryLimit(opts.OracleMemoryBytes, jobs)
+	// The pin the run's evidence records and compares: resolved once, so
+	// gates never read ambient process state.
+	oracleMemoryPin := engine.OracleMemoryLimitBytes()
 	// First match wins; duplicate symbols occur only in hand-edited
 	// documents.
 	prior := map[string]*Finding{}
@@ -733,7 +742,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, err
 		}
 		f := &findings[i]
-		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, OracleTimeout: opts.OracleTimeout.String()}
+		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, OracleTimeout: opts.OracleTimeout.String(), OracleMemoryBytes: oracleMemoryPin}
 		oracle, err := preparation.oracle(ctx, tg)
 		if err != nil {
 			return nil, err
@@ -873,7 +882,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		var drift *Finding
 		var driftMoved []string
 		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
-			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String())
+			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin)
 			if err != nil {
 				return nil, err
 			}
@@ -881,7 +890,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// A mismatch may be exactly the growth the third carve-out
 				// serves: the derived oracle grew while the compartment
 				// moved by an inert declaration delta (REQ-result-stale).
-				added, grows, gerr := evidenceSetCoversGrowthContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String())
+				added, grows, gerr := evidenceSetCoversGrowthContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin)
 				if gerr != nil {
 					return nil, gerr
 				}
@@ -889,7 +898,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					snapshot := snapshotFindings([]Finding{*rec})[0]
 					grow = &snapshot
 					growAdded = added
-				} else if moved, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String()); derr != nil {
+				} else if moved, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin); derr != nil {
 					return nil, derr
 				} else if drifts {
 					// The compartment moved but the movement is attributable:
@@ -959,7 +968,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// disciplines (REQ-result-stale).
 				reason += "; prior candidate evidence re-executes only under its recorded budget, so the whole target re-measures"
 			} else {
-				matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String())
+				matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin)
 				if err != nil {
 					return nil, err
 				}

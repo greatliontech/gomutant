@@ -120,3 +120,11 @@ func resumeProcess(pid uint32) error {
 		}
 	}
 }
+
+// runOracleProcess on Windows delegates to the job-object wrapper's own
+// Run - assignment and resume of the suspended process must stay inside
+// it; the memory ceiling applies as the soft GOMEMLIMIT only
+// (REQ-exec-oracle-memory's where-the-host-provides clause).
+func runOracleProcess(cmd *jobCommand) error {
+	return cmd.Run()
+}

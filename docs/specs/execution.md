@@ -419,9 +419,38 @@ unchanged, while a deadline after it cannot roll back the committed result and
 final output completes successfully. For an ephemeral
 run, completion of the attributed oracle result is the equivalent success
 point. The independently named oracle timeout bounds each unmutated probe and
-mutant oracle process; it defaults to 60 seconds. Only the oracle timeout can
-change mutation attribution and therefore enter finding reuse evidence
-(REQ-result-record); changing the command timeout alone never stales a finding.
+mutant oracle process; it defaults to 60 seconds. The oracle timeout and the
+oracle memory ceiling are the two resource bounds that can change mutation
+attribution and therefore enter finding reuse evidence (REQ-result-record) -
+a mutant near either bound dies under a tight one and survives a loose one;
+changing the command timeout alone never stales a finding.
+
+**REQ-exec-oracle-memory** (behavior): Every oracle process tree — mutant
+runs, baseline probes, and ephemeral probes alike — MUST run under a
+memory ceiling: a soft runtime limit (GOMEMLIMIT at ~90% of the cap, so a
+legitimately large oracle collects garbage against the ceiling instead of
+dying on it) plus, where the host provides one, a hard per-process cap every
+process in the tree inherits (per process, not aggregate: a
+multi-process tree can jointly exceed one process's cap, and two
+concurrent gomutant processes each budget their own RAM share - the
+halved default is the headroom for exactly that). The default derives total RAM over twice the job count, floored
+at 1 GiB — a ceiling that broke in-oracle link steps would convert every
+measurement into a discard — configurable per run and disablable; an
+unreadable RAM total disables the derived default rather than guessing.
+The derived default moves with the job count, so evidence measured
+under it re-measures when jobs change — the exact-equality discipline
+every attribution-bearing pin carries — while a pinned explicit
+ceiling keeps evidence stable across jobs tuning. A
+mutant that dies on its ceiling classifies through the same attribution
+rules as any other oracle death — ordinarily a kill with its
+incompleteness reason; a legitimate oracle whose baseline also dies on
+the cap routes through the noise arm as ever — so a runaway allocation
+becomes a contained per-mutant verdict instead of a host-wide pressure
+event that evicts unrelated processes to swap.
+
+REQ-exec-oracle-memory: enforced by
+`TestOracleMemoryCeilingContainsRunawayMutant`,
+`TestDefaultOracleMemoryLimit`, and `TestOracleMemoryEnv`.
 
 Mutation execution is supported on Unix and Windows hosts, where gomutant can
 own and terminate a process group or Job Object. Other host operating systems

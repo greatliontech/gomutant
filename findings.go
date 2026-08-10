@@ -281,6 +281,14 @@ type Finding struct {
 	OracleEvidence []SubjectEvidence `json:"oracleEvidence"`
 	OracleExplicit bool              `json:"oracleExplicit"`
 	OracleTimeout  string            `json:"oracleTimeout"`
+	// OracleMemoryBytes is the effective per-oracle memory ceiling the
+	// measurement ran under (REQ-exec-oracle-memory); 0 means no
+	// ceiling. A measurement pin exactly like the oracle timeout: a
+	// resource bound can change attribution (a mutant near the ceiling
+	// dies under a tight one and survives a loose one), so evidence
+	// never serves across a moved ceiling. Its addition narrows reuse
+	// and rides the version-4 bump (REQ-result-export's precedent).
+	OracleMemoryBytes int64 `json:"oracleMemoryBytes,omitempty"`
 	// CompartmentLedger is the target package's test-variant declaration
 	// ledger at measure time; the oracle-growth carve-out diffs it against
 	// the current tree, and a record persisted without one (an older
@@ -405,7 +413,7 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // subject's evidence: the field is what stales a record across sibling-test
 // movement, so an older consumer's tolerance would have dropped the pin and
 // served results whose oracle set silently changed.
-const DocumentVersion = 3
+const DocumentVersion = 4
 
 // document is the portable finding set (REQ-result-export).
 type document struct {
@@ -466,7 +474,7 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	known := map[string]bool{
 		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
 		"budget": true, "targetEvidence": true, "oracleEvidence": true,
-		"oracleExplicit": true, "oracleTimeout": true, "compartmentLedger": true, "commit": true, "dirty": true,
+		"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "compartmentLedger": true, "commit": true, "dirty": true,
 		"candidateCount": true, "generated": true, "mutants": true, "killed": true,
 		"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true,
 		"candidateEvidence": true,
@@ -946,7 +954,12 @@ func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget
 	if !budgetCovers(f, budget) {
 		return false, nil
 	}
-	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String())
+	// The advisory boundary reads the installed ceiling once here - the
+	// comparison gates themselves take the pin explicitly. A library
+	// consumer that never installed a ceiling compares 0 against
+	// derived-pinned records and reads stale: the conservative
+	// direction; install or derive a ceiling first for parity with Run.
+	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String(), engine.OracleMemoryLimitBytes())
 	if err != nil || !matches {
 		return matches, err
 	}

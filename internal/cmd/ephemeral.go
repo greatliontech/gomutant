@@ -14,6 +14,7 @@ import (
 type ephemeralOptions struct {
 	dir, file, replacement, batch, testPkg, runPat string
 	timeout, oracleTimeout                         time.Duration
+	oracleMemoryMiB                                int64
 }
 
 func newEphemeralCommand() *cobra.Command {
@@ -30,6 +31,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
+	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
 	return cmd
 }
 
@@ -81,6 +83,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 			return err
 		}
 	}
+	gomutant.SetOracleMemoryLimit(oracleMemoryBytes(o.oracleMemoryMiB), 1)
 	tree, err := gomutant.LoadContext(ctx, o.dir)
 	if err != nil {
 		return err

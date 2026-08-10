@@ -31,10 +31,11 @@ type Server struct {
 	// mu guards the loaded-tree cache. The cached Tree is read-only after
 	// load and served to concurrent tool calls; see loadTreeContext for the
 	// reuse constraint.
-	mu      sync.Mutex
-	tree    *gomutant.Tree
-	treeKey string
-	vouches []string
+	mu           sync.Mutex
+	tree         *gomutant.Tree
+	treeKey      string
+	vouches      []string
+	runsInFlight atomic.Int64
 }
 
 // New builds a server rooted at dir.
@@ -340,6 +341,7 @@ type runIn struct {
 	OracleTimeoutSec int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
 	Jobs             int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
 	BracketPaths     []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
+	OracleMemoryMiB  *int64   `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling per oracle process tree in MiB: absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host"`
 	Force            bool     `json:"force,omitempty" jsonschema:"re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force"`
 	Findings         string   `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
 	Packages         []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
@@ -380,6 +382,8 @@ type runOut struct {
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
+	s.runsInFlight.Add(1)
+	defer s.runsInFlight.Add(-1)
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, out, err
@@ -501,12 +505,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	streams := newRunStreams(&out, notify)
 	options := gomutant.Options{
-		Budget:        in.Budget,
-		OracleTimeout: oracleTimeout,
-		Jobs:          in.Jobs,
-		Force:         in.Force,
-		BracketPaths:  in.BracketPaths,
-		Guidance:      func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
+		Budget:            in.Budget,
+		OracleTimeout:     oracleTimeout,
+		Jobs:              in.Jobs,
+		Force:             in.Force,
+		BracketPaths:      in.BracketPaths,
+		OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB),
+		Guidance:          func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
 		Contradiction: func(c gomutant.AttestationContradiction) {
 			out.Contradictions = append(out.Contradictions, contradictionOut{
 				Symbol: c.Symbol, Position: c.Position, Operator: c.Operator, Killer: c.Killer, Reason: c.Reason,
@@ -1031,9 +1036,25 @@ type ephemeralIn struct {
 	Run              string               `json:"run" jsonschema:"-run pattern naming the deciding test"`
 	TimeoutSec       *int                 `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before attributed result completion after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
 	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
+	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling for the probe's oracle process tree in MiB: absent inherits the server's installed ceiling, 0 derives RAM/2 floored at 1 GiB for this probe, -1 disables for this probe; refused while a run is in flight - the campaign owns the process ceiling"`
 }
 
 func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in ephemeralIn) (*mcp.CallToolResult, *gomutant.EphemeralResult, error) {
+	// The ceiling is process state a running campaign owns: an explicit
+	// probe ceiling while a run is in flight would diverge the campaign's
+	// evidence from its stamped pin (a mutant and its baseline could even
+	// straddle the two ceilings), so it refuses loudly instead of racing.
+	// Without a run in flight the probe's ceiling installs for the
+	// probe's duration and the exact prior state - the installed flag
+	// included - restores after.
+	if in.OracleMemoryMiB != nil {
+		if s.runsInFlight.Load() > 0 {
+			return nil, nil, fmt.Errorf("ephemeral: a run in flight owns the process's oracle memory ceiling; omit oracle_memory_mib or retry after the run")
+		}
+		prior := gomutant.SnapshotOracleMemory()
+		gomutant.SetOracleMemoryLimit(mcpOracleMemoryBytes(in.OracleMemoryMiB), 1)
+		defer gomutant.RestoreOracleMemory(prior)
+	}
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, nil, err
@@ -1103,4 +1124,16 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	}
 	res, err := tree.Ephemeral(ctx, in.File, []byte(in.Replacement), in.TestPkg, in.Run, oracleTimeout)
 	return nil, res, err
+}
+
+// mcpOracleMemoryBytes converts the optional MiB input: absent or 0
+// derives the default, negative disables.
+func mcpOracleMemoryBytes(mib *int64) int64 {
+	if mib == nil || *mib == 0 {
+		return 0
+	}
+	if *mib < 0 {
+		return -1
+	}
+	return *mib << 20
 }

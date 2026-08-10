@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -40,9 +41,12 @@ func CoveredPositions(ctx context.Context, dir, testPkg, runRegex, coverPkg stri
 	defer cancel()
 	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return Coverage{}, fmt.Errorf("coverage probe for %s under %s: %v: %s", coverPkg, testPkg, err, coverageTail(string(out), 300))
+	cmd.Env = oracleMemoryEnv(env)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := runOracleProcess(cmd); err != nil {
+		return Coverage{}, fmt.Errorf("coverage probe for %s under %s: %v: %s", coverPkg, testPkg, err, coverageTail(out.String(), 300))
 	}
 	profiles, err := cover.ParseProfiles(profile)
 	if err != nil {

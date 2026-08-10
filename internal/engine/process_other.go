@@ -15,3 +15,10 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	cmd.WaitDelay = time.Second
 	return cmd
 }
+
+// runOracleProcess on hosts without process-group ownership just runs
+// the command; execution is refused earlier during tree loading, so
+// this exists for compilation completeness only.
+func runOracleProcess(cmd *exec.Cmd) error {
+	return cmd.Run()
+}

@@ -29,3 +29,16 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	cmd.WaitDelay = time.Second
 	return cmd
 }
+
+// runOracleProcess starts the oracle, installs the hard memory ceiling
+// on the live process (descendants inherit the rlimit), and waits -
+// cmd.Run with the prlimit window in between. The window before the
+// limit lands is milliseconds against a runaway that needs seconds to
+// matter (REQ-exec-oracle-memory).
+func runOracleProcess(cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	startOracleCeiling(cmd)
+	return cmd.Wait()
+}

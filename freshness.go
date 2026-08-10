@@ -731,7 +731,7 @@ func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
 func sameAttestationPins(prior, current Finding) bool {
 	if prior.OperatorSet != current.OperatorSet || prior.OracleExplicit != current.OracleExplicit || prior.Budget != current.Budget ||
 		prior.CandidateCount != current.CandidateCount || prior.Generated != current.Generated ||
-		prior.OracleTimeout != current.OracleTimeout || attestationPinView(prior.TargetEvidence) != attestationPinView(current.TargetEvidence) ||
+		prior.OracleTimeout != current.OracleTimeout || prior.OracleMemoryBytes != current.OracleMemoryBytes || attestationPinView(prior.TargetEvidence) != attestationPinView(current.TargetEvidence) ||
 		len(prior.OracleEvidence) != len(current.OracleEvidence) {
 		return false
 	}
@@ -871,7 +871,7 @@ func (m *runtimeMemo) verify(ctx context.Context) (bool, error) {
 // comparison after the core and before the environment tiers, so that
 // reason certifies core equality only. Returns the added oracle symbols,
 // sorted.
-func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) ([]string, bool, error) {
+func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64) ([]string, bool, error) {
 	// Growth is a derived-oracle claim on both sides: an explicit request
 	// that happens to superset the recorded derived set is the caller's
 	// selection, not derived growth — serving it would report "derived
@@ -879,6 +879,7 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 	// oracle under a non-explicit record.
 	if oracleExplicit || prior.OracleExplicit || prior.CompartmentLedger == nil ||
 		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
+		prior.OracleMemoryBytes != memoryPin ||
 		len(prior.OracleEvidence) >= len(oracle) || len(prior.CandidateEvidence) != 0 {
 		return nil, false, nil
 	}
@@ -1160,9 +1161,10 @@ func (r *compartmentReach) walk(seeds []int) bool {
 // compartment pin is untouched by this target's delta) or when its reference
 // walk over the current ledger reaches a delta declaration. Returns the
 // moved oracle symbols, sorted.
-func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) ([]string, bool, error) {
+func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64) ([]string, bool, error) {
 	if prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
 		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
+		prior.OracleMemoryBytes != memoryPin ||
 		len(prior.OracleEvidence) != len(oracle) || len(prior.CandidateEvidence) != 0 ||
 		len(prior.Kills) != prior.Killed {
 		return nil, false, nil
@@ -1234,12 +1236,13 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 	return moved, true, nil
 }
 
-func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
-	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, runtimeinput.CurrentEnvContext)
+func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64) (bool, error) {
+	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, memoryPin, runtimeinput.CurrentEnvContext)
 }
 
-func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
-	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.OracleTimeout != timeout || len(prior.OracleEvidence) != len(oracle) {
+func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
+	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.OracleTimeout != timeout ||
+		prior.OracleMemoryBytes != memoryPin || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
 	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
@@ -1266,8 +1269,8 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 	return memo.verify(ctx)
 }
 
-func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string) (bool, error) {
-	return evidenceSetMatchesContext(context.Background(), prior, target, oracle, oracleExplicit, operatorSet, timeout)
+func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64) (bool, error) {
+	return evidenceSetMatchesContext(context.Background(), prior, target, oracle, oracleExplicit, operatorSet, timeout, memoryPin)
 }
 
 func attachEvidence(target *subjectView, oracle []*subjectView, observation runtimeinput.Observation) (SubjectEvidence, []SubjectEvidence, error) {

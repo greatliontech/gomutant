@@ -238,11 +238,11 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	}
 	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = env
+	cmd.Env = oracleMemoryEnv(env)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	runErr := cmd.Run()
+	runErr := runOracleProcess(cmd)
 
 	if runCtx.Err() == context.DeadlineExceeded {
 		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process timed out", env, capture, oracleBracket, oracleBracketReason)
@@ -302,8 +302,8 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	defer baseCancel()
 	base := commandContext(baseCtx, "go", baseArgs...)
 	base.Dir = dir
-	base.Env = env
-	baseErr := base.Run()
+	base.Env = oracleMemoryEnv(env)
+	baseErr := runOracleProcess(base)
 	mutantState, mutantIncomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process exited before observation finalization", env, capture, oracleBracket, oracleBracketReason)
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
@@ -651,11 +651,11 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	}
 	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = env
+	cmd.Env = oracleMemoryEnv(env)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	runErr := cmd.Run()
+	runErr := runOracleProcess(cmd)
 	if ctx2.Err() == context.DeadlineExceeded {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process timed out", env, capture, oracleBracket, oracleBracketReason)
 		if observationErr != nil {

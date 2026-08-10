@@ -25,6 +25,34 @@ type EphemeralResult struct {
 	Killer string `json:"killer,omitempty"`
 }
 
+// SetOracleMemoryLimit installs the per-oracle-process memory ceiling
+// for this process's runs and ephemeral probes
+// (REQ-exec-oracle-memory): bytes > 0 is the explicit cap, 0 derives
+// RAM / (2 x jobs) floored at 1 GiB, negative disables. Run installs
+// it from RunOptions; ephemeral callers install it directly, and an
+// uninstalled process derives the default at its first probe.
+func SetOracleMemoryLimit(bytes int64, jobs int) {
+	engine.SetOracleMemoryLimit(bytes, jobs)
+}
+
+// OracleMemoryLimitBytes reports the installed per-oracle ceiling; 0
+// means disabled or not yet derived.
+func OracleMemoryLimitBytes() int64 {
+	return engine.OracleMemoryLimitBytes()
+}
+
+// OracleMemorySnapshot mirrors the engine's ceiling state for exact
+// restore around a scoped override.
+type OracleMemorySnapshot = engine.OracleMemorySnapshot
+
+// SnapshotOracleMemory captures the ceiling state; RestoreOracleMemory
+// reinstates it verbatim, the installed flag included.
+func SnapshotOracleMemory() OracleMemorySnapshot { return engine.SnapshotOracleMemory() }
+
+// RestoreOracleMemory reinstates a snapshot captured by
+// SnapshotOracleMemory.
+func RestoreOracleMemory(s OracleMemorySnapshot) { engine.RestoreOracleMemory(s) }
+
 // Ephemeral runs one manual mutant — a caller-supplied replacement of one
 // source file, for the mutations the operator set cannot generate
 // (generated-data drift, resolver seams, caller mappings): it overlays file
@@ -37,6 +65,7 @@ type EphemeralResult struct {
 // testPkg is a go package path; run is a -run pattern. A mutant that fails
 // to compile is an error, not a survivor: nothing was measured.
 func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, oracleTimeout time.Duration) (*EphemeralResult, error) {
+	engine.EnsureOracleMemoryDefault(1)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -65,6 +94,7 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 }
 
 func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration) (*EphemeralResult, error) {
+	engine.EnsureOracleMemoryDefault(1)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

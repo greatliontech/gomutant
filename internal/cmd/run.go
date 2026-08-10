@@ -20,6 +20,7 @@ type runOptions struct {
 	dir, changed, targetsFile, findingsFile string
 	packages, symbols                       []string
 	budget, jobs                            int
+	oracleMemoryMiB                         int64
 	timeout, oracleTimeout                  time.Duration
 	force, plan                             bool
 	bracketPaths, vouches                   []string
@@ -36,6 +37,7 @@ func newRunCommand() *cobra.Command {
 	f.IntVar(&o.budget, "budget", 0, "candidates per symbol; 0 = exhaustive")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result commit after this duration; 0 = unlimited")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
+	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling per oracle process tree in MiB (GOMEMLIMIT plus a hard data-segment cap): 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host")
 	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
 	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "external surface the oracle legitimately reads (module-relative path or absolute file, repeatable; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run")
 	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence")
@@ -163,7 +165,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	var planMeasure, planCandidates, planCached, planSkipped int
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
-		Budget: o.budget, OracleTimeout: o.oracleTimeout, Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, Prior: prior,
+		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, Prior: prior,
 		PlanOnly: o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
 			line := fmt.Sprintf("%-9s target %d/%d %s  candidates %d/%d", event.Phase, event.TargetIndex, event.TargetCount, event.Symbol, event.CandidatesDone, event.CandidatesTotal)
@@ -332,4 +334,13 @@ func skipClasses(findings []gomutant.Finding) (string, int) {
 func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
 	fmt.Fprintf(w, "summary   %d targets: %d measured, %d cached, %d skipped; %d generated, %d killed, %d survived, %d discarded; %d attested, %d open\n",
 		summary.Targets, summary.Measured, summary.Cached, summary.Skipped, summary.Generated, summary.Killed, summary.Survived, summary.Discarded, summary.Attested, summary.Open)
+}
+
+// oracleMemoryBytes converts the MiB flag: 0 stays 0 (derive), negative
+// stays negative (disabled).
+func oracleMemoryBytes(mib int64) int64 {
+	if mib <= 0 {
+		return mib
+	}
+	return mib << 20
 }

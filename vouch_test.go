@@ -238,3 +238,51 @@ func TestSubjectEvidenceCarriesDynamicStateVouches(t *testing.T) {
 		t.Fatalf("fingerprint discharge = %q", back)
 	}
 }
+
+// The oracle memory ceiling is a measurement pin exactly like the
+// oracle timeout: attestation pins split on it, and the document
+// version gates the narrowing field (REQ-exec-oracle-memory,
+// REQ-result-record, REQ-result-export).
+//
+//gofresh:pure
+func TestOracleMemoryPinGatesReuse(t *testing.T) {
+	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleMemoryBytes: 1 << 30,
+		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}}
+	loosened := base
+	loosened.OracleMemoryBytes = 0
+	if sameAttestationPins(base, loosened) {
+		t.Fatal("a moved memory ceiling read as unchanged attestation pins")
+	}
+	if DocumentVersion != 4 {
+		t.Fatalf("DocumentVersion = %d: the memory pin narrows reuse and must ride the version-4 bump", DocumentVersion)
+	}
+}
+
+// The measurement pin is resolved once at run entry: a mid-campaign
+// change to the process ceiling (a misbehaving concurrent caller)
+// never diverges the stamped evidence from the compared pin
+// (REQ-exec-oracle-memory, REQ-result-record).
+func TestRunStampsTheResolvedMemoryPin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	t.Cleanup(func() { engine.SetOracleMemoryLimit(-1, 1) })
+	want := engine.DefaultOracleMemoryLimit(1)
+	if want == 0 || want == 8<<30 {
+		t.Skip("total RAM unreadable on this host")
+	}
+	findings, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}, Options{
+		Budget: 1, Jobs: 1,
+		Progress: func(PreparationEvent) {
+			engine.SetOracleMemoryLimit(8<<30, 1)
+		},
+	})
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("run = %+v, %v", findings, err)
+	}
+	if findings[0].OracleMemoryBytes != want {
+		t.Fatalf("stamped pin = %d, want the entry-resolved %d (mid-campaign flip leaked)", findings[0].OracleMemoryBytes, want)
+	}
+}

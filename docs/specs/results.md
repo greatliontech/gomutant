@@ -47,8 +47,10 @@ disposition is not observable.
 **REQ-result-record** (behavior): A finding record MUST be keyed by the
 mutated symbol and record the available inputs that produced it — target subject evidence,
 the oracle as a set of distinct subject evidence records, the operator version,
-whether the oracle was explicit or package-derived, the candidate budget, and the exact effective oracle timeout in the `oracleTimeout` field encoded as a
-canonical Go duration string — carrying the target package's test-variant
+whether the oracle was explicit or package-derived, the candidate budget, the exact effective oracle timeout in the `oracleTimeout` field encoded as a
+canonical Go duration string, and the effective oracle memory ceiling in the
+`oracleMemoryBytes` field (0 meaning no ceiling; REQ-exec-oracle-memory) - a
+resource bound that can change attribution is a measurement pin — carrying the target package's test-variant
 compartment ledger (the declaration-level record the growth carve-out diffs
 at serve time), the capture commit and dirty provenance,
 the mutant count, the kill count, each kill's candidate identity and killer
@@ -307,11 +309,12 @@ survivor attestations. Oracle membership remains a measurement pin, so changing
 the executable oracle remeasures as usual.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable version-3 document that gomutant owns — carrying, per mutated
+portable version-4 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,
 each carrying its package's test-variant compartment hash beside the maximal
 closure;
-oracle selection mode; operator version; budget; oracle timeout; commit and dirty provenance), the mutant and
+oracle selection mode; operator version; budget; oracle timeout; oracle
+memory ceiling; commit and dirty provenance), the mutant and
 kill counts, the kill-attribution list when the record carries one (its
 absence is tolerated in the anti-flattering direction: a record without it
 re-measures whole under the killer-drift carve-out rather than serving, so
