@@ -250,7 +250,22 @@ diagnostic in the message — manual probes are interactive evidence gathering,
 so the caller repairs the edit from the compiler's reason, never from a
 guess. The result reports whether the named test killed the
 mutant and the attributed failing test; it is evidence for the caller to act
-on, never persisted to a finding record (REQ-result-record). Interference
+on, never persisted to a finding record (REQ-result-record). A kill
+additionally carries its interactive evidence in the result — a bounded
+excerpt of the killing test's own output anchored at its end, where Go
+emits the failure block, with the dropped earlier remainder counted (a
+head would bury the failure reason under run banners); a timeout
+verdict's text naming the governing oracle-timeout option in both its
+spellings (`oracle_timeout_sec` / `--oracle-timeout`); or a
+package-scope crash's bounded text — so acting on a kill requires no
+parallel re-run of the oracle. A caller may demand `runs:N` (bounded; each
+run is a full oracle process): the mutant runs N times against the
+once-probed baseline, the result lists every run's verdict in order with
+the kill count, and the killed verdict means every run killed — N
+consecutive kills split a deterministic kill from a property generator's
+draw luck, and a mixed outcome reads as neither killed nor plain survival.
+A baseline probe exceeding the oracle timeout refuses with an error naming
+the governing oracle-timeout option in both its spellings. Interference
 confirmation is a campaign discipline: an ephemeral probe is a single process
 with no sibling mutants, and its advisory result carries no confirmation
 pass.

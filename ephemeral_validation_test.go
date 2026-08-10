@@ -31,16 +31,16 @@ func TestEphemeralRefusesUnloadedPackageAndUncompiledFile(t *testing.T) {
 	}
 	valid := []byte("package lib\n")
 
-	if _, err := tr.Ephemeral(t.Context(), "lib/excluded.go", []byte("//go:build never\n\npackage lib\n\nfunc Excluded() int { return 2 }\n"), "example.com/fixture/lib", "^TestAdd$", time.Minute); err == nil || !strings.Contains(err.Error(), "not compiled by the loaded build") {
+	if _, err := tr.Ephemeral(t.Context(), "lib/excluded.go", []byte("//go:build never\n\npackage lib\n\nfunc Excluded() int { return 2 }\n"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "not compiled by the loaded build") {
 		t.Fatalf("build-excluded replacement = %v, want an exclusion refusal", err)
 	}
-	if _, err := tr.Ephemeral(t.Context(), "lib/data.txt", []byte("mutated"), "example.com/fixture/lib", "^TestAdd$", time.Minute); err == nil || !strings.Contains(err.Error(), "not compiled by the loaded build") {
+	if _, err := tr.Ephemeral(t.Context(), "lib/data.txt", []byte("mutated"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "not compiled by the loaded build") {
 		t.Fatalf("data-file replacement = %v, want an exclusion refusal", err)
 	}
-	if _, err := tr.Ephemeral(t.Context(), "lib/lib.go", valid, "-exec=/bin/true", "^TestAdd$", time.Minute); err == nil || !strings.Contains(err.Error(), "not a loaded package import path") {
+	if _, err := tr.Ephemeral(t.Context(), "lib/lib.go", valid, "-exec=/bin/true", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "not a loaded package import path") {
 		t.Fatalf("flag-shaped test package = %v, want a loaded-package refusal", err)
 	}
-	if _, err := tr.Ephemeral(t.Context(), "lib/lib.go", valid, "example.com/nowhere", "^TestAdd$", time.Minute); err == nil || !strings.Contains(err.Error(), "not a loaded package import path") {
+	if _, err := tr.Ephemeral(t.Context(), "lib/lib.go", valid, "example.com/nowhere", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "not a loaded package import path") {
 		t.Fatalf("unloaded test package = %v, want a loaded-package refusal", err)
 	}
 }

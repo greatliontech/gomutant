@@ -15,6 +15,7 @@ type ephemeralOptions struct {
 	dir, file, replacement, batch, testPkg, runPat string
 	timeout, oracleTimeout                         time.Duration
 	oracleMemoryMiB                                int64
+	runs                                           int
 }
 
 func newEphemeralCommand() *cobra.Command {
@@ -32,6 +33,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
+	f.IntVar(&o.runs, "runs", 1, "run the mutant this many times (1-10): killed means every run killed - consecutive kills split deterministic kills from a property generator's draw luck")
 	return cmd
 }
 
@@ -90,7 +92,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	}
 	var res *gomutant.EphemeralResult
 	if o.batch != "" {
-		res, err = tree.EphemeralBatch(ctx, batchEdits, o.testPkg, o.runPat, o.oracleTimeout)
+		res, err = tree.EphemeralBatch(ctx, batchEdits, o.testPkg, o.runPat, o.oracleTimeout, o.runs)
 		if err != nil {
 			return err
 		}
@@ -105,15 +107,29 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		res, err = tree.Ephemeral(ctx, o.file, mutant, o.testPkg, o.runPat, o.oracleTimeout)
+		res, err = tree.Ephemeral(ctx, o.file, mutant, o.testPkg, o.runPat, o.oracleTimeout, o.runs)
 		if err != nil {
 			return err
 		}
 	}
-	if res.Killed {
-		fmt.Printf("killed    %s  by %s\n", strings.Join(res.Files, ", "), res.Killer)
-	} else {
+	switch {
+	case res.Killed:
+		line := fmt.Sprintf("killed    %s  by %s", strings.Join(res.Files, ", "), res.Killer)
+		if res.Runs > 1 {
+			line += fmt.Sprintf("  (%d consecutive runs)", res.Runs)
+		}
+		fmt.Println(line)
+	case res.KilledRuns > 0:
+		// A partial kill is a property generator's draw luck, never a
+		// deterministic kill and never plain survival.
+		fmt.Printf("FLAKY     %s  — killed %d/%d runs by %s\n", strings.Join(res.Files, ", "), res.KilledRuns, res.Runs, res.Killer)
+	default:
 		fmt.Printf("SURVIVED  %s  — %s did not notice the mutation\n", strings.Join(res.Files, ", "), res.Run)
+	}
+	if res.KillerOutput != "" {
+		for _, l := range strings.Split(res.KillerOutput, "\n") {
+			fmt.Println("  " + l)
+		}
 	}
 	return nil
 }

@@ -86,7 +86,9 @@ mutant as a whole replacement source, sequential exact-match edits applied
 to one file, or an atomic batch of file-scoped exact-match edits applied to
 one original multi-file snapshot (REQ-exec-ephemeral) — an agent hand-crafting
 a mutation states the change, not whole files — and returns the applied
-result's evidence identically in every form. Single-file edits apply sequentially: each
+result's evidence identically in every form: the verdict with the kill's
+bounded output evidence and, under `runs`, the per-run verdicts
+(REQ-exec-ephemeral). Single-file edits apply sequentially: each
 matches against the content the prior edits produced, exactly once, so a
 statement of changes reads top to bottom and an ambiguity introduced by an
 earlier edit is refused like any other. Batch edits carry their own paths and

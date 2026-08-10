@@ -136,6 +136,111 @@ func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, 
 	return outcome, killer, diagnostic, err
 }
 
+// RunMutantEvidenceEnv is RunMutantEnv additionally deriving the kill's
+// interactive evidence from the mutant run's own -json stream: the
+// killing test's bounded output head, the timeout verdict naming the
+// governing oracle_timeout_sec, or the package-scope crash's bounded
+// text - so acting on a kill needs no parallel oracle re-run
+// (REQ-exec-ephemeral). The evidence is empty when the mutant survived
+// or was discarded.
+func RunMutantEvidenceEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (MutantOutcome, string, string, string, error) {
+	var sink bytes.Buffer
+	outcome, killer, _, _, diagnostic, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, env, &sink)
+	evidence := ""
+	if err == nil && outcome == MutantKilled {
+		evidence = killEvidence(sink.Bytes(), killer, timeout)
+	}
+	return outcome, killer, evidence, diagnostic, err
+}
+
+// killerOutputLines and killerOutputLineCap bound the kill evidence:
+// enough of the killing test's own output to act on, never the whole
+// stream.
+const (
+	killerOutputLines   = 20
+	killerOutputLineCap = 240
+)
+
+// killEvidence derives a kill's bounded evidence text from the mutant
+// run's -json stream by verdict shape: the killing test's output head,
+// the timeout naming its governing option, or the package-scope
+// crash's bounded tail.
+func killEvidence(stream []byte, killer string, timeout time.Duration) string {
+	switch {
+	case killer == TimeoutKiller:
+		return fmt.Sprintf("oracle timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", timeout)
+	case strings.HasPrefix(killer, PackageKillerPrefix):
+		if excerpt := outputTail(stream, func(pkg, test string) bool { return test == "" }); excerpt != "" {
+			return excerpt
+		}
+		return tail(string(stream), 400)
+	default:
+		return outputTail(stream, func(pkg, test string) bool {
+			return pkg+"."+test == killer
+		})
+	}
+}
+
+// outputTail collects the last killerOutputLines non-empty output
+// lines the keep predicate admits from a go test -json stream (subtest
+// output folds to its top-level test), each line capped at a rune
+// boundary, the dropped earlier remainder counted - a truncation is
+// never silent. The excerpt anchors at the END because Go emits the
+// failure block (--- FAIL, assertion text, property counterexamples)
+// last: a head would bury the failure reason under run banners and
+// force exactly the parallel re-run the evidence exists to remove.
+func outputTail(stream []byte, keep func(pkg, test string) bool) string {
+	type event struct {
+		Action  string
+		Package string
+		Test    string
+		Output  string
+	}
+	ring := make([]string, 0, killerOutputLines)
+	next := 0
+	dropped := 0
+	dec := json.NewDecoder(bytes.NewReader(stream))
+	for {
+		var e event
+		if err := dec.Decode(&e); err != nil {
+			break
+		}
+		if e.Action != "output" {
+			continue
+		}
+		name := e.Test
+		if i := strings.Index(name, "/"); i >= 0 {
+			name = name[:i]
+		}
+		if !keep(e.Package, name) {
+			continue
+		}
+		line := strings.TrimRight(e.Output, "\n")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(line) > killerOutputLineCap {
+			cut := killerOutputLineCap
+			for cut > 0 && !utf8.RuneStart(line[cut]) {
+				cut--
+			}
+			line = line[:cut] + "..."
+		}
+		if len(ring) < killerOutputLines {
+			ring = append(ring, line)
+			continue
+		}
+		ring[next] = line
+		next = (next + 1) % killerOutputLines
+		dropped++
+	}
+	lines := append(append([]string(nil), ring[next:]...), ring[:next]...)
+	if dropped > 0 {
+		lines = append([]string{fmt.Sprintf("(%d earlier output lines dropped)", dropped)}, lines...)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // RunMutantObserved is RunMutant with finalized absolute runtime-input evidence
 // for the test process and any differential baseline process it launches. The
 // incomplete result names the candidate-local reason when the mutant's own
@@ -163,10 +268,10 @@ func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []
 // comparison are retired - bracket verdicts are the truth
 // (REQ-exec-observation).
 func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
-	return runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, env)
+	return runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, env, nil)
 }
 
-func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string, sink *bytes.Buffer) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
 	if err := ctx.Err(); err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
@@ -239,8 +344,14 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
 	cmd.Env = oracleMemoryEnv(env)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	// The sink, when given, receives the mutant run's raw -json stream -
+	// the evidence surface RunMutantEvidenceEnv derives kill output from.
+	stdout := &bytes.Buffer{}
+	if sink != nil {
+		stdout = sink
+	}
+	var stderr bytes.Buffer
+	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
 	runErr := runOracleProcess(cmd)
 
@@ -661,7 +772,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		if observationErr != nil {
 			return 0, false, runtimeinput.Observation{}, observationErr
 		}
-		return 0, false, state, fmt.Errorf("baseline test timed out")
+		return 0, false, state, fmt.Errorf("baseline test timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", timeout)
 	}
 	if err := ctx2.Err(); err != nil {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process was cancelled", env, capture, oracleBracket, oracleBracketReason)

@@ -19,10 +19,25 @@ type EphemeralResult struct {
 	Files   []string `json:"files"`
 	TestPkg string   `json:"testPkg"`
 	Run     string   `json:"run"`
-	Killed  bool     `json:"killed"`
+	// Killed means every run killed the mutant: with Runs > 1 it is the
+	// "killed N consecutive runs" claim that splits a deterministic kill
+	// from a property generator's draw luck. A mixed outcome reads
+	// Killed=false with KilledRuns naming how many runs killed.
+	Killed bool `json:"killed"`
 	// Killer names the failing test, a timeout, or a package-scope failure
-	// when Killed; empty when the mutant survived.
+	// from the first killing run; empty when no run killed.
 	Killer string `json:"killer,omitempty"`
+	// KillerOutput is the first killing run's bounded evidence: the
+	// killing test's first output lines (remainder counted), the timeout
+	// naming its governing option, or the package-scope crash's bounded
+	// text - so acting on a kill needs no parallel oracle re-run.
+	KillerOutput string `json:"killerOutput,omitempty"`
+	// Runs is how many times the mutant ran against the once-probed
+	// baseline; KilledRuns how many of them killed; RunVerdicts each
+	// run's verdict in order ("killed: <killer>" or "survived").
+	Runs        int      `json:"runs"`
+	KilledRuns  int      `json:"killedRuns"`
+	RunVerdicts []string `json:"runVerdicts"`
 }
 
 // SetOracleMemoryLimit installs the per-oracle-process memory ceiling
@@ -64,7 +79,7 @@ func RestoreOracleMemory(s OracleMemorySnapshot) { engine.RestoreOracleMemory(s)
 // either refuses the run rather than scoring it. file is tree-relative;
 // testPkg is a go package path; run is a -run pattern. A mutant that fails
 // to compile is an error, not a survivor: nothing was measured.
-func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, oracleTimeout time.Duration) (*EphemeralResult, error) {
+func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	engine.EnsureOracleMemoryDefault(1)
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -90,10 +105,28 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 		return nil, fmt.Errorf("mutant is identical to %s: nothing to measure", file)
 	}
 
-	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, oracleTimeout)
+	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, oracleTimeout, runs)
 }
 
-func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration) (*EphemeralResult, error) {
+// discardError maps a discarded probe to its repairing reason: an
+// environmental-noise discard must not read as a compile failure - the
+// caller would "check the replacements" when the environment was at
+// fault.
+func discardError(files []string, diagnostic string) error {
+	if strings.HasPrefix(diagnostic, "unclassifiable mutant-run failure") {
+		return fmt.Errorf("mutant run was unclassifiable - not a measurement:\n%s", diagnostic)
+	}
+	if diagnostic != "" {
+		return fmt.Errorf("mutant did not compile: nothing was measured — check the replacements for %s\n%s", strings.Join(files, ", "), diagnostic)
+	}
+	return fmt.Errorf("mutant did not compile: nothing was measured — check the replacements for %s", strings.Join(files, ", "))
+}
+
+// maxEphemeralRuns bounds runs:N - each run is a full oracle process,
+// and an unbounded N would let one probe request scale like a campaign.
+const maxEphemeralRuns = 10
+
+func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	engine.EnsureOracleMemoryDefault(1)
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -116,6 +149,12 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	if oracleTimeout <= 0 {
 		oracleTimeout = 60 * time.Second
+	}
+	if runs == 0 {
+		runs = 1
+	}
+	if runs < 1 || runs > maxEphemeralRuns {
+		return nil, fmt.Errorf("runs must be between 1 and %d - each run is a full oracle process", maxEphemeralRuns)
 	}
 	// The build ignores what it does not compile: an overlay of a
 	// build-excluded or non-Go file measures a mutant that was never
@@ -163,34 +202,47 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		engineReplacements[i] = engine.Replacement{File: replacement.Abs, Source: replacement.Source}
 	}
 	m := engine.Mutant{Replacements: engineReplacements}
-	outcome, killer, diagnostic, err := engine.RunMutantEnv(ctx, t.dir, m, []string{testPkg}, run, oracleTimeout, binFlags, env)
-	if err != nil {
-		return nil, err
-	}
-	if outcome == engine.MutantDiscarded {
-		if diagnostic != "" {
-			return nil, fmt.Errorf("mutant did not compile: nothing was measured — check the replacements for %s\n%s", strings.Join(files, ", "), diagnostic)
-		}
-		return nil, fmt.Errorf("mutant did not compile: nothing was measured — check the replacements for %s", strings.Join(files, ", "))
-	}
-	return &EphemeralResult{
+	res := &EphemeralResult{
 		Files:   files,
 		TestPkg: testPkg,
 		Run:     run,
-		Killed:  outcome == engine.MutantKilled,
-		Killer:  killer,
-	}, nil
+		Runs:    runs,
+	}
+	// N runs against the once-probed baseline: per-run verdicts split a
+	// deterministic kill (every run killed) from a property generator's
+	// draw luck (REQ-exec-ephemeral).
+	for i := 0; i < runs; i++ {
+		outcome, killer, evidence, diagnostic, err := engine.RunMutantEvidenceEnv(ctx, t.dir, m, []string{testPkg}, run, oracleTimeout, binFlags, env)
+		if err != nil {
+			return nil, err
+		}
+		if outcome == engine.MutantDiscarded {
+			return nil, discardError(files, diagnostic)
+		}
+		if outcome == engine.MutantKilled {
+			res.KilledRuns++
+			res.RunVerdicts = append(res.RunVerdicts, "killed: "+killer)
+			if res.Killer == "" {
+				res.Killer = killer
+				res.KillerOutput = evidence
+			}
+			continue
+		}
+		res.RunVerdicts = append(res.RunVerdicts, "survived")
+	}
+	res.Killed = res.KilledRuns == runs
+	return res, nil
 }
 
 // EphemeralBatch runs one atomic multi-file exact-match edit batch as a manual
 // mutant. Every edit resolves against the original files before one overlay
 // exposes all effective replacements to the named test.
-func (t *Tree) EphemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, oracleTimeout time.Duration) (*EphemeralResult, error) {
+func (t *Tree) EphemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	replacements, err := prepareEditBatchContext(ctx, t.dir, edits)
 	if err != nil {
 		return nil, err
 	}
-	return t.runEphemeral(ctx, replacements, testPkg, run, oracleTimeout)
+	return t.runEphemeral(ctx, replacements, testPkg, run, oracleTimeout, runs)
 }
 
 // Edit is one exact-match replacement inside an ephemeral mutant's source:
@@ -264,7 +316,7 @@ func overlappingMatchStarts(s, pattern string) int {
 // EphemeralEdits runs an ephemeral mutant given as exact-match edits against
 // the file's current content (REQ-exec-ephemeral): the edits are applied and
 // the result runs exactly as a whole replacement would.
-func (t *Tree) EphemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, oracleTimeout time.Duration) (*EphemeralResult, error) {
+func (t *Tree) EphemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -283,7 +335,7 @@ func (t *Tree) EphemeralEdits(ctx context.Context, file string, edits []Edit, te
 	if err != nil {
 		return nil, err
 	}
-	return t.Ephemeral(ctx, file, mutant, testPkg, run, oracleTimeout)
+	return t.Ephemeral(ctx, file, mutant, testPkg, run, oracleTimeout, runs)
 }
 
 func readFileContext(ctx context.Context, path string) ([]byte, error) {
