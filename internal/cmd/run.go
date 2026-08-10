@@ -164,6 +164,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		return err
 	}
 	var planMeasure, planCandidates, planCached, planSkipped int
+	var commitSheds []gomutant.AttestationShed
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, Prior: prior,
 		PlanOnly: o.plan,
@@ -199,6 +200,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 		Contradiction: func(c gomutant.AttestationContradiction) {
 			fmt.Fprintf(out, "contradiction  %s  attested survivor %s (%s) killed by %s; attestation shed (was: %s)\n", c.Symbol, c.Position, c.Operator, c.Killer, c.Reason)
 		},
+		AttestationSiteShed: func(d gomutant.AttestationShed) {
+			commitSheds = append(commitSheds, d)
+		},
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
@@ -209,7 +213,13 @@ func runCommand(ctx context.Context, o runOptions) error {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				return gomutant.MergeFindings(current, []gomutant.Finding{finding}), nil
+				// The incremental commit is where a cross-site shed
+				// actually happens against the prior document - the final
+				// merge sees an already-stripped record, so the shed must
+				// be collected here or it is silent (REQ-attest-survivor).
+				merged, dropped := gomutant.MergeFindingsShed(current, []gomutant.Finding{finding})
+				commitSheds = append(commitSheds, dropped...)
+				return merged, nil
 			})
 		},
 	})
@@ -263,15 +273,30 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if o.plan {
 		fmt.Fprintf(&terminal, "plan      %d measure (%d candidates), %d cached, %d skipped\n", planMeasure, planCandidates, planCached, planSkipped)
 		fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
-	} else if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+	} else if err := func() error {
+		var shed []gomutant.AttestationShed
+		if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			var merged []gomutant.Finding
+			if wholeTree {
+				merged, shed = gomutant.MergeWholeFindingsShed(current, findings, targets)
+			} else {
+				merged, shed = gomutant.MergeFindingsShed(current, findings)
+			}
+			return merged, nil
+		}); err != nil {
+			return err
 		}
-		if wholeTree {
-			return gomutant.MergeWholeFindings(current, findings, targets), nil
+		// A disposition refused only because the site content under its
+		// position changed is surfaced, never silently dropped: the
+		// surviving mutant is not the attested one (REQ-attest-survivor).
+		for _, d := range append(append([]gomutant.AttestationShed(nil), commitSheds...), shed...) {
+			fmt.Fprintf(&terminal, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)
 		}
-		return gomutant.MergeFindings(current, findings), nil
-	}); err != nil {
+		return nil
+	}(); err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, &terminal); err != nil {

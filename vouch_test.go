@@ -254,8 +254,8 @@ func TestOracleMemoryPinGatesReuse(t *testing.T) {
 	if sameAttestationPins(base, loosened) {
 		t.Fatal("a moved memory ceiling read as unchanged attestation pins")
 	}
-	if DocumentVersion != 4 {
-		t.Fatalf("DocumentVersion = %d: the memory pin narrows reuse and must ride the version-4 bump", DocumentVersion)
+	if DocumentVersion < 4 {
+		t.Fatalf("DocumentVersion = %d: the memory pin narrows reuse and rode the version-4 bump", DocumentVersion)
 	}
 }
 

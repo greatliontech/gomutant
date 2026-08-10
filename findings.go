@@ -184,6 +184,15 @@ func (l *CompartmentLedger) ledger() gofresh.TestVariantLedger {
 type Survivor struct {
 	Position string `json:"position"`
 	Operator string `json:"operator"`
+	// Site is the attestation anchor's site component: a hash of the
+	// mutated range's line window in the original source, stamped at
+	// generation. An attestation's equivalence reasoning is
+	// site-specific, so the anchor keys site content beside position
+	// and operator - a same-shaped mutant at a different site never
+	// inherits a disposition. Empty on records measured before site
+	// anchors existed; an attestation anchor only, never a measurement
+	// pin (REQ-attest-survivor).
+	Site string `json:"site,omitempty"`
 	// Execution buckets why the survivor lived (REQ-result-record):
 	// "never-executed" - the oracle's baseline coverage never reaches the
 	// mutated position, so the survivor is a coverage gap;
@@ -249,6 +258,13 @@ type Attestation struct {
 	Position string `json:"position"`
 	Operator string `json:"operator"`
 	Reason   string `json:"reason"`
+	// Site anchors the disposition to the attested survivor's site
+	// content, stamped from the survivor at attest time; empty on
+	// dispositions recorded before site anchors existed - such a
+	// disposition matches by position and operator alone and adopts
+	// the matched survivor's site on its next carry
+	// (REQ-attest-survivor).
+	Site string `json:"site,omitempty"`
 }
 
 // OperatorSummary accounts for every selected candidate of one operator.
@@ -399,7 +415,14 @@ func (f *Finding) Attest(position, operator, reason string) error {
 			return fmt.Errorf("gomutant: survivor %s %s already attested", position, operator)
 		}
 	}
-	f.Attested = append(f.Attested, Attestation{Position: position, Operator: operator, Reason: reason})
+	site := ""
+	for _, s := range f.Survivors {
+		if s.Position == position && s.Operator == operator {
+			site = s.Site
+			break
+		}
+	}
+	f.Attested = append(f.Attested, Attestation{Position: position, Operator: operator, Reason: reason, Site: site})
 	return nil
 }
 
@@ -412,8 +435,18 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // refuse. Version 3 introduced the test-variant compartment pin on every
 // subject's evidence: the field is what stales a record across sibling-test
 // movement, so an older consumer's tolerance would have dropped the pin and
-// served results whose oracle set silently changed.
-const DocumentVersion = 4
+// served results whose oracle set silently changed. Version 5 introduced
+// the survivor site anchor: attestation inheritance narrowed to matching
+// site content, so an older consumer's tolerance would have dropped the
+// anchor and re-opened cross-site inheritance. Version 4 documents are
+// still readable - their empty sites are the grandfathered
+// match-by-position form that adopts sites on first carry - while an
+// unknown version still refuses.
+const DocumentVersion = 5
+
+// oldestReadableVersion bounds the known older document versions the
+// parser upgrades on read (REQ-result-tolerant).
+const oldestReadableVersion = 4
 
 // document is the portable finding set (REQ-result-export).
 type document struct {
@@ -461,8 +494,8 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	if err := json.Unmarshal(top["version"], &version); err != nil {
 		return nil, fmt.Errorf("gomutant: parse findings version: %w", err)
 	}
-	if version != DocumentVersion {
-		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d)", version, DocumentVersion)
+	if version < oldestReadableVersion || version > DocumentVersion {
+		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d-%d)", version, oldestReadableVersion, DocumentVersion)
 	}
 	if isJSONNull(top["findings"]) {
 		return nil, fmt.Errorf("gomutant: findings must be an array")
@@ -620,7 +653,7 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 			return false, fmt.Errorf("survivors: %w", err)
 		}
 		for i, record := range records {
-			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "execution": true}, []string{"position", "operator"}); err != nil {
+			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "execution": true, "site": true}, []string{"position", "operator"}); err != nil {
 				return false, fmt.Errorf("survivor %d: %w", i, err)
 			}
 		}
@@ -738,7 +771,7 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 			return false, fmt.Errorf("attested: %w", err)
 		}
 		for i, record := range records {
-			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "reason": true}, []string{"position", "operator", "reason"}); err != nil {
+			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "reason": true, "site": true}, []string{"position", "operator", "reason"}); err != nil {
 				return false, fmt.Errorf("attestation %d: %w", i, err)
 			}
 		}
@@ -975,6 +1008,15 @@ func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget
 // (REQ-result-export; skipped results are excluded by Export, the single
 // owner of that rule).
 func MergeFindings(prior, fresh []Finding) []Finding {
+	merged, _ := MergeFindingsShed(prior, fresh)
+	return merged
+}
+
+// MergeFindingsShed is MergeFindings additionally reporting the
+// dispositions that failed to carry only because the site content under
+// their position changed (REQ-attest-survivor).
+func MergeFindingsShed(prior, fresh []Finding) ([]Finding, []AttestationShed) {
+	var shed []AttestationShed
 	bySym := map[string]Finding{}
 	for _, f := range prior {
 		bySym[f.Symbol] = f
@@ -993,7 +1035,12 @@ func MergeFindings(prior, fresh []Finding) []Finding {
 		// merge rides survivor identity, so it grafts onto the fresh record
 		// rather than being clobbered by it.
 		if prior, ok := bySym[f.Symbol]; ok {
-			f.Attested = graftAttestations(prior.Attested, f.Attested, f.Survivors)
+			var dropped []AttestationShed
+			f.Attested, dropped = graftAttestations(prior.Attested, f.Attested, f.Survivors)
+			for _, d := range dropped {
+				d.Symbol = f.Symbol
+				shed = append(shed, d)
+			}
 		}
 		bySym[f.Symbol] = f
 	}
@@ -1001,49 +1048,84 @@ func MergeFindings(prior, fresh []Finding) []Finding {
 	for _, f := range bySym {
 		out = append(out, f)
 	}
-	return out
+	return out, shed
+}
+
+// AttestationShed is one disposition that failed to carry only because
+// the site content under its position changed - the would-have-cross-
+// anchored event the site anchor exists to refuse, surfaced so the
+// re-anchor rate is visible instead of silent (REQ-attest-survivor).
+type AttestationShed struct {
+	Symbol   string
+	Position string
+	Operator string
+	Reason   string
 }
 
 // graftAttestations returns fresh's attestations plus every prior attestation
-// whose survivor identity the fresh record still reports and fresh does not
-// already attest. Position and operator are the survivor identity
-// (REQ-attest-survivor); a survivor absent from fresh sheds its attestation as
-// before.
-func graftAttestations(prior, fresh []Attestation, survivors []Survivor) []Attestation {
+// whose survivor anchor the fresh record still reports and fresh does not
+// already attest. The anchor is position, operator, and site content
+// (REQ-attest-survivor): a same-shaped mutant at a different site - a
+// neighbor shifted into the old coordinates by an edit - never inherits a
+// disposition; a position+operator match whose site moved is returned as a
+// shed so the refusal is visible. A pre-site disposition (empty site)
+// matches by position and operator and adopts the matched survivor's site.
+func graftAttestations(prior, fresh []Attestation, survivors []Survivor) ([]Attestation, []AttestationShed) {
+	siteOf := make(map[survivorKey]string, len(survivors))
 	surviving := make(map[survivorKey]bool, len(survivors))
 	for _, survivor := range survivors {
-		surviving[survivorKey{survivor.Position, survivor.Operator}] = true
+		key := survivorKey{survivor.Position, survivor.Operator}
+		surviving[key] = true
+		siteOf[key] = survivor.Site
 	}
 	attested := make(map[survivorKey]bool, len(fresh))
 	for _, attestation := range fresh {
 		attested[survivorKey{attestation.Position, attestation.Operator}] = true
 	}
 	out := append([]Attestation(nil), fresh...)
+	var shed []AttestationShed
 	for _, attestation := range prior {
 		key := survivorKey{attestation.Position, attestation.Operator}
-		if surviving[key] && !attested[key] {
-			out = append(out, attestation)
+		if !surviving[key] || attested[key] {
+			continue
 		}
+		if attestation.Site != "" && attestation.Site != siteOf[key] {
+			shed = append(shed, AttestationShed{
+				Position: attestation.Position,
+				Operator: attestation.Operator,
+				Reason:   "site content changed under the position - the surviving mutant is not the attested one",
+			})
+			continue
+		}
+		attestation.Site = siteOf[key]
+		out = append(out, attestation)
 	}
-	return out
+	return out, shed
 }
 
 // MergeWholeFindings merges a whole-tree run and removes records whose
 // symbols are absent from the complete discovery snapshot
 // (REQ-result-hygiene). Scoped callers use MergeFindings instead.
 func MergeWholeFindings(prior, fresh []Finding, discovered []Target) []Finding {
+	merged, _ := MergeWholeFindingsShed(prior, fresh, discovered)
+	return merged
+}
+
+// MergeWholeFindingsShed is MergeWholeFindings additionally reporting
+// site-anchored attestation sheds (REQ-attest-survivor).
+func MergeWholeFindingsShed(prior, fresh []Finding, discovered []Target) ([]Finding, []AttestationShed) {
 	current := make(map[string]bool, len(discovered))
 	for _, target := range discovered {
 		current[target.Symbol] = true
 	}
-	merged := MergeFindings(prior, fresh)
+	merged, shed := MergeFindingsShed(prior, fresh)
 	kept := merged[:0]
 	for _, finding := range merged {
 		if current[finding.Symbol] {
 			kept = append(kept, finding)
 		}
 	}
-	return kept
+	return kept, shed
 }
 
 // UpdateDocument applies update to the findings document at path under an

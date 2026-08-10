@@ -108,7 +108,11 @@ re-judgment or a spurious caller-policy failure — the safe direction —
 where a wrongly served claim would be the corrupted flattering measurement
 the keystone refuses (REQ-core-attributed-kills). Tolerance governs unknown
 *fields* within an understood document; an unknown document *version* is the
-structural boundary and is rejected per REQ-result-export's version tag.
+structural boundary and is rejected per REQ-result-export's version tag,
+while a known older version reads with its absent fields in their stated
+grandfathered form (a version-4 document's siteless survivors and
+dispositions are the match-by-position form that adopts sites on first
+carry).
 
 **REQ-result-stale** (behavior): gomutant MUST re-measure a target rather
 than serve a record whose pins no longer cover the request — an edit to the
@@ -309,7 +313,7 @@ survivor attestations. Oracle membership remains a measurement pin, so changing
 the executable oracle remeasures as usual.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable version-4 document that gomutant owns — carrying, per mutated
+portable version-5 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,
 each carrying its package's test-variant compartment hash beside the maximal
 closure;
@@ -407,7 +411,10 @@ share that position and operator, the second and later identities append
 `#<source-order occurrence>`. The discriminator is part of the survivor,
 kill-attribution, and
 attestation identity so overlapping syntax-tree mutation sites cannot collapse
-into one disposition.
+into one disposition. A survivor additionally carries a site anchor - a
+bounded hash of the mutated range's line window (the range extended to full
+line bounds plus one line each side) in the original source, stamped at
+generation: an attestation anchor only, never a measurement pin.
 Under INV-RESULT-CANDIDATE-CONSERVATION, occurrence suffixes are assigned over
 the complete globally ordered candidate set before budget selection or discard;
 an earlier discarded candidate can therefore reserve an occurrence number.
@@ -419,7 +426,25 @@ evidence or mutation-domain pin's equivalences are judged afresh, and a record's
 open findings are its survivors less its attested ones. Positions are location
 metadata only: a remeasurement under identical pins carries a disposition only
 when the same position and operator survive again; source-evidence drift sheds it
-rather than attempting to infer that a closure change was location-only.
+rather than attempting to infer that a closure change was location-only. An
+attestation's equivalence reasoning is site-specific, so every disposition
+carry that can observe moved source — the concurrent-attest graft and the
+pin-hold re-measure carry — additionally anchors on the survivor's site
+content: a same-shaped mutant at a different site (a neighbor shifted into
+the old coordinates by an edit) never inherits a disposition, and a
+position-and-operator match whose site moved is surfaced as a shed, never
+silently dropped or silently carried. The carve-out carries run under
+gates that pin the mutated source, so they anchor by position and
+operator over that pinned source; a document whose recorded sites diverge
+from its own survivors (external divergence — the tool never persists
+one) is surfaced by the merge layer, the divergence-surfacing authority.
+A disposition recorded before site anchors existed matches by position
+and operator alone and adopts the matched survivor's site on its first
+contact with any carry path — one carry in which the pre-upgrade
+permissiveness (a wrong-site adoption, the field bug replayed once per
+grandfathered disposition) remains possible; the alternative, shedding
+every pre-site disposition wholesale, would destroy user-authored
+equivalence reasoning with no audit trail.
 
 **REQ-result-findings** (behavior): gomutant MUST present survivors as
 findings awaiting disposition, never as a pass/fail verdict — strengthen a

@@ -1,7 +1,10 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"go/format"
 	"go/token"
@@ -72,6 +75,67 @@ func candidatePositions(pkg *packages.Package, specs []candidateSpec) []string {
 	return positions
 }
 
+// candidateSites hashes each spec's site window into the attestation
+// anchor's site component: the mutated byte range extended to full line
+// bounds plus one full line above and below, from the original source.
+// An attestation's equivalence reasoning is site-specific, and the
+// window - not the bare snippet - keeps two same-shaped expressions
+// with different neighbors apart, so a neighbor shifted into the old
+// coordinates by an edit never inherits a disposition
+// (REQ-attest-survivor).
+func candidateSites(source []byte, specs []candidateSpec) []string {
+	sites := make([]string, len(specs))
+	for i, spec := range specs {
+		start, end := len(source), 0
+		for _, e := range spec.edits {
+			if e.start < start {
+				start = e.start
+			}
+			if e.end > end {
+				end = e.end
+			}
+		}
+		if start > end {
+			start, end = 0, 0
+		}
+		sites[i] = siteHash(source, start, end)
+	}
+	return sites
+}
+
+func siteHash(source []byte, start, end int) string {
+	clamp := func(v int) int {
+		if v < 0 {
+			return 0
+		}
+		if v > len(source) {
+			return len(source)
+		}
+		return v
+	}
+	start, end = clamp(start), clamp(end)
+	lineStart := func(off int) int {
+		return bytes.LastIndexByte(source[:off], '\n') + 1
+	}
+	lineEnd := func(off int) int {
+		i := bytes.IndexByte(source[off:], '\n')
+		if i < 0 {
+			return len(source)
+		}
+		return off + i + 1
+	}
+	ws := lineStart(start)
+	if ws > 0 {
+		ws = lineStart(ws - 1)
+	}
+	we := lineEnd(end)
+	if we < len(source) {
+		we = lineEnd(we)
+	}
+	sum := sha256.Sum256(source[ws:we])
+	return hex.EncodeToString(sum[:8])
+}
+
 func applySourceEdits(source []byte, edits []sourceEdit) ([]byte, error) {
 	if len(edits) == 0 {
 		return nil, fmt.Errorf("candidate has no source edits")
@@ -105,7 +169,7 @@ func applySourceEdits(source []byte, edits []sourceEdit) ([]byte, error) {
 	return mutated, nil
 }
 
-func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symbol string, specs []candidateSpec, positions []string) ([]Candidate, error) {
+func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symbol string, specs []candidateSpec, positions, sites []string) ([]Candidate, error) {
 	baseline, err := format.Source(catalog.source)
 	if err != nil {
 		return nil, fmt.Errorf("format baseline: %w", err)
@@ -123,7 +187,7 @@ func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symb
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		candidate := Candidate{Symbol: symbol, Operator: spec.operator, Position: positions[i]}
+		candidate := Candidate{Symbol: symbol, Operator: spec.operator, Position: positions[i], Site: sites[i]}
 		mutated, err := spec.apply(catalog.source)
 		if err != nil {
 			return nil, fmt.Errorf("candidate %s %s: %w", candidate.Position, candidate.Operator, err)

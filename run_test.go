@@ -54,7 +54,14 @@ func TestRunEndToEnd(t *testing.T) {
 		{Position: "lib.go:24:12", Operator: "block: empty", Execution: "executed-and-passed"},
 		{Position: "lib.go:25:3", Operator: "statement: delete", Execution: "executed-and-passed"},
 	}
-	if add.Cached || add.Mutants != 11 || add.Killed != 7 || add.Discarded != 1 || !slices.Equal(add.Survivors, wantAddSurvivors) {
+	gotAddSurvivors := append([]Survivor(nil), add.Survivors...)
+	for i := range gotAddSurvivors {
+		if gotAddSurvivors[i].Site == "" {
+			t.Fatalf("survivor %s carries no site anchor", gotAddSurvivors[i].Position)
+		}
+		gotAddSurvivors[i].Site = ""
+	}
+	if add.Cached || add.Mutants != 11 || add.Killed != 7 || add.Discarded != 1 || !slices.Equal(gotAddSurvivors, wantAddSurvivors) {
 		t.Fatalf("Add = %+v, want exact go/12 outcomes %+v", add, wantAddSurvivors)
 	}
 	if len(add.Operators) == 0 {
@@ -3641,7 +3648,7 @@ func TestRunExtendsCappedFindingMeasuringOnlyTheSuffix(t *testing.T) {
 			t.Fatalf("suffix survivor unbucketed after a verifiable extension: %+v", extended.Survivors)
 		}
 	}
-	wantAttestation := Attestation{Position: prefixSurvivor.Position, Operator: prefixSurvivor.Operator, Reason: "equivalent by inspection"}
+	wantAttestation := Attestation{Position: prefixSurvivor.Position, Operator: prefixSurvivor.Operator, Reason: "equivalent by inspection", Site: prefixSurvivor.Site}
 	if len(extended.Attested) != 1 || extended.Attested[0] != wantAttestation {
 		t.Fatalf("extended attestations = %+v, want the prefix survivor's disposition carried verbatim", extended.Attested)
 	}

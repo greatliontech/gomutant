@@ -373,6 +373,7 @@ type runOut struct {
 	OmittedFindings  int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
 	Guidance         []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
 	Contradictions   []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
+	AttestationSheds []string                    `json:"attestationSheds,omitempty" jsonschema:"dispositions refused only because the site content under their position changed: the surviving mutant is not the attested one - re-review and re-attest if genuinely equivalent"`
 	Residue          []gomutant.Residue          `json:"residue,omitempty"`
 	OmittedResidue   int                         `json:"omittedResidue,omitempty"`
 	Preparation      []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
@@ -504,6 +505,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return nil, out, err
 	}
 	streams := newRunStreams(&out, notify)
+	var commitSheds []gomutant.AttestationShed
 	options := gomutant.Options{
 		Budget:            in.Budget,
 		OracleTimeout:     oracleTimeout,
@@ -517,6 +519,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 				Symbol: c.Symbol, Position: c.Position, Operator: c.Operator, Killer: c.Killer, Reason: c.Reason,
 			})
 		},
+		AttestationSiteShed: func(d gomutant.AttestationShed) {
+			commitSheds = append(commitSheds, d)
+		},
 		Prior:    prior,
 		Decision: streams.decision,
 		Progress: streams.progress,
@@ -528,7 +533,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				return gomutant.MergeFindings(current, []gomutant.Finding{finding}), nil
+				// The incremental commit is where a cross-site shed
+				// actually happens against the prior document - the final
+				// merge sees an already-stripped record, so the shed must
+				// be collected here or it is silent (REQ-attest-survivor).
+				merged, dropped := gomutant.MergeFindingsShed(current, []gomutant.Finding{finding})
+				commitSheds = append(commitSheds, dropped...)
+				return merged, nil
 			})
 		},
 	}
@@ -590,17 +601,27 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		out.OmittedResidue = len(out.Residue) - residueCap
 		out.Residue = out.Residue[:residueCap]
 	}
+	var attestationSheds []gomutant.AttestationShed
 	err = s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		var merged []gomutant.Finding
 		if wholeTree {
-			return gomutant.MergeWholeFindings(current, findings, targets), nil
+			merged, attestationSheds = gomutant.MergeWholeFindingsShed(current, findings, targets)
+		} else {
+			merged, attestationSheds = gomutant.MergeFindingsShed(current, findings)
 		}
-		return gomutant.MergeFindings(current, findings), nil
+		return merged, nil
 	})
 	if err != nil {
 		return nil, out, err
+	}
+	// A disposition refused only because the site content under its
+	// position changed is surfaced, never silently dropped
+	// (REQ-attest-survivor).
+	for _, d := range append(append([]gomutant.AttestationShed(nil), commitSheds...), attestationSheds...) {
+		out.AttestationSheds = append(out.AttestationSheds, fmt.Sprintf("%s %s %s - %s", d.Symbol, d.Position, d.Operator, d.Reason))
 	}
 	out.Document = s.findingsPath(in.Findings)
 	// A drift-refused campaign persists its completed findings and still

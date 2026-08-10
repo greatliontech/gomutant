@@ -557,3 +557,71 @@ func TestRunCommandPlanNeverPrunesEmptyWholeTree(t *testing.T) {
 		t.Fatalf("plan-mode empty whole-tree pruned findings: %+v, %v", retained, err)
 	}
 }
+
+// The cross-site shed happens at the incremental per-target commit
+// merge - the final merge sees an already-stripped document - so the
+// run surface must collect and print it from the commit phase; a
+// silent drop here is the field bug's refusal disappearing from view
+// (REQ-attest-survivor).
+func TestRunCommandSurfacesCommitPhaseAttestationSheds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join("..", "engine", "testdata", "fixturemod"))); err != nil {
+		t.Fatal(err)
+	}
+	twin := "package lib\n\nfunc Twin(a, b int) int {\n\tif a > b {\n\t\treturn a\n\t}\n\tif a > b {\n\t\treturn b\n\t}\n\treturn 0\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "lib", "twin.go"), []byte(twin), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "lib", "twin_test.go"), []byte("package lib\n\nimport \"testing\"\n\nfunc TestTwin(t *testing.T) {\n\tTwin(1, 2)\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := gomutant.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []gomutant.Target{{Symbol: "example.com/fixture/lib.Twin", Oracle: []string{"example.com/fixture/lib.TestTwin"}}}
+	first, err := tr.Run(context.Background(), targets, gomutant.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := first[0]
+	var attested *gomutant.Survivor
+	for i, s := range rec.Survivors {
+		if strings.HasPrefix(s.Position, "twin.go:4:") {
+			attested = &rec.Survivors[i]
+			break
+		}
+	}
+	if attested == nil {
+		t.Fatalf("no survivor at the first site: %+v", rec.Survivors)
+	}
+	if err := rec.Attest(attested.Position, attested.Operator, "boundary equivalent at the first site"); err != nil {
+		t.Fatal(err)
+	}
+	path := findingsAt(dir, defaultFindings)
+	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{rec}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Shift the same-shaped neighbor into the attested coordinates.
+	shifted := strings.Replace(twin, "\tif a > b {\n\t\treturn a\n\t}\n", "", 1)
+	if err := os.WriteFile(filepath.Join(dir, "lib", "twin.go"), []byte(shifted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targetsPath := filepath.Join(dir, "targets.json")
+	if err := os.WriteFile(targetsPath, []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Twin","oracle":["example.com/fixture/lib.TestTwin"]}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, targetsFile: targetsPath, output: &output}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "attestation shed: ") || !strings.Contains(output.String(), "site content changed") {
+		t.Fatalf("commit-phase shed not surfaced:\n%s", output.String())
+	}
+}

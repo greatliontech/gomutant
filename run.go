@@ -170,6 +170,10 @@ type Options struct {
 	// REQ-result-stale's growth carve-out). Nil drops the reports; the
 	// shed itself is unconditional.
 	Contradiction func(AttestationContradiction)
+	// AttestationSiteShed reports a disposition refused only because the
+	// site content under its position changed - surfaced, never silent
+	// (REQ-attest-survivor).
+	AttestationSiteShed func(AttestationShed)
 	// dispatched observes each candidate index handed to the worker pool —
 	// a test seam pinning suffix-only dispatch under a budget extension,
 	// flagged-only dispatch under a candidate-evidence serve, and
@@ -1832,7 +1836,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				switch outcomes[wi][mi] {
 				case engine.MutantSurvived:
-					f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator})
+					f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site})
 				case engine.MutantKilled:
 					// The keystone persisted: every kill names its killer
 					// (REQ-core-attributed-kills), so reuse can key the kill
@@ -1848,16 +1852,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// still name the exact survivor; changed pins shed them, so every
 			// evidence version's equivalences are re-judged (REQ-attest-survivor).
 			if rec, ok := prior[targets[w.target].Symbol]; ok && sameAttestationPins(*rec, *f) {
-				open := map[survivorKey]bool{}
-				for _, s := range f.Survivors {
-					open[survivorKey{s.Position, s.Operator}] = true
-				}
-				for _, a := range rec.Attested {
-					if err := ctx.Err(); err != nil {
-						return err
-					}
-					if open[survivorKey{a.Position, a.Operator}] {
-						f.Attested = append(f.Attested, a)
+				kept, siteSheds, _ := carryAnchoredAttestations(rec.Attested, f.Survivors)
+				f.Attested = append(f.Attested, kept...)
+				// Equal attestation pins do NOT imply equal sites: the
+				// site window spans raw file lines and can overhang the
+				// symbol's closure by one line, so an adjacent-line edit
+				// under a forced re-measure reaches this arm - surfaced,
+				// never silent (REQ-attest-survivor).
+				for _, d := range siteSheds {
+					d.Symbol = f.Symbol
+					if opts.AttestationSiteShed != nil {
+						opts.AttestationSiteShed(d)
 					}
 				}
 			}
@@ -2381,6 +2386,41 @@ func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding
 // spliced evidence landed non-reusable; a newly killed attested survivor's
 // attestation is shed and returned — evidence beats attestation
 // (REQ-attest-survivor).
+// carryAnchoredAttestations partitions prior dispositions over the
+// surviving anchors (REQ-attest-survivor): kept dispositions adopt
+// their survivor's site (a grandfathered pre-site disposition anchors
+// by position and operator); a position-and-operator match whose site
+// moved is a site shed - surfaced, never silent; a disposition whose
+// survivor is gone lands in gone, the caller's existing shed
+// semantics.
+func carryAnchoredAttestations(prior []Attestation, survivors []Survivor) (kept []Attestation, siteSheds []AttestationShed, gone []Attestation) {
+	siteOf := make(map[survivorKey]string, len(survivors))
+	open := make(map[survivorKey]bool, len(survivors))
+	for _, s := range survivors {
+		key := survivorKey{s.Position, s.Operator}
+		open[key] = true
+		siteOf[key] = s.Site
+	}
+	for _, a := range prior {
+		key := survivorKey{a.Position, a.Operator}
+		if !open[key] {
+			gone = append(gone, a)
+			continue
+		}
+		if a.Site != "" && a.Site != siteOf[key] {
+			siteSheds = append(siteSheds, AttestationShed{
+				Position: a.Position,
+				Operator: a.Operator,
+				Reason:   "site content changed under the position - the surviving mutant is not the attested one",
+			})
+			continue
+		}
+		a.Site = siteOf[key]
+		kept = append(kept, a)
+	}
+	return kept, siteSheds, gone
+}
+
 func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, survivors map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence) (Finding, []Attestation, error) {
 	// Kill attribution is maintained only over a record that carries it
 	// completely; a record predating attribution stays without one and
@@ -2420,7 +2460,7 @@ func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Can
 			if stamp {
 				execution = "unstable-oracle"
 			}
-			stillSurviving = append(stillSurviving, Survivor{Position: candidate.Position, Operator: candidate.Operator, Execution: execution})
+			stillSurviving = append(stillSurviving, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: execution})
 		case "killed":
 			if killsComplete {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -2454,6 +2494,21 @@ func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Can
 			kept = append(kept, attestation)
 		} else {
 			shed = append(shed, attestation)
+		}
+	}
+	siteOf := make(map[survivorKey]string, len(stillSurviving))
+	for _, survivor := range stillSurviving {
+		siteOf[survivorKey{survivor.Position, survivor.Operator}] = survivor.Site
+	}
+	// This carry runs under a gate that pins the mutated source, so the
+	// anchor is position and operator over that pinned source; it still
+	// stamps (adopts) sites onto grandfathered pre-site dispositions -
+	// the pre-site window closes at first contact on every carry path
+	// (REQ-attest-survivor). A divergent non-empty site is left for the
+	// merge layer, the divergence-surfacing authority.
+	for i := range kept {
+		if kept[i].Site == "" {
+			kept[i].Site = siteOf[survivorKey{kept[i].Position, kept[i].Operator}]
 		}
 	}
 	rec.Attested = kept
@@ -2533,7 +2588,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 				// stands exactly like a standing kill — carries its
 				// recorded advisory bucket verbatim
 				// (REQ-exec-survivor-evidence).
-				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Execution: prior.Execution})
+				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: prior.Execution})
 			}
 			continue
 		}
@@ -2560,7 +2615,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 			if stamp {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Execution: execution})
+			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: execution})
 		case "killed":
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
 		}
@@ -2595,6 +2650,21 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 			kept = append(kept, attestation)
 		} else {
 			shed = append(shed, attestation)
+		}
+	}
+	siteOf := make(map[survivorKey]string, len(survivors))
+	for _, survivor := range survivors {
+		siteOf[survivorKey{survivor.Position, survivor.Operator}] = survivor.Site
+	}
+	// This carry runs under a gate that pins the mutated source, so the
+	// anchor is position and operator over that pinned source; it still
+	// stamps (adopts) sites onto grandfathered pre-site dispositions -
+	// the pre-site window closes at first contact on every carry path
+	// (REQ-attest-survivor). A divergent non-empty site is left for the
+	// merge layer, the divergence-surfacing authority.
+	for i := range kept {
+		if kept[i].Site == "" {
+			kept[i].Site = siteOf[survivorKey{kept[i].Position, kept[i].Operator}]
 		}
 	}
 	rec.Attested = kept
@@ -3022,7 +3092,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 		applyDisposition(&operators[i], disposition, 1)
 		switch disposition {
 		case "survived":
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Execution: suffixExecution})
+			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: suffixExecution})
 		case "killed":
 			if killsComplete {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -3043,6 +3113,18 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 	rec.CandidateEvidence = freshEvidence
 	rec.Budget = budget
 	rec.Generated = len(candidates)
+	// Prefix dispositions carry verbatim, additionally stamping (adopting)
+	// sites onto grandfathered pre-site dispositions - the pre-site window
+	// closes at first contact on every carry path (REQ-attest-survivor).
+	extendSiteOf := make(map[survivorKey]string, len(survivors))
+	for _, survivor := range survivors {
+		extendSiteOf[survivorKey{survivor.Position, survivor.Operator}] = survivor.Site
+	}
+	for i := range rec.Attested {
+		if rec.Attested[i].Site == "" {
+			rec.Attested[i].Site = extendSiteOf[survivorKey{rec.Attested[i].Position, rec.Attested[i].Operator}]
+		}
+	}
 	return rec, nil
 }
 
@@ -3155,7 +3237,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 				// A covered survivor carries its recorded advisory bucket
 				// verbatim, like its disposition and attestation
 				// (REQ-exec-survivor-evidence).
-				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Execution: prior.Execution})
+				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: prior.Execution})
 			}
 			if killer, ok := recordedKills[key]; ok {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killer})
@@ -3184,7 +3266,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 			if rec.TargetEvidence.RuntimeUnverifiable {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Execution: execution})
+			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: execution})
 		}
 		if disposition == "killed" && killsComplete {
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -3214,13 +3296,28 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 	for _, survivor := range survivors {
 		current[survivorKey{survivor.Position, survivor.Operator}] = true
 	}
-	var attested []Attestation
+	var kept []Attestation
 	for _, attestation := range rec.Attested {
 		if current[survivorKey{attestation.Position, attestation.Operator}] {
-			attested = append(attested, attestation)
+			kept = append(kept, attestation)
 		}
 	}
-	rec.Attested = attested
+	siteOf := make(map[survivorKey]string, len(rec.Survivors))
+	for _, survivor := range rec.Survivors {
+		siteOf[survivorKey{survivor.Position, survivor.Operator}] = survivor.Site
+	}
+	// This carry runs under a gate that pins the mutated source, so the
+	// anchor is position and operator over that pinned source; it still
+	// stamps (adopts) sites onto grandfathered pre-site dispositions -
+	// the pre-site window closes at first contact on every carry path
+	// (REQ-attest-survivor). A divergent non-empty site is left for the
+	// merge layer, the divergence-surfacing authority.
+	for i := range kept {
+		if kept[i].Site == "" {
+			kept[i].Site = siteOf[survivorKey{kept[i].Position, kept[i].Operator}]
+		}
+	}
+	rec.Attested = kept
 	return rec, nil
 }
 

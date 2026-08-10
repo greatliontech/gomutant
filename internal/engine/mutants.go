@@ -24,9 +24,13 @@ type Mutant struct {
 // discards. An empty replacement set means the candidate was discarded before
 // execution; its identity remains available for accounting.
 type Candidate struct {
-	Symbol       string
-	Operator     string
-	Position     string
+	Symbol   string
+	Operator string
+	Position string
+	// Site is the attestation anchor's site component: a hash of the
+	// mutated range's line window in the original source - never a
+	// measurement pin (REQ-attest-survivor).
+	Site         string
 	Replacements []Replacement
 }
 
@@ -84,12 +88,14 @@ func (t *Tree) CandidatesContext(ctx context.Context, symbol string, budget int)
 	}
 	orderCandidateSpecs(specs)
 	positions := candidatePositions(catalog.pkg, specs)
+	sites := candidateSites(catalog.source, specs)
 	selected := specs
 	if budget > 0 && budget < len(selected) {
 		selected = selected[:budget]
 		positions = positions[:budget]
+		sites = sites[:budget]
 	}
-	candidates, err := t.materializeCandidates(ctx, catalog, symbol, selected, positions)
+	candidates, err := t.materializeCandidates(ctx, catalog, symbol, selected, positions, sites)
 	if err != nil {
 		return Generation{}, fmt.Errorf("generate %s: %w", symbol, err)
 	}
