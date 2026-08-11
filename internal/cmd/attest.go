@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/spf13/cobra"
@@ -12,8 +14,8 @@ type attestOptions struct{ dir, findingsFile, symbol, position, operator, reason
 
 func newAttestCommand() *cobra.Command {
 	o := attestOptions{}
-	cmd := &cobra.Command{Use: "attest", Short: "Attest an equivalent surviving mutant", Args: cobra.NoArgs, RunE: func(*cobra.Command, []string) error {
-		return attestCommand(o)
+	cmd := &cobra.Command{Use: "attest", Short: "Attest an equivalent surviving mutant", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		return attestCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
@@ -25,7 +27,7 @@ func newAttestCommand() *cobra.Command {
 	return cmd
 }
 
-func attestCommand(o attestOptions) error {
+func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	if o.symbol == "" || o.position == "" || o.operator == "" || o.reason == "" {
 		return fmt.Errorf("attest needs --symbol, --position, --operator, and --reason")
 	}
@@ -33,12 +35,44 @@ func attestCommand(o attestOptions) error {
 	if err != nil {
 		return err
 	}
-	return store.Update(context.Background(), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+	var attested gomutant.Finding
+	if err := store.Update(ctx, func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		for i := range all {
 			if all[i].Symbol == o.symbol {
-				return all, all[i].Attest(o.position, o.operator, o.reason)
+				if err := all[i].Attest(o.position, o.operator, o.reason); err != nil {
+					return nil, err
+				}
+				attested = all[i]
+				return all, nil
 			}
 		}
 		return nil, fmt.Errorf("no finding for %s", o.symbol)
-	})
+	}); err != nil {
+		return err
+	}
+	// The echo states what the disposition did and where the record
+	// lives; a record that cannot serve as it stands says so, because
+	// the next measure judges the equivalence afresh and sheds the
+	// disposition if its pins moved (REQ-attest-survivor).
+	layer, layerReason := store.Layer(attested)
+	switch layer {
+	case "repo":
+		fmt.Fprintf(out, "attested %s %s; %d open; layer: repo\n", o.position, o.operator, len(attested.Open()))
+	default:
+		fmt.Fprintf(out, "attested %s %s; %d open; layer: machine-local (%s)\n", o.position, o.operator, len(attested.Open()), layerReason)
+	}
+	tree, err := gomutant.LoadContext(ctx, o.dir)
+	if err != nil {
+		fmt.Fprintf(out, "warning: record state unavailable: %s\n", err)
+		return nil
+	}
+	inspection, err := tree.InspectFindingContext(ctx, attested)
+	if err != nil {
+		fmt.Fprintf(out, "warning: record state unavailable: %s\n", err)
+		return nil
+	}
+	if inspection.State != gomutant.FindingCurrent {
+		fmt.Fprintf(out, "warning: the record is %s (%s) - the disposition is judged afresh when %s is re-measured\n", inspection.State, inspection.Reason, o.symbol)
+	}
+	return nil
 }

@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -29,9 +30,27 @@ type oracleAttribution struct {
 	unstable  []string
 	completed int
 	firstErr  string
+	// probedPaths unions the completed solo probes' observed
+	// module-local input paths; an input the finding observed that no
+	// solo probe did was reached only under mutant execution.
+	probedPaths map[string]bool
 }
 
-func buildOracleGuidance(symbol, reason string, oracle []string, attr oracleAttribution) OracleGuidance {
+// mutantOnlyInputs names the finding's observed input paths no
+// completed solo probe reached, sorted - the reads only mutant
+// execution provoked (REQ-exec-oracle-guidance).
+func mutantOnlyInputs(findingPaths []string, probed map[string]bool) []string {
+	var out []string
+	for _, path := range findingPaths {
+		if !probed[path] {
+			out = append(out, path)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func buildOracleGuidance(symbol, reason string, oracle []string, attr oracleAttribution, mutantOnly []string) OracleGuidance {
 	unstable := attr.unstable
 	g := OracleGuidance{Symbol: symbol, UnstableTests: unstable, Reason: reason}
 	if attr.completed == 0 {
@@ -45,6 +64,11 @@ func buildOracleGuidance(symbol, reason string, oracle []string, attr oracleAttr
 	}
 	if len(unstable) == 0 {
 		g.Suggestion = "no single oracle test reproduces the instability in its own run (mutant-execution induced); stabilize the input named in the reason or accept a machine-local record"
+		if len(mutantOnly) > 0 {
+			// The narrowest place to look: inputs the finding observed
+			// that no solo probe reached (REQ-exec-oracle-guidance).
+			g.Suggestion += "; inputs observed only under mutant execution: " + cappedNameList(mutantOnly, "inputs")
+		}
 		return g
 	}
 	stable := make([]string, 0, len(oracle))

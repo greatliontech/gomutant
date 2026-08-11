@@ -52,6 +52,9 @@ func lockCallbacks(opts Options) Options {
 	if fn := opts.Contradiction; fn != nil {
 		opts.Contradiction = func(c AttestationContradiction) { mu.Lock(); defer mu.Unlock(); fn(c) }
 	}
+	if fn := opts.AttestationSiteShed; fn != nil {
+		opts.AttestationSiteShed = func(d AttestationShed) { mu.Lock(); defer mu.Unlock(); fn(d) }
+	}
 	if fn := opts.afterExecution; fn != nil {
 		opts.afterExecution = func() { mu.Lock(); defer mu.Unlock(); fn() }
 	}
@@ -526,6 +529,16 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 			continue
 		}
 		attr.completed++
+		if state, serr := runtimeinput.CompletedState(observed); serr == nil {
+			if paths, pok := moduleRelInputs(state.Manifest, t.dir); pok {
+				for _, rel := range paths {
+					if attr.probedPaths == nil {
+						attr.probedPaths = map[string]bool{}
+					}
+					attr.probedPaths[rel] = true
+				}
+			}
+		}
 		if passed && observed.Unverifiable {
 			attr.unstable = append(attr.unstable, test)
 		}
@@ -2239,7 +2252,18 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 		return state, nil
 	}
 	process := fmt.Sprintf("gomutant-finding-merge-%d", findingObservationSequence.Add(1))
-	result, incompleteErr := runtimeinput.IncompleteEnv(root, process, "runtime input observations could not be merged for reuse: "+err.Error(), env)
+	reason := "runtime input observations could not be merged for reuse: " + err.Error()
+	// Best-effort naming: the first pair of observations whose path sets
+	// differ names the narrowest place to look - the mover, not the
+	// bracket root (REQ-result-inspection). A digest-only conflict
+	// yields no path delta and the underlying error stands alone.
+	for i := 1; i < len(states); i++ {
+		if delta := manifestPathDelta(states[0].Manifest, states[i].Manifest, root); len(delta) > 0 {
+			reason += "; diverging inputs: " + cappedNameList(delta, "inputs")
+			break
+		}
+	}
+	result, incompleteErr := runtimeinput.IncompleteEnv(root, process, reason, env)
 	if incompleteErr != nil {
 		return runtimeinput.Observation{}, incompleteErr
 	}
@@ -2358,7 +2382,15 @@ func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol
 		attr = probed
 		guidanceCache[key] = attr
 	}
-	opts.Guidance(buildOracleGuidance(symbol, f.TargetEvidence.RuntimeReason, w.oracle, attr))
+	// Best-effort narrowing: module-local inputs the finding observed
+	// that no completed solo probe reached (REQ-exec-oracle-guidance).
+	var mutantOnly []string
+	if attr.completed > 0 {
+		if paths, pok := moduleRelInputs(f.TargetEvidence.RuntimeInputs, t.dir); pok {
+			mutantOnly = mutantOnlyInputs(paths, attr.probedPaths)
+		}
+	}
+	opts.Guidance(buildOracleGuidance(symbol, f.TargetEvidence.RuntimeReason, w.oracle, attr, mutantOnly))
 	return nil
 }
 
@@ -3265,7 +3297,15 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 		return union, rec, nil
 	}
 	if !state.Unverifiable {
-		incomplete, incompleteErr := runtimeinput.IncompleteEnv(t.dir, fmt.Sprintf("gomutant-splice-%d", findingObservationSequence.Add(1)), "runtime input observations diverged from the served record's completed-process union", env)
+		divergedReason := "runtime input observations diverged from the served record's completed-process union"
+		// Best-effort naming: the paths present in exactly one of the two
+		// unions are the narrowest place to look (REQ-result-inspection);
+		// a digest-only divergence names no path and the reason stands
+		// alone.
+		if delta := manifestPathDelta(rec.TargetEvidence.RuntimeInputs, state.Manifest, t.dir); len(delta) > 0 {
+			divergedReason += "; diverging inputs: " + cappedNameList(delta, "inputs")
+		}
+		incomplete, incompleteErr := runtimeinput.IncompleteEnv(t.dir, fmt.Sprintf("gomutant-splice-%d", findingObservationSequence.Add(1)), divergedReason, env)
 		if incompleteErr != nil {
 			return runtimeinput.Observation{}, Finding{}, incompleteErr
 		}
@@ -3281,6 +3321,73 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 		rec.OracleEvidence[i] = withRuntimeState(rec.OracleEvidence[i], state)
 	}
 	return union, rec, nil
+}
+
+// moduleRelInputs recovers a manifest's tree-local input paths in
+// tree-relative slash form regardless of the manifest's stored form:
+// recorded findings persist relative-form entries while engine
+// observations are absolutized before they leave the engine, and naming
+// must read both. Every naming site recovers against the one tree root
+// so the sets it compares share a base (a workspace member's inputs
+// carry the member prefix on both sides). Relativization tries the root
+// as given and symlink-resolved - whichever form the recorded entries
+// carry. Best-effort - ok reports whether the manifest decoded; a
+// decodable manifest with no tree-local entries returns an empty set,
+// which is a statement, not an absence.
+func moduleRelInputs(encoded, treeDir string) (paths []string, ok bool) {
+	bases := []string{treeDir}
+	if resolved, err := filepath.EvalSymlinks(treeDir); err == nil && resolved != treeDir {
+		bases = append(bases, resolved)
+	}
+	abs, err := runtimeinput.Paths(encoded, treeDir)
+	if err != nil {
+		return nil, false
+	}
+	out := []string{}
+	for _, p := range abs {
+		for _, base := range bases {
+			rel, rerr := filepath.Rel(base, p)
+			if rerr != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+				continue
+			}
+			out = append(out, filepath.ToSlash(rel))
+			break
+		}
+	}
+	return out, true
+}
+
+// manifestPathDelta names the tree-local input paths present in
+// exactly one of two encoded manifests, sorted; undecodable manifests
+// yield nothing - naming is best-effort, the divergence stamp itself
+// never depends on it.
+func manifestPathDelta(prior, fresh, treeDir string) []string {
+	priorPaths, priorOK := moduleRelInputs(prior, treeDir)
+	freshPaths, freshOK := moduleRelInputs(fresh, treeDir)
+	if !priorOK || !freshOK {
+		return nil
+	}
+	inPrior := make(map[string]bool, len(priorPaths))
+	for _, path := range priorPaths {
+		inPrior[path] = true
+	}
+	inFresh := make(map[string]bool, len(freshPaths))
+	for _, path := range freshPaths {
+		inFresh[path] = true
+	}
+	var delta []string
+	for _, path := range priorPaths {
+		if !inFresh[path] {
+			delta = append(delta, path)
+		}
+	}
+	for _, path := range freshPaths {
+		if !inPrior[path] {
+			delta = append(delta, path)
+		}
+	}
+	sort.Strings(delta)
+	return delta
 }
 
 // splicedUnionDiverged reports whether the re-executed processes' completed

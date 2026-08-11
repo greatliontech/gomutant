@@ -337,7 +337,7 @@ func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref f
 		}
 		switch {
 		case fs.IsTest:
-			residue = append(residue, Residue{Path: fs.Path, Reason: "test file: tests are oracles, never targets"})
+			residue = append(residue, Residue{Path: fs.Path, Reason: testFileResidueReason})
 		case !fs.IsGo:
 			residue = append(residue, Residue{Path: fs.Path, Reason: "not a Go source file"})
 		case !fs.Loaded:
@@ -363,6 +363,70 @@ func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref f
 		}
 	}
 	return targets, residue, nil
+}
+
+// testFileResidueReason is the changed-scope residue arm for test
+// files; the closure signpost anchors on it.
+const testFileResidueReason = "test file: tests are oracles, never targets"
+
+// OracleClosureSignpostContext extends changed-scope test-file residue
+// rows with what the changed tests closed over: prior findings outside
+// the run's target set whose records are stale for an oracle-caused
+// reason are exactly the measurements this change touched without
+// re-measuring, so the row names them and the re-measure move
+// (REQ-target-changed). Counting is best-effort - a record whose
+// inspection errors is skipped; the run that re-measures it will say
+// why - and the rows pass through unchanged when nothing qualifies.
+func (t *Tree) OracleClosureSignpostContext(ctx context.Context, residue []Residue, prior []Finding, targets []Target) ([]Residue, error) {
+	hasTestRow := false
+	for _, r := range residue {
+		if r.Reason == testFileResidueReason {
+			hasTestRow = true
+			break
+		}
+	}
+	if !hasTestRow || len(prior) == 0 {
+		return residue, nil
+	}
+	targeted := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		targeted[target.Symbol] = true
+	}
+	var closed []string
+	for _, finding := range prior {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if targeted[finding.Symbol] {
+			continue
+		}
+		inspection, err := t.InspectFindingContext(ctx, finding)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		if inspection.State != FindingStale {
+			continue
+		}
+		if !strings.HasPrefix(inspection.Reason, "oracle ") && !strings.HasPrefix(inspection.Reason, "derived oracle") {
+			continue
+		}
+		closed = append(closed, finding.Symbol)
+	}
+	if len(closed) == 0 {
+		return residue, nil
+	}
+	sort.Strings(closed)
+	signpost := fmt.Sprintf("; oracle closure of %d stale finding(s) - re-measure by symbol: %s", len(closed), cappedNameList(closed, "symbols"))
+	out := append([]Residue(nil), residue...)
+	for i := range out {
+		if out[i].Reason == testFileResidueReason {
+			out[i].Reason += signpost
+		}
+	}
+	return out, nil
 }
 
 // toolOwned reports whether a tree-relative changed path lies in

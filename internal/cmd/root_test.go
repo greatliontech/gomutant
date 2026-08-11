@@ -248,7 +248,7 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, CandidateCount: 1, Generated: 1, Mutants: 1,
 		Survivors: []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}},
 		Attested:  []gomutant.Attestation{{Position: "old.go:1:1", Operator: "zero return", Reason: "equivalent"}}}
-	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "REQ-A")
+	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "REQ-A", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 	if views[0].Layer != "local" || views[0].LayerReason == "" {
 		t.Fatalf("dirty finding layer = %q (%q), want machine-local", views[0].Layer, views[0].LayerReason)
 	}
-	views, err = inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "REQ-other")
+	views, err = inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "REQ-other", "", "")
 	if err != nil || len(views) != 0 {
 		t.Fatalf("label filter = %+v, %v", views, err)
 	}
@@ -322,6 +322,49 @@ func TestRenderRunStatus(t *testing.T) {
 		"summary   2 targets: 1 measured, 1 cached, 0 skipped; 3 generated, 2 killed, 1 survived, 0 discarded; 1 attested, 0 open\n"
 	if output.String() != want {
 		t.Fatalf("run status = %q, want %q", output.String(), want)
+	}
+}
+
+// A plan over real targets renders its decisions and plan tallies with
+// no zeroed run summary - the summary line would claim a measurement
+// that never happened (execution.md's plan render clause).
+func TestRunCommandPlanRendersDecisionsWithoutSummary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs plan preparation over the fixture")
+	}
+	fixture := isolatedFixture(t)
+	targetsPath := filepath.Join(t.TempDir(), "targets.json")
+	if err := os.WriteFile(targetsPath, []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{
+		dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, plan: true, output: &output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "plan      1 measure") || !strings.Contains(output.String(), "plan only: no baselines probed, no mutants executed, nothing persisted") {
+		t.Fatalf("plan output missing its own tallies: %q", output.String())
+	}
+	if strings.Contains(output.String(), "summary   ") {
+		t.Fatalf("plan output carries a run summary: %q", output.String())
+	}
+	if _, err := os.Stat(findingsAt(fixture, defaultFindings)); !os.IsNotExist(err) {
+		t.Fatalf("plan persisted a findings document: %v", err)
+	}
+}
+
+// The confirming line drops the saturated candidates segment - the
+// confirmations counter is the signal there - while executing lines
+// keep it (display only; the event carries the tallies unchanged).
+func TestRenderExecutionEventDropsSaturatedCandidatesWhileConfirming(t *testing.T) {
+	var out bytes.Buffer
+	renderExecutionEvent(&out, gomutant.ExecutionEvent{Phase: "executing", TargetIndex: 1, TargetCount: 2, Symbol: "p.F", CandidatesDone: 3, CandidatesTotal: 7})
+	renderExecutionEvent(&out, gomutant.ExecutionEvent{Phase: "confirming", TargetIndex: 1, TargetCount: 2, Symbol: "p.F", CandidatesDone: 7, CandidatesTotal: 7, ConfirmationsDone: 1, ConfirmationsTotal: 4})
+	want := "executing target 1/2 p.F  candidates 3/7\n" +
+		"confirming target 1/2 p.F  confirmations 1/4\n"
+	if out.String() != want {
+		t.Fatalf("execution lines = %q, want %q", out.String(), want)
 	}
 }
 
@@ -509,7 +552,7 @@ func TestInspectFindingsCarriesCandidateEvidence(t *testing.T) {
 	finding := gomutant.Finding{Symbol: "example.com/empty.Gone", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence, OracleEvidence: []gomutant.SubjectEvidence{evidence}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		CandidateEvidence: []gomutant.CandidateEvidence{{Position: "gone.go:1:1", Operator: "return: zero", Reason: "panicked before observation finalization", Disposition: "killed"}}}
-	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "")
+	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,6 +594,12 @@ func TestRunCommandPlanNeverPrunesEmptyWholeTree(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "plan only: no baselines probed, no mutants executed, nothing persisted") {
 		t.Fatalf("plan output = %q, want the plan line", output.String())
+	}
+	// A plan renders no zeroed run summary: a summary of zeros would
+	// claim a measurement that never happened (REQ-exec-plan's render
+	// clause in execution.md).
+	if strings.Contains(output.String(), "summary   ") {
+		t.Fatalf("plan output carries a run summary: %q", output.String())
 	}
 	retained, err := loadFindings(dir, path)
 	if err != nil || len(retained) != 1 {

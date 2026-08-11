@@ -25,8 +25,11 @@ gomutant run --changed HEAD --budget 5
 # Explicit targets (symbol + oracle + labels) from a JSON document.
 gomutant run --targets targets.json
 
-# Inspect current, stale, unverifiable, and detached findings.
+# Inspect current, stale, unverifiable, and detached findings: one
+# summary row per record by default; --detail for survivor and
+# disposition lists; --state/--symbol/--label narrow the roster.
 gomutant findings
+gomutant findings --detail --state stale
 
 # Inspect effective symbols, derived or explicit oracles, labels, and residue.
 gomutant discover --changed HEAD
@@ -120,7 +123,10 @@ gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \
 
 Strengthen a test for every non-equivalent survivor and rerun its target. Use
 an attestation only when the mutant is behaviorally equivalent, stating why;
-attestations remain visible on a stale record, but a remeasurement sheds them
+attest echoes the disposition, the remaining open count, and the record's
+layer, and warns when the record is already stale — the next measure judges
+the equivalence afresh. Attestations remain visible on a stale record, but a
+remeasurement sheds them
 when the evidence pins move. Open survivors remain advisory, so a completed mutation run exits
 successfully regardless of their count. Operational errors and malformed or
 unattributable observations fail the command; cancellation observed before the

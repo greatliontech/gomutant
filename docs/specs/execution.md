@@ -190,7 +190,9 @@ oracle test is probed alone, tests whose solo runs produce unverifiable
 evidence are named, and the report suggests narrowing to an explicit oracle of
 the stable remainder ("excluding <tests> if they do not vouch for this
 target"). A clean per-test sweep reports the instability as not
-test-reproducible (mutant-execution induced), attributed by reason alone; a
+test-reproducible (mutant-execution induced), attributed by the reason and,
+best-effort, by the module-local inputs the finding observed that no solo
+probe reached — the narrowest place to look for the mutant-induced read; a
 sweep in which no probe completed claims nothing — it reports attribution
 unavailable with the first probe failure. Targets sharing one oracle set share
 one attribution: the probes run once per set, not per finding.
@@ -410,6 +412,8 @@ stop: no baseline probes, no mutant executes, and nothing new persists
 merge; re-merging existing records was already idempotent, and the
 plan-only return carries only findings complete without execution —
 cached serves and skips — never a partially enumerated measure target).
+A plan renders its own tallies and no zeroed run summary — a summary line
+of zeros would claim a measurement that never happened.
 The decisions are the plan: every precondition hole recorded evidence
 already names — stale pins, unverifiable or unstable oracle evidence
 from prior-record inspection, skip classes preparation itself decides —

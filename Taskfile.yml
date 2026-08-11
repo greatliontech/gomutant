@@ -1,6 +1,10 @@
 version: "3"
 
 tasks:
+  test:
+    desc: Full suite; the root package's mutation e2es exceed go test's default 10m package timeout
+    cmds:
+      - go test -timeout 1800s ./...
   install:
     desc: Install gomutant to ~/.local/bin with zsh completion
     cmds:

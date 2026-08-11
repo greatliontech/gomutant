@@ -120,22 +120,31 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if err != nil {
 		return err
 	}
-	var terminal bytes.Buffer
-	for _, r := range residue {
-		fmt.Fprintf(&terminal, "changed, untargeted  %s  (%s)\n", r.Path, r.Reason)
-	}
 	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
 	docPath := findingsAt(o.dir, o.findingsFile)
 	docStore, err := gomutant.OpenStore(docPath, o.dir)
 	if err != nil {
 		return err
 	}
+	prior, err := loadFindingsContext(ctx, o.dir, docPath)
+	if err != nil {
+		return err
+	}
+	if residue, err = tree.OracleClosureSignpostContext(ctx, residue, prior, targets); err != nil {
+		return err
+	}
+	var terminal bytes.Buffer
+	for _, r := range residue {
+		fmt.Fprintf(&terminal, "changed, untargeted  %s  (%s)\n", r.Path, r.Reason)
+	}
 	if len(targets) == 0 {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		fmt.Fprintln(&terminal, "no targets")
-		renderRunSummary(&terminal, gomutant.RunSummary{})
+		if !o.plan {
+			renderRunSummary(&terminal, gomutant.RunSummary{})
+		}
 		if o.plan {
 			// The plan clause's no-write guarantee covers the empty
 			// whole-tree reconciliation too: a plan never prunes.
@@ -156,24 +165,30 @@ func runCommand(ctx context.Context, o runOptions) error {
 		_, err := io.Copy(out, &terminal)
 		return err
 	}
-	prior, err := loadFindingsContext(ctx, o.dir, docPath)
-	if err != nil {
-		return err
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	var planMeasure, planCandidates, planCached, planSkipped int
 	var commitSheds []gomutant.AttestationShed
+	// The run-start snapshot of dispositions per symbol makes the merge
+	// graft pin-correct, and the post-merge rows are the rendering
+	// truth: what the response describes is what the document holds
+	// (REQ-attest-survivor, REQ-mcp-findings-doc).
+	attestSnapshot := map[string][]gomutant.Attestation{}
+	for _, f := range prior {
+		attestSnapshot[f.Symbol] = append([]gomutant.Attestation(nil), f.Attested...)
+	}
+	postMerge := map[string]gomutant.Finding{}
+	contradicted := map[string]bool{}
+	priorLayer := map[string]string{}
+	for _, f := range prior {
+		priorLayer[f.Symbol], _ = docStore.Layer(f)
+	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, Prior: prior,
 		PlanOnly: o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
-			line := fmt.Sprintf("%-9s target %d/%d %s  candidates %d/%d", event.Phase, event.TargetIndex, event.TargetCount, event.Symbol, event.CandidatesDone, event.CandidatesTotal)
-			if event.ConfirmationsTotal > 0 {
-				line += fmt.Sprintf("  confirmations %d/%d", event.ConfirmationsDone, event.ConfirmationsTotal)
-			}
-			fmt.Fprintln(out, line)
+			renderExecutionEvent(out, event)
 		},
 		Decision: func(decision gomutant.RunDecision) {
 			if !o.plan {
@@ -198,6 +213,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			fmt.Fprintf(out, "guidance  %s  unstable oracle evidence (%s): %s\n", g.Symbol, g.Reason, g.Suggestion)
 		},
 		Contradiction: func(c gomutant.AttestationContradiction) {
+			contradicted[c.Symbol+"\x00"+c.Position+"\x00"+c.Operator] = true
 			fmt.Fprintf(out, "contradiction  %s  attested survivor %s (%s) killed by %s; attestation shed (was: %s)\n", c.Symbol, c.Position, c.Operator, c.Killer, c.Reason)
 		},
 		AttestationSiteShed: func(d gomutant.AttestationShed) {
@@ -220,8 +236,13 @@ func runCommand(ctx context.Context, o runOptions) error {
 				// actually happens against the prior document - the final
 				// merge sees an already-stripped record, so the shed must
 				// be collected here or it is silent (REQ-attest-survivor).
-				merged, dropped := gomutant.MergeFindingsShed(current, []gomutant.Finding{finding})
+				merged, dropped := gomutant.MergeFindingsShedAgainst(current, []gomutant.Finding{finding}, attestSnapshot)
 				commitSheds = append(commitSheds, dropped...)
+				for _, m := range merged {
+					if m.Symbol == finding.Symbol {
+						postMerge[finding.Symbol] = m
+					}
+				}
 				return merged, nil
 			})
 		},
@@ -230,7 +251,34 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if err != nil && !errors.As(err, &drift) {
 		return err
 	}
-	for _, f := range findings {
+	// The final merge runs before anything renders: the output reads
+	// the rows the document actually holds - a disposition recorded
+	// concurrently between a symbol's incremental commit and the end of
+	// the run is in both or in neither (REQ-mcp-findings-doc).
+	var finalSheds []gomutant.AttestationShed
+	if !o.plan {
+		if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			var merged []gomutant.Finding
+			if wholeTree {
+				merged, finalSheds = gomutant.MergeWholeFindingsShedAgainst(current, findings, targets, attestSnapshot)
+			} else {
+				merged, finalSheds = gomutant.MergeFindingsShedAgainst(current, findings, attestSnapshot)
+			}
+			for _, m := range merged {
+				if _, ran := postMerge[m.Symbol]; ran {
+					postMerge[m.Symbol] = m
+				}
+			}
+			return merged, nil
+		}); err != nil {
+			return err
+		}
+	}
+	rendered := gomutant.RenderedFindings(findings, postMerge)
+	for _, f := range rendered {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -266,8 +314,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 				summary.Operator, summary.Generated, summary.Killed, summary.Survived, summary.Discarded)
 		}
 	}
-	summary := gomutant.SummarizeRun(findings)
-	renderRunSummary(&terminal, summary)
+	// A plan renders its own tallies; the zeroed run summary would
+	// claim a measurement that never happened (REQ-exec-plan).
+	if !o.plan {
+		renderRunSummary(&terminal, gomutant.SummarizeRun(rendered))
+	}
 	// The class line earns its place only when it aggregates: a single
 	// skip's decision line already said everything.
 	if classes, skips := skipClasses(findings); skips > 1 {
@@ -276,31 +327,30 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if o.plan {
 		fmt.Fprintf(&terminal, "plan      %d measure (%d candidates), %d cached, %d skipped\n", planMeasure, planCandidates, planCached, planSkipped)
 		fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
-	} else if err := func() error {
-		var shed []gomutant.AttestationShed
-		if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
+	} else {
+		// A shed disposition is surfaced once, never silently dropped
+		// (REQ-attest-survivor): the first report wins, and a mutant
+		// whose fate the contradiction line already told - killed
+		// evidence with the shed reasoning attached - is not retold
+		// with the merge layer's vaguer reason.
+		for _, d := range gomutant.DedupeAttestationSheds(append(append([]gomutant.AttestationShed(nil), commitSheds...), finalSheds...)) {
+			if contradicted[d.Symbol+"\x00"+d.Position+"\x00"+d.Operator] {
+				continue
 			}
-			var merged []gomutant.Finding
-			if wholeTree {
-				merged, shed = gomutant.MergeWholeFindingsShed(current, findings, targets)
-			} else {
-				merged, shed = gomutant.MergeFindingsShed(current, findings)
-			}
-			return merged, nil
-		}); err != nil {
-			return err
-		}
-		// A disposition refused only because the site content under its
-		// position changed is surfaced, never silently dropped: the
-		// surviving mutant is not the attested one (REQ-attest-survivor).
-		for _, d := range append(append([]gomutant.AttestationShed(nil), commitSheds...), shed...) {
 			fmt.Fprintf(&terminal, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)
 		}
-		return nil
-	}(); err != nil {
-		return err
+		// A record this run carried from the machine-local overlay into
+		// the committed document is a state change git does not see until
+		// committed, so the run says it happened (REQ-mcp-findings-doc).
+		promoted := 0
+		for symbol, merged := range postMerge {
+			if layer, _ := docStore.Layer(merged); layer == "repo" && priorLayer[symbol] == "local" {
+				promoted++
+			}
+		}
+		if promoted > 0 {
+			fmt.Fprintf(&terminal, "%d record(s) promoted - findings document changed, commit it\n", promoted)
+		}
 	}
 	if _, err := io.Copy(out, &terminal); err != nil {
 		return err
@@ -323,6 +373,21 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 	default:
 		fmt.Fprintf(w, "prepare   %s %s\n", event.Stage, event.Symbol)
 	}
+}
+
+func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent) {
+	line := fmt.Sprintf("%-9s target %d/%d %s", event.Phase, event.TargetIndex, event.TargetCount, event.Symbol)
+	// A confirming window's candidate tally is saturated by
+	// construction - the confirmations counter is the signal - so the
+	// line drops the dead segment (display only; the event carries the
+	// tallies unchanged).
+	if event.Phase != "confirming" {
+		line += fmt.Sprintf("  candidates %d/%d", event.CandidatesDone, event.CandidatesTotal)
+	}
+	if event.ConfirmationsTotal > 0 {
+		line += fmt.Sprintf("  confirmations %d/%d", event.ConfirmationsDone, event.ConfirmationsTotal)
+	}
+	fmt.Fprintln(w, line)
 }
 
 func renderRunDecision(w io.Writer, decision gomutant.RunDecision) {

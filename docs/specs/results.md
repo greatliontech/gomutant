@@ -433,11 +433,22 @@ pin-hold re-measure carry — additionally anchors on the survivor's site
 content: a same-shaped mutant at a different site (a neighbor shifted into
 the old coordinates by an edit) never inherits a disposition, and a
 position-and-operator match whose site moved is surfaced as a shed, never
-silently dropped or silently carried. The carve-out carries run under
+silently dropped or silently carried. The merge graft is gated by the pins,
+not blind to them: a disposition already on record when a run began, whose
+pin-hold re-measure carry judged the equivalence afresh and did not keep it,
+sheds at merge rather than re-attaching — only a disposition recorded
+concurrently during the run grafts onto a still-reported survivor — and a
+disposition whose survivor the fresh record no longer reports sheds with its
+mutant, loudly, in every mode. The carve-out carries run under
 gates that pin the mutated source, so they anchor by position and
 operator over that pinned source; a document whose recorded sites diverge
 from its own survivors (external divergence — the tool never persists
 one) is surfaced by the merge layer, the divergence-surfacing authority.
+The disposition surface echoes what it did: the attested position and
+operator, the record's remaining open count, its persistence layer with the
+disqualifying clause when machine-local, and a warning when the record
+cannot serve as it stands — the next measure judges the equivalence afresh
+and sheds the disposition if its pins moved.
 A disposition recorded before site anchors existed matches by position
 and operator alone and adopts the matched survivor's site on its first
 contact with any carry path — one carry in which the pre-upgrade
@@ -469,10 +480,14 @@ no longer resolves. A record whose candidate evidence flags any candidate is
 not reusable as it stands, so it classifies `unverifiable` even when its
 subject evidence is current, with the candidate evidence carried in every view
 so the candidate-local scope is visible. The classification is advisory and
-runs no tests. Human and machine-readable views carry the reason plus open
-survivors and attested dispositions independently of that state, including
-fully attested records; filtering by an opaque label changes only which
-records are rendered. The reason leads — it precedes the open survivors in
+runs no tests. Every view carries the reason and the open and attested counts
+independently of that state, including fully attested records; the detail
+view carries the survivor and disposition lists themselves, and the CLI's
+machine-readable JSON export - like the document on disk - stays complete
+regardless of the human default (bounded protocol envelopes cap per their
+own contract). Filtering — by
+an opaque label, by state, or by symbol — changes only which records are
+rendered. The reason leads — it precedes the open survivors in
 every view — and is self-contained: a subject-caused reason names the
 responsible subject (`target:` or `oracle <symbol>:`), record-level causes
 (a detached symbol, a changed operator set or derived oracle set,
@@ -480,3 +495,6 @@ candidate-local evidence) need no subject, and a runtime-input digest drift
 names the moved input identities themselves, best-effort, so the developer decides
 between stabilizing the test, narrowing the oracle, and accepting a
 machine-local record without re-deriving which observed object moved.
+Best-effort identity naming is count-capped: a long identity list renders
+its total with leading exemplars, never the whole roster, because the count
+and the first names carry the signal and the detail surfaces carry the rest.

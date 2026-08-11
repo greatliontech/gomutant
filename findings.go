@@ -1046,6 +1046,55 @@ func MergeFindings(prior, fresh []Finding) []Finding {
 // dispositions that failed to carry only because the site content under
 // their position changed (REQ-attest-survivor).
 func MergeFindingsShed(prior, fresh []Finding) ([]Finding, []AttestationShed) {
+	return MergeFindingsShedAgainst(prior, fresh, nil)
+}
+
+// RenderedFindings substitutes each run finding with its post-merge
+// document row where one landed, preserving the run-only Cached and
+// Skipped markers: what a run surface renders is what the document
+// holds (REQ-mcp-findings-doc).
+func RenderedFindings(findings []Finding, postMerge map[string]Finding) []Finding {
+	rendered := make([]Finding, len(findings))
+	for i, f := range findings {
+		if m, ok := postMerge[f.Symbol]; ok {
+			m.Cached, m.Skipped = f.Cached, f.Skipped
+			rendered[i] = m
+		} else {
+			rendered[i] = f
+		}
+	}
+	return rendered
+}
+
+// DedupeAttestationSheds keeps each shed mutant's first report: the
+// in-run carry sheds with the specific cause (a moved site) before the
+// merge layer re-derives the same disposition's fate from the snapshot,
+// and one disposition owes the reader one line (REQ-attest-survivor).
+func DedupeAttestationSheds(sheds []AttestationShed) []AttestationShed {
+	seen := make(map[string]bool, len(sheds))
+	out := sheds[:0:0]
+	for _, d := range sheds {
+		key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, d)
+	}
+	return out
+}
+
+// MergeFindingsShedAgainst is MergeFindingsShed with the caller's
+// run-start snapshot of attested dispositions per symbol. With the
+// snapshot in hand the graft is pin-correct (REQ-attest-survivor):
+// a disposition the fresh record already carries rode the pin-hold
+// re-measure carry and stays; a disposition present in the live
+// document but absent from the snapshot is a concurrent attestation
+// and grafts onto a still-reported survivor; every other prior
+// disposition was judged afresh and rejected - its pins moved - and
+// sheds loudly. Without a snapshot the graft anchors on survivor
+// identity and site alone, the pre-snapshot behavior.
+func MergeFindingsShedAgainst(prior, fresh []Finding, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
 	var shed []AttestationShed
 	bySym := map[string]Finding{}
 	for _, f := range prior {
@@ -1066,7 +1115,15 @@ func MergeFindingsShed(prior, fresh []Finding) ([]Finding, []AttestationShed) {
 		// rather than being clobbered by it.
 		if prior, ok := bySym[f.Symbol]; ok {
 			var dropped []AttestationShed
-			f.Attested, dropped = graftAttestations(prior.Attested, f.Attested, f.Survivors)
+			snap, snapped := (map[survivorKey]Attestation)(nil), false
+			if snapshot != nil {
+				snapped = true
+				snap = map[survivorKey]Attestation{}
+				for _, a := range snapshot[f.Symbol] {
+					snap[survivorKey{a.Position, a.Operator}] = a
+				}
+			}
+			f.Attested, dropped = graftAttestationsAgainst(prior.Attested, f.Attested, f.Survivors, snap, snapped)
 			for _, d := range dropped {
 				d.Symbol = f.Symbol
 				shed = append(shed, d)
@@ -1101,6 +1158,18 @@ type AttestationShed struct {
 // shed so the refusal is visible. A pre-site disposition (empty site)
 // matches by position and operator and adopts the matched survivor's site.
 func graftAttestations(prior, fresh []Attestation, survivors []Survivor) ([]Attestation, []AttestationShed) {
+	return graftAttestationsAgainst(prior, fresh, survivors, nil, false)
+}
+
+// graftAttestationsAgainst is graftAttestations under the caller's
+// run-start snapshot: when snapped, a prior disposition the snapshot
+// already held and the fresh record does not carry was judged afresh
+// by the pin-hold carry and rejected - it sheds as pins-moved instead
+// of grafting (REQ-attest-survivor's shed-whenever-any-pin-moves);
+// only concurrent attestations (absent from the snapshot) graft. A
+// disposition whose survivor the fresh record no longer reports sheds
+// loudly in every mode - never silently dropped.
+func graftAttestationsAgainst(prior, fresh []Attestation, survivors []Survivor, snapshot map[survivorKey]Attestation, snapped bool) ([]Attestation, []AttestationShed) {
 	siteOf := make(map[survivorKey]string, len(survivors))
 	surviving := make(map[survivorKey]bool, len(survivors))
 	for _, survivor := range survivors {
@@ -1116,16 +1185,42 @@ func graftAttestations(prior, fresh []Attestation, survivors []Survivor) ([]Atte
 	var shed []AttestationShed
 	for _, attestation := range prior {
 		key := survivorKey{attestation.Position, attestation.Operator}
-		if !surviving[key] || attested[key] {
+		if attested[key] {
+			continue
+		}
+		if !surviving[key] {
+			shed = append(shed, AttestationShed{
+				Position: attestation.Position,
+				Operator: attestation.Operator,
+				Reason:   "the attested survivor is no longer reported - the disposition sheds with its mutant",
+			})
 			continue
 		}
 		if attestation.Site != "" && attestation.Site != siteOf[key] {
+			// The specific cause outranks the general one: a moved site
+			// names the actionable fact even when the pins also moved.
 			shed = append(shed, AttestationShed{
 				Position: attestation.Position,
 				Operator: attestation.Operator,
 				Reason:   "site content changed under the position - the surviving mutant is not the attested one",
 			})
 			continue
+		}
+		if snapped {
+			// The run started with this exact disposition on record and
+			// the pin-hold carry did not keep it: its pins moved and the
+			// equivalence is judged afresh (REQ-attest-survivor). A
+			// same-mutant disposition whose content differs from the
+			// snapshot entry was recorded concurrently - a re-judgment
+			// against the current record - and grafts instead.
+			if snapAtt, held := snapshot[key]; held && snapAtt == attestation {
+				shed = append(shed, AttestationShed{
+					Position: attestation.Position,
+					Operator: attestation.Operator,
+					Reason:   "attestation pins moved - the equivalence is judged afresh",
+				})
+				continue
+			}
 		}
 		attestation.Site = siteOf[key]
 		out = append(out, attestation)
@@ -1144,11 +1239,17 @@ func MergeWholeFindings(prior, fresh []Finding, discovered []Target) []Finding {
 // MergeWholeFindingsShed is MergeWholeFindings additionally reporting
 // site-anchored attestation sheds (REQ-attest-survivor).
 func MergeWholeFindingsShed(prior, fresh []Finding, discovered []Target) ([]Finding, []AttestationShed) {
+	return MergeWholeFindingsShedAgainst(prior, fresh, discovered, nil)
+}
+
+// MergeWholeFindingsShedAgainst is MergeWholeFindingsShed under the
+// caller's run-start snapshot (REQ-attest-survivor).
+func MergeWholeFindingsShedAgainst(prior, fresh []Finding, discovered []Target, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
 	current := make(map[string]bool, len(discovered))
 	for _, target := range discovered {
 		current[target.Symbol] = true
 	}
-	merged, shed := MergeFindingsShed(prior, fresh)
+	merged, shed := MergeFindingsShedAgainst(prior, fresh, snapshot)
 	kept := merged[:0]
 	for _, finding := range merged {
 		if current[finding.Symbol] {

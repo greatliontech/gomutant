@@ -107,6 +107,14 @@ Go file the loaded packages do not cover (deleted, unparseable, or excluded
 by build constraints — an unbound surface named as such, never mislabeled) —
 so a caller layering its own classification (or a user deciding what to
 hand-mutate) sees the whole changed surface, never a silently narrowed one.
+A test-file residue row additionally names what the changed tests closed
+over, best-effort: when prior findings outside the run's target set are
+stale for an oracle-caused reason, the row counts them and suggests the
+re-measure by symbol — changed-scope discovery alone would never re-measure
+them. The count is attribution-free: any oracle-caused staleness qualifies,
+including staleness predating the delta, because the cost of naming a
+record that already wanted re-measuring is nil and per-file attribution is
+not.
 The one named exclusion: paths under gomutant's own state directory
 (`.gomutant/`) are outside the changed source surface and report as neither
 targets nor residue — the tool's bookkeeping can never produce a mutation

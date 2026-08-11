@@ -91,7 +91,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolDiscover)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "findings",
-		Description: "Inspect every findings record as current, stale, unverifiable, or detached, with its open survivors, attested dispositions, and per-candidate unverifiable runtime evidence (candidateEvidence). Each record states its persistence layer: repo (portable, in the committed findings document) or local (machine-local overlay, with the reason it is not committable). Filter by opaque label; inspection runs no tests.",
+		Description: "Inspect the findings document without running tests. Default: one summary row per record - symbol, state (current, stale, unverifiable, detached), reason, layer, open and attested counts - capped at 50 with the remainder counted. detail=true returns full rows: open survivors, attested dispositions, operator tables, and per-candidate unverifiable runtime evidence (candidateEvidence). Layer is repo (portable, in the committed findings document) or local (machine-local overlay, with the reason it is not committable). Filter by opaque label, state, or symbol.",
 	}, s.toolFindings)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "explain",
@@ -375,6 +375,7 @@ type runOut struct {
 	Contradictions   []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
 	PropertyOracles  []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
 	AttestationSheds []string                    `json:"attestationSheds,omitempty" jsonschema:"dispositions refused only because the site content under their position changed: the surviving mutant is not the attested one - re-review and re-attest if genuinely equivalent"`
+	Promoted         int                         `json:"promoted,omitempty" jsonschema:"records this run carried from the machine-local overlay into the committed findings document - the document changed, commit it"`
 	Residue          []gomutant.Residue          `json:"residue,omitempty"`
 	OmittedResidue   int                         `json:"omittedResidue,omitempty"`
 	Preparation      []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
@@ -480,10 +481,18 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if len(in.Packages) != 0 || len(in.Symbols) != 0 {
 		wholeTree = false
 	}
+	prior, err := s.loadFindingsContext(ctx, in.Findings)
+	if err != nil {
+		return nil, out, err
+	}
+	if out.Residue, err = tree.OracleClosureSignpostContext(ctx, out.Residue, prior, targets); err != nil {
+		return nil, out, err
+	}
 	if len(targets) == 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, out, err
 		}
+		out.Residue, out.OmittedResidue = capResidue(out.Residue)
 		out.Document = s.findingsPath(in.Findings)
 		if wholeTree {
 			err := s.update(ctx, out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
@@ -498,15 +507,22 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 		return nil, out, nil
 	}
-	prior, err := s.loadFindingsContext(ctx, in.Findings)
-	if err != nil {
-		return nil, out, err
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
 	streams := newRunStreams(&out, notify)
 	var commitSheds []gomutant.AttestationShed
+	// The run-start snapshot of dispositions per symbol makes the merge
+	// graft pin-correct, and the post-merge rows are the response truth:
+	// what the harness reads is what the document holds
+	// (REQ-attest-survivor, REQ-mcp-findings-doc).
+	attestSnapshot := map[string][]gomutant.Attestation{}
+	for _, f := range prior {
+		attestSnapshot[f.Symbol] = append([]gomutant.Attestation(nil), f.Attested...)
+	}
+	postMerge := map[string]gomutant.Finding{}
+	contradicted := map[string]bool{}
+	priorLayer := map[string]string{}
 	options := gomutant.Options{
 		Budget:            in.Budget,
 		OracleTimeout:     oracleTimeout,
@@ -516,6 +532,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB),
 		Guidance:          func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
 		Contradiction: func(c gomutant.AttestationContradiction) {
+			contradicted[c.Symbol+"\x00"+c.Position+"\x00"+c.Operator] = true
 			out.Contradictions = append(out.Contradictions, contradictionOut{
 				Symbol: c.Symbol, Position: c.Position, Operator: c.Operator, Killer: c.Killer, Reason: c.Reason,
 			})
@@ -541,8 +558,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 				// actually happens against the prior document - the final
 				// merge sees an already-stripped record, so the shed must
 				// be collected here or it is silent (REQ-attest-survivor).
-				merged, dropped := gomutant.MergeFindingsShed(current, []gomutant.Finding{finding})
+				merged, dropped := gomutant.MergeFindingsShedAgainst(current, []gomutant.Finding{finding}, attestSnapshot)
 				commitSheds = append(commitSheds, dropped...)
+				for _, m := range merged {
+					if m.Symbol == finding.Symbol {
+						postMerge[finding.Symbol] = m
+					}
+				}
 				return merged, nil
 			})
 		},
@@ -591,20 +613,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err != nil && !errors.As(err, &drift) {
 		return nil, out, err
 	}
-	out.Summary = gomutant.SummarizeRun(findings)
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
-	runStore, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
-	if err != nil {
-		return nil, out, err
-	}
-	out.Findings, out.OmittedFindings = capRunFindings(findings, runStore.Layer)
-	const residueCap = 50
-	if len(out.Residue) > residueCap {
-		out.OmittedResidue = len(out.Residue) - residueCap
-		out.Residue = out.Residue[:residueCap]
-	}
+	// The final merge runs before anything renders: the response reads
+	// the rows the document actually holds - a disposition recorded
+	// concurrently between a symbol's incremental commit and the end of
+	// the run is in both or in neither (REQ-mcp-findings-doc).
 	var attestationSheds []gomutant.AttestationShed
 	err = s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
@@ -612,20 +627,48 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 		var merged []gomutant.Finding
 		if wholeTree {
-			merged, attestationSheds = gomutant.MergeWholeFindingsShed(current, findings, targets)
+			merged, attestationSheds = gomutant.MergeWholeFindingsShedAgainst(current, findings, targets, attestSnapshot)
 		} else {
-			merged, attestationSheds = gomutant.MergeFindingsShed(current, findings)
+			merged, attestationSheds = gomutant.MergeFindingsShedAgainst(current, findings, attestSnapshot)
+		}
+		for _, m := range merged {
+			if _, ran := postMerge[m.Symbol]; ran {
+				postMerge[m.Symbol] = m
+			}
 		}
 		return merged, nil
 	})
 	if err != nil {
 		return nil, out, err
 	}
-	// A disposition refused only because the site content under its
-	// position changed is surfaced, never silently dropped
-	// (REQ-attest-survivor).
-	for _, d := range append(append([]gomutant.AttestationShed(nil), commitSheds...), attestationSheds...) {
+	rendered := gomutant.RenderedFindings(findings, postMerge)
+	out.Summary = gomutant.SummarizeRun(rendered)
+	runStore, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	if err != nil {
+		return nil, out, err
+	}
+	for _, f := range prior {
+		priorLayer[f.Symbol], _ = runStore.Layer(f)
+	}
+	out.Findings, out.OmittedFindings = capRunFindings(rendered, runStore.Layer)
+	out.Residue, out.OmittedResidue = capResidue(out.Residue)
+	// A shed disposition is surfaced once, never silently dropped
+	// (REQ-attest-survivor): the first report wins, and a mutant whose
+	// fate the contradiction row already told is not retold with the
+	// merge layer's vaguer reason.
+	for _, d := range gomutant.DedupeAttestationSheds(append(append([]gomutant.AttestationShed(nil), commitSheds...), attestationSheds...)) {
+		if contradicted[d.Symbol+"\x00"+d.Position+"\x00"+d.Operator] {
+			continue
+		}
 		out.AttestationSheds = append(out.AttestationSheds, fmt.Sprintf("%s %s %s - %s", d.Symbol, d.Position, d.Operator, d.Reason))
+	}
+	// A record this run carried from the machine-local overlay into the
+	// committed document is a state change git does not see until
+	// committed, so the response says it happened (REQ-mcp-findings-doc).
+	for symbol, merged := range postMerge {
+		if layer, _ := runStore.Layer(merged); layer == "repo" && priorLayer[symbol] == "local" {
+			out.Promoted++
+		}
 	}
 	out.Document = s.findingsPath(in.Findings)
 	// A drift-refused campaign persists its completed findings and still
@@ -635,6 +678,16 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return nil, out, drift
 	}
 	return nil, out, nil
+}
+
+// capResidue bounds a run response's residue rows with the remainder
+// counted, on every exit path (REQ-mcp-envelope).
+func capResidue(residue []gomutant.Residue) ([]gomutant.Residue, int) {
+	const residueCap = 50
+	if len(residue) > residueCap {
+		return residue[:residueCap], len(residue) - residueCap
+	}
+	return residue, 0
 }
 
 type discoverIn struct {
@@ -786,7 +839,22 @@ func compactTargetDescriptions(descriptions []gomutant.TargetDescription) ([]dis
 
 type findingsIn struct {
 	Label    string `json:"label,omitempty" jsonschema:"show only findings carrying this label"`
+	State    string `json:"state,omitempty" jsonschema:"show only findings in this state: current, stale, unverifiable, or detached"`
+	Symbol   string `json:"symbol,omitempty" jsonschema:"show only the finding for this mutated symbol"`
+	Detail   bool   `json:"detail,omitempty" jsonschema:"full rows - operator tables, open survivors, attested dispositions, candidate evidence; the default is the bounded summary (one row per record: symbol, state, layer, open and attested counts)"`
 	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+}
+
+// findingSummary is the bounded default row: enough to triage - what
+// record, what state, which layer, how much is open - with the full
+// lists behind detail (REQ-mcp-envelope, REQ-result-inspection).
+type findingSummary struct {
+	Symbol   string                `json:"symbol"`
+	State    gomutant.FindingState `json:"state"`
+	Reason   string                `json:"reason,omitempty"`
+	Layer    string                `json:"layer"`
+	Open     int                   `json:"open"`
+	Attested int                   `json:"attested"`
 }
 
 type inspectedFinding struct {
@@ -808,13 +876,24 @@ type inspectedFinding struct {
 }
 
 type findingsOut struct {
-	Findings        []inspectedFinding `json:"findings"`
+	Summary         []findingSummary   `json:"summary,omitempty" jsonschema:"the bounded default: one row per record"`
+	Findings        []inspectedFinding `json:"findings,omitempty" jsonschema:"full rows, only under detail"`
+	Omitted         int                `json:"omitted,omitempty" jsonschema:"rows beyond the cap - the document on disk always carries the full set"`
 	RepoCommittable int                `json:"repoCommittable" jsonschema:"records portable enough for the committed findings document"`
 	LocalOnly       int                `json:"localOnly" jsonschema:"records held in the machine-local overlay a reviewer would not inherit"`
 }
 
+// findingsRowCap bounds the findings response's row list; the omitted
+// remainder is counted, never silent (REQ-mcp-envelope).
+const findingsRowCap = 50
+
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
-	out := findingsOut{Findings: []inspectedFinding{}}
+	out := findingsOut{}
+	switch in.State {
+	case "", string(gomutant.FindingCurrent), string(gomutant.FindingStale), string(gomutant.FindingUnverifiable), string(gomutant.FindingDetached):
+	default:
+		return nil, out, fmt.Errorf("unknown state %q (current, stale, unverifiable, detached)", in.State)
+	}
 	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
@@ -840,15 +919,28 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		if in.Label != "" && !containsLabel(finding.Labels, in.Label) {
 			continue
 		}
+		if in.Symbol != "" && finding.Symbol != in.Symbol {
+			continue
+		}
 		inspection, err := tree.InspectFindingContext(ctx, finding)
 		if err != nil {
 			return nil, out, err
+		}
+		if in.State != "" && string(inspection.State) != in.State {
+			continue
 		}
 		layer, layerReason := store.Layer(finding)
 		if layer == "repo" {
 			out.RepoCommittable++
 		} else {
 			out.LocalOnly++
+		}
+		if !in.Detail {
+			out.Summary = append(out.Summary, findingSummary{
+				Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
+				Layer: layer, Open: len(finding.Open()), Attested: len(finding.AttestedDispositions()),
+			})
+			continue
 		}
 		labels := append([]string(nil), finding.Labels...)
 		sort.Strings(labels)
@@ -862,7 +954,16 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 			Candidates: inspection.CandidateEvidence,
 		})
 	}
+	sort.Slice(out.Summary, func(i, j int) bool { return out.Summary[i].Symbol < out.Summary[j].Symbol })
 	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].Symbol < out.Findings[j].Symbol })
+	if len(out.Summary) > findingsRowCap {
+		out.Omitted = len(out.Summary) - findingsRowCap
+		out.Summary = out.Summary[:findingsRowCap]
+	}
+	if len(out.Findings) > findingsRowCap {
+		out.Omitted = len(out.Findings) - findingsRowCap
+		out.Findings = out.Findings[:findingsRowCap]
+	}
 	return nil, out, nil
 }
 
@@ -1027,7 +1128,10 @@ type attestIn struct {
 }
 
 type attestOut struct {
-	Open int `json:"open" jsonschema:"the symbol's open findings after the disposition"`
+	Open        int    `json:"open" jsonschema:"the symbol's open findings after the disposition"`
+	Layer       string `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
+	LayerReason string `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Warning     string `json:"warning,omitempty" jsonschema:"set when the record cannot serve as it stands - the next measure judges the equivalence afresh and sheds the disposition if its pins moved"`
 }
 
 func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in attestIn) (*mcp.CallToolResult, attestOut, error) {
@@ -1037,6 +1141,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 			return nil, out, fmt.Errorf("attest_survivor needs symbol, position, operator, and reason")
 		}
 	}
+	var attested gomutant.Finding
 	err := s.update(ctx, s.findingsPath(in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		for i := range all {
 			if all[i].Symbol == in.Symbol {
@@ -1044,12 +1149,41 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 					return nil, err
 				}
 				out.Open = len(all[i].Open())
+				attested = all[i]
 				return all, nil
 			}
 		}
 		return nil, fmt.Errorf("no finding for %s", in.Symbol)
 	})
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	// The echo states where the record lives and whether it can serve
+	// as it stands: a disposition on a record whose pins moved is
+	// judged afresh - and shed if rejected - by the next measure
+	// (REQ-attest-survivor). The disposition is already recorded, so
+	// echo failures demote to warnings - a hard error here would read
+	// as a failed write that in fact landed.
+	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	if err != nil {
+		out.Warning = "record state unavailable: " + err.Error()
+		return nil, out, nil
+	}
+	out.Layer, out.LayerReason = store.Layer(attested)
+	tree, err := s.loadTreeContext(ctx)
+	if err != nil {
+		out.Warning = "record state unavailable: " + err.Error()
+		return nil, out, nil
+	}
+	inspection, err := tree.InspectFindingContext(ctx, attested)
+	if err != nil {
+		out.Warning = "record state unavailable: " + err.Error()
+		return nil, out, nil
+	}
+	if inspection.State != gomutant.FindingCurrent {
+		out.Warning = fmt.Sprintf("the record is %s (%s) - the disposition is judged afresh when %s is re-measured", inspection.State, inspection.Reason, in.Symbol)
+	}
+	return nil, out, nil
 }
 
 type ephemeralIn struct {

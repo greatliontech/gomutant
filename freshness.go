@@ -758,6 +758,17 @@ func sameAttestationPins(prior, current Finding) bool {
 	return true
 }
 
+// cappedNameList renders an identity list for a reason string: the
+// count and the first exemplars carry the signal, the full list rides
+// the detail surfaces - best-effort naming per REQ-result-inspection.
+func cappedNameList(names []string, noun string) string {
+	const exemplars = 3
+	if len(names) <= exemplars {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%d %s: %s, ... (+%d more)", len(names), noun, strings.Join(names[:exemplars], ", "), len(names)-exemplars)
+}
+
 // derivedOracleDelta names how the current derived oracle set departs from
 // the recorded one — the added and removed test identities — or returns ""
 // when the sets are equal. Naming the delta keeps the re-measure decision
@@ -794,10 +805,10 @@ func derivedOracleDelta(recorded, current []string) string {
 	}
 	var parts []string
 	if len(added) != 0 {
-		parts = append(parts, "added: "+strings.Join(added, ", "))
+		parts = append(parts, "added: "+cappedNameList(added, "tests"))
 	}
 	if len(removed) != 0 {
-		parts = append(parts, "removed: "+strings.Join(removed, ", "))
+		parts = append(parts, "removed: "+cappedNameList(removed, "tests"))
 	}
 	return "derived oracle changed (" + strings.Join(parts, "; ") + ")"
 }

@@ -454,11 +454,31 @@ func TestToolRunFindingsAttest(t *testing.T) {
 		t.Fatalf("oracle timeout pin = %+v, %v", persisted, err)
 	}
 
-	_, fOut, err := s.toolFindings(ctx, nil, findingsIn{})
+	// The default response is the bounded summary: one row per record,
+	// no lists (REQ-mcp-envelope, REQ-result-inspection).
+	_, sOut, err := s.toolFindings(ctx, nil, findingsIn{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fOut.Findings) != 1 || fOut.Findings[0].State != gomutant.FindingCurrent || len(fOut.Findings[0].Open) != len(out.Findings[0].Open) ||
+	if len(sOut.Summary) != 1 || len(sOut.Findings) != 0 || sOut.Summary[0].State != gomutant.FindingCurrent ||
+		sOut.Summary[0].Open != len(out.Findings[0].Open) || sOut.Summary[0].Layer != "local" {
+		t.Fatalf("summary default = %+v", sOut)
+	}
+	if _, byState, err := s.toolFindings(ctx, nil, findingsIn{State: "stale"}); err != nil || len(byState.Summary) != 0 {
+		t.Fatalf("state filter = %+v, %v", byState, err)
+	}
+	if _, _, err := s.toolFindings(ctx, nil, findingsIn{State: "bogus"}); err == nil {
+		t.Fatal("unknown state accepted")
+	}
+	if _, bySym, err := s.toolFindings(ctx, nil, findingsIn{Symbol: "example.com/fixture/lib.Weak"}); err != nil || len(bySym.Summary) != 1 {
+		t.Fatalf("symbol filter = %+v, %v", bySym, err)
+	}
+
+	_, fOut, err := s.toolFindings(ctx, nil, findingsIn{Detail: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fOut.Findings) != 1 || len(fOut.Summary) != 0 || fOut.Findings[0].State != gomutant.FindingCurrent || len(fOut.Findings[0].Open) != len(out.Findings[0].Open) ||
 		fOut.Findings[0].CandidateCount != out.Findings[0].CandidateCount || fOut.Findings[0].Generated != out.Findings[0].Generated ||
 		fOut.Findings[0].Mutants != out.Findings[0].Mutants || fOut.Findings[0].Discarded != out.Findings[0].Discarded {
 		t.Fatalf("findings = %+v", fOut.Findings)
@@ -468,7 +488,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 		t.Fatalf("uncommitted-fixture layer surface = %+v", fOut)
 	}
 	_, filtered, err := s.toolFindings(ctx, nil, findingsIn{Label: "REQ-other"})
-	if err != nil || filtered.Findings == nil || len(filtered.Findings) != 0 {
+	if err != nil || len(filtered.Summary) != 0 || len(filtered.Findings) != 0 {
 		t.Fatalf("filtered-empty findings = %+v, %v", filtered, err)
 	}
 
@@ -481,6 +501,11 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 	if aOut.Open != len(fOut.Findings[0].Open)-1 {
 		t.Fatalf("attest left %d open, want %d", aOut.Open, len(fOut.Findings[0].Open)-1)
+	}
+	// The disposition echo states the record's layer and stays silent on
+	// a record that can serve as it stands (REQ-attest-survivor).
+	if aOut.Layer != "local" || aOut.LayerReason == "" || aOut.Warning != "" {
+		t.Fatalf("attest echo = %+v", aOut)
 	}
 	if _, _, err := s.toolAttest(ctx, nil, attestIn{Symbol: fOut.Findings[0].Symbol, Position: "nowhere:1:1", Operator: "x", Reason: "r"}); err == nil {
 		t.Fatal("attested a non-survivor")
@@ -548,6 +573,48 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 }
 
+// The findings roster caps at 50 rows with the remainder counted -
+// never silently dropped (REQ-mcp-envelope).
+func TestToolFindingsCapsSummaryRows(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		var all []gomutant.Finding
+		for i := 0; i < findingsRowCap+3; i++ {
+			all = append(all, seededFinding(fmt.Sprintf("example.com/empty.Gone%02d", i)))
+		}
+		return all, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := s.toolFindings(context.Background(), nil, findingsIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Summary) != findingsRowCap || out.Omitted != 3 {
+		t.Fatalf("cap = %d rows, %d omitted; want %d and 3", len(out.Summary), out.Omitted, findingsRowCap)
+	}
+}
+
+// Run-response residue rows cap with the remainder counted on every
+// exit path (REQ-mcp-envelope).
+func TestCapResidueCountsTheRemainder(t *testing.T) {
+	rows := make([]gomutant.Residue, 53)
+	capped, omitted := capResidue(rows)
+	if len(capped) != 50 || omitted != 3 {
+		t.Fatalf("capResidue = %d rows, %d omitted", len(capped), omitted)
+	}
+	if capped, omitted := capResidue(rows[:7]); len(capped) != 7 || omitted != 0 {
+		t.Fatalf("under-cap residue disturbed: %d rows, %d omitted", len(capped), omitted)
+	}
+}
+
 func TestToolCandidateDiscardAccounting(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs an oracle baseline")
@@ -564,7 +631,7 @@ func TestToolCandidateDiscardAccounting(t *testing.T) {
 		len(out.Decisions) != 1 || out.Decisions[0].Candidates != 1 {
 		t.Fatalf("run discard accounting = %+v", out)
 	}
-	_, inspected, err := s.toolFindings(context.Background(), nil, findingsIn{})
+	_, inspected, err := s.toolFindings(context.Background(), nil, findingsIn{Detail: true})
 	if err != nil {
 		t.Fatal(err)
 	}

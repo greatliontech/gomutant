@@ -379,6 +379,18 @@ func TestDerivedOracleDeltaNamesBothDirections(t *testing.T) {
 	if got := derivedOracleDelta([]string{"p.TestA", "p.TestA"}, []string{"p.TestA"}); got != "derived oracle changed (recorded oracle repeats an identity)" {
 		t.Fatalf("duplicate delta = %q", got)
 	}
+	// A long identity list renders count-capped with leading exemplars:
+	// the count and the first names carry the signal, the full roster
+	// rides the detail surfaces (REQ-result-inspection).
+	got = derivedOracleDelta(nil, []string{"p.TestA", "p.TestB", "p.TestC", "p.TestD", "p.TestE"})
+	if got != "derived oracle changed (added: 5 tests: p.TestA, p.TestB, p.TestC, ... (+2 more))" {
+		t.Fatalf("capped delta = %q", got)
+	}
+	// Exactly at the exemplar bound the list renders whole - the cap
+	// buys signal only past it.
+	if got := derivedOracleDelta(nil, []string{"p.TestA", "p.TestB", "p.TestC"}); got != "derived oracle changed (added: p.TestA, p.TestB, p.TestC)" {
+		t.Fatalf("bound delta = %q", got)
+	}
 }
 
 // TestSiblingTestAdditionStalesRecordAsTestVariants pins the test-variant
