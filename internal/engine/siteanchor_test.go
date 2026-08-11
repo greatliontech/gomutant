@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"testing"
 )
 
@@ -36,5 +37,40 @@ func TestSiteHashDiscriminatesSameShapedSites(t *testing.T) {
 	// Bounds: a window at the file edges clamps without panicking.
 	if siteHash(source, 0, 1) == "" || siteHash(source, len(source)-1, len(source)) == "" {
 		t.Fatal("edge windows produced empty hashes")
+	}
+}
+
+// PropertyRuntimesContext maps oracle packages to their recognized
+// property runtimes: rapid via in-package or external test variants,
+// gopter via its own import, plain packages absent
+// (REQ-exec-property-oracles).
+func TestPropertyRuntimesContext(t *testing.T) {
+	tr := fixtureTree(t)
+	got, err := tr.PropertyRuntimesContext(context.Background(), []string{
+		"example.com/fixture/lib", "example.com/fixture/plain",
+		"example.com/fixture/extprop", "example.com/fixture/gopterprop",
+		"example.com/fixture/mixedprop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		"example.com/fixture/lib":        {"rapid"},
+		"example.com/fixture/extprop":    {"rapid"},
+		"example.com/fixture/gopterprop": {"gopter"},
+		"example.com/fixture/mixedprop":  {"gopter", "rapid"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("runtimes = %v, want %v", got, want)
+	}
+	for pkg, runtimes := range want {
+		if len(got[pkg]) != len(runtimes) {
+			t.Fatalf("runtimes[%s] = %v, want %v", pkg, got[pkg], runtimes)
+		}
+		for i := range runtimes {
+			if got[pkg][i] != runtimes[i] {
+				t.Fatalf("runtimes[%s] = %v, want %v (sorted)", pkg, got[pkg], runtimes)
+			}
+		}
 	}
 }

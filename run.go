@@ -34,6 +34,9 @@ func lockCallbacks(opts Options) Options {
 	if fn := opts.Guidance; fn != nil {
 		opts.Guidance = func(g OracleGuidance) { mu.Lock(); defer mu.Unlock(); fn(g) }
 	}
+	if fn := opts.PropertyOracle; fn != nil {
+		opts.PropertyOracle = func(n PropertyOracleNote) { mu.Lock(); defer mu.Unlock(); fn(n) }
+	}
 	if fn := opts.Decision; fn != nil {
 		opts.Decision = func(d RunDecision) { mu.Lock(); defer mu.Unlock(); fn(d) }
 	}
@@ -86,6 +89,10 @@ type Options struct {
 	// unstable ones named with a narrowing suggestion
 	// (REQ-exec-oracle-guidance). Nil skips the attribution probes.
 	Guidance func(OracleGuidance)
+	// PropertyOracle states a property-runtime prerequisite discovered
+	// in an oracle package before execution: what the run pinned itself,
+	// or what the caller must ensure (REQ-exec-property-oracles).
+	PropertyOracle func(PropertyOracleNote)
 	// BracketPaths declares external surfaces the oracle legitimately
 	// reads — module-relative paths (a file or a directory tree) or
 	// absolute files — extending each spawn's observation bracket beyond
@@ -232,6 +239,40 @@ type RunDecision struct {
 	Candidates int    `json:"candidates,omitempty"`
 }
 
+// PropertyOracleNote states one oracle package's property-runtime
+// prerequisite (REQ-exec-property-oracles): a pinned runtime names what
+// the run pinned itself; an unpinnable one names what the caller must
+// ensure for reproducible verdicts.
+type PropertyOracleNote struct {
+	Package string `json:"package"`
+	Runtime string `json:"runtime"`
+	Note    string `json:"note"`
+}
+
+// propertyOracleFlags is the oracle invocation's property-runtime
+// pinning: a rapid package runs with its reproducer files suppressed
+// and its draws pinned, so every mutant faces the same draw sequence
+// and a verdict is reproducible (REQ-exec-property-oracles).
+func propertyOracleFlags(rapid bool) []string {
+	if !rapid {
+		return nil
+	}
+	return engine.PropertyOracleBinFlags()
+}
+
+// propertyOracleNote renders one package's prerequisite statement.
+func propertyOracleNote(pkg, runtime string) (PropertyOracleNote, bool) {
+	switch runtime {
+	case "rapid":
+		return PropertyOracleNote{Package: pkg, Runtime: runtime,
+			Note: "draws pinned (-rapid.seed=1) and reproducer files suppressed (-rapid.nofailfile) - verdicts reproducible"}, true
+	case "gopter":
+		return PropertyOracleNote{Package: pkg, Runtime: runtime,
+			Note: "gomutant cannot pin gopter's draws - ensure the suite fixes its seed, or verdicts are unreproducible"}, true
+	}
+	return PropertyOracleNote{}, false
+}
+
 // RunSummary is the aggregate final disposition of one selected target set.
 type RunSummary struct {
 	Targets   int `json:"targets"`
@@ -292,12 +333,15 @@ type runPreparation struct {
 	validate       func(context.Context, []string) error
 	contextFor     func(context.Context, string) (string, string, error)
 	splitRapidPkgs func(context.Context, []string) ([]string, []string, error)
+	runtimesOf     func(context.Context, []string) (map[string][]string, error)
 
 	verifyEnumeration func(context.Context, string, []string) error
 	derivedOracles    map[string][]string
 	validations       map[string]oracleValidationResult
 	contexts          map[string]packageContextResult
 	rapid             map[string]bool
+	runtimes          map[string][]string
+	notedProperty     map[string]bool
 }
 
 func newRunPreparation(t *Tree) *runPreparation {
@@ -307,6 +351,7 @@ func newRunPreparation(t *Tree) *runPreparation {
 		validate:          t.eng.ValidateOracleContext,
 		contextFor:        t.eng.PackageContextContext,
 		splitRapidPkgs:    t.eng.SplitRapidPkgsContext,
+		runtimesOf:        t.eng.PropertyRuntimesContext,
 		verifyEnumeration: t.eng.VerifyTestEnumerationContext,
 		derivedOracles:    map[string][]string{},
 		validations:       map[string]oracleValidationResult{},
@@ -396,6 +441,41 @@ func (p *runPreparation) rapidPackages(ctx context.Context, candidates []string)
 		p.rapid[pkg] = true
 	}
 	return p.rapid, nil
+}
+
+// noteProperty reports whether pkg's prerequisite statement has not yet
+// been emitted this run and marks it emitted - one statement per
+// package per run.
+func (p *runPreparation) noteProperty(pkg string) bool {
+	if p.notedProperty == nil {
+		p.notedProperty = map[string]bool{}
+	}
+	if p.notedProperty[pkg] {
+		return false
+	}
+	p.notedProperty[pkg] = true
+	return true
+}
+
+// propertyRuntimes memoizes the oracle packages' recognized property
+// runtimes for the run's prerequisite statements
+// (REQ-exec-property-oracles).
+func (p *runPreparation) propertyRuntimes(ctx context.Context, candidates []string) (map[string][]string, error) {
+	if p.runtimes != nil {
+		return p.runtimes, ctx.Err()
+	}
+	runtimes, err := p.runtimesOf(ctx, candidates)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	p.runtimes = runtimes
+	if p.runtimes == nil {
+		p.runtimes = map[string][]string{}
+	}
+	return p.runtimes, nil
 }
 
 func sequenceKey(values []string) string {
@@ -869,6 +949,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			oracleViews = append(oracleViews, views.bySymbol[symbol])
 		}
 		rec, hasPrior := prior[tg.Symbol]
+		// The target's property-runtime measurement regime: a rapid
+		// oracle package pins its draws, and the regime is a measurement
+		// pin - a record measured under other draws re-measures
+		// (REQ-exec-property-oracles).
+		targetRapid, err := preparation.rapidPackages(ctx, oraclePackages)
+		if err != nil {
+			return nil, err
+		}
+		regime := ""
+		for _, run := range pkgRuns(oracle) {
+			if targetRapid[run.pkg] {
+				regime = engine.PropertyRegimeRapid
+				break
+			}
+		}
+		f.PropertyRegime = regime
 		reason := "no-prior"
 		if hasPrior {
 			switch {
@@ -886,7 +982,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		var drift *Finding
 		var driftMoved []string
 		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
-			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin)
+			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
 			if err != nil {
 				return nil, err
 			}
@@ -894,7 +990,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// A mismatch may be exactly the growth the third carve-out
 				// serves: the derived oracle grew while the compartment
 				// moved by an inert declaration delta (REQ-result-stale).
-				added, grows, gerr := evidenceSetCoversGrowthContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin)
+				added, grows, gerr := evidenceSetCoversGrowthContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
 				if gerr != nil {
 					return nil, gerr
 				}
@@ -902,7 +998,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					snapshot := snapshotFindings([]Finding{*rec})[0]
 					grow = &snapshot
 					growAdded = added
-				} else if moved, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin); derr != nil {
+				} else if moved, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime); derr != nil {
 					return nil, derr
 				} else if drifts {
 					// The compartment moved but the movement is attributable:
@@ -972,7 +1068,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// disciplines (REQ-result-stale).
 				reason += "; prior candidate evidence re-executes only under its recorded budget, so the whole target re-measures"
 			} else {
-				matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin)
+				matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
 				if err != nil {
 					return nil, err
 				}
@@ -1198,14 +1294,21 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			groupOracle = w.growAdded
 		}
 		runs := pkgRuns(groupOracle)
-		rapid, err := preparation.rapidPackages(ctx, oraclePackages)
+		runtimes, err := preparation.propertyRuntimes(ctx, oraclePackages)
 		if err != nil {
 			return nil, err
 		}
 		for _, pr := range runs {
-			var flags []string
-			if rapid[pr.pkg] {
-				flags = []string{"-rapid.nofailfile"}
+			// Flags and statements derive from the one detection scan:
+			// a package whose runtimes include rapid pins, and each
+			// detected runtime earns its own statement
+			// (REQ-exec-property-oracles).
+			flags := propertyOracleFlags(slices.Contains(runtimes[pr.pkg], "rapid"))
+			for _, runtime := range runtimes[pr.pkg] {
+				note, ok := propertyOracleNote(pr.pkg, runtime)
+				if ok && preparation.noteProperty(pr.pkg+"/"+runtime) && opts.PropertyOracle != nil {
+					opts.PropertyOracle(note)
+				}
 			}
 			moduleDir, packageDir, err := preparation.packageContext(ctx, pr.pkg)
 			if err != nil {

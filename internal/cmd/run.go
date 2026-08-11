@@ -203,6 +203,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 		AttestationSiteShed: func(d gomutant.AttestationShed) {
 			commitSheds = append(commitSheds, d)
 		},
+		PropertyOracle: func(n gomutant.PropertyOracleNote) {
+			fmt.Fprintf(out, "property  %s  %s: %s\n", n.Package, n.Runtime, n.Note)
+		},
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).

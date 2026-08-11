@@ -50,6 +50,7 @@ func TestSameAttestationPins(t *testing.T) {
 		{"candidate count", func(f *Finding) { f.CandidateCount = 1 }},
 		{"generated candidates", func(f *Finding) { f.Generated = 1 }},
 		{"oracle timeout", func(f *Finding) { f.OracleTimeout = "2m0s" }},
+		{"property regime", func(f *Finding) { f.PropertyRegime = "rapid:nofailfile,seed=1" }},
 		{"target evidence", func(f *Finding) { f.TargetEvidence.RuntimeDigest = "moved" }},
 		{"observation proof", func(f *Finding) { f.TargetEvidence.ObservationEvidence = "moved" }},
 		{"oracle evidence", func(f *Finding) { f.OracleEvidence[0].RuntimeDigest = "moved" }},

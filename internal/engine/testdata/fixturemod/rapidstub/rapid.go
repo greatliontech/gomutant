@@ -14,6 +14,7 @@ import (
 // as a false kill.
 func init() {
 	flag.Bool("rapid.nofailfile", false, "rapid: do not write fail files on test failures")
+	flag.Uint64("rapid.seed", 0, "rapid: PRNG seed (0 means random)")
 }
 
 // T mirrors rapid.T as the property callback's handle.

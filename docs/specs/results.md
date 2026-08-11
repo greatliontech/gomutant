@@ -313,7 +313,7 @@ survivor attestations. Oracle membership remains a measurement pin, so changing
 the executable oracle remeasures as usual.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable version-5 document that gomutant owns — carrying, per mutated
+portable version-6 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,
 each carrying its package's test-variant compartment hash beside the maximal
 closure;

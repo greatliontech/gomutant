@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,10 +89,11 @@ func TestParseFindingsAcceptsVersionFour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := strings.Replace(string(data), "\"version\": 5", "\"version\": 4", 1)
-	if old == string(data) {
-		t.Fatalf("fixture did not carry version 5:\n%s", data)
+	current := fmt.Sprintf("\"version\": %d", DocumentVersion)
+	if !strings.Contains(string(data), current) {
+		t.Fatalf("fixture does not carry the current version:\n%s", data)
 	}
+	old := strings.Replace(string(data), current, "\"version\": 4", 1)
 	parsed, err := ParseFindings([]byte(old))
 	if err != nil {
 		t.Fatalf("version-4 document refused: %v", err)
@@ -99,11 +101,12 @@ func TestParseFindingsAcceptsVersionFour(t *testing.T) {
 	if len(parsed) != 1 || parsed[0].Survivors[0].Site != "" {
 		t.Fatalf("version-4 parse = %+v", parsed)
 	}
-	if _, err := ParseFindings([]byte(strings.Replace(string(data), "\"version\": 5", "\"version\": 3", 1))); err == nil {
+	if _, err := ParseFindings([]byte(strings.Replace(string(data), current, "\"version\": 3", 1))); err == nil {
 		t.Fatal("version-3 document accepted")
 	}
-	if _, err := ParseFindings([]byte(strings.Replace(string(data), "\"version\": 5", "\"version\": 6", 1))); err == nil {
-		t.Fatal("version-6 document accepted")
+	future := fmt.Sprintf("\"version\": %d", DocumentVersion+1)
+	if _, err := ParseFindings([]byte(strings.Replace(string(data), current, future, 1))); err == nil {
+		t.Fatal("future-version document accepted")
 	}
 }
 

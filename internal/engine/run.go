@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,15 @@ const (
 // persist a failure reproducer into the tree unless told not to, which a
 // mutant run must never allow (REQ-mut-overlay).
 const rapidPkg = "pgregory.net/rapid"
+
+// gopterPkg is the property runtime gomutant recognizes but cannot pin:
+// gopter carries no invocation-level seed flag, so determinism is the
+// suite's own responsibility (REQ-exec-property-oracles).
+const gopterPkg = "github.com/leanovate/gopter"
+
+// propertyRuntimeNames maps recognized property-runtime import paths to
+// their short names for prerequisite statements.
+var propertyRuntimeNames = map[string]string{rapidPkg: "rapid", gopterPkg: "gopter"}
 
 var observationSequence atomic.Uint64
 
@@ -91,6 +101,72 @@ func (t *Tree) SplitRapidPkgsContext(ctx context.Context, testPkgs []string) (ra
 	}
 	return rapid, plain, nil
 }
+
+// PropertyRuntimesContext maps each named test package to the recognized
+// property runtimes its package (test variants included) imports,
+// sorted - the preflight input for property-oracle prerequisites
+// (REQ-exec-property-oracles). A mixed package carries every detected
+// runtime, so each earns its own statement; packages importing none
+// are absent.
+func (t *Tree) PropertyRuntimesContext(ctx context.Context, testPkgs []string) (map[string][]string, error) {
+	byPath := map[string]map[string]bool{}
+	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		for _, f := range pkg.Syntax {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			for _, imp := range f.Imports {
+				if name := propertyRuntimeNames[strings.Trim(imp.Path.Value, `"`)]; name != "" {
+					if byPath[pkg.PkgPath] == nil {
+						byPath[pkg.PkgPath] = map[string]bool{}
+					}
+					byPath[pkg.PkgPath][name] = true
+				}
+			}
+		}
+	}
+	runtimes := map[string][]string{}
+	for _, p := range testPkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		names := map[string]bool{}
+		for name := range byPath[p] {
+			names[name] = true
+		}
+		for name := range byPath[p+"_test"] {
+			names[name] = true
+		}
+		if len(names) == 0 {
+			continue
+		}
+		sorted := make([]string, 0, len(names))
+		for name := range names {
+			sorted = append(sorted, name)
+		}
+		sort.Strings(sorted)
+		runtimes[p] = sorted
+	}
+	return runtimes, nil
+}
+
+// PropertyOracleBinFlags is the rapid invocation pinning shared by the
+// campaign and ephemeral probes: reproducer files suppressed and draws
+// pinned, so every mutant faces the same draw sequence and a verdict is
+// reproducible (REQ-exec-property-oracles).
+func PropertyOracleBinFlags() []string {
+	return []string{"-rapid.nofailfile", "-rapid.seed=1"}
+}
+
+// PropertyRegimeRapid is the recorded measurement regime of a finding
+// whose oracle ran under the rapid pinning; the empty regime is a
+// property-runtime-free oracle. The regime is a measurement pin: a
+// record measured under other draws must not serve as if reproducible
+// under this one (REQ-exec-property-oracles, REQ-result-stale).
+const PropertyRegimeRapid = "rapid:nofailfile,seed=1"
 
 // TimeoutKiller is the killer attribution of a timed-out mutant run: the
 // hang itself is the noticed breakage, so no named test claims the kill

@@ -177,7 +177,11 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		return nil, err
 	}
 	if len(rapid) > 0 {
-		binFlags = []string{"-rapid.nofailfile"}
+		// A property oracle's draws are pinned so the probe's verdict -
+		// and runs:N's per-run verdicts - are reproducible; the
+		// reproducer-file suppression protects the tree exactly as
+		// before (REQ-exec-property-oracles).
+		binFlags = engine.PropertyOracleBinFlags()
 	}
 
 	env := t.eng.GoEnv()

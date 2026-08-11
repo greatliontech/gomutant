@@ -305,6 +305,12 @@ type Finding struct {
 	// never serves across a moved ceiling. Its addition narrows reuse
 	// and rides the version-4 bump (REQ-result-export's precedent).
 	OracleMemoryBytes int64 `json:"oracleMemoryBytes,omitempty"`
+	// PropertyRegime records the property-runtime measurement regime the
+	// finding's oracle ran under ("" = none; engine.PropertyRegimeRapid =
+	// rapid draws pinned): a measurement pin, so a record measured under
+	// other draws re-measures instead of serving as reproducible
+	// (REQ-exec-property-oracles).
+	PropertyRegime string `json:"propertyRegime,omitempty"`
 	// CompartmentLedger is the target package's test-variant declaration
 	// ledger at measure time; the oracle-growth carve-out diffs it against
 	// the current tree, and a record persisted without one (an older
@@ -442,7 +448,12 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // still readable - their empty sites are the grandfathered
 // match-by-position form that adopts sites on first carry - while an
 // unknown version still refuses.
-const DocumentVersion = 5
+// Version 6 introduced the
+// property-regime measurement pin: the field is what stales a
+// rapid-oracle record measured under unpinned draws, so an older
+// consumer's tolerance would have dropped it and served verdicts from
+// draw sequences the pinned regime never executes.
+const DocumentVersion = 6
 
 // oldestReadableVersion bounds the known older document versions the
 // parser upgrades on read (REQ-result-tolerant).
@@ -507,7 +518,7 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	known := map[string]bool{
 		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
 		"budget": true, "targetEvidence": true, "oracleEvidence": true,
-		"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "compartmentLedger": true, "commit": true, "dirty": true,
+		"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "propertyRegime": true, "compartmentLedger": true, "commit": true, "dirty": true,
 		"candidateCount": true, "generated": true, "mutants": true, "killed": true,
 		"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true,
 		"candidateEvidence": true,
@@ -992,7 +1003,26 @@ func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget
 	// consumer that never installed a ceiling compares 0 against
 	// derived-pinned records and reads stale: the conservative
 	// direction; install or derive a ceiling first for parity with Run.
-	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String(), engine.OracleMemoryLimitBytes())
+	// The property regime the run would use derives from the oracle's
+	// own packages, exactly as Run derives it - a regimeless rapid
+	// record reads stale here too (REQ-exec-property-oracles).
+	oraclePkgs := make([]string, 0, len(oracle))
+	seenPkg := map[string]bool{}
+	for _, run := range pkgRuns(oracle) {
+		if !seenPkg[run.pkg] {
+			seenPkg[run.pkg] = true
+			oraclePkgs = append(oraclePkgs, run.pkg)
+		}
+	}
+	rapidPkgs, _, err := t.eng.SplitRapidPkgsContext(ctx, oraclePkgs)
+	if err != nil {
+		return false, err
+	}
+	regime := ""
+	if len(rapidPkgs) > 0 {
+		regime = engine.PropertyRegimeRapid
+	}
+	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String(), engine.OracleMemoryLimitBytes(), regime)
 	if err != nil || !matches {
 		return matches, err
 	}

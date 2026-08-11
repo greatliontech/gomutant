@@ -373,6 +373,7 @@ type runOut struct {
 	OmittedFindings  int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
 	Guidance         []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
 	Contradictions   []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
+	PropertyOracles  []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
 	AttestationSheds []string                    `json:"attestationSheds,omitempty" jsonschema:"dispositions refused only because the site content under their position changed: the surviving mutant is not the attested one - re-review and re-attest if genuinely equivalent"`
 	Residue          []gomutant.Residue          `json:"residue,omitempty"`
 	OmittedResidue   int                         `json:"omittedResidue,omitempty"`
@@ -521,6 +522,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		},
 		AttestationSiteShed: func(d gomutant.AttestationShed) {
 			commitSheds = append(commitSheds, d)
+		},
+		PropertyOracle: func(n gomutant.PropertyOracleNote) {
+			out.PropertyOracles = append(out.PropertyOracles, fmt.Sprintf("%s %s: %s", n.Package, n.Runtime, n.Note))
 		},
 		Prior:    prior,
 		Decision: streams.decision,

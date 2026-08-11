@@ -223,6 +223,39 @@ taking sibling targets down; a campaign-wide abort remains reserved for conditio
 invalidate every measurement (cancellation of the run itself, the HEAD
 move above, a view failure spanning all targets).
 
+**REQ-exec-property-oracles** (behavior): gomutant MUST detect recognized
+property runtimes in an oracle package's imports (test variants included)
+before execution and settle each detected runtime's determinism
+prerequisite there, never leaving the discovery to the caller
+mid-campaign — a mixed package earns every detected runtime's own
+statement, because a single-winner note would state something false
+either way. A rapid package
+runs with its draws pinned (`-rapid.seed=1`) and its reproducer files
+suppressed (`-rapid.nofailfile`) — every mutant faces the same draw
+sequence, so a verdict is reproducible and the kill cache's
+killing-oracle-content keying stays stable — and the run states what it
+pinned, once per package and runtime, on runs that execute (a served
+record was measured under its recorded regime, which the regime pin
+below guarantees). The pin's cost is owned: all mutants of a campaign
+share one draw sequence, so total draw coverage narrows versus
+per-process random seeds, and a mutant killable only under other draws
+survives deterministically — the reproducible-survivor direction is
+chosen over the flaky-kill one, and the seed value is incidental, not
+contract. The regime a finding's oracle ran under is a recorded
+measurement pin: a record measured under other draws — a pre-regime
+document included — re-measures rather than serving as reproducible.
+A recognized runtime gomutant cannot pin
+(gopter carries no invocation-level seed flag) earns a stated caller
+prerequisite — ensure an in-suite fixed seed, or verdicts are
+unreproducible — rather than a refusal: an internally pinned suite is
+deterministic and indistinguishable from an unpinned one at the import
+level, so refusing would misjudge sound suites; the empirical
+unstable-oracle evidence machinery remains the anti-flattering backstop.
+Ephemeral probes pin rapid identically, so a probe's verdict and its
+runs:N per-run verdicts are reproducible; the ephemeral surface carries
+no statement channel — the campaign surface owns prerequisite
+statements.
+
 **REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant — a
 caller-supplied replacement of one or more existing source files, given whole,
 as sequential exact-match edits to one file, or as an atomic batch of

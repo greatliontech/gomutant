@@ -2170,19 +2170,19 @@ func TestGrowthGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 		views.bySymbol["example.com/growthgate.TestSmall"],
 		views.bySymbol["example.com/growthgate.TestMore"],
 	}
-	added, ok, err := evidenceSetCoversGrowthContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes)
+	added, ok, err := evidenceSetCoversGrowthContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes, "")
 	if err != nil || !ok || len(added) != 1 || added[0] != "example.com/growthgate.TestMore" {
 		t.Fatalf("intact pins refused the growth gate: added=%v ok=%v err=%v", added, ok, err)
 	}
 	tampered := prior[0]
 	tampered.TargetEvidence.Toolchain = "go0.0-never"
-	if _, ok, err := evidenceSetCoversGrowthContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleMemoryBytes); err != nil || ok {
+	if _, ok, err := evidenceSetCoversGrowthContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleMemoryBytes, ""); err != nil || ok {
 		t.Fatalf("a moved toolchain hid behind the compartment verdict: ok=%v err=%v", ok, err)
 	}
 	// Growth is a derived-oracle claim on both sides: an explicit request
 	// supersetting the recorded derived set is the caller's selection,
 	// never derived growth.
-	if _, ok, err := evidenceSetCoversGrowthContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes); err != nil || ok {
+	if _, ok, err := evidenceSetCoversGrowthContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes, ""); err != nil || ok {
 		t.Fatalf("an explicit request rode the derived-growth carve-out: ok=%v err=%v", ok, err)
 	}
 }
@@ -2488,14 +2488,14 @@ func TestEvidenceSetCoversGrowthRefusesIneligibleRecords(t *testing.T) {
 			return f
 		}(),
 	} {
-		added, ok, err := evidenceSetCoversGrowthContext(ctx, prior, nil, oracle, false, "go/12", "1m0s", 0)
+		added, ok, err := evidenceSetCoversGrowthContext(ctx, prior, nil, oracle, false, "go/12", "1m0s", 0, "")
 		if err != nil || ok || added != nil {
 			t.Fatalf("%s: growth gate = %v %v %v, want a refusal before any evidence check", name, added, ok, err)
 		}
 	}
 	// Not strictly grown: recorded set size equals the current one.
 	equal := base
-	if added, ok, err := evidenceSetCoversGrowthContext(ctx, equal, nil, oracle[:1], false, "go/12", "1m0s", 0); err != nil || ok || added != nil {
+	if added, ok, err := evidenceSetCoversGrowthContext(ctx, equal, nil, oracle[:1], false, "go/12", "1m0s", 0, ""); err != nil || ok || added != nil {
 		t.Fatalf("non-grown set = %v %v %v, want a refusal", added, ok, err)
 	}
 }
