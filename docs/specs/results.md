@@ -313,7 +313,7 @@ survivor attestations. Oracle membership remains a measurement pin, so changing
 the executable oracle remeasures as usual.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable version-6 document that gomutant owns — carrying, per mutated
+portable version-7 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,
 each carrying its package's test-variant compartment hash beside the maximal
 closure;
@@ -327,7 +327,12 @@ inverse of candidate evidence's narrowing precedent), each survivor's
 position and operator, the candidate-evidence
 list when any candidate carries one, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
-it does not understand. A subject's recorded dynamic-state vouches ride the evidence as audit and
+it does not understand. Each subject's evidence carries its module's tree-relative base
+(absent means the tree root), the base the portable-line containment
+resolves that subject's manifest against; the field narrows layer
+routing, so it rides the version bump that introduced it - an older
+consumer re-splitting the document without it could promote a
+workspace member's machine-local record. A subject's recorded dynamic-state vouches ride the evidence as audit and
 never narrow reuse — an old consumer dropping the field changes no
 verdict — so the field rides the current version without a bump, the
 kill-attribution precedent. This is the inverse of the targeting seam: gomutant
@@ -344,8 +349,23 @@ required field of their version are malformed and refused.
 layers by committability. The repo document (the findings path, under version
 control) carries only portable records: clean commit provenance (not dirty,
 commit present), no runtime-unverifiable subject evidence, and no runtime-input
-path outside the module directory — evidence a reviewer on another machine can
-inherit soundly. Every other record — dirty-worktree measurements,
+path outside the subject's own module directory - each subject's manifest
+resolves against its recorded tree-relative module base, so a workspace
+member's containment line is its member module, and a record without a
+base keeps the tree-root line - evidence a reviewer on another machine can
+inherit soundly. Dirty provenance means git-visible drift: an identity
+outside the repository is not git's to vouch for and does not stamp
+dirty - it keeps the record machine-local, named in the portable line
+by its machine-local-input clause (and, where the observation bracket
+could not cover the input, by the unverifiable evidence's recorded
+reason as well - both clauses hold and both are truthful). Whether an
+identity is outside the repository is judged over its physical form -
+for the dirty stamp only; the portable line's containment clause
+judges the recorded form, whose module-boundary meaning the identity
+was recorded under. A literal identity may be an alias form of an
+in-repo path, and form divergence resolves fail-closed - an identity
+whose physical location cannot be established counts as in-repo for
+the dirty stamp, never silently external. Every other record — dirty-worktree measurements,
 unverifiable observations, machine-local input identities — lives in a
 machine-local overlay under the user cache directory keyed by the resolved
 module root, one atomically written entry per symbol; a malformed overlay entry
@@ -472,11 +492,64 @@ assert only what to measure, never that an omitted symbol no longer exists.
 Package- or symbol-filtered runs are likewise scoped and retain every
 unmeasured entry, even when their targets came from whole-tree discovery.
 
+**REQ-result-lifecycle** (behavior): The tool MUST offer the two record
+lifecycle verbs a refactor needs, on both faces. Prune removes every
+record whose mutated symbol no current declaration resolves - the
+terminal records no re-measure can revive - echoing each removed
+record's attested dispositions in its response so the reasoning survives
+the removal, never dropping one silently; it judges symbols only against
+a successfully loaded tree, because a load failure is indistinguishable
+from a rename at the symbol layer and pruning on it would destroy live
+records. Retarget rewrites symbol identity across a rename: every
+record whose symbol-bearing fields carry the caller's old prefix
+rewrites to the new prefix (the mutated symbol, each subject evidence's
+symbol and observation-subject identity, and kill attributions), while
+attestations and survivors ride unchanged - they anchor on position,
+operator, and site content, never symbol text (REQ-attest-survivor).
+A prefix applies only at a segment boundary - the whole identity, or a
+match whose edge falls at a `/` or `.` separator on either side - so a
+rename of `example.com/old` never rewrites `example.com/oldtime`.
+Three lexically unresolvable shapes refuse whole rather than guess: a
+`.` edge after a bare prefix (it may open the named package's local
+half or continue a dotted sibling package - `lib` vs `lib.v2` - and a
+guess would write a corrupted identity durably; the refusal names the
+separator-terminated form), a structurally asymmetric pair (one half
+package-shaped, the other symbol-shaped - the observation-subject
+projections would disagree), and an unlike-terminated pair (the
+matched separator would be consumed and never re-emitted, splicing
+identities like `example.com/newTestF`). A separator-terminated prefix
+is the caller's explicit boundary claim: a trailing `.` marks the
+whole prefix as a package claim - the package half is everything
+before it - so a package whose final segment carries a dot (`lib.v2`)
+renames by its true boundary. A symbol pair renames within its
+package: the destination carries no stored fact to validate a package
+move against, so the package halves must agree and the local halves
+map segment for segment (a dotted remainder may continue a package
+instead of naming a local) - violations refuse. The evidence's
+recorded subject package is authoritative over every match: where the
+pair crosses into the local half of exactly the stored package, the
+local derives from the stored fact; a destination that would move the
+evidence out of its recorded package cannot carry the observation
+identity and refuses; and a prefix crossing a dotted package boundary
+into a sibling refuses whole, naming the sibling package. Kill attributions carry no such fact, so every touched
+record's field rewrites (kill attributions and evidence symbols alike)
+are echoed row by row, in check previews too - the audit surface for
+the one path no gate reaches (bounded protocol envelopes cap the echo
+per their own contract, the remainder counted). A probe-confirmed package-failure kill
+attribution names a package, not a symbol; under a package-shaped pair
+its embedded path rewrites with the same projection.
+Each rewritten target symbol must resolve in the current tree, and a
+rewrite colliding with an existing record refuses whole. Both verbs
+offer a check mode that previews the dispositions without touching the
+document.
+
 **REQ-result-inspection** (behavior): Findings inspection MUST classify every
 record as `current` when all recorded mutation-domain and subject evidence
 still proves reusable, `stale` when a comparable input moved, `unverifiable`
 when current evidence cannot prove reuse, or `detached` when the mutated symbol
-no longer resolves. A record whose candidate evidence flags any candidate is
+no longer resolves - a terminal state the reason says so loudly in every
+view, naming the prune and retarget moves, because nothing short of the
+symbol returning can revive the record. A record whose candidate evidence flags any candidate is
 not reusable as it stands, so it classifies `unverifiable` even when its
 subject evidence is current, with the candidate evidence carried in every view
 so the candidate-local scope is visible. The classification is advisory and

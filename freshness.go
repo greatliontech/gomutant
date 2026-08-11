@@ -3,6 +3,7 @@ package gomutant
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -35,14 +36,31 @@ type FindingInspection struct {
 }
 
 type subjectView struct {
-	symbol      string
-	subject     gofresh.Subject
-	moduleDir   string
+	symbol    string
+	subject   gofresh.Subject
+	moduleDir string
+	// moduleBase is moduleDir relative to the tree root in slash form
+	// ("" for the root module): the machine-portable base persisted on
+	// evidence so the store's portable-line walk resolves each subject's
+	// manifest against that subject's own module (REQ-result-layers).
+	moduleBase  string
 	env         []string
 	view        *gofresh.View
 	fp          gofresh.Fingerprint
 	sourceFiles []string
 	module      *moduleSubjectView
+}
+
+// treeRelModuleBase computes a subject module's tree-relative slash
+// base: "" for the root module, and "" fail-safe when the module
+// escapes the tree - the walk then falls back to the tree root, the
+// pre-base behavior.
+func treeRelModuleBase(treeDir, moduleDir string) string {
+	rel, err := filepath.Rel(treeDir, moduleDir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 type moduleSubjectView struct {
@@ -217,6 +235,7 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 			}
 			set.bySymbol[resolved.symbol] = &subjectView{
 				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir,
+				moduleBase: treeRelModuleBase(t.dir, resolved.moduleDir),
 				env: env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
 			}
 		}
@@ -298,6 +317,7 @@ func (t *Tree) newObservedUnionViews(ctx context.Context, symbols []string, pack
 			}
 			set.bySymbol[resolved.symbol] = &subjectView{
 				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir,
+				moduleBase: treeRelModuleBase(t.dir, resolved.moduleDir),
 				env: env, view: view, fp: captured, sourceFiles: sourceFiles, module: module,
 			}
 		}
@@ -361,7 +381,7 @@ func (s *subjectViewSet) forTarget(target string, oracle []string, faults map[st
 		narrowed.modules = append(narrowed.modules, siblingModule)
 		for _, sv := range group.views {
 			narrowed.bySymbol[sv.symbol] = &subjectView{
-				symbol: sv.symbol, subject: sv.subject, moduleDir: sv.moduleDir,
+				symbol: sv.symbol, subject: sv.subject, moduleDir: sv.moduleDir, moduleBase: sv.moduleBase,
 				env: sv.env, view: sibling, fp: sv.fp, sourceFiles: sv.sourceFiles, module: siblingModule,
 			}
 		}
@@ -627,7 +647,7 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding, prebui
 	}
 	i := sort.SearchStrings(declared, f.Symbol)
 	if i == len(declared) || declared[i] != f.Symbol {
-		return FindingInspection{State: FindingDetached, Reason: "mutated symbol no longer resolves"}, nil
+		return FindingInspection{State: FindingDetached, Reason: "mutated symbol no longer resolves - terminal: no re-measure can revive this record; prune removes it, retarget follows a rename"}, nil
 	}
 	if f.OperatorSet != engine.OperatorSet {
 		return FindingInspection{State: FindingStale, Reason: "operator set changed"}, nil
@@ -725,6 +745,10 @@ func sortedSubjectEvidence(evidence []SubjectEvidence) []SubjectEvidence {
 // disposition whose every measured pin still holds.
 func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
 	evidence.DynamicStateVouches = ""
+	// ModuleBase is resolution metadata for the store's portable-line
+	// walk, never a measured pin: a record grown the field on its first
+	// post-upgrade measure must not shed its dispositions over it.
+	evidence.ModuleBase = ""
 	return evidence
 }
 
@@ -1297,7 +1321,9 @@ func attachEvidence(target *subjectView, oracle []*subjectView, observation runt
 		if err != nil {
 			return SubjectEvidence{}, err
 		}
-		return evidenceFromFingerprint(subject.symbol, fp, state), nil
+		evidence := evidenceFromFingerprint(subject.symbol, fp, state)
+		evidence.ModuleBase = subject.moduleBase
+		return evidence, nil
 	}
 	targetEvidence, err := attach(target)
 	if err != nil {

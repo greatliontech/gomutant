@@ -79,7 +79,7 @@ func (s *Server) Run(ctx context.Context) error {
 // MCP builds the protocol server (REQ-mcp-tools).
 func (s *Server) MCP() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, &mcp.ServerOptions{
-		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
+		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; prune removes resolved-dead records after a refactor and retarget follows a rename (both with check=true previews); ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
 	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
@@ -101,6 +101,14 @@ func (s *Server) MCP() *mcp.Server {
 		Name:        "attest_survivor",
 		Description: "Disposition a surviving mutant as equivalent, with the reasoning on record. Refused unless the mutant is among the finding's current survivors; shed automatically when any pin moves, so every body version is re-judged.",
 	}, s.toolAttest)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "prune",
+		Description: "Remove findings records whose mutated symbol no longer resolves in the current tree - the terminal records no re-measure can revive after a refactor. Refuses when any package did not load cleanly. Each removed record's attested dispositions are echoed in the response, never truncated - the reasoning survives the removal. check=true previews without touching the document.",
+	}, s.toolPrune)
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "retarget",
+		Description: "Rewrite symbol identity across a rename: records whose symbol-bearing fields carry the from prefix rewrite to the to prefix, and surviving attestations follow their mutants by position, operator, and site - never symbol text. Each rewritten target symbol must resolve in the current tree. check=true previews. Rows cap at 50 with the remainder counted.",
+	}, s.toolRetarget)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "ephemeral",
 		Description: "Run one manual mutant the operator set cannot generate: replace one file whole, apply sequential edits to one file, or apply an atomic exact-match edit batch across files, then check whether the named test kills it. The tree is never touched; the result is evidence, never persisted - a kill carries the killing test's bounded output head, and runs:N reports per-run verdicts (killed means every run killed). An observed probe executes the named test once, bracketing runtime-input observation. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited).",
@@ -1182,6 +1190,93 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	}
 	if inspection.State != gomutant.FindingCurrent {
 		out.Warning = fmt.Sprintf("the record is %s (%s) - the disposition is judged afresh when %s is re-measured", inspection.State, inspection.Reason, in.Symbol)
+	}
+	return nil, out, nil
+}
+
+type pruneIn struct {
+	Check    bool   `json:"check,omitempty" jsonschema:"preview the removals without touching the document"`
+	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+}
+
+type prunedOut struct {
+	Symbol   string                 `json:"symbol"`
+	Attested []gomutant.Attestation `json:"attested,omitempty" jsonschema:"the removed record's dispositions, echoed so the reasoning survives the removal"`
+}
+
+type pruneOut struct {
+	Removed []prunedOut `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
+	Kept    int         `json:"kept"`
+	Check   bool        `json:"check,omitempty"`
+}
+
+func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pruneIn) (*mcp.CallToolResult, pruneOut, error) {
+	out := pruneOut{Removed: []prunedOut{}}
+	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	if err != nil {
+		return nil, out, err
+	}
+	tree, err := s.loadTreeContext(ctx)
+	if err != nil {
+		return nil, out, err
+	}
+	result, err := tree.PruneDetachedContext(ctx, store, in.Check)
+	if err != nil {
+		return nil, out, err
+	}
+	out.Kept, out.Check = result.Kept, result.Check
+	// The removal echo is never truncated: for an overlay-resident
+	// record the response is the disposition reasoning's last home, and
+	// a capped check preview would hide part of what a destructive call
+	// is about to delete (REQ-mcp-lifecycle's envelope exception).
+	for _, record := range result.Removed {
+		out.Removed = append(out.Removed, prunedOut{Symbol: record.Symbol, Attested: record.Attested})
+	}
+	return nil, out, nil
+}
+
+type retargetIn struct {
+	From     string `json:"from" jsonschema:"old symbol prefix: a package pair renames a package (a dot-terminated pass covers its own symbols, a slash-terminated pass its subpackages); a symbol pair renames within its package, segment for segment"`
+	To       string `json:"to" jsonschema:"new symbol prefix, terminated like from"`
+	Check    bool   `json:"check,omitempty" jsonschema:"preview the rewrites without touching the document"`
+	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+}
+
+type retargetOut struct {
+	Rewritten        []gomutant.RetargetedRecord `json:"rewritten" jsonschema:"records whose mutated symbol changed"`
+	Touched          int                         `json:"touched,omitempty" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface)"`
+	TouchedRewrites  []gomutant.TouchedRewrite   `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
+	OmittedRewritten int                         `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
+	OmittedTouched   int                         `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
+	Check            bool                        `json:"check,omitempty"`
+}
+
+func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
+	out := retargetOut{Rewritten: []gomutant.RetargetedRecord{}}
+	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	if err != nil {
+		return nil, out, err
+	}
+	tree, err := s.loadTreeContext(ctx)
+	if err != nil {
+		return nil, out, err
+	}
+	result, err := tree.RetargetContext(ctx, store, in.From, in.To, in.Check)
+	if err != nil {
+		return nil, out, err
+	}
+	out.Check = result.Check
+	out.Touched = result.Touched
+	out.Rewritten = append(out.Rewritten, result.Rewritten...)
+	out.TouchedRewrites = append(out.TouchedRewrites, result.TouchedRewrites...)
+	const retargetRowCap = 50
+	if len(out.Rewritten) > retargetRowCap {
+		out.OmittedRewritten = len(out.Rewritten) - retargetRowCap
+		out.Rewritten = out.Rewritten[:retargetRowCap]
+	}
+	if len(out.TouchedRewrites) > retargetRowCap {
+		out.OmittedTouched = len(out.TouchedRewrites) - retargetRowCap
+		out.TouchedRewrites = out.TouchedRewrites[:retargetRowCap]
 	}
 	return nil, out, nil
 }

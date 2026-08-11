@@ -261,7 +261,7 @@ func TestMCPRosterExposesExplain(t *testing.T) {
 	for _, tool := range list.Tools {
 		got[tool.Name] = true
 	}
-	want := []string{"run", "discover", "findings", "explain", "attest_survivor", "ephemeral"}
+	want := []string{"run", "discover", "findings", "explain", "attest_survivor", "prune", "retarget", "ephemeral"}
 	for _, w := range want {
 		if !got[w] {
 			t.Fatalf("tool %s missing from the wire list: %v", w, got)

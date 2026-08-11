@@ -41,6 +41,11 @@ gomutant discover --package 'example.com/project/**' \
 gomutant run --package 'example.com/project/**' \
     --symbol 'example.com/project/parser.*'
 
+# After a refactor: preview and prune records whose symbol no longer
+# resolves, or follow a rename so dispositions ride along.
+gomutant prune --check
+gomutant retarget --from example.com/old/pkg. --to example.com/new/pkg. --check
+
 # Disposition a survivor as equivalent, with the reasoning on record.
 gomutant attest --symbol example.com/pkg.F --position f.go:10:5 \
     --operator "return: zero" --reason "result unused on this path"
@@ -136,7 +141,7 @@ result commit does too.
 
 Agents drive gomutant over the Model Context Protocol — `gomutant mcp` serves
 stdio with the same operations as tools: `run`, `discover`, `findings`,
-`attest_survivor`, and `ephemeral`. The ephemeral tool takes a hand-crafted
+`attest_survivor`, `prune`, `retarget`, and `ephemeral`. The ephemeral tool takes a hand-crafted
 mutation as exact-match edits (state the change, not the file):
 
 ```json

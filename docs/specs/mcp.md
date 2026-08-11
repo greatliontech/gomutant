@@ -64,6 +64,15 @@ carries any record from the machine-local overlay into the committed
 document says so — the promoted count is a document change git only sees
 when committed.
 
+**REQ-mcp-lifecycle** (behavior): The server MUST expose the prune and
+retarget verbs of REQ-result-lifecycle in [results.md](results.md) as
+tools with check previews. The prune response's removal echo is never
+truncated - for an overlay-resident record it is the disposition
+reasoning's last home, and a capped preview would hide part of what the
+destructive call deletes - the one sanctioned exception to
+REQ-mcp-envelope's row caps; retarget rows cap with counted omissions
+as usual.
+
 **REQ-mcp-explain** (behavior): The server MUST expose an explain tool
 answering causally, from the findings document and current-tree
 inspection alone — no tests run, the advisory stance intact: given a

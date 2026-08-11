@@ -1046,7 +1046,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// like a fresh measure's - a dirty-born record promotes to
 				// the portable layer once its paths are clean
 				// (REQ-result-stale, REQ-result-layers).
-				if err := t.stampServedProvenance(ctx, repository, targetView, oracleViews, &cached); err != nil {
+				if err := t.stampProvenance(ctx, repository, targetView, oracleViews, &cached); err != nil {
 					return nil, err
 				}
 				findings[i] = cached
@@ -1748,7 +1748,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// Served prefix + re-executed candidates both validated
 				// against the current tree; provenance recomputes like a
 				// fresh measure's (REQ-result-stale, REQ-result-layers).
-				if err := t.stampServedProvenance(ctx, repository, w.targetView, w.oracleViews, &spliced); err != nil {
+				if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &spliced); err != nil {
 					return err
 				}
 				if err := commitAndAttribute(ctx, spliced, w); err != nil {
@@ -1757,7 +1757,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.grow != nil {
-				grown, union, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+				grown, _, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
 				if err != nil {
 					return err
 				}
@@ -1772,7 +1772,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// The grown record carries the current tree's evidence, so its
 				// commit and dirty provenance are recomputed like a fresh
 				// measure's rather than carried from the served record.
-				if err := t.stampProvenance(ctx, repository, w, &grown, union); err != nil {
+				if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &grown); err != nil {
 					return err
 				}
 				// Advisory buckets re-derived honestly under the delta oracle:
@@ -1822,7 +1822,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.drift != nil {
-				spliced, union, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+				spliced, _, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
 				if err != nil {
 					return err
 				}
@@ -1838,7 +1838,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// gate proved the retained movement is the attributable
 				// compartment delta — so provenance is recomputed like a fresh
 				// measure's (REQ-result-stale's killer-drift carve-out).
-				if err := t.stampProvenance(ctx, repository, w, &spliced, union); err != nil {
+				if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &spliced); err != nil {
 					return err
 				}
 				// With any oracle moved, every surviving candidate was
@@ -1901,7 +1901,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// Served prefix + measured suffix both validated against the
 				// current tree; provenance recomputes like a fresh measure's
 				// (REQ-result-stale, REQ-result-layers).
-				if err := t.stampServedProvenance(ctx, repository, w.targetView, w.oracleViews, &extended); err != nil {
+				if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &extended); err != nil {
 					return err
 				}
 				if err := commitAndAttribute(ctx, extended, w); err != nil {
@@ -1934,7 +1934,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
 				continue
 			}
-			if err := t.stampProvenance(ctx, repository, w, f, state); err != nil {
+			if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, f); err != nil {
 				return err
 			}
 			f.Operators = summarizeOperators(w.candidates, outcomes[wi])
@@ -2417,34 +2417,22 @@ func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, 
 	return append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum")), nil
 }
 
-// stampProvenance records the current tree's provenance on a measured or
-// grown finding: the capture commit, and dirty computed over the finding's
-// subject source files, their historical package files, module selection,
-// and workspace inputs, against the observation's runtime state.
-func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, w work, f *Finding, observation runtimeinput.Observation) error {
-	f.Commit = repository.commit
-	sourceFiles, err := t.provenancePaths(ctx, repository, w.targetView, w.oracleViews)
-	if err != nil {
-		return err
-	}
-	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, observation.State)
-	return err
-}
-
-// stampServedProvenance recomputes commit and dirty provenance on a
-// served record from the current tree, deriving runtime-input paths from
-// the record's own subject evidence: the freshness proof that licensed
-// the serve validated that evidence against the current tree, so the
-// served record's provenance is exactly a fresh measure's - a record
-// measured under dirty provenance becomes portable the first time it
-// serves with those paths clean, its attestations riding the promotion
-// (REQ-result-stale, REQ-result-layers). Manifest identities are
-// module-relative, so each subject's manifest resolves against that
-// subject's own module directory - the base the serve license validated
-// it under. An unreadable evidence manifest, or evidence naming a
-// subject no view carries, stamps dirty terminally - later evidence
-// goes unexamined, fail-closed.
-func (t *Tree) stampServedProvenance(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, f *Finding) error {
+// stampProvenance records the current tree's provenance on a finding -
+// measured, grown, drifted, or served: the capture commit, and dirty
+// computed over the subject source files, their historical package
+// files, module selection, workspace inputs, and runtime-input paths
+// derived from the finding's own subject evidence (attached before any
+// stamp on every path). Manifest identities are module-relative, so
+// each subject's manifest resolves against that subject's own module
+// directory - under a repository root above the module, resolving at
+// the root would materialize local-but-nonexistent paths whose
+// dirtiness git never reports, letting a false-clean portable row land
+// (REQ-result-stale, REQ-result-layers). A record measured under dirty
+// provenance becomes portable the first time it stamps with those paths
+// clean, its attestations riding the promotion. An unreadable evidence
+// manifest, or evidence naming a subject no view carries, stamps dirty
+// terminally - later evidence goes unexamined, fail-closed.
+func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, f *Finding) error {
 	f.Commit = repository.commit
 	sourceFiles, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
 	if err != nil {
@@ -2471,9 +2459,34 @@ func (t *Tree) stampServedProvenance(ctx context.Context, repository repositoryS
 			f.Dirty = true
 			return nil
 		}
-		sourceFiles = append(sourceFiles, paths...)
+		// An identity outside the repository is not git's to vouch for:
+		// dirty means git-visible drift, and the portable line already
+		// keeps a record with external identities machine-local with the
+		// truthful machine-local-input reason. Stamping such records
+		// dirty forever would only mislabel why they cannot promote
+		// (REQ-result-layers). The repository root is git's physical
+		// path while a recorded identity is the literal path the run
+		// opened, so a literal identity outside the root may still be an
+		// alias form of an in-repo path (a working tree reached through
+		// a symlink): judge the physical form git sees, and keep any
+		// identity whose physical location cannot be established - form
+		// divergence resolves fail-closed, never silently external.
+		for _, p := range paths {
+			if rel, rerr := filepath.Rel(repository.root, p); rerr == nil && filepath.IsLocal(rel) {
+				sourceFiles = append(sourceFiles, p)
+				continue
+			}
+			resolved, rerr := filepath.EvalSymlinks(p)
+			if rerr != nil {
+				sourceFiles = append(sourceFiles, p)
+				continue
+			}
+			if rel, rerr := filepath.Rel(repository.root, resolved); rerr == nil && filepath.IsLocal(rel) {
+				sourceFiles = append(sourceFiles, resolved)
+			}
+		}
 	}
-	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles, runtimeinput.State{})
+	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles)
 	return err
 }
 

@@ -7,8 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 func withModuleSelectionPaths(sourceFiles []string) []string {
@@ -67,26 +65,20 @@ func captureRepositoryStateContext(ctx context.Context, dir string) (repositoryS
 	}, nil
 }
 
-func (s repositoryState) pathsDirty(selectedPaths []string, runtimeState runtimeinput.State) bool {
-	dirty, err := s.pathsDirtyContext(context.Background(), selectedPaths, runtimeState)
+func (s repositoryState) pathsDirty(selectedPaths []string) bool {
+	dirty, err := s.pathsDirtyContext(context.Background(), selectedPaths)
 	return err != nil || dirty
 }
 
-func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []string, runtimeState runtimeinput.State) (bool, error) {
+// pathsDirtyContext judges the caller's already-materialized paths:
+// runtime-input paths arrive resolved against their own subject's
+// module directory by the provenance stamp - there is no correct
+// single base to resolve a manifest against here.
+func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []string) (bool, error) {
 	if !s.available {
 		return true, nil
 	}
 	paths := append([]string(nil), selectedPaths...)
-	if runtimeState.OK {
-		runtimePaths, err := runtimeinput.Paths(runtimeState.Manifest, s.root)
-		if err != nil {
-			return true, nil
-		}
-		if err := ctx.Err(); err != nil {
-			return false, err
-		}
-		paths = append(paths, runtimePaths...)
-	}
 	args := []string{"status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--"}
 	seen := map[string]bool{}
 	for _, path := range paths {

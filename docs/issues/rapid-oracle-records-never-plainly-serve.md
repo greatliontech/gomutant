@@ -1,6 +1,10 @@
 # Rapid-oracle records never plainly serve - every campaign re-measures them
 
-Lands: cross-tool train chunk 31.
+Lands: when gofresh's startup-effect-precision chunks 0a-0c (TestMain
+observed window, flag-registration startup audit, property-driver
+dispatch closure) are consumed by a gomutant dependency bump - the
+serve pin test and the tightened regime-pin assertion land with that
+bump.
 
 ## Observed
 
@@ -33,6 +37,29 @@ campaign - the serve machinery's whole point is defeated for exactly the
 suites the property-oracle prerequisites chunk made deterministic. No
 wrong verdicts observed: the failure direction is re-measure, never a
 stale serve.
+
+## Diagnosis (complete)
+
+The record is born unservable: serve acceptance applies the observed
+policy only when the recorded observation proof is Observable, and a
+rapid-oracle test subject's proof records non-observable, so serves
+fall to the plain policy and refuse on the oracle's environment reads -
+drift re-measure every campaign. Measure never consults the proof, so
+measuring works while serving cannot. Three stacked observability
+blockers, confirmed empirically by patching gofresh locally and
+re-running the serve probe after each:
+
+1. A user TestMain classifies as a startup root, so its own
+   fmt/os reaches read as pre-bracket startup effects - but the test
+   log installs in the generated test-main init (after every dependency
+   init, before TestMain), so TestMain's reads are bracketed
+   observation inputs. Moving the already-tracked TestMain reachability
+   slice from the startup walk into the observed subject walk clears
+   this blocker.
+2. The rapid driver's computed prop-callback call ("computed function
+   call in pgregory.net/rapid.Check") opens the subject world.
+3. Standard flag registration from the rapid library's package init
+   reads as an unaudited standard startup operation.
 
 ## Resolution direction
 

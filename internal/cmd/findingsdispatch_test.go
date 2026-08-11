@@ -47,6 +47,11 @@ func TestFindingsCommandDefaultsToSummaryRows(t *testing.T) {
 	if !strings.Contains(summary.String(), "detached  example.com/empty.Gone") || !strings.Contains(summary.String(), "1 open, 0 attested") {
 		t.Fatalf("summary default missing the row: %q", summary.String())
 	}
+	// A detached record says it is terminal and names the moves in
+	// every view (REQ-result-inspection).
+	if !strings.Contains(summary.String(), "terminal") || !strings.Contains(summary.String(), "prune") || !strings.Contains(summary.String(), "retarget") {
+		t.Fatalf("detached row missing the terminal label: %q", summary.String())
+	}
 	if strings.Contains(summary.String(), "survivor old.go:1:1") {
 		t.Fatalf("summary default leaked detail lists: %q", summary.String())
 	}

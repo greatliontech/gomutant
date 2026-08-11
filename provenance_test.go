@@ -18,7 +18,7 @@ func TestRepositoryContextCancellation(t *testing.T) {
 		t.Fatalf("cancelled capture = %+v, %v", state, err)
 	}
 	repository := repositoryState{root: t.TempDir(), commit: "commit", available: true}
-	if _, err := repository.pathsDirtyContext(ctx, []string{"source.go"}, runtimeinput.State{}); !errors.Is(err, context.Canceled) {
+	if _, err := repository.pathsDirtyContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled dirty check = %v", err)
 	}
 	if _, err := repository.historicalPackageFilesContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
@@ -95,20 +95,20 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	if !repository.available || repository.commit == "" {
 		t.Fatalf("repository state = %+v", repository)
 	}
-	if repository.pathsDirty([]string{goMod, source}, runtimeinput.State{}) {
+	if repository.pathsDirty([]string{goMod, source}) {
 		t.Fatal("clean selected inputs reported dirty")
 	}
 	if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("untracked"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if repository.pathsDirty([]string{goMod, source}, runtimeinput.State{}) {
+	if repository.pathsDirty([]string{goMod, source}) {
 		t.Fatal("unrelated untracked file dirtied selected inputs")
 	}
 	selected := append([]string{goMod, source}, repository.historicalPackageFiles([]string{source})...)
 	if err := os.Remove(extraSource); err != nil {
 		t.Fatal(err)
 	}
-	if !repository.pathsDirty(selected, runtimeinput.State{}) {
+	if !repository.pathsDirty(selected) {
 		t.Fatal("deleted tracked package input reported clean")
 	}
 	if err := os.WriteFile(extraSource, []byte("package provenance\n"), 0o644); err != nil {
@@ -117,7 +117,7 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	if err := os.WriteFile(source, []byte("package provenance\n\nvar changed = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !repository.pathsDirty([]string{goMod, source}, runtimeinput.State{}) {
+	if !repository.pathsDirty([]string{goMod, source}) {
 		t.Fatal("modified selected source reported clean")
 	}
 	if err := os.WriteFile(source, []byte("package provenance\n"), 0o644); err != nil {
@@ -127,11 +127,10 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	if err := os.WriteFile(input, []byte("runtime"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog([]byte("open input.txt\n"), root, root, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, root)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !repository.pathsDirty([]string{goMod, source}, state.State) {
+	// Runtime-input paths arrive already materialized against their own
+	// subject's module - the provenance stamp resolves manifests, this
+	// walk only judges paths.
+	if !repository.pathsDirty([]string{goMod, source, input}) {
 		t.Fatal("untracked selected runtime input reported clean")
 	}
 }
@@ -196,7 +195,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	ctx := context.Background()
 
 	clean := Finding{Commit: "stale", Dirty: true, TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
-	if err := tree.stampServedProvenance(ctx, repository, view, nil, &clean); err != nil {
+	if err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
 		t.Fatal(err)
 	}
 	if clean.Dirty || clean.Commit != repository.commit {
@@ -207,7 +206,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
-	if err := tree.stampServedProvenance(ctx, repository, view, nil, &dirtied); err != nil {
+	if err := tree.stampProvenance(ctx, repository, view, nil, &dirtied); err != nil {
 		t.Fatal(err)
 	}
 	if !dirtied.Dirty {
@@ -215,7 +214,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	}
 
 	unreadable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: "not-a-manifest"}}
-	if err := tree.stampServedProvenance(ctx, repository, view, nil, &unreadable); err != nil {
+	if err := tree.stampProvenance(ctx, repository, view, nil, &unreadable); err != nil {
 		t.Fatal(err)
 	}
 	if !unreadable.Dirty {
@@ -223,10 +222,104 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	}
 
 	unknown := Finding{TargetEvidence: SubjectEvidence{Symbol: "example.com/provenance.Ghost", RuntimeInputs: observed.State.Manifest}}
-	if err := tree.stampServedProvenance(ctx, repository, view, nil, &unknown); err != nil {
+	if err := tree.stampProvenance(ctx, repository, view, nil, &unknown); err != nil {
 		t.Fatal(err)
 	}
 	if !unknown.Dirty {
 		t.Fatal("evidence naming a subject with no view re-stamped clean, want fail-closed dirty")
+	}
+}
+
+// TestStampJudgesAliasFormIdentitiesByPhysicalPath: the runtime-input
+// recorder keeps the literal path a run opened, so an in-repo input
+// reached through a symlinked tree path records as an absolute identity
+// outside the repository's physical root. The stamp judges the physical
+// form git sees - alias-form drift stamps dirty, a clean alias-form
+// input stamps clean - and an identity whose physical location cannot
+// be established counts as in-repo, fail-closed, never silently
+// external (REQ-result-layers).
+func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "real")
+	moduleDir := filepath.Join(root, "m")
+	goMod := filepath.Join(moduleDir, "go.mod")
+	source := filepath.Join(moduleDir, "pkg", "source.go")
+	input := filepath.Join(moduleDir, "data", "input.txt")
+	for path, content := range map[string]string{
+		goMod:  "module example.com/provenance\n\ngo 1.26\n",
+		source: "package provenance\n",
+		input:  "runtime\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=gomutant", "GIT_AUTHOR_EMAIL=gomutant@example.invalid",
+			"GIT_COMMITTER_NAME=gomutant", "GIT_COMMITTER_EMAIL=gomutant@example.invalid",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "fixture")
+	repository := captureRepositoryState(root)
+	if !repository.available || repository.commit == "" {
+		t.Fatalf("repository state = %+v", repository)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
+	aliasInput := filepath.Join(alias, "m", "data", "input.txt")
+	observed, err := runtimeinput.FromTestLog([]byte("open "+aliasInput+"\n"), moduleDir, moduleDir, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := &Tree{dir: root}
+	const symbol = "example.com/provenance.F"
+	view := &subjectView{symbol: symbol, moduleDir: moduleDir, sourceFiles: []string{source}}
+	ctx := context.Background()
+
+	clean := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	if err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
+		t.Fatal(err)
+	}
+	if clean.Dirty {
+		t.Fatal("alias-form identity of a clean tracked input stamped dirty")
+	}
+
+	if err := os.WriteFile(input, []byte("runtime moved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	if err := tree.stampProvenance(ctx, repository, view, nil, &dirtied); err != nil {
+		t.Fatal(err)
+	}
+	if !dirtied.Dirty {
+		t.Fatal("alias-form in-repo drift escaped the dirty stamp - the identity was judged silently external")
+	}
+
+	// With the alias gone the identity's physical location is
+	// unknowable: it counts as in-repo and the non-local walk arm
+	// stamps dirty, fail-closed.
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	unresolvable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	if err := tree.stampProvenance(ctx, repository, view, nil, &unresolvable); err != nil {
+		t.Fatal(err)
+	}
+	if !unresolvable.Dirty {
+		t.Fatal("an unresolvable identity stamped clean, want fail-closed dirty")
 	}
 }

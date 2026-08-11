@@ -113,7 +113,17 @@ func portableLineWalk(f Finding, moduleDir string, stopAtFirst bool) []string {
 		if ev.RuntimeInputs == "" {
 			continue
 		}
-		paths, err := runtimeinput.Paths(ev.RuntimeInputs, moduleDir)
+		// Each subject's manifest resolves against its own recorded
+		// module base: a workspace member's identities live under the
+		// member module, and resolving them at the tree root would both
+		// mislocate real inputs and misjudge the portable line in either
+		// direction. A record without a base resolves at the tree root,
+		// the pre-base behavior (REQ-result-layers).
+		base := moduleDir
+		if ev.ModuleBase != "" {
+			base = filepath.Join(moduleDir, filepath.FromSlash(ev.ModuleBase))
+		}
+		paths, err := runtimeinput.Paths(ev.RuntimeInputs, base)
 		if err != nil {
 			if add("unreadable runtime manifest for " + ev.Symbol) {
 				return reasons
@@ -121,7 +131,7 @@ func portableLineWalk(f Finding, moduleDir string, stopAtFirst bool) []string {
 			continue
 		}
 		for _, p := range paths {
-			if p != moduleDir && !strings.HasPrefix(p, moduleDir+string(filepath.Separator)) {
+			if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
 				if add("machine-local runtime input " + p) {
 					return reasons
 				}

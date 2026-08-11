@@ -32,6 +32,6 @@ func newRootCommand() *cobra.Command {
 			return fmt.Errorf("a command is required")
 		},
 	}
-	cmd.AddCommand(newRunCommand(), newDiscoverCommand(), newFindingsCommand(), newAttestCommand(), newEphemeralCommand(), newMCPCommand())
+	cmd.AddCommand(newRunCommand(), newDiscoverCommand(), newFindingsCommand(), newAttestCommand(), newPruneCommand(), newRetargetCommand(), newEphemeralCommand(), newMCPCommand())
 	return cmd
 }

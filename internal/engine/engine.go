@@ -107,6 +107,25 @@ func loadContextWith(ctx context.Context, dir string, executionSupported bool, l
 	return &Tree{pkgs: pkgs, dir: abs, env: append([]string(nil), env...)}, nil
 }
 
+// PackagesHealthyContext reports the first load or type error any
+// loaded package carries. packages.Load errors only on driver failure,
+// so a tree with an unparseable file still "loads" - with its
+// declarations silently missing from the partial syntax. A consumer
+// whose judgment destroys state on a symbol's absence must refuse an
+// unhealthy load: absence under errors is indistinguishable from a
+// rename.
+func (t *Tree) PackagesHealthyContext(ctx context.Context) error {
+	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if len(pkg.Errors) > 0 {
+			return fmt.Errorf("package %s did not load cleanly: %s", pkg.ID, pkg.Errors[0].Msg)
+		}
+	}
+	return nil
+}
+
 func basePackagePath(pkg *packages.Package) string {
 	if pkg.ForTest != "" {
 		return pkg.ForTest

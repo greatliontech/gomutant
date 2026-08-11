@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -57,6 +58,13 @@ type SubjectEvidence struct {
 	// here, and the field rides the current document version (an old
 	// reader dropping it changes no verdict).
 	DynamicStateVouches string `json:"dynamicStateVouches,omitempty"`
+	// ModuleBase is the subject module's tree-relative slash base ("" =
+	// the tree root): manifest identities are module-relative, and the
+	// store has no views at write time, so committability resolves each
+	// subject's manifest against Join(storeDir, ModuleBase). Absent on
+	// records predating the field - those resolve at the store root,
+	// the prior behavior (REQ-result-layers).
+	ModuleBase          string `json:"moduleBase,omitempty"`
 	RuntimeInputs       string `json:"runtimeInputs"`
 	RuntimeDigest       string `json:"runtimeDigest"`
 	RuntimeUnverifiable bool   `json:"runtimeUnverifiable,omitempty"`
@@ -453,7 +461,7 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // rapid-oracle record measured under unpinned draws, so an older
 // consumer's tolerance would have dropped it and served verdicts from
 // draw sequences the pinned regime never executes.
-const DocumentVersion = 6
+const DocumentVersion = 7
 
 // oldestReadableVersion bounds the known older document versions the
 // parser upgrades on read (REQ-result-tolerant).
@@ -834,6 +842,7 @@ var subjectEvidenceFields = []struct {
 	{"observationReason", false, nil},
 	{"observationEvidence", true, func(e SubjectEvidence) string { return e.ObservationEvidence }},
 	{"purityAssertion", false, nil},
+	{"moduleBase", false, nil},
 	{"runtimeInputs", true, func(e SubjectEvidence) string { return e.RuntimeInputs }},
 	{"runtimeDigest", true, func(e SubjectEvidence) string { return e.RuntimeDigest }},
 	{"runtimeUnverifiable", false, nil},
@@ -865,6 +874,20 @@ func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
 	}
 	if evidence.RuntimeUnverifiable != (evidence.RuntimeReason != "") {
 		return false, nil
+	}
+	// The module base is written only by treeRelModuleBase, which never
+	// produces an absolute or escaping form; admitting one from a
+	// hand-edited document would draw the portable-containment line
+	// outside the tree (REQ-result-layers).
+	if evidence.ModuleBase != "" {
+		if strings.HasPrefix(evidence.ModuleBase, "/") || strings.Contains(evidence.ModuleBase, "\\") {
+			return false, fmt.Errorf("module base %q is not a tree-relative slash path", evidence.ModuleBase)
+		}
+		for _, segment := range strings.Split(evidence.ModuleBase, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return false, fmt.Errorf("module base %q is not a clean tree-relative path", evidence.ModuleBase)
+			}
+		}
 	}
 	if evidence.ObservationObservable == (evidence.ObservationReason != "") {
 		return false, nil
