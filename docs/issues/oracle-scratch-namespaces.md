@@ -24,3 +24,9 @@ Second field report, requirements input for the declaration surface:
   not a stable hashable input; until it can, affected targets are
   permanently machine-local.
 
+Third field report (subshuffler campaign, filed in
+[oracle-ephemeral-root-undeclared](oracle-ephemeral-root-undeclared.md))
+endorses a `--scratch-namespace DIR:PATTERN` flag shape for the
+declaration surface; the tool-minted out-of-module TMPDIR half of that
+report is the separate one-seam chunk-85 fix, not this surface.
+
