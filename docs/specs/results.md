@@ -365,7 +365,19 @@ judges the recorded form, whose module-boundary meaning the identity
 was recorded under. A literal identity may be an alias form of an
 in-repo path, and form divergence resolves fail-closed - an identity
 whose physical location cannot be established counts as in-repo for
-the dirty stamp, never silently external. Every other record — dirty-worktree measurements,
+the dirty stamp, never silently external - unless its deepest
+resolvable ancestor lies outside the repository AND the evidence
+revalidates whole - state, reason, and digest, the serve precheck's
+own comparison: reproduced evidence proves every identity exactly as
+recorded (a swept oracle-scratch path recorded missing is missing
+still), and an unchanged external identity is not git-visible drift,
+while an in-repo ancestor reconstructs a pathspec at its first
+unresolved component - git reports drift at or beneath the component,
+an intermediate tracked symlink included. The vouch proves stability
+since measurement, not cleanliness at measurement: an externally
+rooted identity recorded against pre-existing uncommitted drift can
+re-stamp clean, and the machine-local clause - which such an identity
+always carries - is what keeps the record from promoting. Every other record — dirty-worktree measurements,
 unverifiable observations, machine-local input identities — lives in a
 machine-local overlay under the user cache directory keyed by the resolved
 module root, one atomically written entry per symbol; a malformed overlay entry

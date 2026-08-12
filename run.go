@@ -2486,8 +2486,10 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		return err
 	}
 	moduleDirs := map[string]string{targetView.symbol: targetView.moduleDir}
+	viewEnvs := map[string][]string{targetView.symbol: targetView.env}
 	for _, oracleView := range oracleViews {
 		moduleDirs[oracleView.symbol] = oracleView.moduleDir
+		viewEnvs[oracleView.symbol] = oracleView.env
 	}
 	for _, evidence := range append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...) {
 		if err := ctx.Err(); err != nil {
@@ -2518,6 +2520,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		// a symlink): judge the physical form git sees, and keep any
 		// identity whose physical location cannot be established - form
 		// divergence resolves fail-closed, never silently external.
+		var unresolvable []string
 		for _, p := range paths {
 			if rel, rerr := filepath.Rel(repository.root, p); rerr == nil && filepath.IsLocal(rel) {
 				sourceFiles = append(sourceFiles, p)
@@ -2525,11 +2528,47 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 			}
 			resolved, rerr := filepath.EvalSymlinks(p)
 			if rerr != nil {
-				sourceFiles = append(sourceFiles, p)
+				// The identity itself does not resolve, but its deepest
+				// resolvable ancestor decides the family: an ancestor
+				// inside the repository reconstructs an in-repo path -
+				// git reports drift under it (a tracked file deleted
+				// behind a dead alias) - while a genuinely external
+				// chain (swept oracle scratch under the temp root) is a
+				// candidate for the digest vouch below.
+				if ancestor, remainder, ok := deepestResolvedAncestor(p); ok {
+					if rel, rerr := filepath.Rel(repository.root, ancestor); rerr == nil && filepath.IsLocal(rel) {
+						// The pathspec anchors at the FIRST unresolved
+						// component: git never matches an index entry
+						// shallower than a pathspec, and the drift may
+						// be on an intermediate tracked symlink, not
+						// the leaf.
+						first, _, _ := strings.Cut(remainder, string(filepath.Separator))
+						sourceFiles = append(sourceFiles, filepath.Join(ancestor, first))
+						continue
+					}
+				}
+				unresolvable = append(unresolvable, p)
 				continue
 			}
 			if rel, rerr := filepath.Rel(repository.root, resolved); rerr == nil && filepath.IsLocal(rel) {
 				sourceFiles = append(sourceFiles, resolved)
+			}
+		}
+		if len(unresolvable) > 0 {
+			// An externally rooted identity that cannot be established
+			// now may still be exactly as recorded: revalidation that
+			// reproduces the evidence whole - state, reason, and digest,
+			// the serve precheck's own comparison - proves every
+			// identity unchanged since measurement (a swept
+			// oracle-scratch path recorded missing is missing still),
+			// and an unchanged external identity is not git-visible
+			// drift. Anything less keeps the fail-closed arm
+			// (REQ-result-layers, REQ-exec-oracle-scratch).
+			state, serr := runtimeinput.CurrentEnvContext(ctx, evidence.RuntimeInputs, base, viewEnvs[evidence.Symbol])
+			if serr != nil || !state.OK ||
+				state.Unverifiable != evidence.RuntimeUnverifiable || state.Reason != evidence.RuntimeReason ||
+				state.Digest != evidence.RuntimeDigest {
+				sourceFiles = append(sourceFiles, unresolvable...)
 			}
 		}
 	}
@@ -3749,4 +3788,23 @@ func windowEvidenceVolatile(w *work, observations []runtimeinput.Observation) bo
 		}
 	}
 	return false
+}
+
+// deepestResolvedAncestor walks p's ancestors until one resolves,
+// returning the resolved ancestor and the unresolved remainder below
+// it. The filesystem root always resolves, so ok is false only for
+// degenerate inputs.
+func deepestResolvedAncestor(p string) (ancestor, remainder string, ok bool) {
+	dir, rest := filepath.Dir(p), filepath.Base(p)
+	for {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return resolved, rest, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", "", false
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+	}
 }

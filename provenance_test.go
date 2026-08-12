@@ -194,7 +194,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	view := &subjectView{symbol: symbol, moduleDir: moduleDir, sourceFiles: []string{source}}
 	ctx := context.Background()
 
-	clean := Finding{Commit: "stale", Dirty: true, TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	clean := Finding{Commit: "stale", Dirty: true, TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
 	if err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	if err := os.WriteFile(input, []byte("runtime moved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
 	if err := tree.stampProvenance(ctx, repository, view, nil, &dirtied); err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	view := &subjectView{symbol: symbol, moduleDir: moduleDir, sourceFiles: []string{source}}
 	ctx := context.Background()
 
-	clean := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	clean := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
 	if err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
 		t.Fatal(err)
 	}
@@ -298,15 +298,82 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 		t.Fatal("alias-form identity of a clean tracked input stamped dirty")
 	}
 
+	// Drift on an INTERMEDIATE tracked component: a tracked in-module
+	// symlink the recorded path traverses is retargeted to dangle
+	// (uncommitted). The reconstructed pathspec must anchor at the
+	// first unresolved component - git never matches an index entry
+	// shallower than a pathspec, so a leaf pathspec would miss the
+	// symlink's own drift and stamp falsely clean.
+	link := filepath.Join(moduleDir, "link")
+	if err := os.Symlink("data", link); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "tracked link")
+	repository = captureRepositoryState(root)
+	aliasLinkInput := filepath.Join(alias, "m", "link", "input.txt")
+	linkObserved, err := runtimeinput.FromTestLog([]byte("open "+aliasLinkInput+"\n"), moduleDir, moduleDir, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing", link); err != nil {
+		t.Fatal(err)
+	}
+	linked := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol,
+		RuntimeInputs: linkObserved.State.Manifest, RuntimeDigest: linkObserved.State.Digest,
+		RuntimeUnverifiable: linkObserved.State.Unverifiable, RuntimeReason: linkObserved.State.Reason}}
+	if err := tree.stampProvenance(ctx, repository, view, nil, &linked); err != nil {
+		t.Fatal(err)
+	}
+	if !linked.Dirty {
+		t.Fatal("a retargeted tracked intermediate symlink stamped clean - the pathspec must anchor at the first unresolved component")
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	// Restoring the link returns the tree to the committed state - no
+	// new commit needed; later legs run against the same HEAD.
+	if err := os.Symlink("data", link); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := os.WriteFile(input, []byte("runtime moved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
 	if err := tree.stampProvenance(ctx, repository, view, nil, &dirtied); err != nil {
 		t.Fatal(err)
 	}
 	if !dirtied.Dirty {
 		t.Fatal("alias-form in-repo drift escaped the dirty stamp - the identity was judged silently external")
+	}
+
+	// A tracked file deleted before measurement records missing through
+	// the live alias: the digest is stable (missing then, missing now)
+	// but git reports the uncommitted deletion - the deepest resolvable
+	// ancestor lies in-repo, the path reconstructs, and the dirty walk
+	// sees it. A digest vouch alone would falsely stamp clean.
+	if err := os.Remove(input); err != nil {
+		t.Fatal(err)
+	}
+	deletedObserved, err := runtimeinput.FromTestLog([]byte("open "+aliasInput+"\n"), moduleDir, moduleDir, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol,
+		RuntimeInputs: deletedObserved.State.Manifest, RuntimeDigest: deletedObserved.State.Digest,
+		RuntimeUnverifiable: deletedObserved.State.Unverifiable, RuntimeReason: deletedObserved.State.Reason}}
+	if err := tree.stampProvenance(ctx, repository, view, nil, &deleted); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted.Dirty {
+		t.Fatal("a tracked deletion behind a live alias stamped clean - the in-repo ancestor must reconstruct the path for the dirty walk")
+	}
+	if err := os.WriteFile(input, []byte("runtime moved\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	// With the alias gone the identity's physical location is
@@ -315,7 +382,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	if err := os.Remove(alias); err != nil {
 		t.Fatal(err)
 	}
-	unresolvable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest}}
+	unresolvable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
 	if err := tree.stampProvenance(ctx, repository, view, nil, &unresolvable); err != nil {
 		t.Fatal(err)
 	}
