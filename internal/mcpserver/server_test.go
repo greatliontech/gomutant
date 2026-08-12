@@ -176,9 +176,12 @@ func TestToolExplainCapsEveryRowSet(t *testing.T) {
 	s := New(dir)
 	ctx := context.Background()
 
+	// Distinct top-level roots: same-root machine-local clauses roll up
+	// into one row (REQ-mcp-explain), and this test pins the CAP, so
+	// each path must survive the roll-up as its own clause.
 	entries := make([]string, 55)
 	for i := range entries {
-		entries[i] = fmt.Sprintf(`{"k":"abs","p":"/outside/%02d","d":"0123456789abcdef0123456789abcdef"}`, i)
+		entries[i] = fmt.Sprintf(`{"k":"abs","p":"/outside%02d/f","d":"0123456789abcdef0123456789abcdef"}`, i)
 	}
 	wideManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":1,"paths":[` + strings.Join(entries, ",") + `]}`))
 	big := seededFinding("example.com/current.Big")
@@ -235,8 +238,8 @@ func TestToolExplainCapsEveryRowSet(t *testing.T) {
 		t.Fatalf("symbol cap = %+v", dirtyGroup)
 	}
 	// Equal-count groups order by reason ascending.
-	if triage.Promotion[1].Reason != "machine-local runtime input /outside/00" ||
-		triage.Promotion[2].Reason != "machine-local runtime input /outside/01" {
+	if triage.Promotion[1].Reason != "machine-local runtime input /outside00/f" ||
+		triage.Promotion[2].Reason != "machine-local runtime input /outside01/f" {
 		t.Fatalf("group tie-break = %q, %q", triage.Promotion[1].Reason, triage.Promotion[2].Reason)
 	}
 }

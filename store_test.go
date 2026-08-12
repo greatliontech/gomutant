@@ -572,3 +572,32 @@ func TestStoreUpdateDecidesMembershipUnderTheDocumentLock(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Machine-local input clauses sharing a top-level directory roll up
+// into one row naming the root and count; singletons and non-input
+// clauses pass through in place (REQ-mcp-explain).
+func TestRollUpMachineLocalInputs(t *testing.T) {
+	in := []string{
+		"dirty worktree provenance",
+		"machine-local runtime input /tmp/layer-oracle-1/a",
+		"machine-local runtime input /tmp/layer-oracle-2/b",
+		"machine-local runtime input /tmp/layer-oracle-3/c",
+		"runtime-unverifiable evidence for p.A",
+		"machine-local runtime input /etc/hostname",
+	}
+	got := RollUpMachineLocalInputs(in)
+	want := []string{
+		"dirty worktree provenance",
+		"machine-local runtime inputs under /tmp (3 paths)",
+		"runtime-unverifiable evidence for p.A",
+		"machine-local runtime input /etc/hostname",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rolled = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("rolled = %q, want %q", got, want)
+		}
+	}
+}

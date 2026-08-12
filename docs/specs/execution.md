@@ -477,6 +477,56 @@ attribution and therefore enter finding reuse evidence (REQ-result-record) -
 a mutant near either bound dies under a tight one and survives a loose one;
 changing the command timeout alone never stales a finding.
 
+**REQ-exec-completion** (behavior): A run that returns success MUST have
+dispositioned every announced target: measured and committed, served,
+skipped with a recorded reason, or named in a drift error. There is no
+fourth silent outcome — a run whose pipeline ended early without an
+error MUST fail loudly naming the unfinished targets rather than
+report a truncated campaign as complete, because a truncated success
+is indistinguishable from a real one unless the operator diffs the
+findings document against the announced roster.
+
+REQ-exec-completion: enforced by
+`TestTruncatedPipelineFailsLoudlyNamingUnfinishedTargets`.
+
+**REQ-exec-exclusivity** (behavior): A findings-producing run MUST hold an
+advisory campaign lock on its findings document for its whole duration —
+measurement through final merge — acquired fail-fast: a second campaign
+against the same document refuses immediately, naming the holder,
+instead of interleaving measurements whose merges race. The lock
+releases with the holding process, so a crashed campaign never leaves a
+stale lock. Short document operations — dispositions, lifecycle verbs,
+inspection — serialize under the document lock alone and remain
+available while a campaign runs. The lock is flock-based and
+unix-scoped; on other hosts campaigns run without this exclusivity —
+the supported platform carries it.
+
+REQ-exec-exclusivity: enforced by
+`TestCampaignLockExcludesSecondCampaign`,
+`TestRunRefusesWhileCampaignLockHeld`, and
+`TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed`.
+
+**REQ-exec-oracle-scratch** (behavior): Every oracle process tree MUST
+run with its own scratch temp directory (its `TMPDIR`), removed as soon
+as the process ends — with directory permissions restored before
+removal, because leaked test directories can carry modes a plain
+removal cannot descend. A mutant killed on timeout or by the memory
+ceiling never runs its deferred cleanups; without containment its temp
+directories accumulate for the campaign's lifetime, and on a
+tmpfs-backed temp root that accumulation is leaked RAM compounding the
+very pressure the ceiling exists to relieve. The sweep MUST precede
+observation finalization: the recorded evidence then captures the
+swept truth — scratch reads finalize as missing-path identities that
+revalidate stably on every later merge and serve — where sweeping
+after finalization would record content digests of files the sweep
+deletes, evidence that reads moved forever. The scratch directory
+lands under the operator's own temp root, so pointing a
+filesystem-heavy campaign at disk-backed space is one environment
+variable (`TMPDIR=/var/tmp`).
+
+REQ-exec-oracle-scratch: enforced by
+`TestOracleScratchContainsAndSweepsTempDirs`.
+
 **REQ-exec-oracle-memory** (behavior): Every oracle process tree — mutant
 runs, baseline probes, and ephemeral probes alike — MUST run under a
 memory ceiling: a soft runtime limit (GOMEMLIMIT at ~90% of the cap, so a

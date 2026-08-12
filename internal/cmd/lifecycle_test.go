@@ -79,3 +79,28 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 		t.Fatalf("document after lifecycle commands = %+v, %v", after, err)
 	}
 }
+
+// The campaign lock rides the run face: a held lock refuses the run
+// fail-fast naming the holder (REQ-exec-exclusivity).
+func TestRunRefusesWhileCampaignLockHeld(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":    "module example.com/locked\n\ngo 1.26.4\n",
+		"p.go":      "package locked\n\nfunc F() int { return 1 }\n",
+		"p_test.go": "package locked\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { if F() != 1 { t.Fatal() } }\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release, err := gomutant.AcquireCampaignLock(findingsAt(dir, defaultFindings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	err = runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, budget: 1})
+	if err == nil || !strings.Contains(err.Error(), "already holds") {
+		t.Fatalf("run under a held campaign lock = %v, want the fail-fast refusal", err)
+	}
+}

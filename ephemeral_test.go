@@ -92,7 +92,10 @@ func TestEphemeral(t *testing.T) {
 	_ = os.Remove(marker)
 	t.Cleanup(func() { _ = os.Remove(marker) })
 	flaky, err := tr.EphemeralBatch(ctx, []BatchEdit{
-		{File: "lib/doc.go", OldString: "package lib", NewString: "package lib\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n)\n\nfunc addFlaky(a, b int) int {\n\tmarker := filepath.Join(os.TempDir(), \"" + markerName + "\")\n\tif _, err := os.Stat(marker); err != nil {\n\t\t_ = os.WriteFile(marker, []byte(\"x\"), 0o644)\n\t\treturn a + b + 1\n\t}\n\treturn a + b\n}"},
+		// The marker path is baked in absolute: each oracle run has its
+		// own scratch TMPDIR (REQ-exec-oracle-scratch), so the mutant's
+		// cross-run channel must live outside it.
+		{File: "lib/doc.go", OldString: "package lib", NewString: "package lib\n\nimport \"os\"\n\nfunc addFlaky(a, b int) int {\n\tmarker := \"" + marker + "\"\n\tif _, err := os.Stat(marker); err != nil {\n\t\t_ = os.WriteFile(marker, []byte(\"x\"), 0o644)\n\t\treturn a + b + 1\n\t}\n\treturn a + b\n}"},
 		{File: "lib/lib.go", OldString: "return a + b", NewString: "return addFlaky(a, b)"},
 	}, "example.com/fixture/lib", "^TestAdd$", time.Minute, 2)
 	if err != nil {

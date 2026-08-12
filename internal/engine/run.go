@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -357,6 +358,11 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
 	defer os.RemoveAll(tmp)
+	scratchEnv, sweepScratch, err := oracleScratch(env)
+	if err != nil {
+		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+	}
+	defer sweepScratch()
 	if len(m.Replacements) == 0 {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", fmt.Errorf("mutant has no file replacements")
 	}
@@ -419,7 +425,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	}
 	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = oracleMemoryEnv(env)
+	cmd.Env = oracleMemoryEnv(scratchEnv)
 	// The sink, when given, receives the mutant run's raw -json stream -
 	// the evidence surface RunMutantEvidenceEnv derives kill output from.
 	stdout := &bytes.Buffer{}
@@ -430,6 +436,11 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
 	runErr := runOracleProcess(cmd)
+	// The sweep precedes observation finalization: the evidence union
+	// merges this observation with the probes' under revalidation, and
+	// a content digest of a swept file would read moved - the input's
+	// paths dropped and the union stamped unverifiable.
+	sweepScratch()
 
 	if runCtx.Err() == context.DeadlineExceeded {
 		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process timed out", env, capture, oracleBracket, oracleBracketReason)
@@ -489,8 +500,17 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	defer baseCancel()
 	base := commandContext(baseCtx, "go", baseArgs...)
 	base.Dir = dir
-	base.Env = oracleMemoryEnv(env)
+	baseScratchEnv, sweepBaseScratch, err := oracleScratch(env)
+	if err != nil {
+		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+	}
+	defer sweepBaseScratch()
+	base.Env = oracleMemoryEnv(baseScratchEnv)
 	baseErr := runOracleProcess(base)
+	// Sweep before finalization - the record captures the swept truth
+	// (see the mutant site). The defer above is the panic backstop;
+	// the sweep is idempotent.
+	sweepBaseScratch()
 	mutantState, mutantIncomplete, err := processObservationContext(ctx, testlog, moduleDir, packageDir, "mutant test process exited before observation finalization", env, capture, oracleBracket, oracleBracketReason)
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
@@ -816,6 +836,11 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths, env []string) (ran int, passed bool, state runtimeinput.Observation, err error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	scratchEnv, sweepScratch, err := oracleScratch(env)
+	if err != nil {
+		return 0, false, runtimeinput.Observation{}, err
+	}
+	defer sweepScratch()
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
 	// fails on the clean baseline would otherwise write a reproducer into
 	// the tree, the very invariant the runner protects (REQ-mut-overlay).
@@ -838,11 +863,14 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	}
 	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = oracleMemoryEnv(env)
+	cmd.Env = oracleMemoryEnv(scratchEnv)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	runErr := runOracleProcess(cmd)
+	// Sweep before finalization - the record captures the swept truth
+	// (see the mutant site).
+	sweepScratch()
 	if ctx2.Err() == context.DeadlineExceeded {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, packageDir, "baseline test process timed out", env, capture, oracleBracket, oracleBracketReason)
 		if observationErr != nil {
@@ -1082,4 +1110,32 @@ func tail(s string, n int) string {
 		return s
 	}
 	return "…" + s[len(s)-n:]
+}
+
+// oracleScratch gives one oracle process tree its own TMPDIR and
+// returns the swept cleanup. A mutant killed on timeout or by the
+// memory ceiling never runs its deferred cleanups; on a tmpfs-backed
+// temp directory the leaked test directories are leaked RAM
+// compounding the very pressure that triggered the kill, so each
+// process tree writes under its own directory removed as soon as the
+// process ends - with directory permissions restored first, because
+// leaked test dirs can carry modes a plain removal cannot descend
+// (REQ-exec-oracle-scratch). The directory lands under the operator's
+// own TMPDIR, so pointing campaigns at disk-backed space (/var/tmp)
+// needs one environment variable.
+func oracleScratch(env []string) ([]string, func(), error) {
+	dir, err := os.MkdirTemp("", "gomutant-oracle-*")
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		filepath.WalkDir(dir, func(path string, d iofs.DirEntry, err error) error {
+			if err == nil && d.IsDir() {
+				os.Chmod(path, 0o755)
+			}
+			return nil
+		})
+		os.RemoveAll(dir)
+	}
+	return append(append([]string(nil), env...), "TMPDIR="+dir), cleanup, nil
 }

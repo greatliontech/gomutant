@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -129,5 +130,112 @@ func TestToolLifecycleEchoBounds(t *testing.T) {
 		if len(r.Attested) != 1 || r.Attested[0].Reason == "" {
 			t.Fatalf("prune echo row %d lost its disposition: %+v", i, r)
 		}
+	}
+}
+
+// The keepalive ping is the disconnect detector for in-flight
+// campaigns: without it a client that died mid-run leaves the server
+// measuring detached for the campaign's full duration
+// (REQ-mcp-lifecycle).
+func TestServerOptionsCarryKeepalive(t *testing.T) {
+	if opts := serverOptions(); opts.KeepAlive != clientKeepAliveInterval || opts.KeepAlive <= 0 {
+		t.Fatalf("server keepalive = %v, want the configured positive interval - a dead transport must cancel in-flight campaigns", opts.KeepAlive)
+	}
+}
+
+// Machine-local input clauses sharing a top-level directory roll up on
+// BOTH explain arms - the symbol row and the promotion triage grouping
+// (REQ-mcp-explain).
+func TestToolExplainRollsUpSameRootInputs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/roll\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "r.go"), []byte("package roll\n\nfunc Value() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "r_test.go"), []byte("package roll\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal() } }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	s := New(dir)
+	ctx := context.Background()
+
+	entries := make([]string, 3)
+	for i := range entries {
+		entries[i] = fmt.Sprintf(`{"k":"abs","p":"/leaked/tmp%d/f","d":"0123456789abcdef0123456789abcdef"}`, i)
+	}
+	manifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":1,"paths":[` + strings.Join(entries, ",") + `]}`))
+	f := seededFinding("example.com/roll.Value")
+	f.Commit = "abc"
+	f.TargetEvidence.RuntimeInputs = manifest
+	f.OracleEvidence[0].RuntimeInputs = manifest
+	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{f}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, out, err := s.toolExplain(ctx, nil, explainIn{Symbol: "example.com/roll.Value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolled := false
+	for _, r := range out.LayerReasons {
+		if r == "machine-local runtime inputs under /leaked (3 paths)" {
+			rolled = true
+		}
+		if strings.HasPrefix(r, "machine-local runtime input /leaked") {
+			t.Fatalf("per-path clause escaped the roll-up: %q", out.LayerReasons)
+		}
+	}
+	if !rolled {
+		t.Fatalf("no rolled clause on the symbol arm: %q", out.LayerReasons)
+	}
+
+	_, triage, err := s.toolExplain(ctx, nil, explainIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolled = false
+	for _, g := range triage.Promotion {
+		if g.Reason == "machine-local runtime inputs under /leaked (3 paths)" {
+			rolled = true
+		}
+	}
+	if !rolled {
+		t.Fatalf("no rolled group on the triage arm: %+v", triage.Promotion)
+	}
+}
+
+// The campaign lock rides the MCP run face, and the short document
+// operations stay available while a campaign holds it
+// (REQ-exec-exclusivity).
+func TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":    "module example.com/life\n\ngo 1.26.4\n",
+		"p.go":      "package life\n\nfunc F() int { return 1 }\n",
+		"p_test.go": "package life\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { if F() != 1 { t.Fatal() } }\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	s := New(dir)
+	ctx := context.Background()
+	release, err := gomutant.AcquireCampaignLock(s.findingsPath(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, _, err := s.toolRun(ctx, nil, runIn{Symbols: []string{"example.com/life.F"}}); err == nil || !strings.Contains(err.Error(), "already holds") {
+		t.Fatalf("run under a held campaign lock = %v, want the fail-fast refusal", err)
+	}
+	// A lifecycle verb serializes under the document lock alone.
+	if _, _, err := s.toolPrune(ctx, nil, pruneIn{Check: true}); err != nil {
+		t.Fatalf("prune under a held campaign lock refused: %v", err)
 	}
 }

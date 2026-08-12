@@ -1450,14 +1450,25 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	go func() {
 		defer close(prepDone)
 		defer close(items)
-		prepErr = deliverPrepared(runCtx, func(w work) error {
+		delivered := 0
+		err := deliverPrepared(runCtx, func(w work) error {
+			if runTruncateAfterItems > 0 && delivered >= runTruncateAfterItems {
+				return errTruncateSeam
+			}
 			select {
 			case items <- w:
+				delivered++
 				return nil
 			case <-runCtx.Done():
 				return runCtx.Err()
 			}
 		})
+		if errors.Is(err, errTruncateSeam) {
+			// The seam models the failure REQ-exec-completion exists
+			// for: a pipeline that ends early with its error lost.
+			err = nil
+		}
+		prepErr = err
 	}()
 	interner := &manifestInterner{byDigest: map[string]string{}}
 	type job struct{ wi, mi int }
@@ -1486,11 +1497,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// (REQ-exec-oracle-guidance). One exit keeps the attribution
 	// structurally coupled to the commit: no serve arm can persist an
 	// unverifiable record silently.
+	// committed is the completion ledger for measured targets: a clean
+	// return vouches for the whole announced roster, and this ledger is
+	// how the vouch is checked - phase-one serves and skips carry their
+	// own marks (Cached, Skipped), drifted targets are named in the
+	// drift error, and everything else must pass through here.
+	committed := make([]bool, len(targets))
 	commitAndAttribute := func(ctx context.Context, f Finding, w work) error {
 		findings[w.target] = f
 		if err := commitFinding(ctx, repository, opts.Commit, f); err != nil {
 			return err
 		}
+		committed[w.target] = true
 		return t.emitOracleGuidance(ctx, f, w, targets[w.target].Symbol, opts, runEnv, guidanceCache)
 	}
 	// Advisory execution progress rides window boundaries: totals are
@@ -2081,6 +2099,27 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// A run that returns success has dispositioned every announced
+	// target: measured and committed, served, skipped, or named in the
+	// drift error. There is no fourth silent outcome - a pipeline that
+	// ended early with a lost error would otherwise report a truncated
+	// campaign as complete, indistinguishable from success unless the
+	// operator diffs the document against the roster
+	// (REQ-exec-completion).
+	driftedSymbols := make(map[string]bool, len(drifted))
+	for _, d := range drifted {
+		driftedSymbols[d.Symbol] = true
+	}
+	var unfinished []string
+	for i := range findings {
+		if findings[i].Cached || findings[i].Skipped != "" || committed[i] || driftedSymbols[targets[i].Symbol] {
+			continue
+		}
+		unfinished = append(unfinished, targets[i].Symbol)
+	}
+	if len(unfinished) > 0 {
+		return nil, fmt.Errorf("gomutant: campaign truncated - %s ended without a result and without an error; the findings document keeps each unfinished target's prior record", cappedNameList(unfinished, "target"))
+	}
 	if len(drifted) > 0 || treeDrift != nil {
 		completed := completedFindings(findings, drifted)
 		if len(drifted) == 0 {
@@ -2111,6 +2150,14 @@ func snapshotFindings(findings []Finding) []Finding {
 // runWindowCandidates overrides the execution window candidate budget
 // when positive - a test seam; zero means the jobs-derived default.
 var runWindowCandidates int
+
+// runTruncateAfterItems, when positive, makes the preparation pipeline
+// stop delivering work after that many items with the stopping error
+// lost - a test seam reproducing the truncation shape
+// REQ-exec-completion refuses. Production never sets it.
+var runTruncateAfterItems int
+
+var errTruncateSeam = errors.New("truncation seam")
 
 // gatherWindow blocks for the next prepared work item and keeps blocking
 // until the window's candidate budget is met or preparation ends. Blocking —

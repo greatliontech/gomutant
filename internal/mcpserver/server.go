@@ -23,6 +23,11 @@ import (
 	"github.com/greatliontech/gomutant/internal/gitref"
 )
 
+// clientKeepAliveInterval paces the server's keepalive pings - the
+// disconnect detector for in-flight campaigns. A variable so tests can
+// tighten it; production always uses the default.
+var clientKeepAliveInterval = 30 * time.Second
+
 // Server is a dir-bound MCP server over the gomutant library.
 type Server struct {
 	dir            string
@@ -77,10 +82,25 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 // MCP builds the protocol server (REQ-mcp-tools).
-func (s *Server) MCP() *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, &mcp.ServerOptions{
+// serverOptions builds the MCP server options - extracted so the
+// keepalive configuration is a testable fact.
+func serverOptions() *mcp.ServerOptions {
+	return &mcp.ServerOptions{
+		// The keepalive ping is the disconnect detector for in-flight
+		// campaigns: a ping over a dead transport fails the write, and
+		// the connection cancels every in-flight handler context - so a
+		// client that died mid-run aborts the campaign within the
+		// interval instead of measuring detached for its full duration
+		// (REQ-mcp-lifecycle). A client that abandons a request while
+		// its connection lives owes a cancellation notification per the
+		// protocol; the ping cannot see intent.
+		KeepAlive: clientKeepAliveInterval,
 		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; prune removes resolved-dead records after a refactor and retarget follows a rename (both with check=true previews); ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
-	})
+	}
+}
+
+func (s *Server) MCP() *mcp.Server {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, serverOptions())
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
 		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a targets document, changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure, and each finished target commits incrementally so an interrupted run keeps completed targets. Survivors are findings awaiting disposition, never verdicts. Each mutant's oracle executes once, bracketing runtime-input observation. With a progress token: phase notifications plus a heartbeat. Preparation and decision streams leave the response when streamed; long lists cap with the remainder counted. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited); use the CLI for work that may exceed the MCP client's request timeout.",
@@ -518,6 +538,14 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
+	// The campaign lock spans measurement through the final merge: a
+	// second campaign against the same document refuses immediately
+	// instead of interleaving (REQ-exec-exclusivity).
+	releaseCampaign, err := gomutant.AcquireCampaignLock(s.findingsPath(in.Findings))
+	if err != nil {
+		return nil, out, err
+	}
+	defer releaseCampaign()
 	streams := newRunStreams(&out, notify)
 	var commitSheds []gomutant.AttestationShed
 	// The run-start snapshot of dispositions per symbol makes the merge
@@ -1047,7 +1075,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			layer, layerReasons := store.LayerReasons(finding)
 			out := explainOut{
 				Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
-				Layer: layer, LayerReasons: layerReasons,
+				Layer: layer, LayerReasons: gomutant.RollUpMachineLocalInputs(layerReasons),
 				Attested: len(finding.AttestedDispositions()),
 			}
 			if len(out.LayerReasons) > reasonCap {
@@ -1084,7 +1112,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			continue
 		}
 		local++
-		for _, reason := range layerReasons {
+		for _, reason := range gomutant.RollUpMachineLocalInputs(layerReasons) {
 			groups[reason] = append(groups[reason], finding.Symbol)
 		}
 	}

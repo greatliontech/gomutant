@@ -122,6 +122,14 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
 	docPath := findingsAt(o.dir, o.findingsFile)
+	// The campaign lock spans measurement through the final merge:
+	// a second campaign against the same document refuses immediately
+	// instead of interleaving (REQ-exec-exclusivity).
+	releaseCampaign, err := gomutant.AcquireCampaignLock(docPath)
+	if err != nil {
+		return err
+	}
+	defer releaseCampaign()
 	docStore, err := gomutant.OpenStore(docPath, o.dir)
 	if err != nil {
 		return err

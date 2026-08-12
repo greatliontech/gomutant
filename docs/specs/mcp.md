@@ -73,13 +73,33 @@ destructive call deletes - the one sanctioned exception to
 REQ-mcp-envelope's row caps; retarget rows cap with counted omissions
 as usual.
 
+The server MUST detect a dead client transport while a campaign is in
+flight and cancel the campaign rather than measure detached: it
+keepalive-pings the session, and a failed ping write cancels every
+in-flight request context, which aborts the run under
+REQ-exec-cancellation's terms within the ping interval. A client that
+abandons a request while its connection lives owes a cancellation
+notification per the protocol - a ping cannot see intent - and the
+campaign lock of REQ-exec-exclusivity keeps any surviving detached
+campaign from interleaving with a retry. A live client that merely
+misses the ping's response budget loses its session while the campaign
+completes and commits: the document, not the response, is the result
+of record.
+
+REQ-mcp-lifecycle: enforced by `TestToolPruneAndRetarget`,
+`TestToolLifecycleEchoBounds`, and `TestServerOptionsCarryKeepalive`.
+
 **REQ-mcp-explain** (behavior): The server MUST expose an explain tool
 answering causally, from the findings document and current-tree
 inspection alone — no tests run, the advisory stance intact: given a
 mutated symbol, the record's inspection state and reason, its
 persistence layer with every portable-line clause it fails
 (REQ-result-layers' line — the full list, never only the first, so
-repairing one clause never surfaces the next as a surprise), each
+repairing one clause never surfaces the next as a surprise;
+machine-local input clauses sharing a top-level directory roll up into
+one row naming the root and the path count — a tempdir-heavy oracle
+otherwise repeats one story per leaked path — with the per-path list
+still derivable from the document), each
 open survivor with its execution bucket and the action the bucket
 prescribes, and the attested count; given no symbol, the promotion
 triage — repo and machine-local counts leading, machine-local records
@@ -96,6 +116,8 @@ findings tool as the roster.
 
 REQ-mcp-explain: enforced by `TestToolExplainAnswersSymbolAndTriage`,
 `TestToolExplainCapsEveryRowSet`,
+`TestToolExplainRollsUpSameRootInputs`,
+`TestRollUpMachineLocalInputs`,
 `TestCommittableReasonsListEveryFailingClause`, and
 `TestSurvivorAdviceVocabulary`.
 

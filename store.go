@@ -442,3 +442,51 @@ func (s *Store) Committability(ctx context.Context) (repo, localOnly int, err er
 	}
 	return repo, localOnly, nil
 }
+
+// RollUpMachineLocalInputs collapses machine-local runtime-input
+// clauses sharing a top-level directory into one clause naming the
+// root and the count - a tempdir-heavy oracle otherwise repeats one
+// story per leaked path per subject in every rendered view. Other
+// clauses pass through unchanged in place; the full per-path list
+// stays derivable from CommittableReasons and the document is
+// untouched (REQ-mcp-explain).
+func RollUpMachineLocalInputs(reasons []string) []string {
+	const prefix = "machine-local runtime input "
+	type group struct {
+		root  string
+		count int
+		first int
+		one   string
+	}
+	var order []*group
+	byRoot := map[string]*group{}
+	out := make([]string, 0, len(reasons))
+	for _, r := range reasons {
+		path, ok := strings.CutPrefix(r, prefix)
+		if !ok || !strings.HasPrefix(path, "/") {
+			out = append(out, r)
+			continue
+		}
+		seg := path[1:]
+		if i := strings.IndexByte(seg, '/'); i >= 0 {
+			seg = seg[:i]
+		}
+		root := "/" + seg
+		g := byRoot[root]
+		if g == nil {
+			g = &group{root: root, first: len(out), one: r}
+			byRoot[root] = g
+			order = append(order, g)
+			out = append(out, "")
+		}
+		g.count++
+	}
+	for _, g := range order {
+		if g.count == 1 {
+			out[g.first] = g.one
+		} else {
+			out[g.first] = fmt.Sprintf("machine-local runtime inputs under %s (%d paths)", g.root, g.count)
+		}
+	}
+	return out
+}

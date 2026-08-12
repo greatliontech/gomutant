@@ -1,6 +1,6 @@
 # MCP long-running runs
 
-Lands: cross-tool train chunk 41.
+Lands: a go-sdk release carrying the MCP Tasks extension (SEP-2663) plus a consuming agent client - task-based polling, result retrieval, and explicit cancellation for runs beyond a request deadline.
 ## Observed
 
 An exhaustive `gomutant_run` over eight symbols exceeded the MCP client's approximately
@@ -27,3 +27,14 @@ exceed the harness's MCP request timeout - the run tool's description states thi
 defaults timeout_sec to 300. A cancellation observed by gomutant continues to retain
 the prior findings document; a private client deadline that is not propagated is not
 observable by the server and cannot be treated as cancellation.
+
+## Landed half
+
+Dead-transport detection landed independently of MCP Tasks: the server
+keepalive-pings its session, a failed ping write cancels every in-flight
+request context, and the campaign aborts under REQ-exec-cancellation
+(mcp.md REQ-mcp-lifecycle). The campaign lock (REQ-exec-exclusivity)
+keeps any surviving detached campaign from interleaving with a retry.
+What remains for this issue is the protocol-level task surface above:
+polling, result retrieval after a client deadline, and explicit
+cancellation of a run the client abandoned while its connection lives.
