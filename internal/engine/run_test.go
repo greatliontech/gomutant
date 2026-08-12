@@ -675,13 +675,13 @@ func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
 
 func TestProbeBaselineRejectsTestCountDrift(t *testing.T) {
 	tr := fixtureTree(t)
-	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
+	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/unstable")
 	if err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "baseline-count")
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_COUNT="+marker)
-	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", time.Minute, nil, moduleDir, packageDir, nil, env)
+	_, _, _, err = TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/unstable", "^TestAdd$", time.Minute, nil, moduleDir, packageDir, nil, env)
 	if err == nil || !strings.Contains(err.Error(), "baseline test count changed") {
 		t.Fatalf("unstable baseline count = %v", err)
 	}

@@ -1,6 +1,6 @@
 //go:build windows
 
-package lib_test
+package unstable_test
 
 import "syscall"
 

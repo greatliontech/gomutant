@@ -87,19 +87,24 @@ func TestRunStatesPropertyOraclePrerequisites(t *testing.T) {
 // without the recorded regime (a pre-regime document) is refused every
 // serve family and re-measures whole ("stale") - its verdicts were
 // measured under draws the pinned regime never executes - while a
-// record carrying the current regime reaches the serve family
-// (REQ-exec-property-oracles, REQ-result-stale). The rapid fixture's
-// records currently drift-serve rather than plainly serve on unchanged
-// trees - a pre-existing evidence-acceptance condition tracked in
-// docs/issues/rapid-oracle-records-never-plainly-serve.md - so the
-// pin's observable boundary here is serve-family versus stale.
+// record carrying the current regime serves plainly cached on an
+// unchanged tree (REQ-exec-property-oracles, REQ-result-stale). The
+// plain serve is load-bearing: it requires the rapid oracle subject's
+// observation proof to record Observable, which rests on gofresh's
+// property-harness audit (the observed test-main window, the
+// flag-registration startup audit, and the harness boundary gate) -
+// a regression in any of those demotes this serve to a drift
+// re-measure and fails the exact-reason assertion below.
 func TestPropertyRegimePinGatesServe(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
 	tr := fixtureTree(t)
 	ctx := context.Background()
-	targets := []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestPropRapidCheck"}}}
+	// The clean prop fixture: its rapid-oracle subject proves
+	// Observable, so the record is born servable - the lib fixture's
+	// ambient kitchen sink would demote this to a drift re-measure.
+	targets := []Target{{Symbol: "example.com/fixture/prop.Add", Oracle: []string{"example.com/fixture/prop.TestPropRapidCheck"}}}
 	first, err := tr.Run(ctx, targets, Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -117,8 +122,8 @@ func TestPropertyRegimePinGatesServe(t *testing.T) {
 	}
 
 	matching := reasonOf(first)
-	if !strings.HasPrefix(matching, "served:") {
-		t.Fatalf("matching-regime record refused every serve family: %q", matching)
+	if matching != "served: body, oracle closure, and runtime inputs unchanged" {
+		t.Fatalf("matching-regime rapid record did not serve plainly cached: %q", matching)
 	}
 
 	preRegime := append([]Finding(nil), first...)
@@ -126,6 +131,23 @@ func TestPropertyRegimePinGatesServe(t *testing.T) {
 	stripped := reasonOf(preRegime)
 	if strings.HasPrefix(stripped, "served:") {
 		t.Fatalf("pre-regime rapid record reached a serve family under the pinned regime: %q", stripped)
+	}
+
+	// The clean-fixture serve is a boundary, not the norm: the lib
+	// fixture's kitchen-sink binary keeps a refusing observation proof,
+	// so its rapid record must never reach the plain-cached serve -
+	// drift re-measure is the designed behavior there.
+	libTargets := []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestPropRapidCheck"}}}
+	libFirst, err := tr.Run(ctx, libTargets, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	libReason := ""
+	if _, err := tr.Run(ctx, libTargets, Options{Prior: libFirst, Decision: func(d RunDecision) { libReason = d.Reason }}); err != nil {
+		t.Fatal(err)
+	}
+	if libReason == "served: body, oracle closure, and runtime inputs unchanged" {
+		t.Fatal("kitchen-sink rapid record served plainly cached: a refusing proof must demote it to a re-measure family")
 	}
 }
 

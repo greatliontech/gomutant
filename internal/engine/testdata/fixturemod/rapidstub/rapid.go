@@ -17,15 +17,23 @@ func init() {
 	flag.Uint64("rapid.seed", 0, "rapid: PRNG seed (0 means random)")
 }
 
-// T mirrors rapid.T as the property callback's handle.
-type T struct{ testing.TB }
+// T mirrors rapid.T as the property callback's handle. The real
+// rapid.T holds its harness handle in an unexported field and exposes
+// its own methods - the internal dispatch happens inside this package,
+// never in the callback's body - so the stub mirrors that shape rather
+// than embedding, which would materialize promoted-method dispatch in
+// user code the real library never produces.
+type T struct{ tb testing.TB }
+
+// Fatal mirrors the failing-report method the fixtures drive.
+func (t *T) Fatal(args ...any) { t.tb.Fatal(args...) }
 
 // Check mirrors the check driver: it runs the property once.
-func Check(t *testing.T, prop func(*T)) { prop(&T{TB: t}) }
+func Check(t *testing.T, prop func(*T)) { prop(&T{tb: t}) }
 
 // MakeCheck mirrors the subtest-shaped driver.
 func MakeCheck(prop func(*T)) func(*testing.T) {
-	return func(t *testing.T) { prop(&T{TB: t}) }
+	return func(t *testing.T) { prop(&T{tb: t}) }
 }
 
 // Int mirrors a generator constructor: construction alone must not
