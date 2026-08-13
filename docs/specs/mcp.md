@@ -73,7 +73,8 @@ destructive call deletes - the one sanctioned exception to
 REQ-mcp-envelope's row caps; retarget rows cap with counted omissions
 as usual.
 
-The server MUST detect a dead client transport while a campaign is in
+**REQ-mcp-liveness** (behavior): The server MUST detect a dead client
+transport while a campaign is in
 flight and cancel the campaign rather than measure detached: it
 keepalive-pings the session, and a failed ping write cancels every
 in-flight request context, which aborts the run under

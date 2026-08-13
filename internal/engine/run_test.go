@@ -747,7 +747,7 @@ func TestObservationWithoutBracketFailsClosedAsIncomplete(t *testing.T) {
 	if err := os.WriteFile(log, []byte("open fixture\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, incomplete, err := processObservationContext(context.Background(), log, root, root, "", os.Environ(), true, nil, "observation bracket capture failed: fixture reason")
+	obs, incomplete, err := processObservationContext(context.Background(), log, root, root, "", os.Environ(), "", true, nil, "observation bracket capture failed: fixture reason")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,10 +3,13 @@ package gomutant
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 )
 
 func withModuleSelectionPaths(sourceFiles []string) []string {
@@ -178,4 +181,43 @@ func gitOutputContext(ctx context.Context, dir string, args ...string) ([]byte, 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	return cmd.Output()
+}
+
+// measurementResidue names untracked files that appeared in the
+// repository after the run began. A mutant of filesystem-writing code
+// (or its oracle) can create files inside the tree during measurement;
+// the resulting drift refusal is then the run's own residue, not
+// external-actor drift, and the decision line says so instead of
+// reading as operator error (REQ-exec-quiescence's residue sentence).
+// Empty when nothing fresh is untracked, when the repository is
+// unavailable, or when the listing fails - the generic drift reason
+// then stands alone, never blocked by this diagnostic.
+func measurementResidue(ctx context.Context, s repositoryState, since time.Time) string {
+	if !s.available {
+		return ""
+	}
+	out, err := gitOutputContext(ctx, s.root, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return ""
+	}
+	var fresh []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		info, statErr := os.Lstat(filepath.Join(s.root, line))
+		if statErr != nil || info.ModTime().Before(since) {
+			continue
+		}
+		fresh = append(fresh, line)
+	}
+	if len(fresh) == 0 {
+		return ""
+	}
+	sort.Strings(fresh)
+	residue := fresh[0]
+	if len(fresh) > 1 {
+		residue = fmt.Sprintf("%s (and %d more)", fresh[0], len(fresh)-1)
+	}
+	return fmt.Sprintf("; untracked %s appeared during measurement - a mutant or oracle process can write into the tree, and the refused target re-measures once the residue is removed", residue)
 }

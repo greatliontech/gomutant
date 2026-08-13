@@ -13,13 +13,19 @@ func TestStable(t *testing.T) {
 }
 
 func TestUnstable(t *testing.T) {
-	scratch := filepath.Join(t.TempDir(), "scratch")
-	if err := os.WriteFile(scratch, []byte("ephemeral"), 0o644); err != nil {
+	// An absolute external read - under the user home, outside the
+	// module and the minted TMPDIR - that no bracket covers and no
+	// declared root admits: this run's completed evidence stays
+	// content-unverifiable by contract on every platform. Minted-TMPDIR
+	// scratch no longer serves as the vehicle - ingest declares the
+	// tool's scratch root as an ephemeral temp root and swept reads
+	// admit recordless. The file's absence is immaterial: the open
+	// intent records.
+	home, err := os.UserHomeDir()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.ReadFile(scratch); err != nil {
-		t.Fatal(err)
-	}
+	_, _ = os.ReadFile(filepath.Join(home, ".gomutant-external-input-fixture"))
 	if Value() != 1 {
 		t.Fatal("value")
 	}

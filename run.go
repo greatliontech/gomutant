@@ -778,10 +778,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	opts = lockCallbacks(opts)
 	targets = snapshotTargets(targets)
 	opts.Prior = snapshotFindings(opts.Prior)
+	runStart := time.Now()
 	repository, err := captureRepositoryStateContext(ctx, t.dir)
 	if err != nil {
 		return nil, err
 	}
+	// residue evaluates the untracked-file listing once for the whole
+	// run: a wide drift refuses many targets against the same tree
+	// state, and the naming needs the residue set, not a per-target
+	// re-listing.
+	residue := sync.OnceValue(func() string { return measurementResidue(ctx, repository, runStart) })
 	runEnv := t.eng.GoEnv()
 	preparation := newRunPreparation(t)
 	engines := t.newSubjectEngines(opts.AnalysisProgress)
@@ -1760,7 +1766,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
 					continue
 				}
 				// Served prefix + re-executed candidates both validated
@@ -1784,7 +1790,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
 					continue
 				}
 				// The grown record carries the current tree's evidence, so its
@@ -1849,7 +1855,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
 					continue
 				}
 				// The drifted record carries the current tree's evidence — the
@@ -1903,7 +1909,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
 					continue
 				}
 				// Advisory execution buckets: a verifiable extension's suffix
@@ -1949,7 +1955,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error()})
+				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
 				continue
 			}
 			if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, f); err != nil {

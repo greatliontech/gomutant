@@ -216,6 +216,11 @@ incrementally, so a partial campaign retains its sound results. A drift-refused 
 reports the refused set with a re-run hint and fails operationally (a pipeline
 never reads a partial campaign as success); a transient global drift that no
 surviving target's evidence reflects is still reported, never silently absorbed.
+A drift whose residue is untracked files written after the run began names that
+provenance on the decision line — a mutant of filesystem-writing code (or its
+oracle) can create files inside the tree during measurement, and the refusal
+then reads as the run's own residue rather than operator error, self-resolving
+once the residue is removed.
 A repository HEAD move remains campaign-wide: it breaks the commit provenance
 pin every finding carries — a global pin, not per-target source drift.
 The same target-locality governs evidence construction: a target whose own
@@ -404,7 +409,8 @@ routes to the local overlay never reads as a healthy repo-document write.
 Open survivors remain
 advisory and do not change successful exit semantics.
 
-A plan-only run MUST perform the full deterministic preparation
+**REQ-exec-plan-only** (behavior): A plan-only run MUST perform the full
+deterministic preparation
 sequence and deliver every target decision exactly as an executing run
 would — mutants enumerated, candidate counts and reasons exact — then
 stop: no baseline probes, no mutant executes, and nothing new persists
@@ -480,13 +486,16 @@ changing the command timeout alone never stales a finding.
 **REQ-exec-completion** (behavior): A run that returns success MUST have
 dispositioned every announced target: measured and committed, served,
 skipped with a recorded reason, or named in a drift error. There is no
-fourth silent outcome — a run whose pipeline ended early without an
+fourth silent outcome.
+
+**REQ-exec-truncation** (behavior): A run whose pipeline ended early
+without an
 error MUST fail loudly naming the unfinished targets rather than
 report a truncated campaign as complete, because a truncated success
 is indistinguishable from a real one unless the operator diffs the
 findings document against the announced roster.
 
-REQ-exec-completion: enforced by
+REQ-exec-completion, REQ-exec-truncation: enforced by
 `TestTruncatedPipelineFailsLoudlyNamingUnfinishedTargets`.
 
 **REQ-exec-exclusivity** (behavior): A findings-producing run MUST hold an
@@ -514,18 +523,43 @@ removal cannot descend. A mutant killed on timeout or by the memory
 ceiling never runs its deferred cleanups; without containment its temp
 directories accumulate for the campaign's lifetime, and on a
 tmpfs-backed temp root that accumulation is leaked RAM compounding the
-very pressure the ceiling exists to relieve. The sweep MUST precede
-observation finalization: the recorded evidence then captures the
-swept truth — scratch reads finalize as missing-path identities that
-revalidate stably on every later merge and serve — where sweeping
-after finalization would record content digests of files the sweep
-deletes, evidence that reads moved forever. The scratch directory
+very pressure the ceiling exists to relieve. The scratch directory
 lands under the operator's own temp root, so pointing a
 filesystem-heavy campaign at disk-backed space is one environment
 variable (`TMPDIR=/var/tmp`).
 
-REQ-exec-oracle-scratch: enforced by
+**REQ-exec-oracle-scratch-order** (behavior): The scratch sweep MUST
+precede
+observation finalization: the recorded evidence then captures the
+swept truth — a scratch read under the declared root, absent at
+ingest, admits recordless, and a read outside the admission finalizes
+as a missing-path identity that revalidates stably on every later
+merge and serve — where sweeping
+after finalization would record content digests of files the sweep
+deletes, evidence that reads moved forever. The sweep empties the
+root but the root itself outlives finalization: the runtimeinput
+contract admits deeper absent reads only under a root that still
+resolves at ingest — an unresolvable root declares nothing — and the
+emptied root is removed with the run's other ephemera once
+finalization completes.
+
+**REQ-exec-oracle-scratch-declared** (behavior): Observation ingest MUST
+declare the minted scratch root to finalization as an ephemeral temp
+root — the runtimeinput contract's one-identity-wide admission: the
+tool created the root for this process tree and sweeps it after, so
+its identity carries no observable state — because temp-tree creation
+machinery stats the root to mint per-test subtrees, and an undeclared
+root records as an uncovered runtime input that leaves every
+temp-touching oracle's evidence machine-local and its survivors
+unbucketed. The declaration names exactly the root this run minted,
+never an inherited `TMPDIR` — a fail-safe direction: a missing mint
+declares nothing and evidence degrades to unverifiable, rather than a
+foreign temp root reading as ephemeral.
+
+REQ-exec-oracle-scratch, REQ-exec-oracle-scratch-order: enforced by
 `TestOracleScratchContainsAndSweepsTempDirs`.
+REQ-exec-oracle-scratch-declared: enforced by
+`TestTempTouchingOracleFinalizesVerifiable`.
 
 **REQ-exec-oracle-memory** (behavior): Every oracle process tree — mutant
 runs, baseline probes, and ephemeral probes alike — MUST run under a

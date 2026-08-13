@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -135,5 +136,75 @@ func TestRunDriftRefusesSplicedServeTargetLocally(t *testing.T) {
 	}
 	if len(findings) != 0 || len(committed) != 0 {
 		t.Fatalf("drift-refused splice retained findings %+v, committed %v", findings, committed)
+	}
+}
+
+// A drift whose residue is an untracked file written under measurement
+// names the provenance on the decision line: the operator reads that a
+// mutant or oracle process can write into the tree, not generic drift
+// that looks like operator error (REQ-exec-quiescence's residue
+// sentence).
+func TestRunDriftNamesMeasurementResidue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=gomutant", "GIT_AUTHOR_EMAIL=gomutant@example.invalid",
+			"GIT_COMMITTER_NAME=gomutant", "GIT_COMMITTER_EMAIL=gomutant@example.invalid",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("add", ".")
+	runGit("commit", "-q", "-m", "fixture")
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}
+	libPath := filepath.Join(dir, "lib", "lib.go")
+	src, err := os.ReadFile(libPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := strings.Replace(string(src), "return a + b", "return b + a + 0", 1)
+	if moved == string(src) {
+		t.Fatal("fixture body not found")
+	}
+	residue := filepath.Join(dir, "lib", "residue.db")
+	_, err = tr.Run(context.Background(), targets, Options{
+		Budget: 1,
+		afterExecution: func() {
+			// The tracked edit is the proven drift trigger; the
+			// untracked file is the residue the decision line must
+			// name alongside it.
+			if err := os.WriteFile(libPath, []byte(moved), 0o644); err != nil {
+				t.Error(err)
+			}
+			if err := os.WriteFile(residue, []byte("mutant wrote this"), 0o644); err != nil {
+				t.Error(err)
+			}
+		},
+	})
+	var drift *TreeDriftError
+	if !errors.As(err, &drift) {
+		t.Fatalf("residue run error = %v, want a TreeDriftError", err)
+	}
+	if len(drift.Drifted) == 0 {
+		t.Fatalf("drift attribution = %+v", drift)
+	}
+	reason := drift.Drifted[0].Reason
+	if !strings.Contains(reason, "residue.db") || !strings.Contains(reason, "can write into the tree") {
+		t.Fatalf("drift reason lacks the measurement-residue provenance: %q", reason)
 	}
 }

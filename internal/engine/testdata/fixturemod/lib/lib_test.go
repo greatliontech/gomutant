@@ -91,25 +91,20 @@ func TestChangingIdentity(t *testing.T) {
 }
 
 func TestGeneratedFixture(t *testing.T) {
-	// The generated per-run path lives OUTSIDE the module tree (the
-	// system temp dir, which the ingest declares no root for), so its
-	// identities are covered by no observation bracket and the completed
-	// evidence stays content-unverifiable by contract — the shape the
-	// finding-wide remeasure pin needs. In-module self-cleaned scratch no
-	// longer seals: absent at both bracket endpoints, it records
-	// missing-arm identities and binds.
-	dir, err := os.MkdirTemp("", ".generated-fixture-")
+	// The read targets an absolute external path - under the user home,
+	// outside the module and outside the oracle's minted TMPDIR - that
+	// no observation bracket covers and no declared root admits, so the
+	// completed evidence stays content-unverifiable by contract on
+	// every platform - the shape the finding-wide remeasure pin needs.
+	// The file's absence is immaterial: the open intent records.
+	// Neither in-module self-cleaned scratch (missing-arm identities,
+	// binds) nor minted-TMPDIR scratch (declared ephemeral root, admits
+	// recordless) seals anymore.
+	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
-	path := filepath.Join(dir, "input")
-	if err := os.WriteFile(path, []byte("fixture"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.ReadFile(path); err != nil {
-		t.Fatal(err)
-	}
+	_, _ = os.ReadFile(filepath.Join(home, ".gomutant-external-input-fixture"))
 	if Add(1, 2) != 3 {
 		t.Fatal("sum")
 	}

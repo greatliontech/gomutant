@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -388,5 +390,59 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	}
 	if !unresolvable.Dirty {
 		t.Fatal("an unresolvable identity stamped clean, want fail-closed dirty")
+	}
+}
+
+// A drift refusal whose residue is an untracked file written after the
+// run began names the measurement provenance - a mutant or oracle
+// process wrote into the tree - while pre-existing untracked files and
+// clean trees add nothing (REQ-exec-quiescence's residue sentence).
+func TestMeasurementResidueNamesFreshUntrackedFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "source.go"), []byte("package p\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=gomutant", "GIT_AUTHOR_EMAIL=gomutant@example.invalid",
+			"GIT_COMMITTER_NAME=gomutant", "GIT_COMMITTER_EMAIL=gomutant@example.invalid",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("add", "source.go")
+	runGit("commit", "-q", "-m", "fixture")
+	// A pre-existing untracked file: present before the run began.
+	stale := filepath.Join(root, "pre-existing.txt")
+	if err := os.WriteFile(stale, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	repository := captureRepositoryState(root)
+	if !repository.available {
+		t.Fatalf("repository state = %+v", repository)
+	}
+	since := time.Now().Add(-time.Minute)
+	if residue := measurementResidue(context.Background(), repository, since); residue != "" {
+		t.Fatalf("pre-existing untracked file named as residue: %q", residue)
+	}
+	if err := os.WriteFile(filepath.Join(root, "written-under-measurement.db"), []byte("residue"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	residue := measurementResidue(context.Background(), repository, since)
+	if !strings.Contains(residue, "written-under-measurement.db") || !strings.Contains(residue, "can write into the tree") {
+		t.Fatalf("residue = %q, want the fresh untracked file named with its provenance", residue)
+	}
+	// Unavailable repository state degrades to the bare reason.
+	if residue := measurementResidue(context.Background(), repositoryState{}, since); residue != "" {
+		t.Fatalf("unavailable repository produced residue: %q", residue)
 	}
 }
