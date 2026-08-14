@@ -39,19 +39,32 @@ func withModuleSelectionPaths(sourceFiles []string) []string {
 type repositoryState struct {
 	root, commit string
 	available    bool
+	// staged marks the run as measuring the index snapshot
+	// (REQ-result-staged): the dirty judgment narrows to drift the
+	// snapshot cannot vouch for - worktree content diverging from the
+	// index, untracked files, ignored files - while staged-but-
+	// uncommitted changes are exactly the measured content and count
+	// clean. stagedTree is the index's own tree identity
+	// (`git write-tree`): the tree the eventual commit will carry when
+	// the staging lands as reviewed.
+	staged     bool
+	stagedTree string
 }
 
 func captureRepositoryState(dir string) repositoryState {
-	state, _ := captureRepositoryStateContext(context.Background(), dir)
+	state, _ := captureRepositoryStateContext(context.Background(), dir, false)
 	return state
 }
 
-func captureRepositoryStateContext(ctx context.Context, dir string) (repositoryState, error) {
+func captureRepositoryStateContext(ctx context.Context, dir string, staged bool) (repositoryState, error) {
 	root, err := gitOutputContext(ctx, dir, "rev-parse", "--show-toplevel")
 	if ctx.Err() != nil {
 		return repositoryState{}, ctx.Err()
 	}
 	if err != nil {
+		if staged {
+			return repositoryState{}, fmt.Errorf("gomutant: staged mode needs a git repository: %v", err)
+		}
 		return repositoryState{}, nil
 	}
 	commit, err := gitOutputContext(ctx, dir, "rev-parse", "HEAD")
@@ -59,13 +72,31 @@ func captureRepositoryStateContext(ctx context.Context, dir string) (repositoryS
 		return repositoryState{}, ctx.Err()
 	}
 	if err != nil {
+		if staged {
+			return repositoryState{}, fmt.Errorf("gomutant: staged mode needs commit provenance: %v", err)
+		}
 		return repositoryState{}, nil
 	}
-	return repositoryState{
+	state := repositoryState{
 		root:      strings.TrimSpace(string(root)),
 		commit:    strings.TrimSpace(string(commit)),
 		available: true,
-	}, nil
+	}
+	if staged {
+		// write-tree refuses an unmerged index - exactly the states a
+		// snapshot run cannot pin - and materializes the tree identity
+		// the eventual commit will carry.
+		tree, err := gitOutputContext(ctx, state.root, "write-tree")
+		if ctx.Err() != nil {
+			return repositoryState{}, ctx.Err()
+		}
+		if err != nil {
+			return repositoryState{}, fmt.Errorf("gomutant: staged mode cannot pin the index snapshot: %v", err)
+		}
+		state.staged = true
+		state.stagedTree = strings.TrimSpace(string(tree))
+	}
+	return state, nil
 }
 
 func (s repositoryState) pathsDirty(selectedPaths []string) bool {
@@ -104,7 +135,41 @@ func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
-	return err != nil || len(bytes.TrimSpace(status)) > 0, nil
+	if err != nil {
+		return true, nil
+	}
+	if !s.staged {
+		return len(bytes.TrimSpace(status)) > 0, nil
+	}
+	// The snapshot vouches for staged content: only worktree-vs-index
+	// divergence (the Y column), untracked files, and ignored files are
+	// drift the index cannot cover; an index-vs-HEAD change (the X
+	// column alone) IS the measured snapshot (REQ-result-staged).
+	for _, line := range bytes.Split(status, []byte("\n")) {
+		if len(line) < 2 {
+			continue
+		}
+		x, y := line[0], line[1]
+		if x == '?' || x == '!' || y != ' ' {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// snapshotMovedContext reports whether the index snapshot a staged run
+// pinned at start still stands: a re-staging mid-run means the
+// measured content and the recorded tree identity have diverged
+// (REQ-result-staged). A non-staged state never reports movement here.
+func (s repositoryState) snapshotMovedContext(ctx context.Context) (bool, error) {
+	if !s.staged {
+		return false, nil
+	}
+	tree, err := gitOutputContext(ctx, s.root, "write-tree")
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	return err != nil || strings.TrimSpace(string(tree)) != s.stagedTree, nil
 }
 
 func (s repositoryState) historicalPackageFiles(sourceFiles []string) []string {

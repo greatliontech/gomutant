@@ -106,6 +106,13 @@ type Options struct {
 	// carries the bracket contract's mutation-free assertion for the
 	// span.
 	BracketPaths []string
+	// Staged pins the run to the git index snapshot
+	// (REQ-result-staged): staged-but-uncommitted content is the
+	// measured subject and counts clean; unstaged drift over a
+	// measured package's inputs refuses that target instead of
+	// stamping dirty machine-local evidence, and the finding records
+	// the index tree identity the eventual commit will carry.
+	Staged bool
 	// Exemptions is the committed exemption record
 	// (REQ-result-exemptions): reviewed acceptances of exactly-named
 	// unverifiable reasons per subject, consumed by survivor bucketing
@@ -855,7 +862,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	targets = snapshotTargets(targets)
 	opts.Prior = snapshotFindings(opts.Prior)
 	runStart := time.Now()
-	repository, err := captureRepositoryStateContext(ctx, t.dir)
+	repository, err := captureRepositoryStateContext(ctx, t.dir, opts.Staged)
 	if err != nil {
 		return nil, err
 	}
@@ -1030,6 +1037,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// (REQ-exec-run-status); the caller drives it serially, either inline
 	// (plan-only) or from the preparation goroutine pipelined with the
 	// execution windows.
+	// driftedMu guards drifted: the preparation goroutine's cached-serve
+	// refusal and the aggregation loop's refusals append concurrently
+	// (the pipeline runs preparation ahead of execution).
+	var driftedMu sync.Mutex
+	var drifted []TargetDrift
+	refuseTarget := func(symbol, reason string) {
+		driftedMu.Lock()
+		drifted = append(drifted, TargetDrift{Symbol: symbol, Reason: reason})
+		driftedMu.Unlock()
+	}
 	prepareTarget := func(ctx context.Context, resolved resolvedTarget) (*work, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -1128,8 +1145,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// like a fresh measure's - a dirty-born record promotes to
 				// the portable layer once its paths are clean
 				// (REQ-result-stale, REQ-result-layers).
-				if err := t.stampProvenance(ctx, repository, targetView, oracleViews, &cached); err != nil {
+				if stagedDrift, err := t.stampProvenance(ctx, repository, targetView, oracleViews, &cached); err != nil {
 					return nil, err
+				} else if stagedDrift != "" {
+					refuseTarget(tg.Symbol, stagedDrift+residue())
+					if opts.Decision != nil {
+						opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "refused", Reason: stagedDrift})
+					}
+					return nil, nil
 				}
 				findings[i] = cached
 				// Commit precedes the decision: a caller canceling at the
@@ -1501,6 +1524,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		} else if moved {
 			return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
 		}
+		// A staged drift refused during preparation surfaces exactly as
+		// an executing run's epilogue would surface it - a plan
+		// delivering success while silently dropping a refused target
+		// would misreport the budget decision (REQ-exec-plan-only,
+		// REQ-result-staged).
+		driftedMu.Lock()
+		planDrifted := append([]TargetDrift(nil), drifted...)
+		driftedMu.Unlock()
+		if len(planDrifted) > 0 {
+			return nil, &TreeDriftError{Drifted: planDrifted}
+		}
 		// Only findings complete without execution return (cached
 		// serves and skips), so a partially-enumerated measure target
 		// never escapes as evidence.
@@ -1577,7 +1611,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		windowBudget = runWindowCandidates
 	}
 	var treeDrift error
-	var drifted []TargetDrift
 	// commitAndAttribute is the one epilogue every measured or spliced
 	// finding leaves aggregation through: install, persist, and — when
 	// the evidence landed unverifiable under a package-derived oracle —
@@ -1849,14 +1882,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
+					refuseTarget(targets[w.target].Symbol, err.Error() + residue())
 					continue
 				}
 				// Served prefix + re-executed candidates both validated
 				// against the current tree; provenance recomputes like a
 				// fresh measure's (REQ-result-stale, REQ-result-layers).
-				if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &spliced); err != nil {
+				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &spliced); err != nil {
 					return err
+				} else if stagedDrift != "" {
+					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+					continue
 				}
 				if err := commitAndAttribute(ctx, spliced, w); err != nil {
 					return err
@@ -1874,14 +1910,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
+					refuseTarget(targets[w.target].Symbol, err.Error() + residue())
 					continue
 				}
 				// The grown record carries the current tree's evidence, so its
 				// commit and dirty provenance are recomputed like a fresh
 				// measure's rather than carried from the served record.
-				if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &grown); err != nil {
+				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &grown); err != nil {
 					return err
+				} else if stagedDrift != "" {
+					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+					continue
 				}
 				// Advisory buckets re-derived honestly under the delta oracle:
 				// an added test executing a previously never-executed survivor
@@ -1940,15 +1979,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
+					refuseTarget(targets[w.target].Symbol, err.Error() + residue())
 					continue
 				}
 				// The drifted record carries the current tree's evidence — the
 				// gate proved the retained movement is the attributable
 				// compartment delta — so provenance is recomputed like a fresh
 				// measure's (REQ-result-stale's killer-drift carve-out).
-				if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &spliced); err != nil {
+				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &spliced); err != nil {
 					return err
+				} else if stagedDrift != "" {
+					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+					continue
 				}
 				// With any oracle moved, every surviving candidate was
 				// re-measured against the full current oracle, so advisory
@@ -1995,7 +2037,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
+					refuseTarget(targets[w.target].Symbol, err.Error() + residue())
 					continue
 				}
 				// Advisory execution buckets: a verifiable extension's suffix
@@ -2011,8 +2053,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// Served prefix + measured suffix both validated against the
 				// current tree; provenance recomputes like a fresh measure's
 				// (REQ-result-stale, REQ-result-layers).
-				if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &extended); err != nil {
+				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, &extended); err != nil {
 					return err
+				} else if stagedDrift != "" {
+					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+					continue
 				}
 				if err := commitAndAttribute(ctx, extended, w); err != nil {
 					return err
@@ -2041,11 +2086,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				drifted = append(drifted, TargetDrift{Symbol: targets[w.target].Symbol, Reason: err.Error() + residue()})
+				refuseTarget(targets[w.target].Symbol, err.Error() + residue())
 				continue
 			}
-			if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, f); err != nil {
+			if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, f); err != nil {
 				return err
+			} else if stagedDrift != "" {
+				refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+				continue
 			}
 			stampExemptions(f, opts.Exemptions)
 			f.Operators = summarizeOperators(w.candidates, outcomes[wi])
@@ -2572,11 +2620,17 @@ func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, 
 // clean, its attestations riding the promotion. An unreadable evidence
 // manifest, or evidence naming a subject no view carries, stamps dirty
 // terminally - later evidence goes unexamined, fail-closed.
-func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, f *Finding) error {
+// The stagedDrift return is non-empty exactly when a staged run's
+// snapshot cannot vouch for the target - unstaged drift over its
+// measured inputs, or an index re-staged mid-run - and the caller
+// routes the target to its drift refusal instead of persisting a
+// record (REQ-result-staged); non-staged runs always return "".
+func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, f *Finding) (stagedDrift string, err error) {
 	f.Commit = repository.commit
+	f.StagedTree = repository.stagedTree
 	sourceFiles, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
 	if err != nil {
-		return err
+		return "", err
 	}
 	moduleDirs := map[string]string{targetView.symbol: targetView.moduleDir}
 	viewEnvs := map[string][]string{targetView.symbol: targetView.env}
@@ -2586,7 +2640,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 	}
 	for _, evidence := range append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...) {
 		if err := ctx.Err(); err != nil {
-			return err
+			return "", err
 		}
 		if evidence.RuntimeInputs == "" {
 			continue
@@ -2594,12 +2648,12 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		base := moduleDirs[evidence.Symbol]
 		if base == "" {
 			f.Dirty = true
-			return nil
+			return "", nil
 		}
 		paths, perr := runtimeinput.Paths(evidence.RuntimeInputs, base)
 		if perr != nil {
 			f.Dirty = true
-			return nil
+			return "", nil
 		}
 		// An identity outside the repository is not git's to vouch for:
 		// dirty means git-visible drift, and the portable line already
@@ -2666,7 +2720,20 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		}
 	}
 	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles)
-	return err
+	if err != nil {
+		return "", err
+	}
+	if repository.staged {
+		if moved, merr := repository.snapshotMovedContext(ctx); merr != nil {
+			return "", merr
+		} else if moved {
+			return "the index snapshot was re-staged mid-run; the recorded tree no longer names the measured content", nil
+		}
+		if f.Dirty {
+			return "unstaged drift over the measured package's inputs; stage or stash it to pin the snapshot", nil
+		}
+	}
+	return "", nil
 }
 
 // spliceGrownFinding serves a record under the oracle-growth carve-out

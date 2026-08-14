@@ -326,6 +326,11 @@ type Finding struct {
 	CompartmentLedger *CompartmentLedger `json:"compartmentLedger,omitempty"`
 	Commit            string             `json:"commit,omitempty"`
 	Dirty             bool               `json:"dirty"`
+	// StagedTree is the index tree identity a staged run measured
+	// (REQ-result-staged) - the tree the eventual commit carries when
+	// the staging lands as reviewed; empty for worktree runs.
+	// Provenance metadata, never a measurement pin.
+	StagedTree string `json:"stagedTree,omitempty"`
 	// Exempted stamps the reviewed exemption entries this finding's
 	// classification rode (REQ-result-exemptions): audit metadata
 	// derived from the committed exemption record at measure or persist

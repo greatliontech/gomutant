@@ -2901,7 +2901,7 @@ func TestCommitFindingRefusesMovedHead(t *testing.T) {
 	runGit("init", "-q")
 	runGit("add", "file.txt")
 	runGit("commit", "-q", "-m", "one")
-	repository, err := captureRepositoryStateContext(context.Background(), root)
+	repository, err := captureRepositoryStateContext(context.Background(), root, false)
 	if err != nil || !repository.available {
 		t.Fatalf("repository state = %+v, %v", repository, err)
 	}

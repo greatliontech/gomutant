@@ -29,8 +29,8 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 	t.Setenv("TMPDIR", hostScratch)
 	dir := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/scratch\n\ngo 1.26.4\n",
-		"p.go":   "package scratch\n\nfunc F(x int) int {\n\tif x > 100 {\n\t\treturn x - 1\n\t}\n\treturn x\n}\n",
+		"go.mod":    "module example.com/scratch\n\ngo 1.26.4\n",
+		"p.go":      "package scratch\n\nfunc F(x int) int {\n\tif x > 100 {\n\t\treturn x - 1\n\t}\n\treturn x\n}\n",
 		"p_test.go": "package scratch\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n\t\"testing\"\n)\n\nfunc TestF(t *testing.T) {\n\td, err := os.MkdirTemp(\"\", \"layer-oracle-*\")\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tf := filepath.Join(d, \"data\")\n\tif err := os.WriteFile(f, []byte(\"x\"), 0o644); err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif _, err := os.ReadFile(f); err != nil {\n\t\tt.Fatal(err)\n\t}\n\t// A killed oracle never runs cleanups; simulate the residue a\n\t// sweep must descend: a restrictive-mode directory left behind.\n\tif err := os.Chmod(d, 0o500); err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif F(5) != 5 {\n\t\tt.Fatal()\n\t}\n}\n",
 	}
 	for name, content := range files {

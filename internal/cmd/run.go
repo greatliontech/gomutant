@@ -22,7 +22,7 @@ type runOptions struct {
 	budget, jobs                             int
 	oracleMemoryMiB                          int64
 	timeout, oracleTimeout                   time.Duration
-	force, plan                              bool
+	force, plan, staged                      bool
 	bracketPaths, scratchNamespaces, vouches []string
 	output                                   io.Writer
 }
@@ -42,6 +42,7 @@ func newRunCommand() *cobra.Command {
 	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "external surface the oracle legitimately reads (module-relative path or absolute file, repeatable; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run")
 	f.StringArrayVar(&o.scratchNamespaces, "scratch-namespace", nil, "in-module run-scratch namespace DIR:PATTERN (repeatable): DIR is module-relative, PATTERN a single-component os.MkdirTemp-style name pattern; oracle scratch minted and removed inside the namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches - the caller's assertion; malformed declarations refuse before any measurement")
 	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence")
+	f.BoolVar(&o.staged, "staged", false, "measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target (stage or stash it)")
 	f.BoolVar(&o.force, "force", false, "re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without --force")
 	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref")
 	f.StringVar(&o.targetsFile, "targets", "", "path to a JSON targets document (gomutant's or a producer's export); overrides discovery")
@@ -202,7 +203,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		priorLayer[f.Symbol], _ = docStore.Layer(f)
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
-		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Prior: prior,
+		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
 		PlanOnly: o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
 			renderExecutionEvent(out, event)

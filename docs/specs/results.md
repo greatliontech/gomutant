@@ -331,6 +331,23 @@ silent global switch. Matching is exact on subject and reason: an
 instability drifting even one byte is a different instability the record
 never reviewed.
 
+**REQ-result-staged** (behavior): A staged run MUST measure the git index
+snapshot as its subject: the run refuses outright without a repository, a
+commit, or a writable index tree identity (an unmerged index has no
+snapshot to pin); staged-but-uncommitted content is the measured subject
+and counts clean in the provenance judgment, while worktree content
+diverging from the index, untracked files, and ignored files over a
+measured target's inputs are drift the snapshot cannot vouch for - that
+target refuses with the drift named instead of persisting a
+dirty machine-local record, and an index re-staged mid-run refuses the
+same way (the recorded tree no longer names the measured content). Each
+finding records the index's own tree identity - the tree the eventual
+commit carries when the staging lands as reviewed - as provenance
+metadata beside the commit, never as a measurement pin: the measurement
+pins are content-derived, so a staged record serves unchanged after the
+staging commits. Worktree runs are untouched: any git-visible drift over
+selected paths keeps stamping dirty.
+
 **REQ-result-export** (structural): Findings MUST be serializable to a
 portable version-7 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,

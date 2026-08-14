@@ -16,7 +16,7 @@ import (
 func TestRepositoryContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if state, err := captureRepositoryStateContext(ctx, t.TempDir()); !errors.Is(err, context.Canceled) || state.available {
+	if state, err := captureRepositoryStateContext(ctx, t.TempDir(), false); !errors.Is(err, context.Canceled) || state.available {
 		t.Fatalf("cancelled capture = %+v, %v", state, err)
 	}
 	repository := repositoryState{root: t.TempDir(), commit: "commit", available: true}
@@ -197,7 +197,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	ctx := context.Background()
 
 	clean := Finding{Commit: "stale", Dirty: true, TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
 		t.Fatal(err)
 	}
 	if clean.Dirty || clean.Commit != repository.commit {
@@ -208,7 +208,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &dirtied); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &dirtied); err != nil {
 		t.Fatal(err)
 	}
 	if !dirtied.Dirty {
@@ -216,7 +216,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	}
 
 	unreadable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: "not-a-manifest"}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &unreadable); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &unreadable); err != nil {
 		t.Fatal(err)
 	}
 	if !unreadable.Dirty {
@@ -224,7 +224,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	}
 
 	unknown := Finding{TargetEvidence: SubjectEvidence{Symbol: "example.com/provenance.Ghost", RuntimeInputs: observed.State.Manifest}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &unknown); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &unknown); err != nil {
 		t.Fatal(err)
 	}
 	if !unknown.Dirty {
@@ -293,7 +293,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	ctx := context.Background()
 
 	clean := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
 		t.Fatal(err)
 	}
 	if clean.Dirty {
@@ -327,7 +327,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	linked := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol,
 		RuntimeInputs: linkObserved.State.Manifest, RuntimeDigest: linkObserved.State.Digest,
 		RuntimeUnverifiable: linkObserved.State.Unverifiable, RuntimeReason: linkObserved.State.Reason}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &linked); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &linked); err != nil {
 		t.Fatal(err)
 	}
 	if !linked.Dirty {
@@ -346,7 +346,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &dirtied); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &dirtied); err != nil {
 		t.Fatal(err)
 	}
 	if !dirtied.Dirty {
@@ -368,7 +368,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	deleted := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol,
 		RuntimeInputs: deletedObserved.State.Manifest, RuntimeDigest: deletedObserved.State.Digest,
 		RuntimeUnverifiable: deletedObserved.State.Unverifiable, RuntimeReason: deletedObserved.State.Reason}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &deleted); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &deleted); err != nil {
 		t.Fatal(err)
 	}
 	if !deleted.Dirty {
@@ -385,7 +385,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	unresolvable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
-	if err := tree.stampProvenance(ctx, repository, view, nil, &unresolvable); err != nil {
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &unresolvable); err != nil {
 		t.Fatal(err)
 	}
 	if !unresolvable.Dirty {

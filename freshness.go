@@ -236,7 +236,7 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 			set.bySymbol[resolved.symbol] = &subjectView{
 				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir,
 				moduleBase: treeRelModuleBase(t.dir, resolved.moduleDir),
-				env: env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
+				env:        env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
 			}
 		}
 	}
@@ -318,7 +318,7 @@ func (t *Tree) newObservedUnionViews(ctx context.Context, symbols []string, pack
 			set.bySymbol[resolved.symbol] = &subjectView{
 				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir,
 				moduleBase: treeRelModuleBase(t.dir, resolved.moduleDir),
-				env: env, view: view, fp: captured, sourceFiles: sourceFiles, module: module,
+				env:        env, view: view, fp: captured, sourceFiles: sourceFiles, module: module,
 			}
 		}
 	}

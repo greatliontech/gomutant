@@ -28,11 +28,11 @@ func TestRunPipelinesPreparationWithExecution(t *testing.T) {
 	}
 	dir := t.TempDir()
 	files := map[string]string{
-		"go.mod":         "module example.com/pipe\n\ngo 1.26\n",
-		"pa/pa.go":       "package pa\n\nfunc F(x int) int {\n\treturn x + 1\n}\n",
-		"pa/pa_test.go":  "package pa\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n",
-		"pb/pb.go":       "package pb\n\nfunc G(x int) int {\n\treturn x + 2\n}\n",
-		"pb/pb_test.go":  "package pb\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestG(t *testing.T) {\n\ttime.Sleep(2 * time.Second)\n\tif G(1) != 3 {\n\t\tt.Fail()\n\t}\n}\n",
+		"go.mod":        "module example.com/pipe\n\ngo 1.26\n",
+		"pa/pa.go":      "package pa\n\nfunc F(x int) int {\n\treturn x + 1\n}\n",
+		"pa/pa_test.go": "package pa\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n",
+		"pb/pb.go":      "package pb\n\nfunc G(x int) int {\n\treturn x + 2\n}\n",
+		"pb/pb_test.go": "package pb\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestG(t *testing.T) {\n\ttime.Sleep(2 * time.Second)\n\tif G(1) != 3 {\n\t\tt.Fail()\n\t}\n}\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
