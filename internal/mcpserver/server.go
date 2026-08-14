@@ -564,6 +564,10 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err != nil {
 		return nil, out, err
 	}
+	exemptions, err := gomutant.LoadExemptions(gomutant.ExemptionsPathFor(s.findingsPath(in.Findings)))
+	if err != nil {
+		return nil, out, err
+	}
 	options := gomutant.Options{
 		Budget:            in.Budget,
 		OracleTimeout:     oracleTimeout,
@@ -571,6 +575,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		Force:             in.Force,
 		BracketPaths:      in.BracketPaths,
 		ScratchNamespaces: scratchNamespaces,
+		Exemptions:        exemptions,
 		OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB),
 		Guidance:          func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
 		Contradiction: func(c gomutant.AttestationContradiction) {

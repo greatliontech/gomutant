@@ -106,6 +106,13 @@ type Options struct {
 	// carries the bracket contract's mutation-free assertion for the
 	// span.
 	BracketPaths []string
+	// Exemptions is the committed exemption record
+	// (REQ-result-exemptions): reviewed acceptances of exactly-named
+	// unverifiable reasons per subject, consumed by survivor bucketing
+	// and stamped onto each finding they cover; the persistence layer
+	// re-reads the record itself, so revocation bites every later
+	// classification.
+	Exemptions []Exemption
 	// ScratchNamespaces declares in-module run-scratch namespaces for
 	// observation ingest (REQ-exec-scratch-namespace): each is a
 	// module-relative directory plus a single-component os.MkdirTemp
@@ -694,7 +701,7 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 	if from >= len(f.Survivors) {
 		return nil
 	}
-	if f.TargetEvidence.RuntimeUnverifiable {
+	if unstableForBuckets(f, opts.Exemptions) {
 		for si := from; si < len(f.Survivors); si++ {
 			f.Survivors[si].Execution = "unstable-oracle"
 		}
@@ -1829,10 +1836,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			f := &findings[w.target]
 			if w.serve != nil {
-				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
 				if err != nil {
 					return err
 				}
+				stampExemptions(&spliced, opts.Exemptions)
 				// The aggregated work item's retained observations are dead past
 				// this point; releasing them per item keeps the run's peak at the
 				// in-flight items rather than the whole campaign.
@@ -1856,10 +1864,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.grow != nil {
-				grown, _, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+				grown, _, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
 				if err != nil {
 					return err
 				}
+				stampExemptions(&grown, opts.Exemptions)
 				observations[wi] = nil
 				if err := w.producer.validateProducers(ctx); err != nil {
 					if ctx.Err() != nil {
@@ -1880,7 +1889,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// bucket was measured under the full oracle — and a
 				// divergence-stamped record's survivors were already classified
 				// unstable by the counts fold.
-				if !grown.TargetEvidence.RuntimeUnverifiable {
+				if !unstableForBuckets(&grown, opts.Exemptions) {
 					coverage, probed, err := t.oracleCoverage(ctx, w, opts, runEnv, coverageCache)
 					if err != nil {
 						return err
@@ -1921,10 +1930,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.drift != nil {
-				spliced, _, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels)
+				spliced, _, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
 				if err != nil {
 					return err
 				}
+				stampExemptions(&spliced, opts.Exemptions)
 				observations[wi] = nil
 				if err := w.producer.validateProducers(ctx); err != nil {
 					if ctx.Err() != nil {
@@ -1946,7 +1956,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// fresh measure's do; a no-reach serve re-measured nothing
 				// and carries every recorded bucket verbatim, paying no
 				// coverage probe.
-				if len(w.driftMoved) != 0 && !spliced.TargetEvidence.RuntimeUnverifiable {
+				if len(w.driftMoved) != 0 && !unstableForBuckets(&spliced, opts.Exemptions) {
 					if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
 						return err
 					}
@@ -1973,10 +1983,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.extend != nil {
-				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget)
+				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget, opts.Exemptions)
 				if err != nil {
 					return err
 				}
+				stampExemptions(&extended, opts.Exemptions)
 				// Same release as the served branch: the splice is computed, the
 				// per-candidate observations are dead.
 				observations[wi] = nil
@@ -1992,7 +2003,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// run's, while carried prefix survivors keep their recorded
 				// buckets verbatim; a divergence-stamped extension's suffix
 				// survivors were already classified unstable by the splice.
-				if !extended.TargetEvidence.RuntimeUnverifiable {
+				if !unstableForBuckets(&extended, opts.Exemptions) {
 					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
 						return err
 					}
@@ -2036,6 +2047,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, f); err != nil {
 				return err
 			}
+			stampExemptions(f, opts.Exemptions)
 			f.Operators = summarizeOperators(w.candidates, outcomes[wi])
 			for _, summary := range f.Operators {
 				if err := ctx.Err(); err != nil {
@@ -2497,7 +2509,7 @@ func outcomeDisposition(outcome engine.MutantOutcome) string {
 // extension owes the same attribution as a whole measure — its suffix
 // processes are what landed the merged record unverifiable.
 func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol string, opts Options, runEnv []string, guidanceCache map[string]oracleAttribution) error {
-	if opts.Guidance == nil || !f.TargetEvidence.RuntimeUnverifiable || f.OracleExplicit {
+	if opts.Guidance == nil || !unstableForBuckets(&f, opts.Exemptions) || f.OracleExplicit {
 		return nil
 	}
 	key := strings.Join(slices.Sorted(slices.Values(w.oracle)), "\x00")
@@ -2668,7 +2680,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 // read beyond the recorded pins preserves the grown outcome but stamps it
 // explicitly non-reusable. Returns the reconciled union (for provenance)
 // and the shed attestations of newly killed survivors.
-func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding, w work, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, runtimeinput.Observation, []Attestation, error) {
+func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding, w work, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, runtimeinput.Observation, []Attestation, error) {
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.growSurvivors, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes, observations, incompletes, labels, true, false)
 	if err != nil {
 		return Finding{}, runtimeinput.Observation{}, nil, err
@@ -2688,7 +2700,7 @@ func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding
 			rec.OracleEvidence[i].RuntimeUnverifiable, rec.OracleEvidence[i].RuntimeReason = true, divergenceReason
 		}
 	}
-	grown, shed, err := growFindingCounts(ctx, rec, w.candidates, w.growSurvivors, outcomes, killers, spliced.fresh)
+	grown, shed, err := growFindingCounts(ctx, rec, w.candidates, w.growSurvivors, outcomes, killers, spliced.fresh, exemptions)
 	return grown, spliced.union, shed, err
 }
 
@@ -2736,7 +2748,7 @@ func carryAnchoredAttestations(prior []Attestation, survivors []Survivor) (kept 
 	return kept, siteSheds, gone
 }
 
-func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, survivors map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence) (Finding, []Attestation, error) {
+func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, survivors map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, []Attestation, error) {
 	// Kill attribution is maintained only over a record that carries it
 	// completely; a record predating attribution stays without one and
 	// re-measures whole under the killer-drift carve-out
@@ -2752,7 +2764,7 @@ func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Can
 	for _, survivor := range rec.Survivors {
 		priorBuckets[survivorKey{survivor.Position, survivor.Operator}] = survivor.Execution
 	}
-	stamp := rec.TargetEvidence.RuntimeUnverifiable
+	stamp := unstableForBuckets(&rec, exemptions)
 	var stillSurviving []Survivor
 	for mi := range candidates {
 		if err := ctx.Err(); err != nil {
@@ -2841,7 +2853,7 @@ func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Can
 // drifted outcome but stamps it explicitly non-reusable. Returns the
 // reconciled union (for provenance) and the shed attestations of newly
 // killed survivors.
-func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding, w work, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, runtimeinput.Observation, []Attestation, error) {
+func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding, w work, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, runtimeinput.Observation, []Attestation, error) {
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.driftRemeasure, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes, observations, incompletes, labels, true, false)
 	if err != nil {
 		return Finding{}, runtimeinput.Observation{}, nil, err
@@ -2857,7 +2869,7 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 			rec.OracleEvidence[i].RuntimeUnverifiable, rec.OracleEvidence[i].RuntimeReason = true, divergenceReason
 		}
 	}
-	driftedFinding, shed, err := driftFindingCounts(ctx, rec, w.candidates, w.driftRemeasure, outcomes, killers, spliced.fresh)
+	driftedFinding, shed, err := driftFindingCounts(ctx, rec, w.candidates, w.driftRemeasure, outcomes, killers, spliced.fresh, exemptions)
 	return driftedFinding, spliced.union, shed, err
 }
 
@@ -2872,7 +2884,7 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 // unstable-oracle when the spliced evidence landed non-reusable; a newly
 // killed attested survivor's attestation is shed and returned — evidence
 // beats attestation (REQ-attest-survivor).
-func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, remeasured map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence) (Finding, []Attestation, error) {
+func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, remeasured map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, []Attestation, error) {
 	operators := append([]OperatorSummary(nil), rec.Operators...)
 	byOperator := make(map[string]int, len(operators))
 	for i := range operators {
@@ -2886,7 +2898,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 	for _, survivor := range rec.Survivors {
 		recordedSurvivors[survivorKey{survivor.Position, survivor.Operator}] = survivor
 	}
-	stamp := rec.TargetEvidence.RuntimeUnverifiable
+	stamp := unstableForBuckets(&rec, exemptions)
 	var survivors []Survivor
 	var kills []Kill
 	for mi, candidate := range candidates {
@@ -3274,7 +3286,7 @@ func extendedPrefixStands(generation engine.Generation, rec Finding) bool {
 // while a read beyond the record's pins is runtime information it never
 // pinned, so the extended outcome is preserved but explicitly non-reusable
 // (REQ-result-stale's fail-closed bound).
-func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int) (Finding, error) {
+func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int, exemptions []Exemption) (Finding, error) {
 	suffix := make(map[int]bool, len(candidates)-from)
 	for mi := from; mi < len(candidates); mi++ {
 		suffix[mi] = true
@@ -3285,7 +3297,7 @@ func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Find
 	if err != nil {
 		return Finding{}, err
 	}
-	return extendFindingCounts(ctx, spliced.rec, candidates, from, outcomes, killers, spliced.fresh, budget)
+	return extendFindingCounts(ctx, spliced.rec, candidates, from, outcomes, killers, spliced.fresh, budget, exemptions)
 }
 
 // splicedEvidence is one splice's evidence outcome: the record after
@@ -3369,7 +3381,7 @@ func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding,
 // survivors are appended in candidate order, the suffix run's candidate
 // evidence becomes the record's (an extendable record carries none), and the
 // budget, generated, and candidate counts record the merged truth.
-func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, from int, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, budget int) (Finding, error) {
+func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, from int, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, budget int, exemptions []Exemption) (Finding, error) {
 	// Prefix kill attributions carry verbatim — their pins did not move —
 	// and suffix kills append theirs; a record predating attribution stays
 	// without one (REQ-core-attributed-kills).
@@ -3388,7 +3400,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 	// stay unbucketed here and earn fresh probes afterwards
 	// (REQ-exec-survivor-evidence; advisory, never a pin).
 	suffixExecution := ""
-	if rec.TargetEvidence.RuntimeUnverifiable {
+	if unstableForBuckets(&rec, exemptions) {
 		suffixExecution = "unstable-oracle"
 	}
 	for mi := from; mi < len(candidates); mi++ {
@@ -3453,12 +3465,12 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 // process's pinned runtime inputs; fresh observations that diverge are runtime
 // information the record never pinned, so the spliced outcome is preserved but
 // explicitly non-reusable (REQ-exec-observation).
-func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string) (Finding, error) {
+func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, error) {
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, flagged, baselines, targetView, oracleViews, currentLedger, outcomes, observations, incompletes, labels, false, true)
 	if err != nil {
 		return Finding{}, err
 	}
-	return spliceFindingCounts(ctx, spliced.rec, candidates, flagged, outcomes, killers, spliced.fresh)
+	return spliceFindingCounts(ctx, spliced.rec, candidates, flagged, outcomes, killers, spliced.fresh, exemptions)
 }
 
 // applySplicedUnion reconciles the re-executed processes' completed union with
@@ -3587,7 +3599,7 @@ func splicedUnionDiverged(state runtimeinput.State, prior SubjectEvidence) bool 
 // pins the serve verified — an attestation rides only a survivor that
 // survives again at the same position and operator (REQ-attest-survivor),
 // and the fresh candidate evidence replaces the served record's.
-func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, flagged map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence) (Finding, error) {
+func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, flagged map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, error) {
 	// Covered kills carry their recorded attribution, flagged candidates
 	// that die again record their fresh killer; a record predating
 	// attribution stays without one (REQ-core-attributed-kills).
@@ -3653,7 +3665,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 			// while covered survivors above keep their recorded buckets
 			// verbatim (REQ-exec-survivor-evidence).
 			execution := priorSurvivors[key].Execution
-			if rec.TargetEvidence.RuntimeUnverifiable {
+			if unstableForBuckets(&rec, exemptions) {
 				execution = "unstable-oracle"
 			}
 			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: execution})

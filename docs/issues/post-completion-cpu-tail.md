@@ -20,6 +20,26 @@ whose hardening landed as the derived-oracle direct-parse cross-check
 - `probeOracleInstability` (`run.go:293+`) without spawning probes.
 - A spin in the final serve/splice path.
 
+## Observed (2026-08-14, protodb, mid-prepare variant — stacks lost)
+
+`gomutant run --changed HEAD --oracle-timeout 5m` over a 6-file /
+7-target delta in the protodb tree (targets spanning
+`internal/model/document` and the large `internal/db` package): the
+progress stream emitted resolve+freshness events for all 7 targets in
+the first minute, then went silent BEFORE any target decision or
+baseline probe; the process spun at ~194% CPU (state Sl, no child
+processes, no further file writes) for 3h05m until externally killed.
+Differs from the original observation in phase — between the last
+freshness event and decision output, i.e. plausibly the decision-view
+batch build (see decision-build-locality.md), not post-commit — but
+matches the signature class: multi-core spin, no children, no writes.
+The `internal/db` target's oracle closure is a very large package (a
+known heavy typed-load); candidate trigger. Stacks were not captured
+(process was killed before SIGQUIT was attempted); the reproducing
+tree is protodb @ 411caec9 + a small staged delta, recoverable.
+Next reproduction: SIGQUIT first for the goroutine dump this issue's
+profiling trigger wants.
+
 ## Probe (2026-08-01, did not reproduce)
 
 An instrumented library-level campaign (54 targets, `Force`, jobs=4, one

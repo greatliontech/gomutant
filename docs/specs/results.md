@@ -312,6 +312,25 @@ finding adopts the current target's labels without remeasurement or shedding
 survivor attestations. Oracle membership remains a measurement pin, so changing
 the executable oracle remeasures as usual.
 
+**REQ-result-exemptions** (behavior): A committed exemption record beside the
+findings document (`exemptions.json`, version 1) MUST be consumed as the live
+authority on accepted runtime instability: each reviewed entry names one
+subject, the exact recorded unverifiable reason it accepts, and the reviewer's
+rationale - a malformed record refuses the store, and an entry missing any of
+the three refuses the record. A finding whose every runtime-unverifiable
+subject evidence is accepted - the target's union evidence additionally
+covered by an entry naming any of the finding's oracle subjects under the
+same reason, the read that tainted the union - passes the portable line's
+unverifiable clause and its survivors bucket normally instead of
+unstable-oracle; every other portable-line clause, and reuse (an unverifiable
+record still never serves), are untouched. The matched entries are stamped
+onto each finding they cover as audit metadata; classification re-derives
+from the record on every decision, so deleting an entry revokes the
+acceptance for every later classification without a stamp rewrite - never a
+silent global switch. Matching is exact on subject and reason: an
+instability drifting even one byte is a different instability the record
+never reviewed.
+
 **REQ-result-export** (structural): Findings MUST be serializable to a
 portable version-7 document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,
@@ -348,7 +367,8 @@ required field of their version are malformed and refused.
 **REQ-result-layers** (behavior): Findings persistence MUST split into two
 layers by committability. The repo document (the findings path, under version
 control) carries only portable records: clean commit provenance (not dirty,
-commit present), no runtime-unverifiable subject evidence, and no runtime-input
+commit present), no runtime-unverifiable subject evidence outside a reviewed
+exemption (REQ-result-exemptions), and no runtime-input
 path outside the subject's own module directory - each subject's manifest
 resolves against its recorded tree-relative module base, so a workspace
 member's containment line is its member module, and a record without a

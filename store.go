@@ -31,6 +31,9 @@ type Store struct {
 	path       string
 	moduleDir  string
 	overlayDir string
+	// exemptions is the committed exemption record loaded from beside
+	// the findings document at open (REQ-result-exemptions).
+	exemptions []Exemption
 
 	// mu guards the stat-keyed overlay parse cache. The overlay's
 	// per-symbol layout makes each entry independently cacheable: a read
@@ -79,7 +82,15 @@ func OpenStore(path, moduleDir string) (*Store, error) {
 	}
 	key := sha256.Sum256([]byte(abs))
 	overlay := filepath.Join(cache, "gomutant", "repos", hex.EncodeToString(key[:12]), "findings")
-	return &Store{path: path, moduleDir: abs, overlayDir: overlay, cache: map[string]overlayCacheEntry{}}, nil
+	// The committed exemption record beside the findings document is
+	// the live authority for the portable line's exemption clause
+	// (REQ-result-exemptions); a malformed record refuses the store
+	// rather than silently classifying without it.
+	exemptions, err := LoadExemptions(ExemptionsPathFor(path))
+	if err != nil {
+		return nil, err
+	}
+	return &Store{path: path, moduleDir: abs, overlayDir: overlay, exemptions: exemptions, cache: map[string]overlayCacheEntry{}}, nil
 }
 
 // portableLineWalk is the one derivation of the portable line
@@ -89,7 +100,7 @@ func OpenStore(path, moduleDir string) (*Store, error) {
 // deduplicated in walk order. stopAtFirst returns after the first
 // clause - the write path's committability split needs only the
 // verdict, not the full diagnosis.
-func portableLineWalk(f Finding, moduleDir string, stopAtFirst bool) []string {
+func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopAtFirst bool) []string {
 	var reasons []string
 	seen := map[string]bool{}
 	add := func(r string) bool {
@@ -105,9 +116,13 @@ func portableLineWalk(f Finding, moduleDir string, stopAtFirst bool) []string {
 	if f.Commit == "" && add("no commit provenance") {
 		return reasons
 	}
+	// A reviewed exemption covering every unverifiable subject lifts
+	// exactly the unverifiable clause (REQ-result-exemptions); every
+	// other portable-line clause still applies.
+	_, exempted := coveredExemptions(&f, exemptions)
 	subjects := append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...)
 	for _, ev := range subjects {
-		if ev.RuntimeUnverifiable && add("runtime-unverifiable evidence for "+ev.Symbol) {
+		if ev.RuntimeUnverifiable && !exempted && add("runtime-unverifiable evidence for "+ev.Symbol) {
 			return reasons
 		}
 		if ev.RuntimeInputs == "" {
@@ -145,14 +160,14 @@ func portableLineWalk(f Finding, moduleDir string, stopAtFirst bool) []string {
 // deduplicated; empty means the record is portable repo evidence. The
 // full list exists so a caller repairing one clause is never surprised
 // by the next: every single-reason surface derives from the same walk.
-func CommittableReasons(f Finding, moduleDir string) []string {
-	return portableLineWalk(f, moduleDir, false)
+func CommittableReasons(f Finding, moduleDir string, exemptions []Exemption) []string {
+	return portableLineWalk(f, moduleDir, exemptions, false)
 }
 
 // Committable reports whether a finding is portable repo evidence, and
 // when it is not, the first reason it must stay machine-local.
-func Committable(f Finding, moduleDir string) (bool, string) {
-	if reasons := portableLineWalk(f, moduleDir, true); len(reasons) > 0 {
+func Committable(f Finding, moduleDir string, exemptions []Exemption) (bool, string) {
+	if reasons := portableLineWalk(f, moduleDir, exemptions, true); len(reasons) > 0 {
 		return false, reasons[0]
 	}
 	return true, ""
@@ -347,13 +362,22 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		}
 		nextSymbols := make(map[string]bool, len(next))
 		for _, f := range next {
-			ok, _ := Committable(f, s.moduleDir)
+			ok, _ := Committable(f, s.moduleDir, s.exemptions)
 			committable[f.Symbol] = ok
 			nextSymbols[f.Symbol] = true
 		}
 		byRepo := make(map[string]Finding, len(repoPrior))
 		for _, f := range repoPrior {
-			byRepo[f.Symbol] = f
+			// "Portable truth is never evicted by a local measurement"
+			// protects rows that ARE still portable: an incumbent that
+			// fails the current portable line - a revoked exemption is
+			// the reachable case - is not portable truth, and retaining
+			// it would commit a row the layer contract forbids
+			// (REQ-result-layers, REQ-result-exemptions). Its successor
+			// lands in whichever layer its own classification earns.
+			if ok, _ := Committable(f, s.moduleDir, s.exemptions); ok {
+				byRepo[f.Symbol] = f
+			}
 		}
 		for _, f := range next {
 			if committable[f.Symbol] {
@@ -419,7 +443,7 @@ func (s *Store) Layer(f Finding) (layer, reason string) {
 // portable-line clause, so a caller repairing one is never surprised by
 // the next.
 func (s *Store) LayerReasons(f Finding) (layer string, reasons []string) {
-	if rs := CommittableReasons(f, s.moduleDir); len(rs) > 0 {
+	if rs := CommittableReasons(f, s.moduleDir, s.exemptions); len(rs) > 0 {
 		return "local", rs
 	}
 	return "repo", nil
@@ -434,7 +458,7 @@ func (s *Store) Committability(ctx context.Context) (repo, localOnly int, err er
 		return 0, 0, err
 	}
 	for _, f := range prior {
-		if ok, _ := Committable(f, s.moduleDir); ok {
+		if ok, _ := Committable(f, s.moduleDir, s.exemptions); ok {
 			repo++
 		} else {
 			localOnly++

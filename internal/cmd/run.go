@@ -135,6 +135,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 		return err
 	}
 	defer releaseCampaign()
+	exemptions, err := gomutant.LoadExemptions(gomutant.ExemptionsPathFor(docPath))
+	if err != nil {
+		return err
+	}
 	docStore, err := gomutant.OpenStore(docPath, o.dir)
 	if err != nil {
 		return err
@@ -198,7 +202,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		priorLayer[f.Symbol], _ = docStore.Layer(f)
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
-		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Prior: prior,
+		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Prior: prior,
 		PlanOnly: o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
 			renderExecutionEvent(out, event)

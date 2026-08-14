@@ -51,7 +51,7 @@ func TestCommittableResolvesEachSubjectAgainstItsModuleBase(t *testing.T) {
 		f.TargetEvidence.ModuleBase = "m"
 		f.TargetEvidence.RuntimeInputs = relManifest("data.txt")
 	})
-	if ok, reason := Committable(memberLocal, dir); !ok {
+	if ok, reason := Committable(memberLocal, dir, nil); !ok {
 		t.Fatalf("member-local identity refused: %s", reason)
 	}
 
@@ -64,7 +64,7 @@ func TestCommittableResolvesEachSubjectAgainstItsModuleBase(t *testing.T) {
 		f.TargetEvidence.ModuleBase = "m"
 		f.TargetEvidence.RuntimeInputs = storeManifest(filepath.Join(dir, "shared.txt"))
 	})
-	if ok, reason := Committable(escaping, dir); ok || !strings.Contains(reason, "machine-local runtime input") {
+	if ok, reason := Committable(escaping, dir, nil); ok || !strings.Contains(reason, "machine-local runtime input") {
 		t.Fatalf("member-escaping identity = committable=%v reason=%q, want the machine-local refusal", ok, reason)
 	}
 
@@ -74,7 +74,7 @@ func TestCommittableResolvesEachSubjectAgainstItsModuleBase(t *testing.T) {
 	grandfathered := storeFinding("p.A", func(f *Finding) {
 		f.TargetEvidence.RuntimeInputs = storeManifest(filepath.Join(dir, "shared.txt"))
 	})
-	if ok, reason := Committable(grandfathered, dir); !ok {
+	if ok, reason := Committable(grandfathered, dir, nil); !ok {
 		t.Fatalf("baseless record lost the tree-root behavior: %s", reason)
 	}
 }

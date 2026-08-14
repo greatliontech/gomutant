@@ -164,7 +164,8 @@ carry execution evidence bucketing why each lived: `never-executed` when the
 oracle's baseline coverage never reaches the mutated position (a coverage
 gap), `executed-and-passed` when the position runs and the oracle still
 passes (a weak assertion or an equivalent mutant), and `unstable-oracle` when
-the finding's runtime evidence is unverifiable, in which case no coverage
+the finding's runtime evidence is unverifiable and no reviewed exemption
+accepts it (REQ-result-exemptions), in which case no coverage
 probe runs. Coverage is measured once per oracle group on the unmutated tree
 and cached across the run's targets sharing the group and cover package —
 advisory classification, never a measurement pin; an unprobeable oracle

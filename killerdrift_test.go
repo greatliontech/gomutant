@@ -273,7 +273,7 @@ func TestDriftFindingCountsRescoresRemeasured(t *testing.T) {
 	remeasured := map[int]bool{1: true, 2: true, 3: true}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantKilled, engine.MutantSurvived, 0, 0}
 	killers := []string{"", "", "p.TestMoved", "", "", ""}
-	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, outcomes, killers, nil)
+	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, outcomes, killers, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

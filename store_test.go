@@ -51,7 +51,7 @@ func storeFinding(symbol string, mutate func(*Finding)) Finding {
 // stay local (REQ-result-layers).
 func TestCommittableDrawsThePortableLine(t *testing.T) {
 	dir := t.TempDir()
-	if ok, reason := Committable(storeFinding("p.A", nil), dir); !ok {
+	if ok, reason := Committable(storeFinding("p.A", nil), dir, nil); !ok {
 		t.Fatalf("clean finding not committable: %s", reason)
 	}
 	cases := []struct {
@@ -66,7 +66,7 @@ func TestCommittableDrawsThePortableLine(t *testing.T) {
 		{"machine-local input", func(f *Finding) { f.TargetEvidence.RuntimeInputs = storeManifest("/etc/hosts") }, "machine-local runtime input /etc/hosts"},
 	}
 	for _, tc := range cases {
-		if ok, reason := Committable(storeFinding("p.A", tc.mutate), dir); ok || !strings.Contains(reason, tc.want) {
+		if ok, reason := Committable(storeFinding("p.A", tc.mutate), dir, nil); ok || !strings.Contains(reason, tc.want) {
 			t.Fatalf("%s: committable=%v reason=%q, want reason containing %q", tc.name, ok, reason, tc.want)
 		}
 	}
@@ -78,7 +78,7 @@ func TestCommittableDrawsThePortableLine(t *testing.T) {
 // the explain surface).
 func TestCommittableReasonsListEveryFailingClause(t *testing.T) {
 	dir := t.TempDir()
-	if reasons := CommittableReasons(storeFinding("p.A", nil), dir); len(reasons) != 0 {
+	if reasons := CommittableReasons(storeFinding("p.A", nil), dir, nil); len(reasons) != 0 {
 		t.Fatalf("clean finding carries reasons: %v", reasons)
 	}
 	shared := storeManifest("/etc/hosts")
@@ -95,7 +95,7 @@ func TestCommittableReasonsListEveryFailingClause(t *testing.T) {
 		"machine-local runtime input /etc/hosts",
 		"runtime-unverifiable evidence for p.ATest",
 	}
-	reasons := CommittableReasons(f, dir)
+	reasons := CommittableReasons(f, dir, nil)
 	if len(reasons) != len(want) {
 		t.Fatalf("reasons = %v, want %v", reasons, want)
 	}
@@ -104,7 +104,7 @@ func TestCommittableReasonsListEveryFailingClause(t *testing.T) {
 			t.Fatalf("reasons[%d] = %q, want %q (full: %v)", i, reasons[i], want[i], reasons)
 		}
 	}
-	if ok, first := Committable(f, dir); ok || first != reasons[0] {
+	if ok, first := Committable(f, dir, nil); ok || first != reasons[0] {
 		t.Fatalf("Committable = %v %q, want the walk's first clause %q", ok, first, reasons[0])
 	}
 	// An unreadable manifest on one subject never truncates the walk:
@@ -117,7 +117,7 @@ func TestCommittableReasonsListEveryFailingClause(t *testing.T) {
 		"unreadable runtime manifest for p.A",
 		"machine-local runtime input /etc/hosts",
 	}
-	reasons = CommittableReasons(torn, dir)
+	reasons = CommittableReasons(torn, dir, nil)
 	if len(reasons) != len(want) || reasons[0] != want[0] || reasons[1] != want[1] {
 		t.Fatalf("torn-manifest walk = %v, want %v", reasons, want)
 	}

@@ -326,6 +326,13 @@ type Finding struct {
 	CompartmentLedger *CompartmentLedger `json:"compartmentLedger,omitempty"`
 	Commit            string             `json:"commit,omitempty"`
 	Dirty             bool               `json:"dirty"`
+	// Exempted stamps the reviewed exemption entries this finding's
+	// classification rode (REQ-result-exemptions): audit metadata
+	// derived from the committed exemption record at measure or persist
+	// time - the record itself stays the live authority on every later
+	// classification, so revoking an entry demotes the finding without
+	// touching this stamp's history.
+	Exempted []Exemption `json:"exempted,omitempty"`
 
 	CandidateCount int               `json:"candidateCount"`
 	Generated      int               `json:"generated"`

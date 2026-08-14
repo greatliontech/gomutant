@@ -2027,7 +2027,7 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 	flagged := map[int]bool{1: true, 2: true, 4: true}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantKilled, 0, engine.MutantDiscarded}
 	fresh := []CandidateEvidence{{Position: "f.go:5:5", Operator: "op-c", Reason: "mutant test process did not start because the mutant failed to build", Disposition: "discarded"}}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, outcomes, nil, fresh)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, outcomes, nil, fresh, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2532,7 +2532,7 @@ func TestGrowFindingCountsReplacesSurvivorOutcomes(t *testing.T) {
 	}
 	survivors := map[int]bool{1: true, 2: true}
 	outcomes := []engine.MutantOutcome{0, engine.MutantKilled, engine.MutantSurvived, 0}
-	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, survivors, outcomes, nil, nil)
+	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, survivors, outcomes, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2561,7 +2561,7 @@ func TestGrowFindingCountsReplacesSurvivorOutcomes(t *testing.T) {
 	// unstable rather than carrying buckets measured under a stable run.
 	stamped := rec
 	stamped.TargetEvidence = SubjectEvidence{RuntimeUnverifiable: true}
-	grownStamped, _, err := growFindingCounts(context.Background(), stamped, candidates, survivors, outcomes, nil, nil)
+	grownStamped, _, err := growFindingCounts(context.Background(), stamped, candidates, survivors, outcomes, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2639,7 +2639,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 		},
 	}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, outcomes, nil, nil)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, outcomes, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2652,7 +2652,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op-a", Execution: "never-executed"}},
 	}
-	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, outcomes, nil, nil, 2)
+	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, outcomes, nil, nil, 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3876,7 +3876,7 @@ func TestExtendFindingCountsAppendsSuffixOutcomes(t *testing.T) {
 	}
 	outcomes := []engine.MutantOutcome{0, 0, engine.MutantSurvived, engine.MutantKilled, engine.MutantDiscarded}
 	fresh := []CandidateEvidence{{Position: "f.go:3:3", Operator: "op-a", Reason: "test process produced no runtime-input log", Disposition: "survived"}}
-	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, outcomes, nil, fresh, 5)
+	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, outcomes, nil, fresh, 5, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
