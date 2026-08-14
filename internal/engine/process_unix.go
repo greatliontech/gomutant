@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const processExecutionSupported = true
@@ -30,15 +32,31 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	return cmd
 }
 
+// oracleNiceness is the absolute niceness every oracle process tree
+// runs at: batch work that yields to interactive neighbors while a
+// campaign saturates the host (REQ-exec-oracle-parallelism). Verdicts
+// see it only through the wall-clock oracle timeout, like any ambient
+// load.
+const oracleNiceness = 10
+
 // runOracleProcess starts the oracle, installs the hard memory ceiling
-// on the live process (descendants inherit the rlimit), and waits -
-// cmd.Run with the prlimit window in between. The window before the
-// limit lands is milliseconds against a runaway that needs seconds to
-// matter (REQ-exec-oracle-memory).
+// on the live process (descendants inherit the rlimit), lowers the
+// process group's scheduling priority (descendants inherit the
+// niceness), and waits - cmd.Run with the two windows in between. Each
+// window before a bound lands is milliseconds against work that needs
+// seconds to matter (REQ-exec-oracle-memory,
+// REQ-exec-oracle-parallelism). The priority drop is best-effort: a
+// gomutant already running below oracleNiceness cannot lower its
+// children to it, which is already the yielded state the drop exists
+// to reach.
 func runOracleProcess(cmd *exec.Cmd) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	startOracleCeiling(cmd)
+	// Setpgid on the SysProcAttr above pins the child's pgid to its own
+	// pid before exec, so the group id is its pid by the time Start
+	// returns.
+	_ = unix.Setpriority(unix.PRIO_PGRP, cmd.Process.Pid, oracleNiceness)
 	return cmd.Wait()
 }

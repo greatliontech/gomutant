@@ -1351,6 +1351,17 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 		gomutant.SetOracleMemoryLimit(mcpOracleMemoryBytes(in.OracleMemoryMiB), 1)
 		defer gomutant.RestoreOracleMemory(prior)
 	}
+	// A prior run's inner-parallelism cap must not throttle a lone
+	// probe in this long-lived process: between campaigns the probe is
+	// the only oracle tree, so it runs at jobs=1 width (full), the
+	// prior state restored after. While a run is in flight the probe
+	// shares the host with the campaign's jobs and correctly inherits
+	// the campaign's width (REQ-exec-oracle-parallelism).
+	if s.runsInFlight.Load() == 0 {
+		prior := gomutant.SnapshotOracleParallelism()
+		gomutant.SetOracleParallelism(1)
+		defer gomutant.RestoreOracleParallelism(prior)
+	}
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, nil, err

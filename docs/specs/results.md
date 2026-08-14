@@ -50,7 +50,10 @@ the oracle as a set of distinct subject evidence records, the operator version,
 whether the oracle was explicit or package-derived, the candidate budget, the exact effective oracle timeout in the `oracleTimeout` field encoded as a
 canonical Go duration string, and the effective oracle memory ceiling in the
 `oracleMemoryBytes` field (0 meaning no ceiling; REQ-exec-oracle-memory) - a
-resource bound that can change attribution is a measurement pin — carrying the target package's test-variant
+resource bound whose configured value decides attribution is a measurement
+pin, where scheduling bounds reach verdicts through wall-clock or the
+recorded environment evidence instead
+(REQ-exec-oracle-parallelism) — carrying the target package's test-variant
 compartment ledger (the declaration-level record the growth carve-out diffs
 at serve time), the capture commit and dirty provenance,
 the mutant count, the kill count, each kill's candidate identity and killer

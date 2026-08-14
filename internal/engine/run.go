@@ -424,7 +424,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	}
 	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = oracleMemoryEnv(scratchEnv)
+	cmd.Env = oracleEnv(scratchEnv)
 	// The sink, when given, receives the mutant run's raw -json stream -
 	// the evidence surface RunMutantEvidenceEnv derives kill output from.
 	stdout := &bytes.Buffer{}
@@ -504,7 +504,7 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
 	defer removeBaseScratch()
-	base.Env = oracleMemoryEnv(baseScratchEnv)
+	base.Env = oracleEnv(baseScratchEnv)
 	baseErr := runOracleProcess(base)
 	// Sweep before finalization - the record captures the swept truth
 	// (see the mutant site). The defer above is the panic backstop;
@@ -596,13 +596,19 @@ func captureOracleFrame(ctx context.Context, moduleDir, packageDir string, brack
 // facade refuses an environment whose PWD does not name the frame's
 // package directory, which ends the silent process-local seal every
 // PWD read got under the parent's inherited PWD. The spawn env's
-// TMPDIR and GOMEMLIMIT additions deliberately stay out of the mirror:
-// the minted scratch value is per-run noise the ephemeral-root
-// declaration covers, and the ceiling is tool bookkeeping, not an
-// oracle input.
+// TMPDIR and GOMEMLIMIT additions deliberately stay out of the mirror
+// - the minted scratch value is per-run noise the ephemeral-root
+// declaration covers, and the ceiling's value is a measurement pin
+// that stales findings itself - but the injected GOMAXPROCS is
+// mirrored: the width is neither a pin nor per-run noise, so an
+// oracle that observably reads it must have the value it actually saw
+// recorded as runtime-input evidence - a mirror that hid it would
+// serve stale verdicts to width-sensitive oracles across jobs changes
+// (REQ-exec-oracle-parallelism). Applying the same composer the spawn
+// used reproduces the spawn's exact narrowing decision.
 func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame) []string {
 	if frame.PkgDir == "" {
-		return env
+		return oracleCPUEnv(env)
 	}
 	out := make([]string, 0, len(env)+1)
 	for _, entry := range env {
@@ -610,7 +616,7 @@ func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame) []string {
 			out = append(out, entry)
 		}
 	}
-	return append(out, "PWD="+frame.PkgDir)
+	return oracleCPUEnv(append(out, "PWD="+frame.PkgDir))
 }
 
 // processObservationContext finalizes one launched test process's runtime-input
@@ -862,7 +868,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	}
 	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = oracleMemoryEnv(scratchEnv)
+	cmd.Env = oracleEnv(scratchEnv)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf

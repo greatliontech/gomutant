@@ -879,6 +879,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		jobs = max(1, runtime.NumCPU()/2)
 	}
 	engine.SetOracleMemoryLimit(opts.OracleMemoryBytes, jobs)
+	// The inner-parallelism cap is a scheduling bound, deliberately
+	// unpinned: it reaches verdicts only through the wall-clock oracle
+	// timeout, exactly as host speed and ambient load do
+	// (REQ-exec-oracle-parallelism).
+	engine.SetOracleParallelism(jobs)
 	// The pin the run's evidence records and compares: resolved once, so
 	// gates never read ambient process state.
 	oracleMemoryPin := engine.OracleMemoryLimitBytes()

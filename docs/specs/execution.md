@@ -483,10 +483,14 @@ final output completes successfully. For an ephemeral
 run, completion of the attributed oracle result is the equivalent success
 point. The independently named oracle timeout bounds each unmutated probe and
 mutant oracle process; it defaults to 60 seconds. The oracle timeout and the
-oracle memory ceiling are the two resource bounds that can change mutation
-attribution and therefore enter finding reuse evidence (REQ-result-record) -
+oracle memory ceiling are the two resource bounds whose configured values
+decide attribution directly and therefore pin finding reuse evidence
+(REQ-result-record) -
 a mutant near either bound dies under a tight one and survives a loose one;
-changing the command timeout alone never stales a finding.
+changing the command timeout alone never stales a finding. The
+inner-parallelism width is deliberately not such a pin: it reaches verdicts
+through wall-clock speed and, where an oracle observably reads it, through
+the recorded environment evidence (REQ-exec-oracle-parallelism).
 
 **REQ-exec-completion** (behavior): A run that returns success MUST have
 dispositioned every announced target: measured and committed, served,
@@ -612,6 +616,52 @@ event that evicts unrelated processes to swap.
 REQ-exec-oracle-memory: enforced by
 `TestOracleMemoryCeilingContainsRunawayMutant`,
 `TestDefaultOracleMemoryLimit`, and `TestOracleMemoryEnv`.
+
+**REQ-exec-oracle-parallelism** (behavior): Every oracle process tree
+MUST run with its inner parallelism capped so the campaign's aggregate
+stays within the host: at J concurrent jobs, each tree's width — the Go
+runtime's scheduler width and the go tool's package-build parallelism —
+is bounded by max(1, NumCPU/J), and the cap only ever narrows: an
+environment already carrying a narrower width keeps it. Without the cap
+every job spawns a full-width toolchain tree — jobs × NumCPU runnable
+threads, quadratic in cores at the default job count — starving the
+host and its neighbor processes. Oracle trees additionally run at low
+scheduling priority where the host provides one, so a saturated
+campaign yields to interactive work. The width and priority are
+scheduling bounds, never measurement pins — pinning a
+host-geometry-derived value would machine-localize every finding — but
+the injected width is part of the observed oracle environment: the
+observation ingest mirror carries the effective GOMAXPROCS, so an
+oracle that observably reads it records the value it actually saw as
+runtime-input evidence, and exactly those width-sensitive findings
+re-measure when the width moves. Every other verdict path sees the
+width and priority only through the wall-clock oracle timeout, exactly
+as host speed and ambient load do — variance the reuse evidence
+already deliberately does not pin (a finding measured on a slower or
+busier host serves unchanged), with the attribution noise arm owning a
+baseline that dies beside its mutant under contention.
+
+REQ-exec-oracle-parallelism: enforced by
+`TestOracleParallelismWidth`, `TestOracleCPUEnv`,
+`TestOracleEnvCarriesInnerParallelismCap`,
+`TestOracleIngestEnvCarriesInnerParallelismCap`,
+`TestRunInstallsOracleParallelism`, and
+`TestOracleRunsAtLowPriority`. (The go tool's package-build
+parallelism follows the delivered GOMAXPROCS — `-p` defaults to it —
+so the environment single-sources both dimensions; an explicit flag
+would override an operator's narrower ambient bound.)
+
+**REQ-exec-attribution-symmetry** (behavior): A mutant run and the
+baseline probe that attributes its failure MUST execute under identical
+resource bounds — the memory ceiling and the parallelism cap alike —
+because differential attribution is sound only when the two runs differ
+in the overlay alone: a mutant that exhausts a bound its baseline never
+faced reads as a kill when the failure is the bound's, and a baseline
+squeezed under a bound its mutant escaped converts a real kill into a
+noise discard.
+
+REQ-exec-attribution-symmetry: enforced by
+`TestBaselineProbeRunsUnderOracleBounds`.
 
 Mutation execution is supported on Unix and Windows hosts, where gomutant can
 own and terminate a process group or Job Object. Other host operating systems

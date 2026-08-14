@@ -32,7 +32,12 @@ func commandContext(ctx context.Context, name string, args ...string) *jobComman
 	job, err := windows.CreateJobObject(nil, nil)
 	if err == nil {
 		info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
-		info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+		// Oracle trees run below normal priority: batch work that
+		// yields to interactive neighbors while a campaign saturates
+		// the host (REQ-exec-oracle-parallelism); the job object
+		// applies it to every process in the tree.
+		info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows.JOB_OBJECT_LIMIT_PRIORITY_CLASS
+		info.BasicLimitInformation.PriorityClass = windows.BELOW_NORMAL_PRIORITY_CLASS
 		_, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
 			uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)))
 	}

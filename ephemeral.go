@@ -68,6 +68,27 @@ func SnapshotOracleMemory() OracleMemorySnapshot { return engine.SnapshotOracleM
 // SnapshotOracleMemory.
 func RestoreOracleMemory(s OracleMemorySnapshot) { engine.RestoreOracleMemory(s) }
 
+// SetOracleParallelism installs the per-oracle inner-parallelism cap
+// for this process's runs (REQ-exec-oracle-parallelism): each oracle
+// tree's width becomes max(1, NumCPU/jobs). Run installs it from its
+// job count; a long-lived caller probing between campaigns installs
+// jobs=1 (full width for the lone tree) around the probe.
+func SetOracleParallelism(jobs int) { engine.SetOracleParallelism(jobs) }
+
+// OracleParallelismSnapshot mirrors the engine's width state for exact
+// restore around a scoped override.
+type OracleParallelismSnapshot = engine.OracleParallelismSnapshot
+
+// SnapshotOracleParallelism captures the width state;
+// RestoreOracleParallelism reinstates it verbatim.
+func SnapshotOracleParallelism() OracleParallelismSnapshot {
+	return engine.SnapshotOracleParallelism()
+}
+
+// RestoreOracleParallelism reinstates a snapshot captured by
+// SnapshotOracleParallelism.
+func RestoreOracleParallelism(s OracleParallelismSnapshot) { engine.RestoreOracleParallelism(s) }
+
 // Ephemeral runs one manual mutant — a caller-supplied replacement of one
 // source file, for the mutations the operator set cannot generate
 // (generated-data drift, resolver seams, caller mappings): it overlays file

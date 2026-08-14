@@ -3,9 +3,11 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
@@ -54,4 +56,37 @@ func TestCommandContextKillsProcessGroup(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("child process %d survived cancellation", childPID)
+}
+
+// An oracle process tree runs at low scheduling priority
+// (REQ-exec-oracle-parallelism): the group's niceness is raised right
+// after the spawn, before the oracle's real work begins. The sleep
+// outwaits the parent's start-to-Setpriority window.
+func TestOracleRunsAtLowPriority(t *testing.T) {
+	if own := processNiceness(t, os.Getpid()); own >= oracleNiceness {
+		t.Skipf("already running at niceness %d; lowering to %d needs privileges", own, oracleNiceness)
+	}
+	var out bytes.Buffer
+	cmd := commandContext(context.Background(), "sh", "-c", "sleep 2; ps -o nice= -p $$")
+	cmd.Stdout = &out
+	if err := runOracleProcess(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(out.String()); got != strconv.Itoa(oracleNiceness) {
+		t.Fatalf("oracle niceness = %q, want %d", got, oracleNiceness)
+	}
+}
+
+// processNiceness reads a process's niceness via ps - the portable
+// user-facing scale, where raw getpriority is kernel-scaled on Linux.
+func processNiceness(t *testing.T, pid int) int {
+	out, err := exec.Command("ps", "-o", "nice=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		t.Fatalf("read niceness of %d: %v", pid, err)
+	}
+	nice, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatalf("parse niceness %q: %v", out, err)
+	}
+	return nice
 }

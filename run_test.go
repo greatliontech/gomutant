@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1553,6 +1554,28 @@ func TestRunDuplicateTargetRefused(t *testing.T) {
 	}, Options{})
 	if err == nil || !strings.Contains(err.Error(), "duplicate target symbol") {
 		t.Fatalf("duplicate targets accepted: %v", err)
+	}
+}
+
+// TestRunInstallsOracleParallelism pins the campaign's install of the
+// inner-parallelism cap (REQ-exec-oracle-parallelism): a run derives
+// the per-tree width from its job count before any oracle work. The
+// duplicate-target refusal fires just after the install, keeping the
+// witness cheap; jobs at the host width makes the installed value
+// unmistakable.
+func TestRunInstallsOracleParallelism(t *testing.T) {
+	tr := fixtureTree(t)
+	prior := engine.SnapshotOracleParallelism()
+	t.Cleanup(func() { engine.RestoreOracleParallelism(prior) })
+	_, err := tr.Run(context.Background(), []Target{
+		{Symbol: "example.com/fixture/lib.Add"},
+		{Symbol: "example.com/fixture/lib.Add"},
+	}, Options{Jobs: runtime.NumCPU()})
+	if err == nil || !strings.Contains(err.Error(), "duplicate target symbol") {
+		t.Fatalf("expected the duplicate refusal, got %v", err)
+	}
+	if got := engine.OracleParallelismWidth(); got != 1 {
+		t.Fatalf("installed width = %d, want 1 at jobs = host width", got)
 	}
 }
 
