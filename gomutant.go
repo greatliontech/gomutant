@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/greatliontech/glob"
+	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -210,6 +211,27 @@ func (t *Tree) SetDynamicStateVouches(identities ...string) {
 // for callers auditing which acceptances the tree judges under.
 func (t *Tree) DynamicStateVouches() []string {
 	return append([]string(nil), t.vouches...)
+}
+
+// ParseScratchNamespaces parses DIR:PATTERN scratch-namespace
+// declarations (REQ-exec-scratch-namespace): DIR module-relative,
+// PATTERN a single-component os.MkdirTemp-style name pattern. Each
+// parsed declaration passes gofresh's namespace grammar here, so a
+// malformed one refuses at the boundary - before a measurement whose
+// every observation would otherwise degrade at ingest.
+func ParseScratchNamespaces(entries []string) ([]runtimeinput.ScratchNamespace, error) {
+	var namespaces []runtimeinput.ScratchNamespace
+	for _, entry := range entries {
+		dir, pattern, ok := strings.Cut(entry, ":")
+		if !ok || dir == "" || pattern == "" {
+			return nil, fmt.Errorf("gomutant: scratch namespace %q is not DIR:PATTERN", entry)
+		}
+		if err := runtimeinput.ValidateScratchNamespace(dir, pattern); err != nil {
+			return nil, fmt.Errorf("gomutant: scratch namespace %q refused: %w", entry, err)
+		}
+		namespaces = append(namespaces, runtimeinput.ScratchNamespace{Dir: dir, Pattern: pattern})
+	}
+	return namespaces, nil
 }
 
 // ParseDynamicStateVouches parses caller vouch entries of the form

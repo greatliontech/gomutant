@@ -111,7 +111,11 @@ fixture binds instead of sealing the observation. An absolute external
 directory cannot be walked by the bracket's hashing semantics and is refused at
 run start — declaring it would seal every observation, strictly worse than not
 declaring — as is a declared path under a tool-excluded directory, which would
-otherwise be silently uncovered; a spawn whose bracket could not
+otherwise be silently uncovered, and a declared path absent or
+unhashable against a measured module's root - the base each spawn's
+capture resolves against - checked before that module's first spawn: a
+surface the oracle reads exists before the run, and a transient
+per-test path belongs to a scratch namespace, not a bracket path; a spawn whose bracket could not
 be captured finalizes as an incomplete observation carrying the capture's
 stated reason, never as a completed one - the values the run read cannot bind. When
 the completed states agree with one coherent current view, their deterministic
@@ -560,6 +564,26 @@ REQ-exec-oracle-scratch, REQ-exec-oracle-scratch-order: enforced by
 `TestOracleScratchContainsAndSweepsTempDirs`.
 REQ-exec-oracle-scratch-declared: enforced by
 `TestTempTouchingOracleFinalizesVerifiable`.
+
+**REQ-exec-scratch-namespace** (behavior): gomutant MUST accept caller
+scratch-namespace declarations - a module-relative directory and a
+single-component `os.MkdirTemp`-style name pattern - and declare each
+to observation ingest as a runtime-input scratch namespace, validating
+the declaration's grammar when the run starts and refusing a malformed
+one before any measurement. The declaration carries the caller's
+assertion that absence-probes of matching names inside the directory
+are no oracle's meaningful input - the namespace's one forfeited
+protection, one declared namespace wide per measured module (the
+directory re-roots at each module's ingest base). In-module scratch an oracle
+mints and removes inside a declared namespace stops recording per-run
+missing-arm identities, restoring union-equality across runs for the
+serve carve-outs' persisted-union comparisons; scratch outside every
+declared namespace keeps its records unchanged.
+
+REQ-exec-scratch-namespace: enforced by
+`TestScratchNamespaceOracleScratchRecordless`,
+`TestRunRefusesMalformedScratchNamespace`, and
+`TestParseScratchNamespaces`.
 
 **REQ-exec-oracle-memory** (behavior): Every oracle process tree — mutant
 runs, baseline probes, and ephemeral probes alike — MUST run under a

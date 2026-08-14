@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [multi-package-testlog-clobber](multi-package-testlog-clobber.md) | a multi-package observed engine run clobbers its one testlog; unreachable from Tree.Run (single-package groups), exported-API hazard only | when an engine consumer passes multiple test packages to an observed mutant run |
 | [decision-build-locality](decision-build-locality.md) | decision-view build and body-hash abort campaign-wide on one target's persistent breakage; interlocked with folding the decision batch and the observed proof union into one pass | cross-tool train chunk 39 |
 | [init-functions-as-subjects](init-functions-as-subjects.md) | init bodies (registry wiring - classic silent-fault carrier) are loudly excluded from mutation, not measured | cross-tool train chunk 40 |
 | [runtime-input-provenance](runtime-input-provenance.md) | Prove reusable runtime evidence across producer-created outputs | cross-tool train chunk 38 |
@@ -17,4 +18,3 @@ is deleted (git holds history).
 | [overlay-bypassed-oracle-verdicts](overlay-bypassed-oracle-verdicts.md) | Disk-reading oracles (tree walks, go list subprocesses) bypass the build overlay and report false survivors; label via the existing filesystem-read observations | cross-tool train chunk 39 |
 | [env-input-oracle-policy](env-input-oracle-policy.md) | Getwd-to-go.mod repo-root idiom classes as unstable env input; settled direction: per-repo reviewed exemption record (classification refinement rejected - unsound failure direction) | cross-tool train chunk 38 |
 | [post-completion-cpu-tail](post-completion-cpu-tail.md) | After the last target committed, the run burned ~100% of one core for 30+ minutes (futex wait, no children, no writes) until externally killed | cross-tool train chunk 39 |
-| [oracle-scratch-namespaces](oracle-scratch-namespaces.md) | oracle tests' in-module scratch records missing-arm noise defeating union-equality across runs; needs a declaration surface like pew's directive | cross-tool train chunk 37 |

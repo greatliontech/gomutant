@@ -86,7 +86,7 @@ func TestOracleMemoryCeilingContainsRunawayMutant(t *testing.T) {
 	}
 	start := time.Now()
 	out, killer, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
-		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, GoEnv("testdata/fixturemod"))
+		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, GoEnv("testdata/fixturemod"))
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("runaway mutant aborted the campaign: %v", err)
@@ -126,7 +126,7 @@ func TestOracleMemoryCeilingContainsRunawayMutant(t *testing.T) {
 		}
 	}
 	out, killer, _, _, _, err = RunMutantObservedEnv(context.Background(), "testdata/fixturemod", senseMutant,
-		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, sensingEnv)
+		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, sensingEnv)
 	if err != nil {
 		t.Fatalf("env-sensing mutant aborted the campaign: %v", err)
 	}

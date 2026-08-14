@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	iofs "io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -105,6 +106,16 @@ type Options struct {
 	// carries the bracket contract's mutation-free assertion for the
 	// span.
 	BracketPaths []string
+	// ScratchNamespaces declares in-module run-scratch namespaces for
+	// observation ingest (REQ-exec-scratch-namespace): each is a
+	// module-relative directory plus a single-component os.MkdirTemp
+	// name pattern, becoming a gofresh scratch namespace
+	// (REQ-inputs-scratch-namespace) over every oracle observation. The
+	// declaration forfeits exactly the appearance-pin of absence-probes
+	// matching the pattern inside the directory - the caller-side
+	// assertion its author takes on. Malformed declarations refuse at
+	// run start, before any measurement.
+	ScratchNamespaces []runtimeinput.ScratchNamespace
 	// Jobs bounds concurrent mutant runs; 0 means half the CPUs. Mutant runs
 	// are process-isolated (own overlay, own temp dir, shared
 	// content-addressed build cache), so they parallelize safely — but
@@ -518,7 +529,7 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 		if pkg == "" || fn == "" || !ok {
 			continue
 		}
-		_, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, runEnv)
+		_, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 		if err != nil {
 			if ctx.Err() != nil {
 				return oracleAttribution{}, ctx.Err()
@@ -629,7 +640,7 @@ func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts 
 		if outcome != engine.MutantSurvived {
 			break
 		}
-		out, groupKiller, state, incomplete, diagnostic, err := engine.RunMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, runEnv)
+		out, groupKiller, state, incomplete, diagnostic, err := engine.RunMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 		if diagnostic != "" {
 			// The mutant failed this group's build: no test process
 			// started, so the group contributes no runtime observation and
@@ -753,6 +764,55 @@ func validateBracketPaths(paths []string) error {
 	return nil
 }
 
+// preflightBracketPaths proves each declared bracket path exists and
+// hashes against one measured module's root - the same base the
+// per-spawn capture resolves against - refusing before that module's
+// first spawn instead of burning a campaign whose every observation
+// would seal at finalization: the field failure this guards against
+// declared a transient per-test directory that test cleanup deleted
+// before end-bracket hashing (REQ-exec-observation). A surface the
+// oracle reads exists before the run; a path that legitimately churns
+// wants a scratch namespace, not a bracket path.
+func preflightBracketPaths(ctx context.Context, moduleDir string, paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	root, err := filepath.EvalSymlinks(moduleDir)
+	if err != nil {
+		return fmt.Errorf("gomutant: bracket path preflight: %w", err)
+	}
+	for _, p := range paths {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		full := p
+		if !filepath.IsAbs(p) {
+			full = filepath.Join(root, filepath.FromSlash(p))
+		}
+		if _, err := os.Stat(full); err != nil {
+			return fmt.Errorf("gomutant: bracket path %s does not exist at run start (%v); a transient per-test path wants --scratch-namespace, not a bracket path", p, err)
+		}
+		// Hashability preflight mirrors the bracket's tolerance classes
+		// (regular files, directories, symlinks hash; anything else is
+		// recorded unhashable and seals at ingest) - capture itself
+		// tolerates unhashable entries, so the walk is the only place a
+		// refusal can happen before the campaign burns.
+		err := filepath.WalkDir(full, func(entry string, d iofs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if kind := d.Type(); !d.IsDir() && !kind.IsRegular() && kind&iofs.ModeSymlink == 0 {
+				return fmt.Errorf("irregular entry %s (%s)", entry, kind)
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("gomutant: bracket path %s preflight failed (%v); refusing before measurement rather than sealing every observation", p, err)
+		}
+	}
+	return nil
+}
+
 func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Finding, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -772,6 +832,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if err := validateBracketPaths(opts.BracketPaths); err != nil {
 		return nil, err
 	}
+	for _, namespace := range opts.ScratchNamespaces {
+		if err := runtimeinput.ValidateScratchNamespace(namespace.Dir, namespace.Pattern); err != nil {
+			return nil, fmt.Errorf("gomutant: scratch namespace %s:%s refused before measurement: %w", namespace.Dir, namespace.Pattern, err)
+		}
+	}
+	// Bracket-path preflight is per measured module (the base the
+	// per-spawn capture resolves against), memoized, at group
+	// formation - before that module's first spawn.
+	bracketPreflights := map[string]error{}
 	if opts.OracleTimeout == 0 {
 		opts.OracleTimeout = 60 * time.Second
 	}
@@ -1333,6 +1402,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if err != nil {
 				return nil, err
 			}
+			if _, seen := bracketPreflights[moduleDir]; !seen {
+				bracketPreflights[moduleDir] = preflightBracketPaths(ctx, moduleDir, opts.BracketPaths)
+			}
+			if err := bracketPreflights[moduleDir]; err != nil {
+				return nil, err
+			}
 			w.groups = append(w.groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
 		}
 		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
@@ -1345,7 +1420,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					return nil, err
 				}
 				probeGate.RLock()
-				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, runEnv)
+				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 				probeGate.RUnlock()
 				if err != nil {
 					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)

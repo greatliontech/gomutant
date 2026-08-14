@@ -94,7 +94,7 @@ func serverOptions() *mcp.ServerOptions {
 		// (REQ-mcp-lifecycle). A client that abandons a request while
 		// its connection lives owes a cancellation notification per the
 		// protocol; the ping cannot see intent.
-		KeepAlive: clientKeepAliveInterval,
+		KeepAlive:    clientKeepAliveInterval,
 		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; prune removes resolved-dead records after a refactor and retarget follows a rename (both with check=true previews); ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
 	}
 }
@@ -361,19 +361,20 @@ func (s *Server) loadFindingsContext(ctx context.Context, override string) ([]go
 }
 
 type runIn struct {
-	TargetsPath      string   `json:"targets_path,omitempty" jsonschema:"path to a gomutant targets document; overrides discovery"`
-	TargetsJSON      string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
-	Changed          string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
-	Budget           int      `json:"budget,omitempty" jsonschema:"candidates per symbol; 0 means exhaustive"`
-	TimeoutSec       *int     `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before the final findings commit after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
-	OracleTimeoutSec int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
-	Jobs             int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
-	BracketPaths     []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
-	OracleMemoryMiB  *int64   `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling per oracle process tree in MiB: absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host"`
-	Force            bool     `json:"force,omitempty" jsonschema:"re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force"`
-	Findings         string   `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
-	Packages         []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
-	Symbols          []string `json:"symbols,omitempty" jsonschema:"complete fully qualified symbol glob filters; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*; alternatives"`
+	TargetsPath       string   `json:"targets_path,omitempty" jsonschema:"path to a gomutant targets document; overrides discovery"`
+	TargetsJSON       string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
+	Changed           string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
+	Budget            int      `json:"budget,omitempty" jsonschema:"candidates per symbol; 0 means exhaustive"`
+	TimeoutSec        *int     `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before the final findings commit after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
+	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
+	Jobs              int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
+	BracketPaths      []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
+	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any measurement"`
+	OracleMemoryMiB   *int64   `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling per oracle process tree in MiB: absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host"`
+	Force             bool     `json:"force,omitempty" jsonschema:"re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force"`
+	Findings          string   `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
+	Packages          []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
+	Symbols           []string `json:"symbols,omitempty" jsonschema:"complete fully qualified symbol glob filters; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*; alternatives"`
 }
 
 type findingOut struct {
@@ -559,12 +560,17 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	postMerge := map[string]gomutant.Finding{}
 	contradicted := map[string]bool{}
 	priorLayer := map[string]string{}
+	scratchNamespaces, err := gomutant.ParseScratchNamespaces(in.ScratchNamespaces)
+	if err != nil {
+		return nil, out, err
+	}
 	options := gomutant.Options{
 		Budget:            in.Budget,
 		OracleTimeout:     oracleTimeout,
 		Jobs:              in.Jobs,
 		Force:             in.Force,
 		BracketPaths:      in.BracketPaths,
+		ScratchNamespaces: scratchNamespaces,
 		OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB),
 		Guidance:          func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
 		Contradiction: func(c gomutant.AttestationContradiction) {
