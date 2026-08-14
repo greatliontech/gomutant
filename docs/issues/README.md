@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [build-selection-oracles](build-selection-oracles.md) | tag-gated/toolchain'd oracles are invisible end to end; single ambient selection by construction, so no divergence bug - a capability boundary | a campaign needs a tag-gated or toolchain'd oracle |
 | [skip-worktree-false-clean](skip-worktree-false-clean.md) | skip-worktree/assume-unchanged entries stamp provenance clean while the measurement read divergent bytes | a field report shows a measured tree using either flag |
 | [multi-package-testlog-clobber](multi-package-testlog-clobber.md) | a multi-package observed engine run clobbers its one testlog; unreachable from Tree.Run (single-package groups), exported-API hazard only | when an engine consumer passes multiple test packages to an observed mutant run |
 | [decision-build-locality](decision-build-locality.md) | decision-view build and body-hash abort campaign-wide on one target's persistent breakage; interlocked with folding the decision batch and the observed proof union into one pass | cross-tool train chunk 39 |
