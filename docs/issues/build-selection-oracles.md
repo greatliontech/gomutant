@@ -17,4 +17,4 @@ Stipulator's REQ-go-build-selections (view = the (tag-set, toolchain)
 pair, first-declaring-view precedence, degrade floor) is the reference
 shape for the resolution half.
 
-Lands: a campaign needs a tag-gated or toolchain'd oracle.
+Lands: cross-tool train chunk 88.

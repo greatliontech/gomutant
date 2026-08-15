@@ -1,6 +1,6 @@
 # No structural mutation class — analyzer-shaped oracles get no teeth check
 
-Lands: when a caller needs adequacy evidence for an oracle that asserts a
+Lands: cross-tool train chunk 89 (was: when a caller needs adequacy evidence for an oracle that asserts a
 structural property (an import boundary, an interface satisfaction) rather
 than a function body's behavior.
 

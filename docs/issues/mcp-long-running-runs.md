@@ -1,6 +1,6 @@
 # MCP long-running runs
 
-Lands: a go-sdk release carrying the MCP Tasks extension (SEP-2663) plus a consuming agent client - task-based polling, result retrieval, and explicit cancellation for runs beyond a request deadline.
+Lands: cross-tool train chunk 41 (which dispositions the go-sdk MCP Tasks dependency explicitly - the upstream extension SEP-2663 plus a consuming agent client remain the build prerequisites).
 ## Observed
 
 An exhaustive `gomutant_run` over eight symbols exceeded the MCP client's approximately

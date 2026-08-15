@@ -10,4 +10,4 @@ the staged mode's clean stamp now asserts equality with a named tree
 flags over selected paths (`git ls-files -v`) and refuse or stamp
 dirty when set.
 
-Lands: a field report shows a measured tree using either flag.
+Lands: cross-tool train chunk 39.

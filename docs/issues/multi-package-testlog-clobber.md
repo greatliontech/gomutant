@@ -11,5 +11,5 @@ packages and observation enabled). A fix would be per-package capture
 files with a merged observation, or a refusal when observation is
 requested for a multi-package run.
 
-Lands: when an engine consumer passes multiple test packages to an
+Lands: cross-tool train chunk 39 (was: when an engine consumer passes multiple test packages to an
 observed mutant run.

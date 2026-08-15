@@ -1,6 +1,6 @@
 # No recipe-shaped mutation classes for generator and seam adequacy
 
-Lands: when a caller repeatedly needs manual mutants for generated data,
+Lands: cross-tool train chunk 89 (was: when a caller repeatedly needs manual mutants for generated data,
 resolver seams, or caller mappings.
 
 The operator set covers expression-level body changes. Some recurring
