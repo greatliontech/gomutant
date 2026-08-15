@@ -82,21 +82,29 @@ type subjectViewSet struct {
 // still constructed per call: a producer view's capture-attach-validate
 // transaction is per subject set and cannot be shared across targets.
 type subjectEngines struct {
-	env      []string
-	vouches  []string
-	progress func(phase, pkg string)
-	byDir    map[string]*gofresh.Engine
+	env []string
+	// evidenceEnv is the environment oracle evidence digests under -
+	// env with the injected inner-parallelism width
+	// (engine.OracleEvidenceEnv). It is the engines' declared producer
+	// env and every subject view's revalidation env; env alone keeps
+	// serving loads and analysis. Captured at construction, so the
+	// width install must precede newSubjectEngines.
+	evidenceEnv []string
+	vouches     []string
+	progress    func(phase, pkg string)
+	byDir       map[string]*gofresh.Engine
 }
 
 func (t *Tree) newSubjectEngines(progress func(phase, pkg string)) *subjectEngines {
-	return &subjectEngines{env: t.eng.GoEnv(), vouches: t.vouches, progress: progress, byDir: map[string]*gofresh.Engine{}}
+	env := t.eng.GoEnv()
+	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, progress: progress, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	if engine, ok := e.byDir[dir]; ok {
 		return engine, nil
 	}
-	opts := []gofresh.Option{gofresh.WithDir(dir), gofresh.WithEnv(e.env...)}
+	opts := []gofresh.Option{gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...)}
 	if len(e.vouches) > 0 {
 		opts = append(opts, gofresh.WithDynamicStateVouches(e.vouches...))
 	}
@@ -185,7 +193,7 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 		return nil, err
 	}
 	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(symbols))}
-	env := engines.env
+	env := engines.evidenceEnv
 	for _, group := range groups {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -263,7 +271,7 @@ func (t *Tree) newObservedUnionViews(ctx context.Context, symbols []string, pack
 		return nil, nil, err
 	}
 	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(symbols))}
-	env := engines.env
+	env := engines.evidenceEnv
 	for _, group := range groups {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err

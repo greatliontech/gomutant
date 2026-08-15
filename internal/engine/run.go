@@ -718,7 +718,13 @@ func mergeProcessObservationsContext(ctx context.Context, root string, env []str
 	if !capture {
 		return runtimeinput.Observation{}, nil
 	}
-	return mergeRuntimeEvidenceContext(ctx, root, env, states...)
+	// Merge re-evaluates each child's recorded digests against the
+	// merge-time environment; the children ingested under the evidence
+	// env (the injected width included), so merging under the raw env
+	// would read a width-reading oracle's records as moved and degrade
+	// the union to incomplete - silent evidence loss on exactly the
+	// differential-attribution path (REQ-exec-oracle-parallelism).
+	return mergeRuntimeEvidenceContext(ctx, root, OracleEvidenceEnv(env), states...)
 }
 
 func mergeRuntimeEvidence(root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {

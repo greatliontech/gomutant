@@ -112,6 +112,34 @@ func TestOracleParallelismSnapshotRoundTrip(t *testing.T) {
 	oracleParallelWidth.Store(0)
 }
 
+// Merging re-evaluates children against the oracle evidence env - the
+// injected width included - so a width-reading oracle's observation
+// merges cleanly instead of reading as moved and silently degrading
+// the union to unverifiable on exactly the differential-attribution
+// path (REQ-exec-oracle-parallelism).
+func TestMergePreservesWidthReadingEvidence(t *testing.T) {
+	SetOracleParallelism(runtime.NumCPU()) // width 1: injection guaranteed
+	t.Cleanup(func() { oracleParallelWidth.Store(0) })
+	root := t.TempDir()
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GOMAXPROCS=") {
+			env = append(env, kv)
+		}
+	}
+	obs, err := runtimeinput.FromTestLogEnv([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env), runtimeinput.WithCompletedProcess("width"), runtimeinput.WithBracket(testBracket(t, root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := mergeProcessObservations(root, env, true, obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merged.OK || merged.Unverifiable {
+		t.Fatalf("width-reading child degraded in the merge: %+v", merged)
+	}
+}
+
 // The ingest mirror carries the injected GOMAXPROCS: an oracle that
 // observably reads the width must have the value it actually saw
 // recorded as runtime-input evidence, so width-sensitive verdicts

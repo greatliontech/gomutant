@@ -1557,6 +1557,44 @@ func TestRunDuplicateTargetRefused(t *testing.T) {
 	}
 }
 
+// TestWidthReadingOracleEvidenceServes pins the serve loop for a
+// target whose oracle set carries a width-reading member (the fixture's
+// GOMAXPROCS-reading test covers Weak): the oracle evidence records the
+// delivered width, and serve-side revalidation recomputes from the
+// same evidence env - a raw-env stand-in would read the record as
+// moved and re-measure on every run (REQ-exec-oracle-parallelism).
+func TestWidthReadingOracleEvidenceServes(t *testing.T) {
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	// Explicit oracle pair: the width-reading member plus the plain one,
+	// keeping the fixture's deliberately-uncacheable external-input test
+	// out of the evidence set.
+	targets := []Target{{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak", "example.com/fixture/lib.TestWeakUnderWidthEnv"}}}
+	first, err := tr.Run(ctx, targets, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[0].Cached {
+		t.Fatal("first run served with no prior")
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	second, err := tr.Run(ctx, targets, Options{Budget: 1, Prior: prior, Decision: func(d RunDecision) { decisions = append(decisions, d) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second[0].Cached {
+		t.Fatalf("width-reading oracle evidence did not serve on an unchanged tree; decisions: %+v", decisions)
+	}
+}
+
 // TestRunInstallsOracleParallelism pins the campaign's install of the
 // inner-parallelism cap (REQ-exec-oracle-parallelism): a run derives
 // the per-tree width from its job count before any oracle work. The

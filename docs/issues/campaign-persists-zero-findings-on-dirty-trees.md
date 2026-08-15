@@ -45,7 +45,29 @@ list was permanently lost when the consumer piped output through
   `--version` nor `version`), which is its own small gap for field
   reports like this one.
 
+## Demonstrated serve-refusal mechanism (2026-08-15, fixture probe)
+
+While building a width-evidence serve witness, the zero-reuse arm was
+demonstrated locally: an oracle test WITHOUT a `//gofresh:pure`
+assertion never serves - its closure verdict is unverifiable (the
+maximal tier names an effect, e.g. "reaches os.Remove (path
+mutation)"), and although the record carries completed observation
+evidence plus the caller observation assertion, the serve-path check
+never fires gofresh's observed-discharge arm (decideAfterClosureObserved's
+`observed` leg), so the recorded evidence cannot substitute for the
+I/O dependence and every serve refuses. The fixture oracles that do
+serve (`TestAdd`, `TestWeak`) pass only via their `//gofresh:pure`
+purity override. A field consumer's oracles read files and env
+routinely and carry no purity assertions - consistent with every
+campaign reporting `0 cached` and the committed document never
+holding a finding. The 38a diagnosis should decide where the fix
+belongs: the serve views' observed configuration, the check surface's
+handling of a recorded observation assertion, or both.
+
 ## Reproduction
 
 ocifs @ 3c70fe5: stage any small delta, run the repo's `task mutate`,
-inspect `.gomutant/findings.json` before and after.
+inspect `.gomutant/findings.json` before and after. Serve-refusal
+mechanism: measure any fixture target with a non-pure oracle carrying
+an env or file read, run twice, watch the second run re-measure with
+an unverifiable closure reason despite intact observation evidence.

@@ -871,19 +871,28 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// state, and the naming needs the residue set, not a per-target
 	// re-listing.
 	residue := sync.OnceValue(func() string { return measurementResidue(ctx, repository, runStart) })
-	runEnv := t.eng.GoEnv()
 	preparation := newRunPreparation(t)
-	engines := t.newSubjectEngines(opts.AnalysisProgress)
 	jobs := opts.Jobs
 	if jobs <= 0 {
 		jobs = max(1, runtime.NumCPU()/2)
 	}
 	engine.SetOracleMemoryLimit(opts.OracleMemoryBytes, jobs)
 	// The inner-parallelism cap is a scheduling bound, deliberately
-	// unpinned: it reaches verdicts only through the wall-clock oracle
-	// timeout, exactly as host speed and ambient load do
-	// (REQ-exec-oracle-parallelism).
+	// unpinned: it reaches verdicts through the wall-clock oracle
+	// timeout like ambient load, and through the recorded environment
+	// evidence exactly where an oracle observably reads it
+	// (REQ-exec-oracle-parallelism). Installed before the subject
+	// engines: their evidence env - the revalidation and producer env -
+	// captures the delivered width at construction.
 	engine.SetOracleParallelism(jobs)
+	engines := t.newSubjectEngines(opts.AnalysisProgress)
+	// The campaign's one evidence environment: every oracle spawn,
+	// ingest mirror, merge, and splice below judges under this single
+	// width-composed value, so a mid-campaign move of the process-wide
+	// width atomic (a scoped probe override in a long-lived server)
+	// cannot split the campaign's evidence - the engine-level
+	// compositions are idempotent on an already-composed environment.
+	runEnv := engines.evidenceEnv
 	// The pin the run's evidence records and compares: resolved once, so
 	// gates never read ambient process state.
 	oracleMemoryPin := engine.OracleMemoryLimitBytes()
@@ -2437,6 +2446,12 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.Observation{}, err
 	}
+	// The finding union is judged under the oracle evidence env - the
+	// injected width included - because its children were ingested under
+	// it; a raw-env merge reads a width-reading oracle's records as
+	// moved and degrades the union (REQ-exec-oracle-parallelism).
+	// Idempotent when the caller already passes the evidence env.
+	env = engine.OracleEvidenceEnv(env)
 	state, err := runtimeinput.MergeEnv(root, env, states...)
 	if cancelErr := ctx.Err(); cancelErr != nil {
 		return runtimeinput.Observation{}, cancelErr
@@ -3435,6 +3450,11 @@ func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Fin
 // finding non-reusable rather than serving unpinned runtime information
 // (REQ-result-stale's fail-closed bound).
 func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding, moduleDir string, union runtimeinput.Observation) (runtimeinput.Observation, error) {
+	// Adoption re-evaluates the persisted union's digests; the record was
+	// ingested under the oracle evidence env, so adopting under the raw
+	// env would read a width-reading record as moved and stamp the
+	// extension non-reusable (REQ-exec-oracle-parallelism).
+	env = engine.OracleEvidenceEnv(env)
 	adopted, adoptErr := runtimeinput.AdoptEnv(rec.TargetEvidence.RuntimeInputs, moduleDir, fmt.Sprintf("gomutant-extend-%d", findingObservationSequence.Add(1)), env)
 	if adoptErr != nil {
 		if err := ctx.Err(); err != nil {

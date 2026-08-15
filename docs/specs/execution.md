@@ -634,7 +634,18 @@ the injected width is part of the observed oracle environment: the
 observation ingest mirror carries the effective GOMAXPROCS, so an
 oracle that observably reads it records the value it actually saw as
 runtime-input evidence, and exactly those width-sensitive findings
-re-measure when the width moves. Every other verdict path sees the
+re-measure when the width moves. Every environment the evidence is
+judged against — merge-time re-evaluation, serve-side revalidation,
+and the analysis engines' declared producer environment — is that
+same evidence environment: a raw-environment stand-in would read a
+width-reading oracle's records as moved, silently degrading merges
+and re-measuring serves forever, or serve stale where an ambient
+value matches a record the process never reproduced. Standalone
+inspection judges under the inspecting process's own width — a
+run-time knob no inspection can know — so a width-reading finding may
+inspect as changed yet serve on the next same-jobs run; the
+divergence's direction is a spurious re-measure report, never a
+spurious serve. Every other verdict path sees the
 width and priority only through the wall-clock oracle timeout, exactly
 as host speed and ambient load do — variance the reuse evidence
 already deliberately does not pin (a finding measured on a slower or
@@ -645,7 +656,9 @@ REQ-exec-oracle-parallelism: enforced by
 `TestOracleParallelismWidth`, `TestOracleCPUEnv`,
 `TestOracleEnvCarriesInnerParallelismCap`,
 `TestOracleIngestEnvCarriesInnerParallelismCap`,
-`TestRunInstallsOracleParallelism`, and
+`TestRunInstallsOracleParallelism`,
+`TestMergePreservesWidthReadingEvidence`,
+`TestWidthReadingOracleEvidenceServes`, and
 `TestOracleRunsAtLowPriority`. (The go tool's package-build
 parallelism follows the delivered GOMAXPROCS — `-p` defaults to it —
 so the environment single-sources both dimensions; an explicit flag
