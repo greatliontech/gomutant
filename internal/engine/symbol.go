@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -188,6 +190,12 @@ func (t *Tree) objectContext(ctx context.Context, symbol string) (types.Object, 
 	if pkgPath == "" {
 		return nil, fmt.Errorf("symbol %s: no loaded package matches its import path", symbol)
 	}
+	if file, ordinal, ok := parseInitSymbol(rest); ok {
+		return t.initObjectContext(ctx, symbol, pkgPath, file, ordinal)
+	}
+	if strings.HasPrefix(rest, "init#") {
+		return nil, fmt.Errorf("symbol %s: malformed init identity; want <pkg>.init#<file>#<ordinal> with a 0-based decimal ordinal", symbol)
+	}
 	parts := strings.Split(rest, ".")
 	if len(parts) == 0 || len(parts) > 2 {
 		return nil, fmt.Errorf("symbol %s: want <pkg>.<Ident> or <pkg>.<Receiver>.<Method>", symbol)
@@ -206,14 +214,88 @@ func (t *Tree) objectContext(ctx context.Context, symbol string) (types.Object, 
 			return obj, nil
 		}
 	}
-	// init is unreferencable by language definition, so the failure is
-	// structural, not a typo: name the class so an explicit init target
-	// is actionable. Only the function form - a METHOD named init is
-	// addressable, and its resolution failures are ordinary.
+	// init is unreferencable by language definition, so the bare name is
+	// structural, not a typo: point at the positional grammar. Only the
+	// function form - a METHOD named init is addressable, and its
+	// resolution failures are ordinary.
 	if len(parts) == 1 && parts[0] == "init" {
-		return nil, fmt.Errorf("symbol %s does not resolve: func init() is not an addressable mutation subject (its wiring runs under every oracle execution)", symbol)
+		return nil, fmt.Errorf("symbol %s does not resolve: func init() is addressed positionally - use <pkg>.init#<file>#<ordinal> (0-based ordinal within the file)", symbol)
 	}
 	return nil, fmt.Errorf("symbol %s does not resolve", symbol)
+}
+
+// parseInitSymbol parses the positional init identity "init#<file>#<n>"
+// from a symbol's package-local remainder. The ordinal is the suffix
+// after the LAST "#" - a file base name may itself contain "#" - and
+// must be canonical decimal (no sign, no leading zeros), so every
+// identity has exactly one spelling.
+func parseInitSymbol(rest string) (file string, ordinal int, ok bool) {
+	body, found := strings.CutPrefix(rest, "init#")
+	if !found {
+		return "", 0, false
+	}
+	i := strings.LastIndex(body, "#")
+	if i <= 0 || i == len(body)-1 {
+		return "", 0, false
+	}
+	digits := body[i+1:]
+	if len(digits) > 1 && digits[0] == '0' {
+		return "", 0, false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return "", 0, false
+		}
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil {
+		return "", 0, false
+	}
+	return body[:i], n, true
+}
+
+// initObjectContext resolves a positional init identity to the declared
+// *types.Func: the ordinal-th receiverless init declaration of the
+// named file, counted 0-based in declaration order - the declaration
+// ledger identity shared with gofresh (REQ-target-changed).
+func (t *Tree) initObjectContext(ctx context.Context, symbol, pkgPath, file string, ordinal int) (types.Object, error) {
+	if strings.HasSuffix(file, "_test.go") {
+		return nil, fmt.Errorf("symbol %s does not resolve: test sources are oracles, never targets", symbol)
+	}
+	for _, pkg := range t.pkgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if basePackagePath(pkg) != pkgPath {
+			continue
+		}
+		if len(pkg.Errors) > 0 {
+			return nil, fmt.Errorf("package %s has load errors: %v", pkg.ID, pkg.Errors[0])
+		}
+		for _, f := range pkg.Syntax {
+			// Unadjusted: the identity names the on-disk file, immune to
+			// //line directives (REQ-target-changed).
+			if filepath.Base(pkg.Fset.PositionFor(f.Pos(), false).Filename) != file {
+				continue
+			}
+			inits := 0
+			for _, d := range f.Decls {
+				fn, ok := d.(*ast.FuncDecl)
+				if !ok || !isInitDecl(fn) {
+					continue
+				}
+				if inits == ordinal {
+					if obj := pkg.TypesInfo.Defs[fn.Name]; obj != nil {
+						return obj, nil
+					}
+					return nil, fmt.Errorf("symbol %s does not resolve: init declaration has no type object", symbol)
+				}
+				inits++
+			}
+			return nil, fmt.Errorf("symbol %s does not resolve: %s declares %d init function(s), ordinal %d requested (0-based)", symbol, file, inits, ordinal)
+		}
+	}
+	return nil, fmt.Errorf("symbol %s does not resolve: no loaded file %s in %s", symbol, file, pkgPath)
 }
 
 // splitSymbol finds the loaded package whose path prefixes the symbol
@@ -285,8 +367,12 @@ func (t *Tree) sourceOf(pkg *packages.Package, node ast.Node) ([]byte, error) {
 }
 
 func (t *Tree) sourceOfContext(ctx context.Context, pkg *packages.Package, node ast.Node) ([]byte, error) {
-	start := pkg.Fset.Position(node.Pos())
-	end := pkg.Fset.Position(node.End())
+	// Unadjusted positions: the read targets the on-disk file that was
+	// parsed, and a //line directive - which remaps names and lines for
+	// diagnostics, not bytes - must not redirect it to a file that may
+	// not exist or hold different content.
+	start := pkg.Fset.PositionFor(node.Pos(), false)
+	end := pkg.Fset.PositionFor(node.End(), false)
 	data, err := contextio.ReadFile(ctx, start.Filename)
 	if err != nil {
 		return nil, err

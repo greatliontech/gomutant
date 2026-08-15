@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -15,8 +16,8 @@ import (
 // and method declared in the tree's non-test, non-generated source files,
 // sorted — the whole-tree discovery surface (REQ-target-producers). Test
 // files are oracles, never targets; generated bodies have nothing
-// hand-written to strengthen a test against; and a package initializer is
-// unreferencable by language definition — none yields a target.
+// hand-written to strengthen a test against. Package initializers appear
+// under their positional identity <pkg>.init#<file>#<ordinal>.
 func (t *Tree) DeclaredSymbols() []string {
 	symbols, _ := t.DeclaredSymbolsContext(context.Background())
 	return symbols
@@ -38,9 +39,19 @@ func (t *Tree) DeclaredSymbolsContext(ctx context.Context) ([]string, error) {
 			if strings.HasSuffix(name, "_test.go") || ast.IsGenerated(f) {
 				continue
 			}
+			// The init identity names the on-disk file: unadjusted
+			// position, so a //line directive cannot split the identity
+			// from the freshness producer's (REQ-target-changed).
+			initBase := filepath.Base(pkg.Fset.PositionFor(f.Pos(), false).Filename)
+			inits := 0
 			for _, d := range f.Decls {
 				fn, ok := d.(*ast.FuncDecl)
 				if !ok {
+					continue
+				}
+				if isInitDecl(fn) {
+					seen[initSymbol(pkgPath, initBase, inits)] = true
+					inits++
 					continue
 				}
 				if sym := declSymbol(pkgPath, fn); sym != "" {

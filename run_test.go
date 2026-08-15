@@ -5066,3 +5066,91 @@ func TestCoverageUpgradeIsUpgradeOnly(t *testing.T) {
 		}
 	}
 }
+
+// An init body measures end to end under its positional identity: the
+// classic silent-fault carrier (registry wiring) generates candidates,
+// runs against the package suite - the ground-truth oracle: every test
+// of the package executes every init - and records a finding with
+// freshness evidence keyed to the positional subject
+// (REQ-target-changed).
+func TestInitTargetMeasuresEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tmp := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/initrun\n\ngo 1.26.4\n",
+		"wire.go": `package initrun
+
+var registry = map[string]int{}
+
+func init() {
+	if len(registry) < 10 {
+		registry["a"] = 1
+	}
+}
+`,
+		"wire_test.go": `package initrun
+
+import "testing"
+
+func TestWired(t *testing.T) {
+	if registry["a"] != 1 {
+		t.Fatalf("registry not wired: %v", registry)
+	}
+}
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	symbol := "example.com/initrun.init#wire.go#0"
+	findings, err := tree.Run(context.Background(), []Target{{Symbol: symbol}}, Options{OracleTimeout: 2 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].Skipped != "" {
+		t.Fatalf("init target did not measure: %+v", findings)
+	}
+	f := findings[0]
+	if f.Symbol != symbol || f.Mutants == 0 {
+		t.Fatalf("init finding = %+v, want mutants measured under the positional symbol", f)
+	}
+	if f.Killed == 0 {
+		t.Fatalf("registry-pinning oracle killed nothing: %+v", f)
+	}
+	if f.TargetEvidence.MaximalClosure == "" || f.TargetEvidence.Symbol != symbol {
+		t.Fatalf("init finding evidence = %+v, want gofresh evidence keyed to the positional subject", f.TargetEvidence)
+	}
+	// The record serves warm: a second run with unchanged pins re-uses it.
+	again, err := tree.Run(context.Background(), []Target{{Symbol: symbol}}, Options{OracleTimeout: 2 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 1 || again[0].Mutants != f.Mutants {
+		t.Fatalf("warm init run = %+v, want the served record", again)
+	}
+}
+
+// Positional init refusals are target-local and name their cause: an
+// out-of-range ordinal, a test-file init, and a malformed identity.
+func TestInitTargetRefusalsNameTheirCause(t *testing.T) {
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	for _, tc := range []struct{ symbol, want string }{
+		{"example.com/fixture/lib.init#lib.go#7", "init function(s)"},
+		{"example.com/fixture/lib.init#lib_test.go#0", "test sources are oracles"},
+		{"example.com/fixture/lib.init#", "malformed init identity"},
+		{"example.com/fixture/lib.init#lib.go#01", "malformed init identity"},
+	} {
+		_, err := tr.eng.BodyHashContext(ctx, tc.symbol)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("BodyHash(%s) = %v, want %q", tc.symbol, err, tc.want)
+		}
+	}
+}

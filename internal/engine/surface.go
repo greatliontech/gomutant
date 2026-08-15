@@ -35,15 +35,10 @@ type FileSurface struct {
 	// from the working file — deletions, which yield no target (nothing
 	// remains to mutate) but are part of the changed surface.
 	RefOnlyDecls int
-	// ChangedInits counts func init() bodies that differ from the
-	// reference — edited or removed. Go defines the init identifier as
-	// unreferencable, so an init body can never be a resolvable target
-	// symbol; the count lets the caller report the exclusion instead of
-	// either aborting on an unresolvable symbol or silently narrowing
-	// the changed surface (REQ-target-changed).
-	ChangedInits int
 	// Symbols are the resolver symbol strings of the declarations whose body
-	// differs from the reference version, sorted.
+	// differs from the reference version, sorted. Init bodies appear under
+	// their positional identity <pkg>.init#<file>#<ordinal>
+	// (REQ-target-changed).
 	Symbols []string
 }
 
@@ -83,7 +78,10 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			abs := pkg.Fset.Position(f.Pos()).Filename
+			// Unadjusted: the changed-path keys arrive as on-disk names
+			// (git's view), so a //line directive must not re-key the
+			// file off its own path (REQ-target-changed).
+			abs := pkg.Fset.PositionFor(f.Pos(), false).Filename
 			rel, err := filepath.Rel(t.dir, abs)
 			if err != nil || strings.HasPrefix(rel, "..") {
 				continue
@@ -106,12 +104,15 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 				key := declKey(fn)
 				sym := declSymbol(pkgPath, fn)
 				if isInitDecl(fn) {
-					// init bodies are tracked for change detection under a
-					// per-file ordinal key — every init in a file shares the
-					// name, which the language keeps unreferencable — and
-					// carry no symbol: a changed init is reported as an
-					// exclusion, never emitted as an unresolvable target.
+					// init bodies carry the positional identity - the
+					// per-file ordinal comparison key and the resolver
+					// symbol share one 0-based count, so a changed init
+					// is an ordinary target. The base is the on-disk
+					// (unadjusted) name: a //line directive must not
+					// split the identity from the freshness producer's
+					// (REQ-target-changed).
 					key = initKey(inits)
+					sym = initSymbol(pkgPath, filepath.Base(pkg.Fset.PositionFor(f.Pos(), false).Filename), inits)
 					inits++
 				} else if sym == "" {
 					continue
@@ -160,23 +161,13 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 				if old != nil && old[key] == wd.hash {
 					continue // body unchanged since the reference
 				}
-				if wd.symbol == "" {
-					// A changed init body: counted for the exclusion
-					// report, never a target symbol (unreferencable).
-					fs.ChangedInits++
-					continue
-				}
 				fs.Symbols = append(fs.Symbols, wd.symbol)
 			}
 			for key := range old {
 				if _, ok := d.byKey[key]; !ok {
-					// A removed init is the init class, not a deleted
-					// symbol: there was never a symbol to delete.
-					if strings.HasPrefix(key, "init#") {
-						fs.ChangedInits++
-					} else {
-						fs.RefOnlyDecls++
-					}
+					// A removed init is a deleted symbol like any other:
+					// its positional identity no longer names a body.
+					fs.RefOnlyDecls++
 				}
 			}
 			sort.Strings(fs.Symbols)
@@ -237,6 +228,14 @@ func initKey(n int) string {
 	return "init#" + strconv.Itoa(n)
 }
 
+// initSymbol is the resolver symbol of a file's n-th receiverless init
+// declaration, 0-based in declaration order: the declaration-ledger
+// identity shared with gofresh, file-scoped so inits elsewhere in the
+// package never shift it (REQ-target-changed).
+func initSymbol(pkgPath, fileBase string, n int) string {
+	return pkgPath + ".init#" + fileBase + "#" + strconv.Itoa(n)
+}
+
 // bodyNode is the declaration's body when it has one, else the whole
 // declaration — mirroring BodyHash, so the hashed span is behavior-bearing.
 func bodyNode(fd *ast.FuncDecl) ast.Node {
@@ -257,9 +256,9 @@ func declKey(fd *ast.FuncDecl) string {
 
 // declSymbol builds the resolver symbol string for a top-level declaration:
 // "<pkg>.<Name>" for a function, "<pkg>.<Receiver>.<Name>" for a method.
-// A package initializer yields no symbol: the language defines the init
-// identifier as unreferencable, so a "<pkg>.init" target could never
-// resolve and would abort every discovery form that emitted it.
+// A package initializer yields no symbol here - its identity is
+// positional (initSymbol) and needs the declaring file and ordinal the
+// bare declaration cannot supply.
 func declSymbol(pkgPath string, fd *ast.FuncDecl) string {
 	if isInitDecl(fd) {
 		return ""

@@ -215,3 +215,30 @@ func TestLoadWorkspace(t *testing.T) {
 		t.Fatalf("escaping go.work member accepted: %v", err)
 	}
 }
+
+// The positional init identity parses right to left: the ordinal is the
+// canonical-decimal suffix after the LAST "#", so a file base name may
+// itself contain "#"; every identity has exactly one spelling.
+func TestParseInitSymbol(t *testing.T) {
+	for _, tc := range []struct {
+		rest, file string
+		ordinal    int
+		ok         bool
+	}{
+		{"init#a.go#0", "a.go", 0, true},
+		{"init#a.go#12", "a.go", 12, true},
+		{"init#a#b.go#2", "a#b.go", 2, true},
+		{"init#a.go#01", "", 0, false},
+		{"init#a.go#-1", "", 0, false},
+		{"init#a.go#", "", 0, false},
+		{"init##0", "", 0, false},
+		{"init#", "", 0, false},
+		{"init", "", 0, false},
+		{"Wired", "", 0, false},
+	} {
+		file, ordinal, ok := parseInitSymbol(tc.rest)
+		if file != tc.file || ordinal != tc.ordinal || ok != tc.ok {
+			t.Fatalf("parseInitSymbol(%q) = %q, %d, %v; want %q, %d, %v", tc.rest, file, ordinal, ok, tc.file, tc.ordinal, tc.ok)
+		}
+	}
+}

@@ -505,13 +505,13 @@ func TestPkgRuns(t *testing.T) {
 	}
 }
 
-// A func init() is unreferencable by language definition, so no discovery
-// form may emit it as a target: whole-tree discovery omits it, a changed
-// init body reports as reasoned residue beside the same file's real
-// targets, and an explicit init target is refused with an error naming the
-// class — one changed init never aborts or silently narrows a delta run
-// (REQ-target-changed).
-func TestInitFunctionsAreExcludedLoudly(t *testing.T) {
+// A func init() is addressable under its positional identity
+// <pkg>.init#<file>#<ordinal>: whole-tree discovery emits it, a changed
+// init body targets exactly the changed ordinal, a removed init is a
+// deleted symbol, a generated file's init stays in the generated class,
+// and the bare unreferencable name refuses pointing at the positional
+// grammar (REQ-target-changed).
+func TestInitFunctionsTargetPositionally(t *testing.T) {
 	tmp := t.TempDir()
 	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
 		t.Fatal(err)
@@ -529,16 +529,21 @@ func TestInitFunctionsAreExcludedLoudly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Whole-tree discovery: no init symbol, and the description pass that
-	// aborted in the field completes.
+	// Whole-tree discovery: both hand-written inits appear positionally,
+	// the generated file's does not, and the description pass completes.
 	targets, err := tr.DiscoverContext(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	discovered := map[string]bool{}
 	for _, tg := range targets {
-		if strings.HasSuffix(tg.Symbol, ".init") {
-			t.Fatalf("whole-tree discovery emitted an unresolvable init target: %s", tg.Symbol)
-		}
+		discovered[tg.Symbol] = true
+	}
+	if !discovered["example.com/fixture/lib.init#wired.go#0"] || !discovered["example.com/fixture/lib.init#wired.go#1"] {
+		t.Fatalf("whole-tree discovery missed positional init targets: %v", targets)
+	}
+	if discovered["example.com/fixture/lib.init#genwired.go#0"] {
+		t.Fatal("whole-tree discovery emitted a generated file's init")
 	}
 	if _, err := tr.DescribeTargetsContext(context.Background(), targets); err != nil {
 		t.Fatalf("describing whole-tree targets aborted: %v", err)
@@ -559,32 +564,25 @@ func TestInitFunctionsAreExcludedLoudly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(targets) != 0 {
-		t.Fatalf("init-only delta produced targets: %v", targets)
+	if len(targets) != 1 || targets[0].Symbol != "example.com/fixture/lib.init#wired.go#1" {
+		t.Fatalf("init-only delta targets = %v, want exactly the changed ordinal", targets)
 	}
-	initReason := "func init() changed: not an addressable mutation subject"
-	if len(residue) != 1 || !strings.Contains(residue[0].Reason, initReason) {
-		t.Fatalf("init-only delta residue = %v, want the init exclusion", residue)
+	if len(residue) != 0 {
+		t.Fatalf("init-only delta residue = %v, want none", residue)
 	}
 
-	// Changed init beside a changed function: the function targets AND the
-	// exclusion reports — neither swallows the other.
+	// Changed init beside a changed function: both target.
 	refBoth := strings.Replace(refChangedInit, "return registry[k]", "return registry[k] + 0", 1)
-	targets, residue, err = tr.DiscoverChangedContext(context.Background(), []string{"lib/wired.go"}, ref(refBoth))
+	targets, _, err = tr.DiscoverChangedContext(context.Background(), []string{"lib/wired.go"}, ref(refBoth))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(targets) != 1 || targets[0].Symbol != "example.com/fixture/lib.Wired" {
-		t.Fatalf("changed function beside changed init = %v, want Wired targeted", targets)
+	got := map[string]bool{}
+	for _, tg := range targets {
+		got[tg.Symbol] = true
 	}
-	found := false
-	for _, r := range residue {
-		if strings.Contains(r.Reason, initReason) {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("init exclusion missing beside a targeting file: %v", residue)
+	if len(targets) != 2 || !got["example.com/fixture/lib.Wired"] || !got["example.com/fixture/lib.init#wired.go#1"] {
+		t.Fatalf("changed function beside changed init = %v, want both targeted", targets)
 	}
 
 	// Unchanged inits: no exclusion row — the file is ordinary churn.
@@ -596,8 +594,8 @@ func TestInitFunctionsAreExcludedLoudly(t *testing.T) {
 		t.Fatalf("identical file residue = %v, want churn only", residue)
 	}
 
-	// A REMOVED init is the init class too — never "only deleted
-	// symbols": there was never a symbol to delete.
+	// A REMOVED init is a deleted symbol: its positional identity no
+	// longer names a body, and nothing remains to mutate.
 	refExtraInit := strings.Replace(working, "func Wired(", "func init() { registry[\"c\"] = 9 }\n\nfunc Wired(", 1)
 	targets, residue, err = tr.DiscoverChangedContext(context.Background(), []string{"lib/wired.go"}, ref(refExtraInit))
 	if err != nil {
@@ -606,8 +604,8 @@ func TestInitFunctionsAreExcludedLoudly(t *testing.T) {
 	if len(targets) != 0 {
 		t.Fatalf("removed-init delta produced targets: %v", targets)
 	}
-	if len(residue) != 1 || !strings.Contains(residue[0].Reason, initReason) {
-		t.Fatalf("removed-init residue = %v, want the init exclusion alone", residue)
+	if len(residue) != 1 || !strings.Contains(residue[0].Reason, "only deleted symbols") {
+		t.Fatalf("removed-init residue = %v, want the deleted-symbol class", residue)
 	}
 
 	// A file a categorical class already excludes whole reports that
@@ -630,10 +628,11 @@ func TestInitFunctionsAreExcludedLoudly(t *testing.T) {
 		t.Fatalf("generated-file residue = %v, want the generated class alone", residue)
 	}
 
-	// An explicit init target is a structural refusal naming the class.
+	// The bare unreferencable name refuses pointing at the positional
+	// grammar.
 	_, err = tr.DescribeTargetsContext(context.Background(), []Target{{Symbol: "example.com/fixture/lib.init"}})
-	if err == nil || !strings.Contains(err.Error(), "not an addressable mutation subject") {
-		t.Fatalf("explicit init target error = %v, want the class-naming refusal", err)
+	if err == nil || !strings.Contains(err.Error(), "init#<file>#<ordinal>") {
+		t.Fatalf("bare init target error = %v, want the positional-grammar pointer", err)
 	}
 
 	// A method named init is addressable; its resolution failure is
@@ -641,5 +640,69 @@ func TestInitFunctionsAreExcludedLoudly(t *testing.T) {
 	_, err = tr.DescribeTargetsContext(context.Background(), []Target{{Symbol: "example.com/fixture/lib.NoSuchType.init"}})
 	if err == nil || strings.Contains(err.Error(), "not an addressable mutation subject") {
 		t.Fatalf("method-form init miss got the func-init class claim: %v", err)
+	}
+}
+
+// The positional identity is file-scoped - inits in sibling files never
+// shift an existing file's ordinals - and names the on-disk file: a
+// //line directive remaps positions but not the identity, which must
+// match the freshness producer's unadjusted naming
+// (REQ-target-changed).
+func TestInitIdentityFileScopedAndDirectiveImmune(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"lib/wired.go":  "package lib\n\nvar registry = map[string]int{}\n\nfunc init() { registry[\"a\"] = 1 }\n\nfunc init() { registry[\"b\"] = 2 }\n",
+		"lib/wired2.go": "package lib\n\nfunc init() { registry[\"c\"] = 3 }\n",
+		"lib/lined.go":  "//line other.go:1\npackage lib\n\nfunc init() { registry[\"d\"] = 4 }\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets, err := tr.DiscoverContext(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovered := map[string]bool{}
+	for _, tg := range targets {
+		discovered[tg.Symbol] = true
+	}
+	for _, want := range []string{
+		"example.com/fixture/lib.init#wired.go#0",
+		"example.com/fixture/lib.init#wired.go#1",
+		"example.com/fixture/lib.init#wired2.go#0",
+		"example.com/fixture/lib.init#lined.go#0",
+	} {
+		if !discovered[want] {
+			t.Fatalf("whole-tree discovery missed %s: %v", want, targets)
+		}
+	}
+	if discovered["example.com/fixture/lib.init#other.go#0"] {
+		t.Fatal("//line directive remapped the init identity off the on-disk file")
+	}
+	if _, err := tr.eng.BodyHashContext(context.Background(), "example.com/fixture/lib.init#lined.go#0"); err != nil {
+		t.Fatalf("on-disk identity under a //line directive did not resolve: %v", err)
+	}
+	// Changed scope mints the same on-disk identity.
+	ref := strings.Replace(files["lib/lined.go"], "= 4", "= 5", 1)
+	changedTargets, _, err := tr.DiscoverChangedContext(context.Background(), []string{"lib/lined.go"}, func(p string) ([]byte, bool) {
+		if p == "lib/lined.go" {
+			return []byte(ref), true
+		}
+		return nil, false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changedTargets) != 1 || changedTargets[0].Symbol != "example.com/fixture/lib.init#lined.go#0" {
+		t.Fatalf("changed-scope directive identity = %v, want the on-disk positional symbol", changedTargets)
 	}
 }

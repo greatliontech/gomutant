@@ -89,20 +89,27 @@ churn: the canonical projection preserves literal interiors byte-exact), a decla
 changed, a symbol deleted since the ref yields no target (nothing remains to
 mutate), and an unparseable prior version conservatively reads as all
 changed. Test sources are oracles, never targets, and are excluded from the
-changed surface. A `func init()` declaration is not an addressable target in
-any discovery form — the language defines the init identifier as
-unreferencable, so an emitted init target could never resolve — and a changed
-or removed init body reports as residue naming the exclusion beside whatever
-targets the same file yields, never aborting or silently narrowing the delta;
-a file a categorical residue class already excludes whole (a test, generated,
-non-Go, or unloaded file) reports that class alone; an explicit
-target naming init is refused with an error naming the same class. The mode
+changed surface. A `func init()` declaration is an addressable target under
+its positional identity `<pkg>.init#<file>#<ordinal>`: `<file>` is the
+declaring file's on-disk base name — the unadjusted position, which a
+`//line` directive cannot remap — and `<ordinal>` counts the file's receiverless
+init declarations in declaration order, 0-based — the declaration-ledger
+identity the freshness producer shares, file-scoped so inits elsewhere in
+the package never shift it. The ordinal is the suffix after the LAST `#`
+(a file base name may itself contain `#`), spelled as canonical decimal.
+Discovery emits changed and whole-tree init bodies exactly like named
+symbols — a removed init is a deleted symbol — and the derived oracle is
+the package suite like any target's, which is also the ground truth of the
+oracle relationship: every test of the package executes every init. The
+bare name `<pkg>.init` never resolves — the language keeps the identifier
+unreferencable — and its refusal points at the positional grammar; an
+out-of-range ordinal refuses naming the file's actual init count; a
+test-file init is oracle-side source and refuses as such. The mode
 also reports the changed-but-untargeted
 residue with the engine-level reason each path yielded no target — a test
 file, a generated file, a non-Go or data-only file, a changed file declaring
 no function body, a file whose declared bodies are all canonically unchanged
-(formatting-only churn), a file whose only change is a deleted symbol, a file
-whose only change is an init body (edited or removed), or a
+(formatting-only churn), a file whose only change is a deleted symbol, or a
 Go file the loaded packages do not cover (deleted, unparseable, or excluded
 by build constraints — an unbound surface named as such, never mislabeled) —
 so a caller layering its own classification (or a user deciding what to

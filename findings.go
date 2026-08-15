@@ -478,7 +478,12 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // rapid-oracle record measured under unpinned draws, so an older
 // consumer's tolerance would have dropped it and served verdicts from
 // draw sequences the pinned regime never executes.
-const DocumentVersion = 7
+// Version 8 introduced positional init targets
+// (<pkg>.init#<file>#<ordinal>): their symbols resolve in no earlier
+// release, so an older consumer's routine prune would classify every
+// init finding detached and destroy the records - the version boundary
+// refuses the destruction instead.
+const DocumentVersion = 8
 
 // OldestReadableDocumentVersion bounds the known older document versions the
 // parser upgrades on read (REQ-result-tolerant).
