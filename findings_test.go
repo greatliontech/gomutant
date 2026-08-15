@@ -1,11 +1,11 @@
 package gomutant
 
 import (
-	"testing"
-
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"strings"
+	"testing"
 )
 
 func TestSubjectEvidencePreservesObservationProof(t *testing.T) {
@@ -134,5 +134,19 @@ func TestAttributedKill(t *testing.T) {
 	}
 	if err := attributedKill("p.TestOutsider", oracle); err == nil {
 		t.Fatal("a killer outside the oracle attributed")
+	}
+}
+
+// A version ahead of the reader names the probable cause and the
+// restart signal - the recurring field shape is a long-lived MCP
+// server outliving a binary upgrade, its surface dead while the reader
+// hunts for document corruption (REQ-result-export).
+func TestParseFindingsVersionAheadNamesProbableCause(t *testing.T) {
+	_, err := ParseFindings([]byte(`{"version": 99, "findings": []}`))
+	if err == nil || !strings.Contains(err.Error(), "newer gomutant likely wrote it") || !strings.Contains(err.Error(), "restart it on the upgraded binary") {
+		t.Fatalf("version-ahead error = %v, want the probable cause and restart signal", err)
+	}
+	if _, err := ParseFindings([]byte(`{"version": 1, "findings": []}`)); err == nil || strings.Contains(err.Error(), "newer gomutant") {
+		t.Fatalf("version-behind error = %v, want the plain range refusal", err)
 	}
 }

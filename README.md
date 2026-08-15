@@ -129,6 +129,19 @@ remeasures the whole target.
 Mutation execution is supported on Unix and Windows hosts; other hosts are
 refused during tree loading rather than run with weaker cleanup guarantees.
 
+Consumer hygiene for oracle scratch state: mutants the campaign kills
+(timeouts, losers) never run their `t.Cleanup`, and because the killed
+process was running *mutated* code, its residue can be shapes the clean
+suite never produces — occupied sequence-numbered directories, even
+permission-mangled entries a plain `rm -rf` cannot delete (a
+chmod-application mutant). Scratch helpers must enforce their own
+freshness (`RemoveAll` before `MkdirAll`, never assume per-process
+newness), and sweepers must treat permission-mangled residue as expected
+(`chmod -R u+rwx` before removal). The failure shape to recognize: the
+clean suite breaks *after* a campaign, in a directory the campaign never
+touched directly. A `--scratch-namespace` declaration additionally keeps
+such residue out of the observation record.
+
 Review survivors independently of process success:
 
 ```

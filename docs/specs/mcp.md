@@ -4,6 +4,9 @@ An agent drives gomutant the way an operator drives the CLI: measure, read
 findings, disposition survivors, probe manual mutants. The server is a shell
 over the same library — one engine, two faces — and it inherits the advisory
 stance whole: no tool renders a pass/fail verdict (REQ-result-findings).
+The MCP surface outranks the CLI in design priority: it serves an LLM agent
+in a harness, where every byte of output spends the consumer's context —
+minimal output, maximal usefulness governs every response shape.
 
 **REQ-mcp-tools** (behavior): The MCP server MUST expose the library's
 operations as tools — measuring a target set (every producer form: discovery,
@@ -72,6 +75,15 @@ reasoning's last home, and a capped preview would hide part of what the
 destructive call deletes - the one sanctioned exception to
 REQ-mcp-envelope's row caps; retarget rows cap with counted omissions
 as usual.
+
+Concurrent runs against different findings documents are legal, but the
+oracle-parallelism width is process state every in-flight campaign shares
+(REQ-exec-oracle-parallelism in [execution.md](execution.md)): the first
+in-flight campaign's job count owns the width, and a concurrent run
+requesting a different count is refused with the owner's count named —
+never installed over the owner, which would split its oracles' recorded
+environments from the campaign's evidence environment (enforced by
+`TestRunWidthClaimRefusesDifferingJobs`).
 
 **REQ-mcp-liveness** (behavior): The server MUST detect a dead client
 transport while a campaign is in

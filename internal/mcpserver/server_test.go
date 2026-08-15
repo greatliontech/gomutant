@@ -424,9 +424,10 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if len(out.Findings) != 1 || len(out.Findings[0].Open) == 0 || out.Findings[0].Labels[0] != "REQ-weak" || out.Summary.Targets != 1 || out.Document == "" {
 		t.Fatalf("run = %+v", out)
 	}
-	if len(out.Findings[0].Operators) == 0 {
-		t.Fatal("run omitted operator summaries")
-	}
+	// Run rows carry no per-row operator tables - the findings tool's
+	// detail arm serves them; duplicating them on every run row spends
+	// the agent's context on drill-down data it did not ask for
+	// (REQ-mcp-envelope's minimal-output stance).
 	// The run row itself states the layer (REQ-result-layers): the copied
 	// fixture has no commit provenance, so the record routes local and the
 	// response says so without a second findings call.

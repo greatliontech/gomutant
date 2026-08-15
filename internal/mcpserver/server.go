@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -36,11 +37,78 @@ type Server struct {
 	// mu guards the loaded-tree cache. The cached Tree is read-only after
 	// load and served to concurrent tool calls; see loadTreeContext for the
 	// reuse constraint.
-	mu           sync.Mutex
-	tree         *gomutant.Tree
-	treeKey      string
-	vouches      []string
-	runsInFlight atomic.Int64
+	mu      sync.Mutex
+	tree    *gomutant.Tree
+	treeKey string
+	vouches []string
+	// widthMu guards the in-flight campaigns' shared claim on the
+	// process-wide oracle-parallelism width and the ephemeral probe's
+	// process-wide overrides: the first campaign's job count owns the
+	// width until every claiming run exits, and a probe's override
+	// excludes campaigns entirely for its duration.
+	widthMu        sync.Mutex
+	widthJobs      int
+	widthClaims    int
+	probeOverrides int
+}
+
+// claimRunWidth admits a run into the shared process-width claim: the
+// first in-flight campaign's job count owns the width; a concurrent
+// run requesting a different count refuses loudly instead of splitting
+// the owner's oracle environments from its evidence environment
+// (REQ-exec-oracle-parallelism).
+func (s *Server) claimRunWidth(jobs int) error {
+	resolved := resolveJobs(jobs)
+	s.widthMu.Lock()
+	defer s.widthMu.Unlock()
+	if s.probeOverrides > 0 {
+		return fmt.Errorf("run: an in-flight ephemeral probe holds a process-wide override (width or memory ceiling); retry after it finishes")
+	}
+	if s.widthClaims > 0 && resolved != s.widthJobs {
+		return fmt.Errorf("run: an in-flight campaign with jobs=%d owns the process's oracle-parallelism width; request jobs=%d, a different width, after it finishes (or match its job count)", s.widthJobs, resolved)
+	}
+	if s.widthClaims == 0 {
+		s.widthJobs = resolved
+	}
+	s.widthClaims++
+	return nil
+}
+
+func (s *Server) releaseRunWidth() {
+	s.widthMu.Lock()
+	defer s.widthMu.Unlock()
+	s.widthClaims--
+}
+
+// resolveJobs mirrors the run's own derivation (jobs<=0 means half the
+// CPUs, floored at 1), so two spellings of the same effective width
+// share one claim and the refusal names a count the agent can request.
+func resolveJobs(jobs int) int {
+	if jobs <= 0 {
+		return max(1, runtime.NumCPU()/2)
+	}
+	return jobs
+}
+
+// claimProbeOverride admits an ephemeral probe's process-wide override
+// (memory ceiling or width) only while no campaign is in flight, and
+// blocks campaigns from starting until the probe releases - the same
+// shared-state discipline as the width claim, closing the gap where a
+// probe's deferred restore could land mid-campaign.
+func (s *Server) claimProbeOverride() error {
+	s.widthMu.Lock()
+	defer s.widthMu.Unlock()
+	if s.widthClaims > 0 {
+		return fmt.Errorf("ephemeral: a run in flight owns the process's oracle width and memory ceiling; omit the overrides or retry after the run")
+	}
+	s.probeOverrides++
+	return nil
+}
+
+func (s *Server) releaseProbeOverride() {
+	s.widthMu.Lock()
+	defer s.widthMu.Unlock()
+	s.probeOverrides--
 }
 
 // New builds a server rooted at dir.
@@ -97,6 +165,39 @@ func serverOptions() *mcp.ServerOptions {
 		KeepAlive:    clientKeepAliveInterval,
 		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; prune removes resolved-dead records after a refactor and retarget follows a rename (both with check=true previews); ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
 	}
+}
+
+// heartbeatInterval paces withHeartbeat's still-working notifications;
+// a variable so the emission is testable without a 20-second test.
+var heartbeatInterval = 20 * time.Second
+
+// withHeartbeat runs fn while a bounded ticker tells a progress-token
+// client the labeled stretch is still working - no compile, load, or
+// oracle stretch stays silent when the client asked for progress
+// (REQ-mcp-envelope). The caller passes its request's ONE notifier so
+// every stretch shares one monotonically increasing progress counter -
+// MCP requires the value to increase per token, and a fresh counter per
+// stretch would regress it. A nil notifier (no token) is exactly fn.
+func withHeartbeat[T any](ctx context.Context, notify func(string), label string, fn func(context.Context) (T, error)) (T, error) {
+	if notify == nil {
+		return fn(ctx)
+	}
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		started := time.Now()
+		ticker := time.NewTicker(heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				notify(fmt.Sprintf("still working: %s (%s elapsed)", label, time.Since(started).Round(time.Second)))
+			}
+		}
+	}()
+	return fn(ctx)
 }
 
 func (s *Server) MCP() *mcp.Server {
@@ -187,7 +288,7 @@ func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (s
 			Symbol: f.Symbol, Labels: f.Labels,
 			CandidateCount: f.CandidateCount, Generated: f.Generated,
 			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
-			Attested: len(f.Attested), Operators: append([]gomutant.OperatorSummary{}, f.Operators...), Open: open,
+			Attested: len(f.Attested), Open: open,
 			OmittedOpen: omittedOpen,
 			Cached:      f.Cached, Skipped: f.Skipped,
 		}
@@ -369,7 +470,7 @@ type runIn struct {
 	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
 	Jobs              int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
 	BracketPaths      []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
-	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any measurement"`
+	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any measurement. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness (RemoveAll before MkdirAll) and expect permission-mangled residue from mutated code"`
 	OracleMemoryMiB   *int64   `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling per oracle process tree in MiB: absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host"`
 	Staged            bool     `json:"staged,omitempty" jsonschema:"measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target"`
 	Force             bool     `json:"force,omitempty" jsonschema:"re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force"`
@@ -379,21 +480,20 @@ type runIn struct {
 }
 
 type findingOut struct {
-	Symbol         string                     `json:"symbol"`
-	Labels         []string                   `json:"labels,omitempty"`
-	CandidateCount int                        `json:"candidateCount"`
-	Generated      int                        `json:"generated"`
-	Mutants        int                        `json:"mutants"`
-	Killed         int                        `json:"killed"`
-	Discarded      int                        `json:"discarded"`
-	Operators      []gomutant.OperatorSummary `json:"operators"`
-	Attested       int                        `json:"attested,omitempty"`
-	Open           []gomutant.Survivor        `json:"open,omitempty"`
-	OmittedOpen    int                        `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
-	Cached         bool                       `json:"cached,omitempty"`
-	Skipped        string                     `json:"skipped,omitempty"`
-	Layer          string                     `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
-	LayerReason    string                     `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Symbol         string              `json:"symbol"`
+	Labels         []string            `json:"labels,omitempty"`
+	CandidateCount int                 `json:"candidateCount"`
+	Generated      int                 `json:"generated"`
+	Mutants        int                 `json:"mutants"`
+	Killed         int                 `json:"killed"`
+	Discarded      int                 `json:"discarded"`
+	Attested       int                 `json:"attested,omitempty"`
+	Open           []gomutant.Survivor `json:"open,omitempty"`
+	OmittedOpen    int                 `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
+	Cached         bool                `json:"cached,omitempty"`
+	Skipped        string              `json:"skipped,omitempty"`
+	Layer          string              `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
+	LayerReason    string              `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 }
 
 type runOut struct {
@@ -416,8 +516,19 @@ type runOut struct {
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
-	s.runsInFlight.Add(1)
-	defer s.runsInFlight.Add(-1)
+	// The oracle-parallelism width is process state every in-flight
+	// campaign shares (REQ-exec-oracle-parallelism): concurrent runs
+	// against different documents are legal, but a second campaign
+	// installing a NARROWER width would rewrite the first campaign's
+	// later spawn widths downward, splitting those oracles' recorded
+	// environment from the campaign's evidence environment (degrade or
+	// re-measure - fail-safe, and refused here instead). Symmetric with
+	// the ephemeral probe-override refusal: the width owner is the
+	// first in-flight campaign's resolved job count.
+	if err := s.claimRunWidth(in.Jobs); err != nil {
+		return nil, out, err
+	}
+	defer s.releaseRunWidth()
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, out, err
@@ -433,8 +544,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	defer func() {
 		if err != nil {
-			if contextErr := ctx.Err(); contextErr != nil {
-				err = contextErr
+			if contextErr := ctx.Err(); contextErr != nil && !errors.Is(err, contextErr) {
+				// Wrap, never replace: the underlying cause (a partial
+				// commit note, a version-ahead refusal) survives beside
+				// the deadline attribution.
+				err = fmt.Errorf("%w: %v", contextErr, err)
 			}
 		}
 	}()
@@ -449,7 +563,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	} else {
 		out.Preparation = append(out.Preparation, loading)
 	}
-	tree, err := s.loadTreeContext(ctx)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
 	if err != nil {
 		return nil, out, err
 	}
@@ -735,11 +849,25 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	out.Document = s.findingsPath(in.Findings)
 	// A drift-refused campaign persists its completed findings and still
 	// errors: the client never reads a partial campaign as success
-	// (REQ-exec-quiescence).
+	// (REQ-exec-quiescence). The SDK renders only the error text on
+	// failure, so consequences already stripped from the document -
+	// attestation sheds - fold into it via driftError: surfaced once,
+	// never silently dropped (REQ-attest-survivor).
 	if drift != nil {
-		return nil, out, drift
+		return nil, out, driftError(drift, out.AttestationSheds)
 	}
 	return nil, out, nil
+}
+
+// driftError folds attestation sheds into a drift refusal: the SDK
+// renders only the error text on failure, and the document already
+// stripped the sheds, so this text is their one surfacing - never
+// silently dropped (REQ-attest-survivor).
+func driftError(drift error, sheds []string) error {
+	if len(sheds) == 0 {
+		return drift
+	}
+	return fmt.Errorf("%w; attestation sheds riding this refusal (re-review and re-attest if genuinely equivalent): %s", drift, strings.Join(sheds, "; "))
 }
 
 // capResidue bounds a run response's residue rows with the remainder
@@ -765,7 +893,7 @@ type discoverTarget struct {
 	Symbol         string   `json:"symbol" jsonschema:"fully qualified target symbol"`
 	OracleSet      int      `json:"oracleSet" jsonschema:"zero-based id that references one entry in the top-level oracleSets array"`
 	Labels         []string `json:"labels,omitempty" jsonschema:"sorted opaque labels carried unchanged from the target"`
-	OracleExplicit bool     `json:"oracleExplicit" jsonschema:"whether the referenced oracle was explicitly supplied rather than package-derived"`
+	OracleExplicit bool     `json:"oracleExplicit,omitempty" jsonschema:"whether the referenced oracle was explicitly supplied rather than package-derived"`
 	Skipped        string   `json:"skipped,omitempty" jsonschema:"reason this target cannot be measured, when applicable"`
 }
 
@@ -787,7 +915,8 @@ type discoverOut struct {
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
 	var out discoverOut
-	tree, err := s.loadTreeContext(ctx)
+	notify := progressNotifier(ctx, req)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
 	if err != nil {
 		return nil, out, err
 	}
@@ -943,6 +1072,7 @@ type findingsOut struct {
 	Omitted         int                `json:"omitted,omitempty" jsonschema:"rows beyond the cap - the document on disk always carries the full set"`
 	RepoCommittable int                `json:"repoCommittable" jsonschema:"records portable enough for the committed findings document"`
 	LocalOnly       int                `json:"localOnly" jsonschema:"records held in the machine-local overlay a reviewer would not inherit"`
+	Document        string             `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
 }
 
 // findingsRowCap bounds the findings response's row list; the omitted
@@ -950,7 +1080,7 @@ type findingsOut struct {
 const findingsRowCap = 50
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
-	out := findingsOut{}
+	out := findingsOut{Document: s.findingsPath(in.Findings)}
 	switch in.State {
 	case "", string(gomutant.FindingCurrent), string(gomutant.FindingStale), string(gomutant.FindingUnverifiable), string(gomutant.FindingDetached):
 	default:
@@ -970,7 +1100,8 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if len(all) == 0 {
 		return nil, out, nil
 	}
-	tree, err := s.loadTreeContext(ctx)
+	notify := progressNotifier(ctx, req)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
 	if err != nil {
 		return nil, out, err
 	}
@@ -1060,6 +1191,7 @@ type explainOut struct {
 	OmittedOpen         int                   `json:"omittedOpen,omitempty"`
 	Attested            int                   `json:"attested,omitempty"`
 	RepoCommittable     *int                  `json:"repoCommittable,omitempty" jsonschema:"document arm: records portable enough for the committed findings document"`
+	Document            string                `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
 	LocalOnly           *int                  `json:"localOnly,omitempty" jsonschema:"document arm: records held in the machine-local overlay"`
 	Promotion           []promotionGroup      `json:"promotion,omitempty" jsonschema:"document arm: machine-local records grouped by failing portable-line clause"`
 	OmittedGroups       int                   `json:"omittedGroups,omitempty"`
@@ -1090,7 +1222,8 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			if finding.Symbol != in.Symbol {
 				continue
 			}
-			tree, err := s.loadTreeContext(ctx)
+			notify := progressNotifier(ctx, req)
+			tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
 			if err != nil {
 				return nil, explainOut{}, err
 			}
@@ -1103,6 +1236,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 				Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
 				Layer: layer, LayerReasons: gomutant.RollUpMachineLocalInputs(layerReasons),
 				Attested: len(finding.AttestedDispositions()),
+				Document: s.findingsPath(in.Findings),
 			}
 			if len(out.LayerReasons) > reasonCap {
 				out.OmittedLayerReasons = len(out.LayerReasons) - reasonCap
@@ -1142,7 +1276,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			groups[reason] = append(groups[reason], finding.Symbol)
 		}
 	}
-	out := explainOut{RepoCommittable: &repo, LocalOnly: &local}
+	out := explainOut{RepoCommittable: &repo, LocalOnly: &local, Document: s.findingsPath(in.Findings)}
 	reasons := make([]string, 0, len(groups))
 	for reason := range groups {
 		reasons = append(reasons, reason)
@@ -1232,7 +1366,8 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 		return nil, out, nil
 	}
 	out.Layer, out.LayerReason = store.Layer(attested)
-	tree, err := s.loadTreeContext(ctx)
+	notify := progressNotifier(ctx, req)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
 	if err != nil {
 		out.Warning = "record state unavailable: " + err.Error()
 		return nil, out, nil
@@ -1259,18 +1394,20 @@ type prunedOut struct {
 }
 
 type pruneOut struct {
-	Removed []prunedOut `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
-	Kept    int         `json:"kept"`
-	Check   bool        `json:"check,omitempty"`
+	Removed  []prunedOut `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
+	Kept     int         `json:"kept"`
+	Check    bool        `json:"check,omitempty"`
+	Document string      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
 }
 
 func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pruneIn) (*mcp.CallToolResult, pruneOut, error) {
-	out := pruneOut{Removed: []prunedOut{}}
+	out := pruneOut{Removed: []prunedOut{}, Document: s.findingsPath(in.Findings)}
 	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
 	}
-	tree, err := s.loadTreeContext(ctx)
+	notify := progressNotifier(ctx, req)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
 	if err != nil {
 		return nil, out, err
 	}
@@ -1303,15 +1440,17 @@ type retargetOut struct {
 	OmittedRewritten int                         `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
 	OmittedTouched   int                         `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
 	Check            bool                        `json:"check,omitempty"`
+	Document         string                      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
 }
 
 func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
-	out := retargetOut{Rewritten: []gomutant.RetargetedRecord{}}
+	out := retargetOut{Rewritten: []gomutant.RetargetedRecord{}, Document: s.findingsPath(in.Findings)}
 	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
 	}
-	tree, err := s.loadTreeContext(ctx)
+	notify := progressNotifier(ctx, req)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
 	if err != nil {
 		return nil, out, err
 	}
@@ -1356,21 +1495,35 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	// Without a run in flight the probe's ceiling installs for the
 	// probe's duration and the exact prior state - the installed flag
 	// included - restores after.
-	if in.OracleMemoryMiB != nil {
-		if s.runsInFlight.Load() > 0 {
-			return nil, nil, fmt.Errorf("ephemeral: a run in flight owns the process's oracle memory ceiling; omit oracle_memory_mib or retry after the run")
+	// Process-wide overrides (memory ceiling, probe width) install only
+	// under the shared width-claim guard: the old check-then-install
+	// read runsInFlight atomically but installed outside any lock, so a
+	// campaign admitted concurrently could interleave with the probe's
+	// deferred restore and run later spawns under a ceiling diverged
+	// from its recorded pin. The claim admits the probe only while no
+	// campaign is in flight AND blocks campaigns until release, closing
+	// the probe-vs-campaign window (REQ-exec-oracle-parallelism,
+	// REQ-exec-oracle-memory). Probe-vs-probe interleaving remains: two
+	// concurrent probes' restores can interleave, bounded and
+	// self-healing (results are never persisted; the next install
+	// resets) - tracked in the train plan.
+	if err := s.claimProbeOverride(); err != nil {
+		if in.OracleMemoryMiB != nil {
+			return nil, nil, err
 		}
-		prior := gomutant.SnapshotOracleMemory()
-		gomutant.SetOracleMemoryLimit(mcpOracleMemoryBytes(in.OracleMemoryMiB), 1)
-		defer gomutant.RestoreOracleMemory(prior)
-	}
-	// A prior run's inner-parallelism cap must not throttle a lone
-	// probe in this long-lived process: between campaigns the probe is
-	// the only oracle tree, so it runs at jobs=1 width (full), the
-	// prior state restored after. While a run is in flight the probe
-	// shares the host with the campaign's jobs and correctly inherits
-	// the campaign's width (REQ-exec-oracle-parallelism).
-	if s.runsInFlight.Load() == 0 {
+		// No explicit override requested: the probe correctly inherits
+		// the in-flight campaign's width and ceiling.
+	} else {
+		defer s.releaseProbeOverride()
+		if in.OracleMemoryMiB != nil {
+			prior := gomutant.SnapshotOracleMemory()
+			gomutant.SetOracleMemoryLimit(mcpOracleMemoryBytes(in.OracleMemoryMiB), 1)
+			defer gomutant.RestoreOracleMemory(prior)
+		}
+		// A prior run's inner-parallelism cap must not throttle a lone
+		// probe in this long-lived process: between campaigns the probe
+		// is the only oracle tree, so it runs at jobs=1 width (full),
+		// the prior state restored after (REQ-exec-oracle-parallelism).
 		prior := gomutant.SnapshotOracleParallelism()
 		gomutant.SetOracleParallelism(1)
 		defer gomutant.RestoreOracleParallelism(prior)
@@ -1427,7 +1580,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	if notify != nil {
 		notify("prepare loading")
 	}
-	tree, err := s.loadTreeContext(ctx)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1435,14 +1588,20 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 		notify("running " + in.TestPkg)
 	}
 	if len(in.BatchEdits) > 0 {
-		res, err := tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
+		res, err := withHeartbeat(ctx, notify, "ephemeral oracle", func(ctx context.Context) (*gomutant.EphemeralResult, error) {
+			return tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
+		})
 		return nil, res, err
 	}
 	if len(in.Edits) > 0 {
-		res, err := tree.EphemeralEdits(ctx, in.File, in.Edits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
+		res, err := withHeartbeat(ctx, notify, "ephemeral oracle", func(ctx context.Context) (*gomutant.EphemeralResult, error) {
+			return tree.EphemeralEdits(ctx, in.File, in.Edits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
+		})
 		return nil, res, err
 	}
-	res, err := tree.Ephemeral(ctx, in.File, []byte(in.Replacement), in.TestPkg, in.Run, oracleTimeout, in.Runs)
+	res, err := withHeartbeat(ctx, notify, "ephemeral oracle", func(ctx context.Context) (*gomutant.EphemeralResult, error) {
+		return tree.Ephemeral(ctx, in.File, []byte(in.Replacement), in.TestPkg, in.Run, oracleTimeout, in.Runs)
+	})
 	return nil, res, err
 }
 

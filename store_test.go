@@ -602,3 +602,44 @@ func TestRollUpMachineLocalInputs(t *testing.T) {
 		}
 	}
 }
+
+// A version-ahead overlay entry is a newer binary's record, not
+// corruption: a stale long-lived reader refuses the read with the
+// restart signal instead of silently destroying machine-local evidence
+// (REQ-result-export's version-ahead arm on the overlay layer).
+func TestOverlayVersionAheadRefusesInsteadOfDeleting(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := store.entryPath("p.Ahead")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"version": 99, "findings": [{}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.Load(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "newer gomutant likely wrote it") {
+		t.Fatalf("version-ahead overlay read = %v, want the restart-signal refusal", err)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("version-ahead overlay entry destroyed: %v", statErr)
+	}
+	// Genuine garbage is still swept.
+	garbage := store.entryPath("p.Garbage")
+	if err := os.WriteFile(garbage, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load(context.Background()); err != nil {
+		t.Fatalf("garbage entry failed the read: %v", err)
+	}
+	if _, statErr := os.Stat(garbage); !os.IsNotExist(statErr) {
+		t.Fatal("garbage overlay entry survived the sweep")
+	}
+}

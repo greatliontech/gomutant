@@ -41,12 +41,17 @@ func TestServerInstallsVouchesOnLoadedTrees(t *testing.T) {
 // (REQ-exec-oracle-memory).
 func TestEphemeralCeilingRefusesDuringRunAndRestores(t *testing.T) {
 	s := serverAt(t)
-	s.runsInFlight.Add(1)
+	// The campaign's admission path is the width claim - the same guard
+	// the probe override checks, closing the old check-then-install
+	// window (REQ-exec-oracle-parallelism, REQ-exec-oracle-memory).
+	if err := s.claimRunWidth(4); err != nil {
+		t.Fatal(err)
+	}
 	mib := int64(256)
-	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{OracleMemoryMiB: &mib}); err == nil || !strings.Contains(err.Error(), "owns the process's oracle memory ceiling") {
+	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{OracleMemoryMiB: &mib}); err == nil || !strings.Contains(err.Error(), "owns the process's oracle width and memory ceiling") {
 		t.Fatalf("in-flight explicit ceiling accepted: %v", err)
 	}
-	s.runsInFlight.Add(-1)
+	s.releaseRunWidth()
 
 	gomutant.SetOracleMemoryLimit(-1, 1)
 	before := gomutant.SnapshotOracleMemory()

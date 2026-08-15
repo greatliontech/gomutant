@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -485,6 +486,12 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // refuses the destruction instead.
 const DocumentVersion = 8
 
+// ErrVersionAhead marks a findings document (or overlay entry) written
+// by a newer gomutant than this reader: the refusal class a stale
+// long-lived process must surface loudly rather than treat as
+// corruption (REQ-result-export).
+var ErrVersionAhead = errors.New("a newer gomutant likely wrote it - if this reader is a long-lived process (an MCP server), restart it on the upgraded binary")
+
 // OldestReadableDocumentVersion bounds the known older document versions the
 // parser upgrades on read (REQ-result-tolerant).
 const OldestReadableDocumentVersion = 4
@@ -535,7 +542,16 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	if err := json.Unmarshal(top["version"], &version); err != nil {
 		return nil, fmt.Errorf("gomutant: parse findings version: %w", err)
 	}
-	if version < OldestReadableDocumentVersion || version > DocumentVersion {
+	if version > DocumentVersion {
+		// A version AHEAD of this reader is nearly always "a newer
+		// gomutant wrote this" - the recurring field shape is a
+		// long-lived MCP server outliving a binary upgrade at the same
+		// path, its surface dead until someone realizes the process
+		// itself is stale. Name the probable cause and the signal, so
+		// the reader is not sent hunting for document corruption.
+		return nil, fmt.Errorf("gomutant: findings document version %d not understood (this binary reads %d-%d): %w", version, OldestReadableDocumentVersion, DocumentVersion, ErrVersionAhead)
+	}
+	if version < OldestReadableDocumentVersion {
 		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d-%d)", version, OldestReadableDocumentVersion, DocumentVersion)
 	}
 	if isJSONNull(top["findings"]) {

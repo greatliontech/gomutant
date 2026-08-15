@@ -134,7 +134,13 @@ re-judgment or a spurious caller-policy failure — the safe direction —
 where a wrongly served claim would be the corrupted flattering measurement
 the keystone refuses (REQ-core-attributed-kills). Tolerance governs unknown
 *fields* within an understood document; an unknown document *version* is the
-structural boundary and is rejected per REQ-result-export's version tag,
+structural boundary and is rejected per REQ-result-export's version tag —
+a version AHEAD of the reader's range naming the probable cause and the
+signal (a newer gomutant likely wrote the document; a long-lived reader
+such as an MCP server needs a restart on the upgraded binary), since the
+recurring field shape is a server outliving a binary upgrade with its
+surface dead until someone suspects the process rather than the document
+(enforced by `TestParseFindingsVersionAheadNamesProbableCause`) —
 while a known older version reads with its absent fields in their stated
 grandfathered form (a version-4 document's siteless survivors and
 dispositions are the match-by-position form that adopts sites on first

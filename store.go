@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -232,6 +233,16 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 		}
 		findings, err := ParseFindings(data)
 		if err != nil || len(findings) != 1 {
+			// A version AHEAD of this reader is a newer binary's record,
+			// not corruption: deleting it would silently destroy
+			// machine-local evidence (including overlay-resident
+			// attestation reasoning) every time a stale long-lived
+			// server touches a document an upgraded CLI wrote. Refuse
+			// the whole read instead - the same loud restart signal the
+			// repo document's parse gives (REQ-result-export).
+			if errors.Is(err, ErrVersionAhead) {
+				return nil, fmt.Errorf("machine-local overlay %s: %w", name, err)
+			}
 			_ = os.Remove(path)
 			continue
 		}
