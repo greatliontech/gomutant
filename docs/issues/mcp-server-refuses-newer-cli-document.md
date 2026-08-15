@@ -18,9 +18,9 @@ server is long-lived; the CLI upgrades under it).
 
 The refusal message names the versions but not the likely cause; a
 reader pointed at the document suspects corruption (this consumer
-initially recorded it as an empty-write bug — see
-campaign-persists-zero-findings-on-dirty-trees.md for what the
-document actually contained). A version *ahead* of the reader's
+initially recorded it as an empty-write bug - the document in fact
+held a valid, empty findings set, `{"version": 7, "findings": []}`,
+whose emptiness had its own separate cause). A version *ahead* of the reader's
 range is nearly always "a newer gomutant wrote this" — the message
 could say so, and the server could stat its own binary against its
 start time (or compare the on-disk binary's advertised version) and

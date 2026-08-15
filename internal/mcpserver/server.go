@@ -406,6 +406,7 @@ type runOut struct {
 	PropertyOracles  []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
 	AttestationSheds []string                    `json:"attestationSheds,omitempty" jsonschema:"dispositions refused only because the site content under their position changed: the surviving mutant is not the attested one - re-review and re-attest if genuinely equivalent"`
 	Promoted         int                         `json:"promoted,omitempty" jsonschema:"records this run carried from the machine-local overlay into the committed findings document - the document changed, commit it"`
+	MachineLocalOnly int                         `json:"machineLocalOnly,omitempty" jsonschema:"records this run routed to the machine-local overlay - the repo findings document gains nothing from them until their per-record disqualifiers clear; the capped findings list may omit some, this count never does"`
 	Residue          []gomutant.Residue          `json:"residue,omitempty"`
 	OmittedResidue   int                         `json:"omittedResidue,omitempty"`
 	Preparation      []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
@@ -717,6 +718,18 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	for symbol, merged := range postMerge {
 		if layer, _ := runStore.Layer(merged); layer == "repo" && priorLayer[symbol] == "local" {
 			out.Promoted++
+		}
+	}
+	// The aggregate machine-local count survives the findings-list cap:
+	// a large all-local campaign must state its non-persistence even
+	// when the capped rows cannot carry every disqualifier
+	// (REQ-result-local-signpost).
+	for _, f := range rendered {
+		if f.Skipped != "" {
+			continue
+		}
+		if layer, _ := runStore.Layer(f); layer == "local" {
+			out.MachineLocalOnly++
 		}
 	}
 	out.Document = s.findingsPath(in.Findings)

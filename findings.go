@@ -475,9 +475,9 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // draw sequences the pinned regime never executes.
 const DocumentVersion = 7
 
-// oldestReadableVersion bounds the known older document versions the
+// OldestReadableDocumentVersion bounds the known older document versions the
 // parser upgrades on read (REQ-result-tolerant).
-const oldestReadableVersion = 4
+const OldestReadableDocumentVersion = 4
 
 // document is the portable finding set (REQ-result-export).
 type document struct {
@@ -525,8 +525,8 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	if err := json.Unmarshal(top["version"], &version); err != nil {
 		return nil, fmt.Errorf("gomutant: parse findings version: %w", err)
 	}
-	if version < oldestReadableVersion || version > DocumentVersion {
-		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d-%d)", version, oldestReadableVersion, DocumentVersion)
+	if version < OldestReadableDocumentVersion || version > DocumentVersion {
+		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d-%d)", version, OldestReadableDocumentVersion, DocumentVersion)
 	}
 	if isJSONNull(top["findings"]) {
 		return nil, fmt.Errorf("gomutant: findings must be an array")

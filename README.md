@@ -56,7 +56,12 @@ gomutant ephemeral --batch edits.json --test-pkg example.com/pkg \
 ```
 
 Findings live in a versioned JSON document (default
-`.gomutant/findings.json`), pinned to the inputs that produced them — the
+`.gomutant/findings.json`), pinned to the inputs that produced them. A
+sibling `findings.json.campaign` file is the campaign lock: the flock
+is the lock and the file deliberately persists between campaigns —
+never commit it (the default `.gomutant/` directory carries a minted
+`.gitignore` for it; a document elsewhere needs the ignore added by
+hand). The pins cover the
 target and oracle source closures, observed runtime inputs, toolchain and
 build configuration, operator-set version, budget, and effective oracle timeout. A
 run re-measures exactly what a moved pin invalidates and serves the rest from

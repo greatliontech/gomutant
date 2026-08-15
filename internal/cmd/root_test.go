@@ -457,6 +457,12 @@ func TestRunCommandStatesMachineLocalRouting(t *testing.T) {
 	if got := strings.Count(output.String(), "machine-local:"); got != 1 {
 		t.Fatalf("machine-local rows = %d, want exactly the measured record's:\n%s", got, output.String())
 	}
+	// The aggregate form: a run whose records all stayed machine-local
+	// states it once at the end, so an unchanged repo document never
+	// reads as a silent write failure.
+	if !strings.Contains(output.String(), "1 record(s) machine-local only") {
+		t.Fatalf("run output missing the aggregate machine-local line:\n%s", output.String())
+	}
 	data, err := os.ReadFile(findingsPath)
 	if err != nil {
 		t.Fatal(err)

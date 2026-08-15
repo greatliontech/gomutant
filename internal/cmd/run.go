@@ -296,6 +296,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		}
 	}
 	rendered := gomutant.RenderedFindings(findings, postMerge)
+	localOnly := 0
 	for _, f := range rendered {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -317,6 +318,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			// that rendered healthy counts never leaves the repo document
 			// silently missing the record.
 			if layer, reason := docStore.Layer(f); layer == "local" {
+				localOnly++
 				fmt.Fprintf(&terminal, "          machine-local: %s\n", reason)
 			}
 		}
@@ -368,6 +370,14 @@ func runCommand(ctx context.Context, o runOptions) error {
 		}
 		if promoted > 0 {
 			fmt.Fprintf(&terminal, "%d record(s) promoted - findings document changed, commit it\n", promoted)
+		}
+		// The aggregate form of the per-record signpost, printed when
+		// any record stayed machine-local: without it a run leaving
+		// the repo document unchanged reads as a silent write failure
+		// from outside (the field shape: real measured counts, an
+		// empty committed document, no stated cause).
+		if localOnly > 0 {
+			fmt.Fprintf(&terminal, "%d record(s) machine-local only (disqualifiers named above) - the repo findings document gains nothing from them until the disqualifiers clear; a pre-commit loop can measure the staged index clean with --staged\n", localOnly)
 		}
 	}
 	if _, err := io.Copy(out, &terminal); err != nil {

@@ -91,6 +91,61 @@ func TestStagedRunPinsIndexSnapshot(t *testing.T) {
 	}
 }
 
+// The pre-commit consumer loop the staged mode exists for, end to
+// end: a staged run's record routes to the repo findings document
+// (clean provenance on the index snapshot - not the machine-local
+// overlay), the persisted document carries it, and a second identical
+// staged run serves it - persistence plus later-run reuse, the field
+// trigger this mode's issue doc named (REQ-result-staged,
+// REQ-result-layers).
+func TestStagedPreCommitLoopPersistsAndServes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant, twice")
+	}
+	root, runGit := stagedFixture(t)
+	edited := "package staged\n\nfunc F(x int) int {\n\tif x > 99 {\n\t\treturn x - 1\n\t}\n\treturn x\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "p.go"), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "p.go")
+	tree, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := tree.Run(context.Background(), stagedTarget(), Options{Budget: 1, OracleTimeout: 2 * time.Minute, Staged: true})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("staged measure = %+v, %v", first, err)
+	}
+	store, err := OpenStore(filepath.Join(root, ".gomutant", "findings.json"), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layer, reason := store.Layer(first[0]); layer != "repo" {
+		t.Fatalf("staged record routed %s (%s), want the repo document", layer, reason)
+	}
+	if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) { return first, nil }); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".gomutant", "findings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "example.com/staged.F") {
+		t.Fatalf("repo document does not carry the staged record: %s", raw)
+	}
+	prior, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := tree.Run(context.Background(), stagedTarget(), Options{Budget: 1, OracleTimeout: 2 * time.Minute, Staged: true, Prior: prior})
+	if err != nil || len(second) != 1 {
+		t.Fatalf("second staged run = %+v, %v", second, err)
+	}
+	if !second[0].Cached {
+		t.Fatal("unchanged staged tree re-measured: the pre-commit loop has no reuse")
+	}
+}
+
 // Unstaged drift over the measured package's inputs refuses the target
 // with the drift named, and an untracked file in the package refuses
 // the same way - the snapshot cannot vouch for either

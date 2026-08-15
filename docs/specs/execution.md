@@ -517,12 +517,20 @@ stale lock. Short document operations — dispositions, lifecycle verbs,
 inspection — serialize under the document lock alone and remain
 available while a campaign runs. The lock is flock-based and
 unix-scoped; on other hosts campaigns run without this exclusivity —
-the supported platform carries it.
+the supported platform carries it. The lock file persists by design
+(the flock is the lock; removing it would race two waiters onto
+different inodes of one name), so inside the tool-owned document
+directory the tool maintains an ignore entry covering it —
+add-everything staging loops cannot commit a file whose lifecycle its
+name does not reveal — while a document placed in a user-owned
+directory keeps that directory untouched and relies on this
+documented lifecycle.
 
 REQ-exec-exclusivity: enforced by
 `TestCampaignLockExcludesSecondCampaign`,
-`TestRunRefusesWhileCampaignLockHeld`, and
-`TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed`.
+`TestRunRefusesWhileCampaignLockHeld`,
+`TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed`, and
+`TestCampaignLockIgnoreMinted`.
 
 **REQ-exec-oracle-scratch** (behavior): Every oracle process tree MUST
 run with its own scratch temp directory (its `TMPDIR`), removed as soon

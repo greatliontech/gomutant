@@ -26,12 +26,14 @@ func newRootCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "gomutant",
 		Short:         "Mutation testing for Go",
+		Version:       versionString(),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(*cobra.Command, []string) error {
 			return fmt.Errorf("a command is required")
 		},
 	}
-	cmd.AddCommand(newRunCommand(), newDiscoverCommand(), newFindingsCommand(), newAttestCommand(), newPruneCommand(), newRetargetCommand(), newEphemeralCommand(), newMCPCommand())
+	cmd.SetVersionTemplate("{{.Version}}\n")
+	cmd.AddCommand(newRunCommand(), newDiscoverCommand(), newFindingsCommand(), newAttestCommand(), newPruneCommand(), newRetargetCommand(), newEphemeralCommand(), newMCPCommand(), newVersionCommand())
 	return cmd
 }

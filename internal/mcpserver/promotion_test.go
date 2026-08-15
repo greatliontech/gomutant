@@ -57,6 +57,12 @@ func TestToolRunReportsPromotedRecords(t *testing.T) {
 	if dirty.Promoted != 0 {
 		t.Fatalf("dirty measure claimed %d promotions", dirty.Promoted)
 	}
+	// The aggregate machine-local count survives the findings-list cap
+	// (REQ-result-local-signpost): the dirty measure's one record stayed
+	// out of the repo document, and the response says so.
+	if dirty.MachineLocalOnly != 1 {
+		t.Fatalf("dirty measure reported %d machine-local records, want 1", dirty.MachineLocalOnly)
+	}
 
 	runGit("add", "-A")
 	runGit("commit", "-q", "-m", "content lands")

@@ -99,6 +99,29 @@ INV-RESULT-CANDIDATE-CONSERVATION: enforced by
 `TestGrowFindingCountsReplacesSurvivorOutcomes`, and
 `TestParseFindingsCandidateEvidence`.
 
+**REQ-result-local-signpost** (behavior): A run surface that renders
+measured counts MUST name each record the store routes machine-local
+with its disqualifier, and state the aggregate when any record stayed
+machine-local — an unchanged repo document after a measuring run
+states its cause on the run face instead of reading as a silent write
+failure (the field shape: healthy counts, an empty committed
+document, and a consumer diagnosing corruption).
+
+REQ-result-local-signpost: enforced by
+`TestRunCommandStatesMachineLocalRouting` and
+`TestToolRunReportsPromotedRecords` (the structured face's aggregate
+count, which survives the capped findings list).
+
+**REQ-result-version-surface** (behavior): The command surface MUST
+report the binary's identity and the findings document versions it
+writes and reads (`--version` and `version`), because document-version
+skew between a long-lived server and a newer CLI presents as a bare
+refusal, and a field report without the version line cannot attribute
+it — the reporting consumer could not even establish which binary
+generation produced its empty documents.
+
+REQ-result-version-surface: enforced by `TestVersionSurfaces`.
+
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
 tolerance is safe because its direction is anti-flattering: every open
