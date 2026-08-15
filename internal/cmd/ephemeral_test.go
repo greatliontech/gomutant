@@ -1,14 +1,19 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	gomutant "github.com/greatliontech/gomutant"
 )
 
 const fixtureDir = "../engine/testdata/fixturemod"
@@ -112,5 +117,59 @@ func TestEphemeralBatchCommand(t *testing.T) {
 	err = ephemeralCommand(context.Background(), ephemeralOptions{dir: fixtureDir, batch: path, testPkg: "example.com/fixture/lib", runPat: "^TestAdd$"})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The CLI face of REQ-exec-ephemeral's unexercised label: a non-kill
+// verdict names every replacement file the probed baseline never
+// reaches, so "did not notice" never affirms a false survivor reading.
+func TestRenderEphemeralVerdictNamesUnexercisedFiles(t *testing.T) {
+	var out bytes.Buffer
+	renderEphemeralVerdict(&out, &gomutant.EphemeralResult{
+		Files: []string{"outside/outside.go"}, Run: "^TestOK$", Runs: 1,
+		UnexercisedFiles: []string{"outside/outside.go"},
+	})
+	text := out.String()
+	if !strings.Contains(text, "SURVIVED") || !strings.Contains(text, "unexercised  outside/outside.go") {
+		t.Fatalf("survivor render missing the unexercised label:\n%s", text)
+	}
+	out.Reset()
+	renderEphemeralVerdict(&out, &gomutant.EphemeralResult{
+		Files: []string{"a.go"}, Run: "^TestOK$", Runs: 3, KilledRuns: 1, Killer: "TestOK",
+		UnexercisedFiles: []string{"a.go"},
+	})
+	if text := out.String(); !strings.Contains(text, "FLAKY") || !strings.Contains(text, "unexercised  a.go") {
+		t.Fatalf("flaky render missing the unexercised label:\n%s", text)
+	}
+	out.Reset()
+	renderEphemeralVerdict(&out, &gomutant.EphemeralResult{
+		Files: []string{"a.go"}, Run: "^TestOK$", Runs: 1, KilledRuns: 1, Killed: true, Killer: "TestOK",
+	})
+	if text := out.String(); strings.Contains(text, "unexercised") {
+		t.Fatalf("kill verdict rendered a label it should not carry:\n%s", text)
+	}
+}
+
+// syncWriter is the run face's one serialization point for the
+// heartbeat's concurrency-exempt callback beside the callback-locked
+// render lines; concurrent writes must stay whole and race-free.
+func TestSyncWriterSerializesConcurrentWrites(t *testing.T) {
+	var buf bytes.Buffer
+	w := &syncWriter{w: &buf}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				fmt.Fprintf(w, "line\n")
+			}
+		}()
+	}
+	wg.Wait()
+	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+		if line != "line" {
+			t.Fatalf("sheared line %q", line)
+		}
 	}
 }

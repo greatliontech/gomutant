@@ -124,6 +124,112 @@ func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectV
 	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil))
 }
 
+// newSubjectViewsFaultTolerant builds the decision-evidence view set
+// with per-symbol fault routing: a symbol that fails to resolve, or a
+// module group whose engine, view, or capture fails, records the fault
+// for each affected symbol instead of aborting the set - the same
+// target-locality the observed union carries (REQ-exec-quiescence);
+// only the run's own cancellation aborts.
+func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*subjectViewSet, map[string]error, error) {
+	faults := map[string]error{}
+	groups, err := t.resolveModuleGroups(ctx, symbols, packageContext, func(symbol string, err error) error {
+		faults[symbol] = err
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(symbols))}
+	env := engines.evidenceEnv
+	capture := func(ctx context.Context, view *gofresh.View, module *moduleSubjectView, resolved []resolvedSubject) error {
+		for _, r := range resolved {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			fp, err := view.Capture(ctx, r.subject)
+			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				faults[r.symbol] = err
+				continue
+			}
+			sourceFiles, err := view.SourceFilesFor(r.subject)
+			if err != nil {
+				faults[r.symbol] = err
+				continue
+			}
+			set.bySymbol[r.symbol] = &subjectView{
+				symbol: r.symbol, subject: r.subject, moduleDir: r.moduleDir,
+				moduleBase: treeRelModuleBase(t.dir, r.moduleDir),
+				env:        env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
+			}
+		}
+		return nil
+	}
+	for _, group := range groups {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		groupEngine, err := engines.engineFor(group.dir)
+		if err != nil {
+			for _, resolved := range group.resolved {
+				faults[resolved.symbol] = err
+			}
+			continue
+		}
+		view, err := groupEngine.NewViewFor(ctx, group.subjects, group.dir, gofresh.CodeResult)
+		if err == nil {
+			module := &moduleSubjectView{view: view, validate: view.Validate}
+			set.modules = append(set.modules, module)
+			if err := capture(ctx, view, module, group.resolved); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		// Splinter retry: the module group batches every subject into
+		// one view, so one broken package would fault its healthy
+		// siblings wholesale - regroup per package and build each
+		// subset alone, and only subjects whose own closure carries the
+		// breakage fault (REQ-exec-quiescence). The batch view stays
+		// the healthy-path cost; the splinter runs only on failure.
+		byPkg := map[string][]resolvedSubject{}
+		var order []string
+		for _, resolved := range group.resolved {
+			if _, ok := byPkg[resolved.subject.Package]; !ok {
+				order = append(order, resolved.subject.Package)
+			}
+			byPkg[resolved.subject.Package] = append(byPkg[resolved.subject.Package], resolved)
+		}
+		for _, pkg := range order {
+			subset := byPkg[pkg]
+			subjects := make([]gofresh.Subject, 0, len(subset))
+			for _, r := range subset {
+				subjects = append(subjects, r.subject)
+			}
+			subView, subErr := groupEngine.NewViewFor(ctx, subjects, group.dir, gofresh.CodeResult)
+			if subErr != nil {
+				if ctx.Err() != nil {
+					return nil, nil, ctx.Err()
+				}
+				for _, r := range subset {
+					faults[r.symbol] = subErr
+				}
+				continue
+			}
+			subModule := &moduleSubjectView{view: subView, validate: subView.Validate}
+			set.modules = append(set.modules, subModule)
+			if err := capture(ctx, subView, subModule, subset); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return set, faults, nil
+}
+
 // resolvedSubject and moduleGroup carry symbol resolution grouped by
 // module directory — the shared front half of every view-set build.
 type resolvedSubject struct {

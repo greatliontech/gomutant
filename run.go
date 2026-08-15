@@ -714,6 +714,18 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 		}
 		return nil
 	}
+	// The mutant executes through the build overlay, so an oracle whose
+	// observed union read any mutated file's on-disk bytes derived its
+	// verdict from the unmutated tree - the false-survivor channel a
+	// disk-walking oracle opens. The union read is target-scoped truth:
+	// every re-measured survivor buckets overlay-bypassed, the
+	// labeled-never-silent direction (REQ-exec-survivor-evidence).
+	if overlayBypassedRead(f, w) {
+		for si := from; si < len(f.Survivors); si++ {
+			f.Survivors[si].Execution = "overlay-bypassed"
+		}
+		return nil
+	}
 	coverage, probed, err := t.oracleCoverage(ctx, w, opts, runEnv, cache)
 	if err != nil {
 		return err
@@ -736,6 +748,47 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 		}
 	}
 	return nil
+}
+
+// coverageUpgradeAllowed reports whether a coverage-probe re-derivation
+// may overwrite a survivor's recorded execution bucket: only empty and
+// never-executed buckets upgrade. overlay-bypassed and unstable-oracle
+// were judged from evidence a coverage probe cannot see - the observed
+// union's disk reads and the runtime-evidence verdict - so a probe
+// never overrides them, and executed-and-passed is already the
+// probe's own ceiling (REQ-exec-survivor-evidence).
+func coverageUpgradeAllowed(execution string) bool {
+	return execution == "" || execution == "never-executed"
+}
+
+// overlayBypassedRead reports whether the finding's observed union
+// recorded a read of any mutated file's own path: the replacements'
+// catalog paths and the finalized manifest identities are both
+// absolute, so the comparison is exact. Best-effort advisory - an
+// unreadable manifest leaves the coverage buckets to speak.
+func overlayBypassedRead(f *Finding, w work) bool {
+	if f.TargetEvidence.RuntimeInputs == "" || w.targetView == nil {
+		return false
+	}
+	mutated := map[string]bool{}
+	for _, candidate := range w.candidates {
+		for _, replacement := range candidate.Replacements {
+			mutated[replacement.File] = true
+		}
+	}
+	if len(mutated) == 0 {
+		return false
+	}
+	paths, err := runtimeinput.Paths(f.TargetEvidence.RuntimeInputs, w.targetView.moduleDir)
+	if err != nil {
+		return false
+	}
+	for _, path := range paths {
+		if mutated[path] {
+			return true
+		}
+	}
+	return false
 }
 
 // splitSurvivorPosition splits "file.go:line:col" (an occurrence suffix
@@ -955,7 +1008,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			continue
 		}
 		if err := preparation.validateOracle(ctx, oracle); err != nil {
-			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// Target-local: one target's broken oracle set never takes
+			// sibling targets down (REQ-exec-quiescence's locality,
+			// which governs resolution and decision evidence exactly as
+			// it governs freshness-proof construction).
+			f.Skipped = "oracle validation failed: " + err.Error()
+			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			continue
 		}
 		bodyHash, err := t.eng.BodyHashContext(ctx, tg.Symbol)
 		if errors.Is(err, engine.ErrNotFunction) {
@@ -966,7 +1028,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			// The target package failing its typed load (a type error is
+			// parse-clean, so this is the first site that sees it) is
+			// this target's own breakage - a skip with the cause, never
+			// a campaign abort (REQ-exec-quiescence).
+			f.Skipped = "target resolution failed: " + err.Error()
+			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			continue
 		}
 		f.BodyHash = bodyHash
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationFreshness, Symbol: tg.Symbol})
@@ -978,12 +1049,41 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		subjectSymbols = append(subjectSymbols, oracle...)
 	}
 	views := &subjectViewSet{bySymbol: map[string]*subjectView{}}
+	viewFaults := map[string]error{}
 	if len(subjectSymbols) != 0 {
 		var err error
-		views, err = t.newSubjectViewsWithPackageContext(ctx, subjectSymbols, preparation.packageContext, false, engines)
+		views, viewFaults, err = t.newSubjectViewsFaultTolerant(ctx, subjectSymbols, preparation.packageContext, engines)
 		if err != nil {
 			return nil, fmt.Errorf("freshness: %w", err)
 		}
+	}
+	// Decision-evidence faults route target-locally exactly as the
+	// observed union's do (REQ-exec-quiescence): a target whose own
+	// symbol or any of whose oracle symbols has no decision view skips
+	// with the cause, and its siblings proceed.
+	if len(viewFaults) != 0 {
+		kept := resolvedTargets[:0]
+		for _, rt := range resolvedTargets {
+			var cause error
+			for _, symbol := range append([]string{targets[rt.index].Symbol}, rt.oracle...) {
+				if fault, ok := viewFaults[symbol]; ok {
+					cause = fault
+					break
+				}
+				if views.bySymbol[symbol] == nil {
+					cause = fmt.Errorf("no decision view for %s", symbol)
+					break
+				}
+			}
+			if cause == nil {
+				kept = append(kept, rt)
+				continue
+			}
+			f := &findings[rt.index]
+			f.Skipped = "decision evidence unavailable: " + cause.Error()
+			decisions[rt.index] = RunDecision{Symbol: targets[rt.index].Symbol, Action: "skipped", Reason: f.Skipped}
+		}
+		resolvedTargets = kept
 	}
 	// One observed union over every target and oracle replaces the
 	// per-target proof builds the campaign previously paid (the measured
@@ -1950,7 +2050,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if probed {
 						coverPkg := w.targetView.subject.Package
 						for si := range grown.Survivors {
-							if grown.Survivors[si].Execution == "executed-and-passed" {
+							if !coverageUpgradeAllowed(grown.Survivors[si].Execution) {
 								continue
 							}
 							file, line, col, ok := splitSurvivorPosition(grown.Survivors[si].Position)

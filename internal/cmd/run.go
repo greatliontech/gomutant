@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
@@ -15,6 +16,19 @@ import (
 	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/spf13/cobra"
 )
+
+// syncWriter serializes Write calls from the run's concurrent render
+// sources onto one underlying writer.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
+}
 
 type runOptions struct {
 	dir, changed, targetsFile, findingsFile  string
@@ -69,6 +83,12 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if out == nil {
 		out = os.Stdout
 	}
+	// The analysis heartbeat is invoked outside the library's callback
+	// serialization (Options.AnalysisProgress is documented safe for
+	// concurrent invocation), so it can write concurrently with the
+	// callback-rendered decision and progress lines; one serialized
+	// writer keeps every line whole and race-free.
+	out = &syncWriter{w: out}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -198,6 +218,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	postMerge := map[string]gomutant.Finding{}
 	contradicted := map[string]bool{}
+	var analysisMu sync.Mutex
+	var analysisLast time.Time
 	priorLayer := map[string]string{}
 	for _, f := range prior {
 		priorLayer[f.Symbol], _ = docStore.Layer(f)
@@ -226,6 +248,22 @@ func runCommand(ctx context.Context, o runOptions) error {
 		},
 		Progress: func(event gomutant.PreparationEvent) {
 			renderPreparation(out, event)
+		},
+		// The analysis keep-alive, time-gated to a heartbeat: the run's
+		// longest silent stretches are in-process gofresh analysis (the
+		// freshness and producer-validation passes - the field reports'
+		// "post-completion tail" burned hours there with no line
+		// printed), and a ten-second heartbeat names the phase without
+		// flooding a healthy run.
+		AnalysisProgress: func(phase, pkg string) {
+			analysisMu.Lock()
+			defer analysisMu.Unlock()
+			now := time.Now()
+			if now.Sub(analysisLast) < 10*time.Second {
+				return
+			}
+			analysisLast = now
+			fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(phase+" "+pkg))
 		},
 		Guidance: func(g gomutant.OracleGuidance) {
 			fmt.Fprintf(out, "guidance  %s  unstable oracle evidence (%s): %s\n", g.Symbol, g.Reason, g.Suggestion)

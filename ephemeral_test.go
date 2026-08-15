@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 func TestEphemeralPreparationCancellation(t *testing.T) {
@@ -257,5 +259,87 @@ func TestDiscardErrorSplitsNoiseFromCompileFailure(t *testing.T) {
 	bare := discardError(files, "")
 	if !strings.Contains(bare.Error(), "did not compile") {
 		t.Fatalf("bare discard = %v", bare)
+	}
+}
+
+// A survivor verdict over a replacement outside the probed oracle's
+// exercised set is labeled, never silent: the out-of-closure file
+// lands in UnexercisedFiles, while an in-closure covered survivor
+// carries no label (REQ-exec-ephemeral).
+func TestEphemeralLabelsUnexercisedReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per probe")
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+
+	outside, err := os.ReadFile("internal/engine/testdata/fixturemod/diskread/disk.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(outside), "return x - 1", "return x - 2", 1)
+	if mutated == string(outside) {
+		t.Fatal("fixture edit failed")
+	}
+	res, err := tr.Ephemeral(ctx, "diskread/disk.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Killed {
+		t.Fatalf("out-of-closure replacement killed: %+v", res)
+	}
+	if len(res.UnexercisedFiles) != 1 || res.UnexercisedFiles[0] != "diskread/disk.go" {
+		t.Fatalf("unexercised label = %v, want the out-of-closure file named", res.UnexercisedFiles)
+	}
+
+	inside, err := os.ReadFile("internal/engine/testdata/fixturemod/lib/lib.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The large-x arm: TestWeak never exercises it, so the mutant
+	// survives while the FILE is covered - no label.
+	inMutated := strings.Replace(string(inside), "return x - 1", "return x - 2", 1)
+	if inMutated == string(inside) {
+		t.Fatal("fixture edit failed")
+	}
+	res, err = tr.Ephemeral(ctx, "lib/lib.go", []byte(inMutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Killed {
+		t.Fatalf("untested-branch mutant killed: %+v", res)
+	}
+	if len(res.UnexercisedFiles) != 0 {
+		t.Fatalf("covered file labeled unexercised: %v", res.UnexercisedFiles)
+	}
+}
+
+// A failed coverage probe leaves the unexercised label absent and the
+// measurement sound - the label is advisory classification, never a
+// gate on the verdict (REQ-exec-ephemeral).
+func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per probe")
+	}
+	restore := coveredPositions
+	coveredPositions = func(context.Context, string, string, string, string, time.Duration, []string, []string) (engine.Coverage, error) {
+		return engine.Coverage{}, errors.New("probe refused")
+	}
+	defer func() { coveredPositions = restore }()
+	tr := fixtureTree(t)
+	outside, err := os.ReadFile("internal/engine/testdata/fixturemod/diskread/disk.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(outside), "return x - 1", "return x - 2", 1)
+	res, err := tr.Ephemeral(context.Background(), "diskread/disk.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Killed {
+		t.Fatalf("out-of-closure replacement killed: %+v", res)
+	}
+	if res.UnexercisedFiles != nil {
+		t.Fatalf("failed probe still labeled: %v", res.UnexercisedFiles)
 	}
 }

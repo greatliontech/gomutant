@@ -99,3 +99,12 @@ func coverageTail(s string, n int) string {
 	}
 	return s[len(s)-n:]
 }
+
+// CoversFile reports whether any executed block lives in the
+// import-path-qualified file - the file-granular judgment ephemeral
+// classification needs: a replacement file with no executed block was
+// never exercised by the probed oracle (never linked, or linked and
+// never reached).
+func (c Coverage) CoversFile(qualifiedFile string) bool {
+	return len(c.covered[qualifiedFile]) > 0
+}

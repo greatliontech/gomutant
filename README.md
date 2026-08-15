@@ -70,6 +70,12 @@ hold measures only the unmeasured candidate suffix and splices it onto the
 recorded prefix. Open findings are survivors minus attested dispositions;
 whether they fail a build is the caller's policy, not gomutant's verdict.
 
+Long analysis stretches print a throttled `analysis` heartbeat naming the
+phase. For a run that appears hung, set `GOMUTANT_PPROF=127.0.0.1:6060`
+before launching: the process serves `net/http/pprof` on that address, so
+goroutine and CPU profiles are one `curl` away without a restart or an
+instrumented rebuild.
+
 ## Standalone workflow
 
 Inspect before measuring when selecting a changed or filtered surface. The

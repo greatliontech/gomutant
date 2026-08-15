@@ -372,7 +372,13 @@ commit carries when the staging lands as reviewed - as provenance
 metadata beside the commit, never as a measurement pin: the measurement
 pins are content-derived, so a staged record serves unchanged after the
 staging commits. Worktree runs are untouched: any git-visible drift over
-selected paths keeps stamping dirty.
+selected paths keeps stamping dirty. In both modes a selected path flagged
+skip-worktree or assume-unchanged is drift by construction: the flags are an
+operator opt-out of git's own change tracking, so `git status` omits the
+path's divergence and a clean judgment over it is unsupported - the
+provenance probe reads the flags directly and stamps dirty (worktree) or
+refuses the target (staged) rather than vouching for bytes git was told not
+to watch (enforced by `TestPathsDirtyDetectsTrackingOptOutFlags`).
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
 portable version-7 document that gomutant owns — carrying, per mutated
@@ -497,7 +503,7 @@ REQ-result-layers: enforced by `TestCommittableDrawsThePortableLine`,
 `TestOverlayMergedViewIsIsolatedFromCallerMutation`.
 
 A survivor carries optional execution evidence — `never-executed`,
-`executed-and-passed`, or `unstable-oracle` per REQ-exec-survivor-evidence in
+`executed-and-passed`, `overlay-bypassed`, or `unstable-oracle` per REQ-exec-survivor-evidence in
 [execution.md](execution.md) — advisory and empty on records measured before
 bucketing existed; it is location metadata's sibling, never a measurement pin.
 

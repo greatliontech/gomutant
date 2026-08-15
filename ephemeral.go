@@ -4,12 +4,19 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
+
+// coveredPositions is the baseline coverage probe; a variable so the
+// probe-failure arm - the label stays absent and the measurement stays
+// sound - is testable without constructing a genuinely unbuildable
+// probe.
+var coveredPositions = engine.CoveredPositions
 
 // EphemeralResult is one manual mutant's evidence (REQ-exec-ephemeral): what
 // was mutated, the test it ran against, whether that test killed it, and the
@@ -38,6 +45,13 @@ type EphemeralResult struct {
 	Runs        int      `json:"runs"`
 	KilledRuns  int      `json:"killedRuns"`
 	RunVerdicts []string `json:"runVerdicts"`
+	// UnexercisedFiles names replacement files no baseline-covered block
+	// touches (non-kill verdicts - plain survival and the mixed
+	// killed-some-runs outcome alike): the probed oracle never linked
+	// or never reached them, so killed=false over these is not evidence
+	// the oracle noticed nothing. Advisory, absent when the coverage
+	// probe fails (REQ-exec-ephemeral).
+	UnexercisedFiles []string `json:"unexercisedFiles,omitempty"`
 }
 
 // SetOracleMemoryLimit installs the per-oracle-process memory ceiling
@@ -256,6 +270,27 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		res.RunVerdicts = append(res.RunVerdicts, "survived")
 	}
 	res.Killed = res.KilledRuns == runs
+	if !res.Killed {
+		// A survivor verdict over a replacement the probed binary never
+		// exercised is not evidence the oracle noticed nothing - the
+		// out-of-closure false-survivor channel: a compiled file in a
+		// package the test package never imports overlays cleanly and
+		// every test passes. One baseline coverage probe (non-kill
+		// verdicts only - the mixed killed-some-runs outcome leaves the
+		// false-survivor reading open too; kills need no qualifier)
+		// classifies each
+		// replacement file; a probe failure leaves the advisory label
+		// absent rather than failing a sound measurement
+		// (REQ-exec-ephemeral).
+		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", oracleTimeout, binFlags, t.eng.GoEnv()); err == nil {
+			for i, replacement := range replacements {
+				pkgPath := t.eng.FileImportPath(replacement.Abs)
+				if pkgPath == "" || !coverage.CoversFile(pkgPath+"/"+filepath.Base(replacement.Abs)) {
+					res.UnexercisedFiles = append(res.UnexercisedFiles, files[i])
+				}
+			}
+		}
+	}
 	return res, nil
 }
 

@@ -446,3 +446,55 @@ func TestMeasurementResidueNamesFreshUntrackedFiles(t *testing.T) {
 		t.Fatalf("unavailable repository produced residue: %q", residue)
 	}
 }
+
+// Index entries flagged skip-worktree or assume-unchanged opt out of
+// git's own change tracking, so the porcelain judges them false-clean
+// while the measurement read divergent bytes; either flag on a
+// selected path makes the clean judgment unsupported and stamps dirty
+// (REQ-result-staged sharpens the stake: the staged clean stamp
+// asserts equality with a named tree).
+func TestPathsDirtyDetectsTrackingOptOutFlags(t *testing.T) {
+	root, runGit := stagedFixture(t)
+	path := filepath.Join(root, "p.go")
+	state, err := captureRepositoryStateContext(context.Background(), root, false)
+	if err != nil || !state.available {
+		t.Fatalf("repository state = %+v, %v", state, err)
+	}
+	if dirty := state.pathsDirty([]string{path}); dirty {
+		t.Fatal("clean unflagged tree judged dirty")
+	}
+	// The probe is scoped to the selected paths: a tracking-opt-out
+	// flag hiding divergence on an unselected sibling never dirties
+	// this target's judgment.
+	runGit("update-index", "--skip-worktree", "p_test.go")
+	if err := os.WriteFile(filepath.Join(root, "p_test.go"), []byte("package staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirty := state.pathsDirty([]string{path}); dirty {
+		t.Fatal("unselected flagged sibling dirtied a scoped judgment")
+	}
+	runGit("update-index", "--no-skip-worktree", "p_test.go")
+	runGit("checkout", "--", "p_test.go")
+	runGit("update-index", "--skip-worktree", "p.go")
+	if err := os.WriteFile(path, []byte("package staged\n\nfunc F(x int) int { return x + 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirty := state.pathsDirty([]string{path}); !dirty {
+		t.Fatal("skip-worktree divergence judged clean")
+	}
+	runGit("update-index", "--no-skip-worktree", "p.go")
+	runGit("update-index", "--assume-unchanged", "p.go")
+	if dirty := state.pathsDirty([]string{path}); !dirty {
+		t.Fatal("assume-unchanged divergence judged clean")
+	}
+	// Staged mode shares the probe: the flag makes the staged clean
+	// stamp's equality assertion with the recorded index tree
+	// unsupported, so the flagged path judges dirty there too.
+	stagedState, err := captureRepositoryStateContext(context.Background(), root, true)
+	if err != nil || !stagedState.available {
+		t.Fatalf("staged repository state = %+v, %v", stagedState, err)
+	}
+	if dirty := stagedState.pathsDirty([]string{path}); !dirty {
+		t.Fatal("staged mode judged a tracking-opt-out flag clean")
+	}
+}

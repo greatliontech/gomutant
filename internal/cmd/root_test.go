@@ -463,6 +463,13 @@ func TestRunCommandStatesMachineLocalRouting(t *testing.T) {
 	if !strings.Contains(output.String(), "1 record(s) machine-local only") {
 		t.Fatalf("run output missing the aggregate machine-local line:\n%s", output.String())
 	}
+	// The analysis heartbeat: a measuring run's in-process analysis
+	// stretches print a phase line (the first event immediately, then
+	// time-gated), so the historically silent freshness and
+	// producer-validation phases are visible on the run face.
+	if !strings.Contains(output.String(), "analysis  ") {
+		t.Fatalf("run output missing the analysis heartbeat:\n%s", output.String())
+	}
 	data, err := os.ReadFile(findingsPath)
 	if err != nil {
 		t.Fatal(err)

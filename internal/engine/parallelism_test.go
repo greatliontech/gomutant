@@ -303,3 +303,15 @@ func TestBaselineProbeRunsUnderOracleBounds(t *testing.T) {
 		t.Fatalf("uncapped arm = %v (killer %q, incomplete %q), want a noise discard from the failing sentinel", out, killer, incomplete)
 	}
 }
+
+// An observed run covers one test package per process: a
+// multi-package request with observation enabled refuses instead of
+// silently ingesting only the last binary's truncated testlog as a
+// completed observation (REQ-exec-observation).
+func TestObservedRunRefusesMultiplePackages(t *testing.T) {
+	_, _, _, _, _, err := RunMutantObservedEnv(context.Background(), ".", Mutant{},
+		[]string{"example.com/a", "example.com/b"}, ".", time.Minute, nil, "/m", "/m/p", nil, nil, []string{"A=1"})
+	if err == nil || !strings.Contains(err.Error(), "one test package per process") {
+		t.Fatalf("multi-package observed run = %v, want the refusal", err)
+	}
+}

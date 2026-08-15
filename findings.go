@@ -206,7 +206,10 @@ type Survivor struct {
 	// mutated position, so the survivor is a coverage gap;
 	// "executed-and-passed" - the position runs and the oracle still
 	// passes, so the survivor is a weak assertion or an equivalent
-	// mutant; "unstable-oracle" - the finding's runtime evidence is
+	// mutant; "overlay-bypassed" - the observed union recorded a read of
+	// a mutated file's own on-disk path, so a disk-walking oracle's
+	// verdict derived from the unmutated tree and the survivor reading
+	// is not evidence the oracle noticed nothing; "unstable-oracle" - the finding's runtime evidence is
 	// unverifiable, so execution evidence cannot be trusted. Empty on
 	// records measured before bucketing existed; advisory, never a
 	// measurement pin.
@@ -223,6 +226,8 @@ func SurvivorAdvice(execution string) string {
 		return "no oracle test executes the mutated position - extend a test to reach it"
 	case "executed-and-passed":
 		return "the position executes and every oracle assertion still passes - sharpen an assertion or attest an equivalence"
+	case "overlay-bypassed":
+		return "the oracle's observed reads include a mutated file's own on-disk path - its verdict came from the unmutated tree, not the built mutant; restructure the test to judge the linked build (a pure core over in-memory inputs) instead of re-reading the tree"
 	case "unstable-oracle":
 		return "the finding's runtime evidence is unverifiable - stabilize the oracle's runtime inputs before trusting execution evidence"
 	default:

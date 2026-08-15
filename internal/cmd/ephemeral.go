@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -112,26 +114,38 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 			return err
 		}
 	}
+	renderEphemeralVerdict(os.Stdout, res)
+	return nil
+}
+
+// renderEphemeralVerdict prints the probe's verdict face. A non-kill
+// verdict names every unexercised replacement file: "did not notice"
+// over a file no baseline-covered block touches would affirmatively
+// assert the false reading the label exists to prevent
+// (REQ-exec-ephemeral).
+func renderEphemeralVerdict(w io.Writer, res *gomutant.EphemeralResult) {
 	switch {
 	case res.Killed:
 		line := fmt.Sprintf("killed    %s  by %s", strings.Join(res.Files, ", "), res.Killer)
 		if res.Runs > 1 {
 			line += fmt.Sprintf("  (%d consecutive runs)", res.Runs)
 		}
-		fmt.Println(line)
+		fmt.Fprintln(w, line)
 	case res.KilledRuns > 0:
 		// A partial kill is a property generator's draw luck, never a
 		// deterministic kill and never plain survival.
-		fmt.Printf("FLAKY     %s  — killed %d/%d runs by %s\n", strings.Join(res.Files, ", "), res.KilledRuns, res.Runs, res.Killer)
+		fmt.Fprintf(w, "FLAKY     %s  — killed %d/%d runs by %s\n", strings.Join(res.Files, ", "), res.KilledRuns, res.Runs, res.Killer)
 	default:
-		fmt.Printf("SURVIVED  %s  — %s did not notice the mutation\n", strings.Join(res.Files, ", "), res.Run)
+		fmt.Fprintf(w, "SURVIVED  %s  — %s did not notice the mutation\n", strings.Join(res.Files, ", "), res.Run)
+	}
+	for _, f := range res.UnexercisedFiles {
+		fmt.Fprintf(w, "unexercised  %s  — no baseline-covered block reaches this replacement (never linked or never reached); its survival is not evidence the oracle noticed nothing\n", f)
 	}
 	if res.KillerOutput != "" {
 		for _, l := range strings.Split(res.KillerOutput, "\n") {
-			fmt.Println("  " + l)
+			fmt.Fprintln(w, "  "+l)
 		}
 	}
-	return nil
 }
 
 func readInput(path string) ([]byte, error) {

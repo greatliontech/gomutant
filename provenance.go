@@ -112,10 +112,9 @@ func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []
 	if !s.available {
 		return true, nil
 	}
-	paths := append([]string(nil), selectedPaths...)
-	args := []string{"status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--"}
 	seen := map[string]bool{}
-	for _, path := range paths {
+	var pathspec []string
+	for _, path := range selectedPaths {
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
@@ -125,18 +124,41 @@ func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []
 		}
 		if !seen[rel] {
 			seen[rel] = true
-			args = append(args, rel)
+			pathspec = append(pathspec, rel)
 		}
 	}
-	if len(args) == 5 {
+	if len(pathspec) == 0 {
 		return false, nil
 	}
-	status, err := gitOutputContext(ctx, s.root, args...)
+	status, err := gitOutputContext(ctx, s.root, append([]string{"status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--"}, pathspec...)...)
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
 	if err != nil {
 		return true, nil
+	}
+	// The porcelain omits index entries flagged skip-worktree or
+	// assume-unchanged - an operator opt-out of git's own change
+	// tracking - so a divergent worktree file under either flag would
+	// judge false-clean; a selected path carrying a flag makes the
+	// clean judgment unsupported and stamps dirty (REQ-result-staged
+	// sharpens the stake: the staged clean stamp asserts equality with
+	// a named tree). ls-files -v tags: uppercase S is skip-worktree,
+	// any lowercase tag is assume-unchanged.
+	flagged, err := gitOutputContext(ctx, s.root, append([]string{"ls-files", "-v", "--"}, pathspec...)...)
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
+	if err != nil {
+		return true, nil
+	}
+	for _, line := range bytes.Split(flagged, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		if tag := line[0]; tag == 'S' || (tag >= 'a' && tag <= 'z') {
+			return true, nil
+		}
 	}
 	if !s.staged {
 		return len(bytes.TrimSpace(status)) > 0, nil

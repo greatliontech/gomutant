@@ -13,16 +13,20 @@ type buildSet struct {
 	once     sync.Once
 	packages map[string]bool
 	files    map[string]bool
+	filePkg  map[string]string
 }
 
 func (t *Tree) buildIndex() *buildSet {
 	t.build.once.Do(func() {
 		t.build.packages = make(map[string]bool, len(t.pkgs))
 		t.build.files = make(map[string]bool)
+		t.build.filePkg = make(map[string]string)
 		for _, pkg := range t.pkgs {
 			t.build.packages[pkg.PkgPath] = true
 			for _, file := range pkg.GoFiles {
-				t.build.files[filepath.Clean(file)] = true
+				clean := filepath.Clean(file)
+				t.build.files[clean] = true
+				t.build.filePkg[clean] = pkg.PkgPath
 			}
 		}
 	})
@@ -40,4 +44,12 @@ func (t *Tree) HasPackage(path string) bool {
 // exercised.
 func (t *Tree) BuildCompilesFile(abs string) bool {
 	return t.buildIndex().files[filepath.Clean(abs)]
+}
+
+// FileImportPath reports the loaded package import path compiling the
+// absolute file, empty when no loaded package does - the coverage
+// profile's file keys are import-path-qualified, so classifying a
+// replacement against a profile starts here.
+func (t *Tree) FileImportPath(abs string) string {
+	return t.buildIndex().filePkg[filepath.Clean(abs)]
 }

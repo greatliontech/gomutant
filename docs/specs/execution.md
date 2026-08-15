@@ -100,7 +100,12 @@ fresh measurement.
 
 **REQ-exec-observation** (behavior): gomutant MUST capture one independent Go
 testlog observation for every mutant and oracle-baseline process it launches and
-finalize completed logs against that process's package working directory. A
+finalize completed logs against that process's package working directory. An
+observed mutant run covers exactly one test package per process - sequential
+test binaries each truncate the single per-process testlog, so a multi-package
+observed request is refused with the cause rather than ingesting a capture that
+silently covers only the last binary (enforced by
+`TestObservedRunRefusesMultiplePackages`). A
 completed observation binds its values through an observation bracket
 fingerprinted over the oracle package's directory before the process spawns
 (tool-owned bookkeeping directories excluded), plus any caller-declared bracket
@@ -163,10 +168,22 @@ classifies the candidate as discarded rather than measured.
 carry execution evidence bucketing why each lived: `never-executed` when the
 oracle's baseline coverage never reaches the mutated position (a coverage
 gap), `executed-and-passed` when the position runs and the oracle still
-passes (a weak assertion or an equivalent mutant), and `unstable-oracle` when
+passes (a weak assertion or an equivalent mutant), `overlay-bypassed` when
+the finding's observed union recorded a read of a mutated file's own
+on-disk path - the mutant executes through the build overlay, so a
+disk-walking oracle's verdict derived from the unmutated tree and the
+survivor reading is not evidence the oracle noticed nothing - and
+`unstable-oracle` when
 the finding's runtime evidence is unverifiable and no reviewed exemption
 accepts it (REQ-result-exemptions), in which case no coverage
-probe runs. Coverage is measured once per oracle group on the unmutated tree
+probe runs. Oracle growth's coverage-only upgrade pass applies only to empty
+or `never-executed` buckets: `overlay-bypassed` and `unstable-oracle` were
+judged from evidence its coverage probe cannot see, so that pass never
+overrides them. A full re-measure (drift with moved oracles) instead
+re-judges the overlay-bypass from the current union before classifying
+fresh, and an extension's carried prefix is never touched. The overlay-bypass judgment precedes the coverage probe:
+a bypassed target's coverage would bucket confidence the evidence
+cannot support. Coverage is measured once per oracle group on the unmutated tree
 and cached across the run's targets sharing the group and cover package —
 advisory classification, never a measurement pin; an unprobeable oracle
 leaves the bucket empty rather than failing a sound measurement. Served
@@ -183,8 +200,10 @@ non-reusable (unverifiable) spliced record classify unstable-oracle.
 
 REQ-exec-survivor-evidence: enforced by `TestRunBucketsSurvivorExecution`,
 `TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets`,
-`TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence`, and
-`TestRunExtendsCappedFindingMeasuringOnlyTheSuffix`.
+`TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence`,
+`TestRunExtendsCappedFindingMeasuringOnlyTheSuffix`,
+`TestDiskReadingOracleSurvivorsBucketOverlayBypassed`, and
+`TestCoverageUpgradeIsUpgradeOnly`.
 
 **REQ-exec-oracle-guidance** (behavior): When a fresh measurement's merged
 runtime evidence lands unverifiable under a package-derived oracle — a
@@ -228,12 +247,20 @@ then reads as the run's own residue rather than operator error, self-resolving
 once the residue is removed.
 A repository HEAD move remains campaign-wide: it breaks the commit provenance
 pin every finding carries — a global pin, not per-target source drift.
-The same target-locality governs evidence construction: a target whose own
+The same target-locality governs evidence construction — symbol
+resolution, oracle validation, target body-hash reads, and
+decision-evidence construction included: a target whose own
 freshness-proof construction fails — after one bounded retry — skips with
-the cause on its decision line, never overwriting a prior record and never
+the cause on its decision line, one package's typed-load breakage
+skips exactly the targets whose own closure carries it (the batched
+decision views splinter per package on failure, so healthy same-module
+siblings keep their views), never overwriting a prior record and never
 taking sibling targets down; a campaign-wide abort remains reserved for conditions that
 invalidate every measurement (cancellation of the run itself, the HEAD
-move above, a view failure spanning all targets).
+move above).
+
+REQ-exec-quiescence's evidence-construction locality: enforced by
+`TestRunSkipsBrokenTargetLocally`.
 
 **REQ-exec-property-oracles** (behavior): gomutant MUST detect recognized
 property runtimes in an oracle package's imports (test variants included)
@@ -295,7 +322,17 @@ diagnostic in the message — manual probes are interactive evidence gathering,
 so the caller repairs the edit from the compiler's reason, never from a
 guess. The result reports whether the named test killed the
 mutant and the attributed failing test; it is evidence for the caller to act
-on, never persisted to a finding record (REQ-result-record). A kill
+on, never persisted to a finding record (REQ-result-record). A survivor
+verdict additionally names the replacement files no baseline-covered block
+touches - a compiled file in a package the probed test package never imports
+overlays cleanly and every test passes, so killed=false over an unexercised
+replacement is not evidence the oracle noticed nothing (the ephemeral twin of
+the survivor-evidence buckets); the classification comes from one baseline
+coverage probe run only when the verdict is not a kill (plain survival and
+the mixed killed-some-runs outcome alike - both leave the false-survivor
+reading open), is advisory, and is absent when
+the probe fails - a probe failure never fails a sound measurement (enforced by
+`TestEphemeralLabelsUnexercisedReplacement`). A kill
 additionally carries its interactive evidence in the result — a bounded
 excerpt of the killing test's own output anchored at its end, where Go
 emits the failure block, with the dropped earlier remainder counted (a

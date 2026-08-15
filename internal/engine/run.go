@@ -353,6 +353,15 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
 	capture := moduleDir != "" && packageDir != ""
+	if capture && len(testPkgs) > 1 {
+		// One run, one testlog: each sequential test binary truncates
+		// the shared capture file, so a multi-package observed run
+		// would ingest only the last binary's reads as a completed
+		// observation silently covering one package - refused instead.
+		// Campaign groups are single-package; this guards the exported
+		// engine API (REQ-exec-observation).
+		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", fmt.Errorf("observed mutant runs cover one test package per process: %d packages requested with observation enabled; run per package and merge the observations", len(testPkgs))
+	}
 	tmp, err := os.MkdirTemp("", "gomutant-*")
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err

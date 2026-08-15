@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unsafe"
 
 	gofresh "github.com/greatliontech/gofresh"
@@ -1557,6 +1558,90 @@ func TestRunDuplicateTargetRefused(t *testing.T) {
 	}
 }
 
+// A disk-walking oracle's survivors bucket overlay-bypassed: the
+// observed union records the read of the mutated file's own path, so
+// the survivor reading is labeled as evidence the oracle could not
+// have noticed the mutant, never a silent killed-false
+// (REQ-exec-survivor-evidence).
+func TestDiskReadingOracleSurvivorsBucketOverlayBypassed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	targets := []Target{{Symbol: "example.com/fixture/diskread.D", Oracle: []string{"example.com/fixture/diskread.TestDiskVerdict"}, OracleExplicit: true}}
+	findings, err := tr.Run(context.Background(), targets, Options{Budget: 2, OracleTimeout: 2 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings[0].Survivors) == 0 {
+		t.Fatalf("disk-reading oracle killed everything: %+v", findings[0])
+	}
+	for _, s := range findings[0].Survivors {
+		if s.Execution != "overlay-bypassed" {
+			t.Fatalf("survivor %s bucket = %q, want overlay-bypassed", s.Position, s.Execution)
+		}
+	}
+}
+
+// One target's broken package never takes sibling targets down
+// (REQ-exec-quiescence's locality governing resolution and decision
+// evidence exactly as it governs freshness proofs): the typed-load
+// failure skips that target with its cause at the resolution site, a
+// healthy target whose oracle lives in the broken package skips at
+// the decision-evidence site, and the healthy sibling measures.
+func TestRunSkipsBrokenTargetLocally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tmp := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":                "module example.com/locality\n\ngo 1.26.4\n",
+		"ok/ok.go":              "package ok\n\nfunc F(x int) int {\n\tif x > 100 {\n\t\treturn x - 1\n\t}\n\treturn x\n}\n\nfunc G(x int) int { return x }\n\nfunc H(x int) int { return x + 2 }\n",
+		"ok/ok_test.go":         "package ok\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F(5) != 5 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"broken/broken.go":      "package broken\n\nfunc B() int { return undefinedSymbol }\n",
+		"broken/broken_test.go": "package broken\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {}\n",
+	} {
+		path := filepath.Join(tmp, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []Target{
+		{Symbol: "example.com/locality/ok.F", Oracle: []string{"example.com/locality/ok.TestF"}, OracleExplicit: true},
+		{Symbol: "example.com/locality/broken.B", Oracle: []string{"example.com/locality/broken.TestB"}, OracleExplicit: true},
+		{Symbol: "example.com/locality/ok.G", Oracle: []string{"example.com/locality/broken.TestB"}, OracleExplicit: true},
+		{Symbol: "example.com/locality/ok.H", Oracle: []string{"example.com/locality/ok.TestMissing"}, OracleExplicit: true},
+	}
+	findings, err := tree.Run(context.Background(), targets, Options{Budget: 1, OracleTimeout: 2 * time.Minute})
+	if err != nil {
+		t.Fatalf("one broken package aborted the campaign: %v", err)
+	}
+	if findings[0].Skipped != "" || findings[0].Mutants == 0 {
+		t.Fatalf("healthy sibling did not measure: %+v", findings[0])
+	}
+	// Each skip names its own stage's cause: the broken package's typed
+	// load fails at target resolution, the broken oracle subject faults
+	// its decision view, and the nonexistent oracle test fails oracle
+	// validation - three distinct target-local refusals, none of them a
+	// campaign abort.
+	if !strings.Contains(findings[1].Skipped, "target resolution failed:") {
+		t.Fatalf("broken target's skip = %q, want the named resolution cause", findings[1].Skipped)
+	}
+	if !strings.Contains(findings[2].Skipped, "decision evidence unavailable:") {
+		t.Fatalf("broken-oracle target's skip = %q, want the named decision-evidence cause", findings[2].Skipped)
+	}
+	if !strings.Contains(findings[3].Skipped, "oracle validation failed:") {
+		t.Fatalf("invalid-oracle target's skip = %q, want the named validation cause", findings[3].Skipped)
+	}
+}
+
 // TestWidthReadingOracleEvidenceServes pins the serve loop for a
 // target whose oracle set carries a width-reading member (the fixture's
 // GOMAXPROCS-reading test covers Weak): the oracle evidence records the
@@ -1626,8 +1711,10 @@ func TestRunRejectsNegativeBudget(t *testing.T) {
 }
 
 // TestRunRejectsAmbiguousOracle pins the orchestration guard from
-// REQ-target-oracle: same-named in-package and external tests cannot be mapped
-// back from one displayed test event, so the run must stop before mutation.
+// REQ-target-oracle: same-named in-package and external tests cannot be
+// mapped back from one displayed test event, so that oracle is rejected
+// and its target never mutates - a target-local refusal with the named
+// cause, never a campaign abort (REQ-exec-quiescence).
 func TestRunRejectsAmbiguousOracle(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
@@ -1645,12 +1732,19 @@ func TestRunRejectsAmbiguousOracle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tree.Run(context.Background(), []Target{{
+	findings, err := tree.Run(context.Background(), []Target{{
 		Symbol: "example.com/ambiguous.F",
 		Oracle: []string{"example.com/ambiguous.TestSame"},
 	}}, Options{Budget: 1})
-	if err == nil || !strings.Contains(err.Error(), "ambiguous across test package variants") {
-		t.Fatalf("ambiguous oracle run = %v", err)
+	if err != nil {
+		t.Fatalf("ambiguous oracle aborted the campaign: %v", err)
+	}
+	if len(findings) != 1 || !strings.Contains(findings[0].Skipped, "oracle validation failed:") ||
+		!strings.Contains(findings[0].Skipped, "ambiguous across test package variants") {
+		t.Fatalf("ambiguous oracle target = %+v, want the named validation skip", findings)
+	}
+	if findings[0].Mutants != 0 {
+		t.Fatalf("ambiguous oracle still measured: %+v", findings[0])
 	}
 }
 
@@ -4950,5 +5044,25 @@ func TestCandidateSpliceDirtyRecordPromotesOnCleanTree(t *testing.T) {
 	}
 	if !promoted {
 		t.Fatal("the spliced record did not promote to the repo document")
+	}
+}
+
+// A coverage-probe re-derivation (oracle growth, drift, extension) may
+// only upgrade empty or never-executed buckets: overlay-bypassed and
+// unstable-oracle were judged from evidence a coverage probe cannot
+// see, so a probe overriding them would silently downgrade the
+// labeled-never-silent direction (REQ-exec-survivor-evidence).
+func TestCoverageUpgradeIsUpgradeOnly(t *testing.T) {
+	want := map[string]bool{
+		"":                    true,
+		"never-executed":      true,
+		"executed-and-passed": false,
+		"overlay-bypassed":    false,
+		"unstable-oracle":     false,
+	}
+	for bucket, allowed := range want {
+		if got := coverageUpgradeAllowed(bucket); got != allowed {
+			t.Fatalf("coverageUpgradeAllowed(%q) = %v, want %v", bucket, got, allowed)
+		}
 	}
 }

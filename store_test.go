@@ -130,6 +130,7 @@ func TestSurvivorAdviceVocabulary(t *testing.T) {
 	want := map[string]string{
 		"never-executed":      "no oracle test executes the mutated position - extend a test to reach it",
 		"executed-and-passed": "the position executes and every oracle assertion still passes - sharpen an assertion or attest an equivalence",
+		"overlay-bypassed":    "the oracle's observed reads include a mutated file's own on-disk path - its verdict came from the unmutated tree, not the built mutant; restructure the test to judge the linked build (a pure core over in-memory inputs) instead of re-reading the tree",
 		"unstable-oracle":     "the finding's runtime evidence is unverifiable - stabilize the oracle's runtime inputs before trusting execution evidence",
 		"":                    "execution evidence unavailable - the coverage probe was refused or the record predates bucketing; re-measure to bucket this survivor",
 	}
