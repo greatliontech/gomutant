@@ -202,6 +202,8 @@ const PackageKillerPrefix = "(package failure: "
 // The diagnostic return carries the compiler's own text when the mutant
 // failed to build, empty otherwise, so a manual-probe refusal can name
 // the reason instead of leaving the caller to guess (REQ-exec-ephemeral).
+// Ambient-environment convenience: selection-bearing paths use the Env
+// form with the tree's frozen environment.
 func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string) (MutantOutcome, string, string, error) {
 	outcome, killer, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, GoEnv(dir))
 	return outcome, killer, diagnostic, err

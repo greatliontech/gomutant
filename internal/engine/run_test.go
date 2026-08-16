@@ -711,7 +711,7 @@ func TestLoadRefusesUnsupportedProcessExecution(t *testing.T) {
 func TestLoadContextCancelsPackageLoading(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	loaded := false
-	tree, err := loadContextWith(ctx, t.TempDir(), true, func(cfg *packages.Config, _ ...string) ([]*packages.Package, error) {
+	tree, err := loadContextWith(ctx, t.TempDir(), Selection{}, true, func(cfg *packages.Config, _ ...string) ([]*packages.Package, error) {
 		loaded = true
 		if cfg.Context != ctx {
 			t.Fatal("package loader did not receive caller context")

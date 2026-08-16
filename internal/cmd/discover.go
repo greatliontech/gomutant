@@ -16,6 +16,8 @@ import (
 type discoverOptions struct {
 	dir, changed, targetsFile string
 	packages, symbols         []string
+	tags                      []string
+	toolchain                 string
 	json                      bool
 }
 
@@ -36,6 +38,7 @@ func newDiscoverCommand() *cobra.Command {
 	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable targets")
 	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
 	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
+	selectionFlags(f, &o.tags, &o.toolchain)
 	return cmd
 }
 
@@ -72,7 +75,7 @@ func discoverCommand(ctx context.Context, o discoverOptions) error {
 
 func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, error) {
 	view := discoveryView{Targets: []gomutant.TargetDescription{}, Residue: []gomutant.Residue{}}
-	tree, err := gomutant.LoadContext(ctx, o.dir)
+	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return view, err
 	}

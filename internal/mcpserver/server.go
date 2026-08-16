@@ -461,7 +461,23 @@ func (s *Server) loadFindingsContext(ctx context.Context, override string) ([]go
 	return findings, ctx.Err()
 }
 
+// selectionIn is the build-selection surface every tree-consuming tool
+// shares: declared tags and a toolchain directive rewrite the tree's
+// one frozen environment at load, so discovery, resolution, oracle
+// spawns, and the measurement pins all see the same selection by
+// construction (a //go:build-gated oracle measures exactly as an
+// untagged one).
+type selectionIn struct {
+	Tags      []string `json:"tags,omitempty" jsonschema:"build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one"`
+	Toolchain string   `json:"toolchain,omitempty" jsonschema:"GOTOOLCHAIN directive for this call's selection (e.g. go1.26.5); rides the toolchain measurement pin, so a different selection re-measures rather than serving across"`
+}
+
+func (s selectionIn) selection() gomutant.Selection {
+	return gomutant.Selection{Tags: s.Tags, Toolchain: s.Toolchain}
+}
+
 type runIn struct {
+	selectionIn
 	TargetsPath       string   `json:"targets_path,omitempty" jsonschema:"path to a gomutant targets document; overrides discovery"`
 	TargetsJSON       string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
 	Changed           string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
@@ -563,7 +579,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	} else {
 		out.Preparation = append(out.Preparation, loading)
 	}
-	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 	if err != nil {
 		return nil, out, err
 	}
@@ -881,6 +897,7 @@ func capResidue(residue []gomutant.Residue) ([]gomutant.Residue, int) {
 }
 
 type discoverIn struct {
+	selectionIn
 	TargetsPath string   `json:"targets_path,omitempty" jsonschema:"path to a targets document; overrides discovery"`
 	TargetsJSON string   `json:"targets_json,omitempty" jsonschema:"inline targets document; overrides discovery"`
 	Changed     string   `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
@@ -916,7 +933,7 @@ type discoverOut struct {
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
 	var out discoverOut
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 	if err != nil {
 		return nil, out, err
 	}
@@ -1029,6 +1046,7 @@ func compactTargetDescriptions(descriptions []gomutant.TargetDescription) ([]dis
 }
 
 type findingsIn struct {
+	selectionIn
 	Label    string `json:"label,omitempty" jsonschema:"show only findings carrying this label"`
 	State    string `json:"state,omitempty" jsonschema:"show only findings in this state: current, stale, unverifiable, or detached"`
 	Symbol   string `json:"symbol,omitempty" jsonschema:"show only the finding for this mutated symbol"`
@@ -1101,7 +1119,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		return nil, out, nil
 	}
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 	if err != nil {
 		return nil, out, err
 	}
@@ -1161,6 +1179,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 }
 
 type explainIn struct {
+	selectionIn
 	Symbol   string `json:"symbol,omitempty" jsonschema:"the mutated symbol to explain; empty explains the whole document's promotion state"`
 	Label    string `json:"label,omitempty" jsonschema:"with no symbol, restrict the promotion triage to findings carrying this label"`
 	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
@@ -1223,7 +1242,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 				continue
 			}
 			notify := progressNotifier(ctx, req)
-			tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
+			tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 			if err != nil {
 				return nil, explainOut{}, err
 			}
@@ -1316,6 +1335,7 @@ func containsLabel(labels []string, want string) bool {
 }
 
 type attestIn struct {
+	selectionIn
 	Symbol   string `json:"symbol" jsonschema:"the mutated symbol"`
 	Position string `json:"position" jsonschema:"the survivor's position (file.go:line:col), as reported"`
 	Operator string `json:"operator" jsonschema:"the survivor's operator, as reported"`
@@ -1367,7 +1387,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	}
 	out.Layer, out.LayerReason = store.Layer(attested)
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 	if err != nil {
 		out.Warning = "record state unavailable: " + err.Error()
 		return nil, out, nil
@@ -1384,6 +1404,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 }
 
 type pruneIn struct {
+	selectionIn
 	Check    bool   `json:"check,omitempty" jsonschema:"preview the removals without touching the document"`
 	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
 }
@@ -1407,7 +1428,7 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 		return nil, out, err
 	}
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 	if err != nil {
 		return nil, out, err
 	}
@@ -1427,6 +1448,7 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 }
 
 type retargetIn struct {
+	selectionIn
 	From     string `json:"from" jsonschema:"old symbol prefix: a package pair renames a package (a dot-terminated pass covers its own symbols, a slash-terminated pass its subpackages); a symbol pair renames within its package, segment for segment"`
 	To       string `json:"to" jsonschema:"new symbol prefix, terminated like from"`
 	Check    bool   `json:"check,omitempty" jsonschema:"preview the rewrites without touching the document"`
@@ -1450,7 +1472,7 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 		return nil, out, err
 	}
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 	if err != nil {
 		return nil, out, err
 	}
@@ -1475,6 +1497,7 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 }
 
 type ephemeralIn struct {
+	selectionIn
 	File             string               `json:"file,omitempty" jsonschema:"tree-relative source file for replacement or edits; omit for batch_edits"`
 	Replacement      string               `json:"replacement,omitempty" jsonschema:"the whole replacement source; give exactly one mutation form"`
 	Edits            []gomutant.Edit      `json:"edits,omitempty" jsonschema:"exact-match edits applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file"`
@@ -1580,7 +1603,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	if notify != nil {
 		notify("prepare loading")
 	}
-	tree, err := withHeartbeat(ctx, notify, "loading tree", s.loadTreeContext)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 	if err != nil {
 		return nil, nil, err
 	}

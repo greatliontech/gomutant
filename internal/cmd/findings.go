@@ -18,6 +18,8 @@ type findingsOptions struct {
 	state, symbol            string
 	detail, json             bool
 	vouches                  []string
+	tags                     []string
+	toolchain                string
 }
 
 type findingView struct {
@@ -47,6 +49,7 @@ func newFindingsCommand() *cobra.Command {
 	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read")
 	f.StringVar(&o.label, "label", "", "show only findings carrying this label")
+	selectionFlags(f, &o.tags, &o.toolchain)
 	f.StringVar(&o.state, "state", "", "show only findings in this state: current, stale, unverifiable, or detached")
 	f.StringVar(&o.symbol, "symbol", "", "show only the finding for this mutated symbol")
 	f.BoolVar(&o.detail, "detail", false, "full rows - operator tables, survivors, dispositions, candidate evidence; the default is one summary row per record")
@@ -79,7 +82,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		fmt.Fprintln(out, "no findings")
 		return nil
 	}
-	tree, err := gomutant.LoadContext(ctx, o.dir)
+	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
 	}

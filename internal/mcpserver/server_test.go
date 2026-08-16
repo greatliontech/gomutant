@@ -888,11 +888,11 @@ func TestMCPBuilds(t *testing.T) {
 func TestServerReusesLoadedTreeUntilSourceChanges(t *testing.T) {
 	s := serverAt(t)
 	ctx := context.Background()
-	first, err := s.loadTreeContext(ctx)
+	first, err := s.loadTreeContext(ctx, gomutant.Selection{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := s.loadTreeContext(ctx)
+	second, err := s.loadTreeContext(ctx, gomutant.Selection{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -902,7 +902,7 @@ func TestServerReusesLoadedTreeUntilSourceChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(s.dir, "notes.txt"), []byte("not a loader input\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	third, err := s.loadTreeContext(ctx)
+	third, err := s.loadTreeContext(ctx, gomutant.Selection{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -917,14 +917,14 @@ func TestServerReusesLoadedTreeUntilSourceChanges(t *testing.T) {
 	if err := os.WriteFile(source, append(data, []byte("\n// moved\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	fourth, err := s.loadTreeContext(ctx)
+	fourth, err := s.loadTreeContext(ctx, gomutant.Selection{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fourth == first {
 		t.Fatal("stale tree served after a source edit")
 	}
-	fifth, err := s.loadTreeContext(ctx)
+	fifth, err := s.loadTreeContext(ctx, gomutant.Selection{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -43,8 +43,22 @@ var errNoCoherentSignal = errors.New("mcpserver: tree state has no coherent in-t
 // call and a tree is cached only when the post-load fingerprint equals the
 // pre-load one, so a hit proves the loader's inputs are byte-identical now —
 // an edit racing a load, even one later reverted, is never served.
-func (s *Server) loadTreeContext(ctx context.Context) (*gomutant.Tree, error) {
-	key, err := treeStateKeyContext(ctx, s.dir)
+func (s *Server) loadTreeContext(ctx context.Context, sel gomutant.Selection) (*gomutant.Tree, error) {
+	// A malformed declaration refuses before any identity derives from
+	// it: without the boundary check, a comma-carrying tag would alias
+	// a valid split set's cache key and serve where a cold load
+	// refuses.
+	if err := sel.Validate(); err != nil {
+		return nil, err
+	}
+	rawKey, err := treeStateKeyContext(ctx, s.dir)
+	// The declared selection joins the cache key: two selections are two
+	// loader input sets even over byte-identical source, so a cached
+	// tree serves only calls naming the selection that loaded it. Tags
+	// join canonically (order is presentation, never a new selection),
+	// and the post-load equality check below compares raw fingerprints —
+	// the selection is a constant of this call, not a tree state.
+	key := rawKey + "\x00sel:" + strings.Join(sel.CanonicalTags(), ",") + "\x00" + sel.Toolchain
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -54,7 +68,7 @@ func (s *Server) loadTreeContext(ctx context.Context) (*gomutant.Tree, error) {
 		s.mu.Lock()
 		s.tree, s.treeKey = nil, ""
 		s.mu.Unlock()
-		tree, err := gomutant.LoadContext(ctx, s.dir)
+		tree, err := gomutant.LoadContextSelection(ctx, s.dir, sel)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +80,7 @@ func (s *Server) loadTreeContext(ctx context.Context) (*gomutant.Tree, error) {
 	if s.tree != nil && s.treeKey == key {
 		return s.tree, nil
 	}
-	tree, err := gomutant.LoadContext(ctx, s.dir)
+	tree, err := gomutant.LoadContextSelection(ctx, s.dir, sel)
 	if tree != nil {
 		tree.SetDynamicStateVouches(s.vouches...)
 	}
@@ -80,7 +94,7 @@ func (s *Server) loadTreeContext(ctx context.Context) (*gomutant.Tree, error) {
 	// pre-load key alone would let an edit racing the load — later reverted —
 	// serve that edited tree forever against restored bytes.
 	after, afterErr := treeStateKeyContext(ctx, s.dir)
-	if afterErr != nil || after != key {
+	if afterErr != nil || after != rawKey {
 		s.tree, s.treeKey = nil, ""
 		return tree, nil
 	}

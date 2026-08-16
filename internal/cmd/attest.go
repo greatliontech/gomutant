@@ -10,7 +10,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type attestOptions struct{ dir, findingsFile, symbol, position, operator, reason string }
+type attestOptions struct {
+	dir, findingsFile, symbol, position, operator, reason string
+	tags                                                  []string
+	toolchain                                             string
+}
 
 func newAttestCommand() *cobra.Command {
 	o := attestOptions{}
@@ -19,6 +23,7 @@ func newAttestCommand() *cobra.Command {
 	}}
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
+	selectionFlags(f, &o.tags, &o.toolchain)
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to update")
 	f.StringVar(&o.symbol, "symbol", "", "the mutated symbol")
 	f.StringVar(&o.position, "position", "", "the survivor's position (file:line:col)")
@@ -61,7 +66,7 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	default:
 		fmt.Fprintf(out, "attested %s %s; %d open; layer: machine-local (%s)\n", o.position, o.operator, len(attested.Open()), layerReason)
 	}
-	tree, err := gomutant.LoadContext(ctx, o.dir)
+	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		fmt.Fprintf(out, "warning: record state unavailable: %s\n", err)
 		return nil

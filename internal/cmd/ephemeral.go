@@ -18,6 +18,8 @@ type ephemeralOptions struct {
 	timeout, oracleTimeout                         time.Duration
 	oracleMemoryMiB                                int64
 	runs                                           int
+	tags                                           []string
+	toolchain                                      string
 }
 
 func newEphemeralCommand() *cobra.Command {
@@ -28,6 +30,7 @@ func newEphemeralCommand() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
 	f.StringVar(&o.file, "file", "", "tree-relative source file to replace")
+	selectionFlags(f, &o.tags, &o.toolchain)
 	f.StringVar(&o.replacement, "replacement", "", "path to the whole replacement source")
 	f.StringVar(&o.batch, "batch", "", "JSON edit-batch path, or - for stdin")
 	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill")
@@ -88,7 +91,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 		}
 	}
 	gomutant.SetOracleMemoryLimit(oracleMemoryBytes(o.oracleMemoryMiB), 1)
-	tree, err := gomutant.LoadContext(ctx, o.dir)
+	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
 	}

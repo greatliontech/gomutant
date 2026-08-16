@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -48,33 +49,46 @@ func Load(dir string) (*Tree, error) {
 }
 
 func load(dir string, executionSupported bool) (*Tree, error) {
-	return loadContext(context.Background(), dir, executionSupported)
+	return loadContext(context.Background(), dir, Selection{}, executionSupported)
 }
 
 // LoadContext is Load with caller-owned cancellation.
 func LoadContext(ctx context.Context, dir string) (*Tree, error) {
-	return loadContext(ctx, dir, processExecutionSupported)
+	return loadContext(ctx, dir, Selection{}, processExecutionSupported)
 }
 
-func loadContext(ctx context.Context, dir string, executionSupported bool) (*Tree, error) {
-	return loadContextWith(ctx, dir, executionSupported, packages.Load)
+// LoadContextSelection is LoadContext under a declared build selection:
+// the selection rewrites the tree's one frozen environment before
+// anything reads it, so package loading, target discovery, constraint
+// matching, oracle spawns, and the measurement pins all see the same
+// selection by construction — a tag-gated oracle becomes visible end to
+// end exactly as an untagged one.
+func LoadContextSelection(ctx context.Context, dir string, sel Selection) (*Tree, error) {
+	return loadContext(ctx, dir, sel, processExecutionSupported)
 }
 
-func loadContextWith(ctx context.Context, dir string, executionSupported bool, loadPackages func(*packages.Config, ...string) ([]*packages.Package, error)) (*Tree, error) {
+func loadContext(ctx context.Context, dir string, sel Selection, executionSupported bool) (*Tree, error) {
+	return loadContextWith(ctx, dir, sel, executionSupported, packages.Load)
+}
+
+func loadContextWith(ctx context.Context, dir string, sel Selection, executionSupported bool, loadPackages func(*packages.Config, ...string) ([]*packages.Package, error)) (*Tree, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if !executionSupported {
 		return nil, fmt.Errorf("gomutant: mutation execution supports Unix and Windows hosts")
 	}
-	if err := toolchainSupportsBuildEvents(ctx, dir); err != nil {
+	env, err := sel.applyEnv(GoEnv(dir))
+	if err != nil {
+		return nil, err
+	}
+	if err := toolchainSupportsBuildEvents(ctx, dir, env); err != nil {
 		return nil, err
 	}
 	members, err := workspaceMembersContext(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
-	env := GoEnv(dir)
 	var pkgs []*packages.Package
 	for _, m := range members {
 		if err := ctx.Err(); err != nil {
@@ -210,12 +224,20 @@ func workspaceMembersContext(ctx context.Context, dir string) ([]string, error) 
 // go.mod directs a newer toolchain — that shape refuses loudly where the runs
 // would in fact have been sound: the chosen direction is the conservative
 // one, never a silent kill on an event-less stream.
-func toolchainSupportsBuildEvents(ctx context.Context, dir string) error {
+func toolchainSupportsBuildEvents(ctx context.Context, dir string, env []string) error {
 	cmd := commandContext(ctx, "go", "version")
 	cmd.Dir = dir
-	cmd.Env = GoEnv(dir)
+	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
+		// The probe is the first consumer of a declared toolchain
+		// directive, so its refusal must name go's own cause (an
+		// unknown or undownloadable toolchain), never a bare exit
+		// status.
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			return fmt.Errorf("gomutant: probe toolchain version: %w: %s", err, strings.TrimSpace(string(exit.Stderr)))
+		}
 		return fmt.Errorf("gomutant: probe toolchain version: %w", err)
 	}
 	version := strings.TrimSpace(string(out))

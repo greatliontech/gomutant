@@ -147,6 +147,29 @@ or ambiguous oracles are refused exactly as a run refuses them. Human and
 machine-readable CLI views and MCP discovery derive from the same target
 descriptions, so inspection cannot disagree with execution.
 
+**REQ-target-selection** (behavior): A run MAY declare a build selection
+— build tags and a GOTOOLCHAIN directive — and the declared selection
+MUST rewrite the run's one frozen environment before anything reads it,
+so package loading, target discovery, build-constraint matching, oracle
+spawns, and the measurement pins all observe the same selection: a
+`//go:build`-gated symbol or oracle under the declared tags is loaded,
+discoverable, and runnable exactly as an untagged one. One run carries
+one selection — two selections are two runs, the single-selection
+construction gomutant keeps deliberately (the multi-view resolution
+form is stipulator's) — and every tree-consuming surface (measuring,
+inspection, attestation, lifecycle) accepts the same declaration, so a
+tag-gated finding's whole lifecycle happens under the selection that
+measured it. Declared tags replace any ambient GOFLAGS `-tags` rather
+than merging — a silent union would measure a selection nobody named —
+the declared set is order-canonicalized (tag order is presentation,
+never a distinct selection), and a malformed tag or directive refuses
+before any load, identically whether any selection-keyed cache is cold
+or warm. The
+toolchain and build-configuration measurement pins carry the effective
+selection, so runs under different selections re-measure rather than
+serve across each other: the alternation cost is re-execution, stated,
+never a served cross-selection verdict.
+
 **REQ-target-filtering** (behavior): Run and target inspection MUST accept
 repeatable package and symbol filters over every target producer. Filters use
 the complete-input pattern language of `github.com/greatliontech/glob`:

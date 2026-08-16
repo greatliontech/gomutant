@@ -16,14 +16,14 @@ func TestServerInstallsVouchesOnLoadedTrees(t *testing.T) {
 	s := serverAt(t)
 	want := []string{"a.example/dep.Var"}
 	s.vouches = append([]string(nil), want...)
-	tree, err := s.loadTreeContext(context.Background())
+	tree, err := s.loadTreeContext(context.Background(), gomutant.Selection{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := tree.DynamicStateVouches(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("cache-miss tree vouches = %v, want %v", got, want)
 	}
-	cached, err := s.loadTreeContext(context.Background())
+	cached, err := s.loadTreeContext(context.Background(), gomutant.Selection{})
 	if err != nil {
 		t.Fatal(err)
 	}

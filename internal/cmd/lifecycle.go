@@ -13,6 +13,8 @@ import (
 type pruneOptions struct {
 	dir, findingsFile string
 	check             bool
+	tags              []string
+	toolchain         string
 }
 
 func newPruneCommand() *cobra.Command {
@@ -24,6 +26,7 @@ func newPruneCommand() *cobra.Command {
 	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to update")
 	f.BoolVar(&o.check, "check", false, "preview the removals without touching the document")
+	selectionFlags(f, &o.tags, &o.toolchain)
 	return cmd
 }
 
@@ -32,7 +35,7 @@ func pruneCommand(ctx context.Context, o pruneOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	tree, err := gomutant.LoadContext(ctx, o.dir)
+	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
 	}
@@ -64,6 +67,8 @@ func renderPrune(w io.Writer, result gomutant.PruneResult) {
 type retargetOptions struct {
 	dir, findingsFile, from, to string
 	check                       bool
+	tags                        []string
+	toolchain                   string
 }
 
 func newRetargetCommand() *cobra.Command {
@@ -77,6 +82,7 @@ func newRetargetCommand() *cobra.Command {
 	f.StringVar(&o.from, "from", "", "old symbol prefix: a package pair renames a package (a dot-terminated pass covers its own symbols, a slash-terminated pass its subpackages); a symbol pair renames within its package, segment for segment")
 	f.StringVar(&o.to, "to", "", "new symbol prefix, terminated like --from")
 	f.BoolVar(&o.check, "check", false, "preview the rewrites without touching the document")
+	selectionFlags(f, &o.tags, &o.toolchain)
 	return cmd
 }
 
@@ -85,7 +91,7 @@ func retargetCommand(ctx context.Context, o retargetOptions, out io.Writer) erro
 	if err != nil {
 		return err
 	}
-	tree, err := gomutant.LoadContext(ctx, o.dir)
+	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
 	}

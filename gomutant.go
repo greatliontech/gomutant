@@ -277,6 +277,22 @@ func Load(dir string) (*Tree, error) {
 
 // LoadContext is Load with caller-owned cancellation.
 func LoadContext(ctx context.Context, dir string) (*Tree, error) {
+	return LoadContextSelection(ctx, dir, Selection{})
+}
+
+// Selection is a run's declared build selection (build tags and a
+// toolchain directive); the zero value selects nothing.
+type Selection = engine.Selection
+
+// LoadContextSelection is LoadContext under a declared build selection:
+// the selection rewrites the tree's one frozen environment before
+// anything reads it, so package loading, target discovery, constraint
+// matching, oracle spawns, and the measurement pins all see the same
+// selection by construction. A tag-gated oracle measures exactly as an
+// untagged one; the toolchain and build-configuration measurement pins
+// carry the selection, so alternating selections re-measure rather
+// than serve across each other.
+func LoadContextSelection(ctx context.Context, dir string, sel Selection) (*Tree, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -284,7 +300,7 @@ func LoadContext(ctx context.Context, dir string) (*Tree, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
 	}
-	e, err := engine.LoadContext(ctx, abs)
+	e, err := engine.LoadContextSelection(ctx, abs, sel)
 	if err != nil {
 		return nil, err
 	}

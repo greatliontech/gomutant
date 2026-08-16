@@ -33,6 +33,8 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 type runOptions struct {
 	dir, changed, targetsFile, findingsFile  string
 	packages, symbols                        []string
+	tags                                     []string
+	toolchain                                string
 	budget, jobs                             int
 	oracleMemoryMiB                          int64
 	timeout, oracleTimeout                   time.Duration
@@ -63,6 +65,7 @@ func newRunCommand() *cobra.Command {
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read and update")
 	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
 	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
+	selectionFlags(f, &o.tags, &o.toolchain)
 	f.BoolVar(&o.plan, "plan", false, "preflight only: run the full preparation sequence and print every target decision — cached, skipped with reason, or measure with candidate count — then stop before baseline probes and mutant execution, persisting nothing; precondition holes surface before any budget is spent")
 	return cmd
 }
@@ -93,7 +96,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		return err
 	}
 	renderPreparation(out, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
-	tree, err := gomutant.LoadContext(ctx, o.dir)
+	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
 	}
