@@ -347,10 +347,25 @@ func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []
 // comparison are retired - bracket verdicts are the truth
 // (REQ-exec-observation).
 func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
-	return runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, nil)
+	return runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, nil)
+}
+
+// RunMutantBaselineDirEnv is RunMutantEnv with the differential baseline
+// probe running in baselineDir instead of dir: a scratch-tree run
+// carries its mutation on disk, so a same-dir baseline would compare
+// the mutant against itself — a probe-caused package crash would read
+// as environmental noise and a flake as a false kill
+// (REQ-exec-attribution's differential, scratch form).
+func RunMutantBaselineDirEnv(ctx context.Context, dir, baselineDir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env, baselineEnv []string) (MutantOutcome, string, string, error) {
+	outcome, killer, _, _, diagnostic, err := runMutantBase(ctx, dir, baselineDir, baselineEnv, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, nil)
+	return outcome, killer, diagnostic, err
 }
 
 func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+	return runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink)
+}
+
+func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
 	if err := ctx.Err(); err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
@@ -510,7 +525,14 @@ func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string,
 	defer baseCancel()
 	base := commandContext(baseCtx, "go", baseArgs...)
 	base.Dir = dir
-	baseScratchEnv, baseScratchRoot, sweepBaseScratch, removeBaseScratch, err := oracleScratch(env)
+	if baselineDir != "" {
+		base.Dir = baselineDir
+	}
+	effectiveBaselineEnv := env
+	if baselineEnv != nil {
+		effectiveBaselineEnv = baselineEnv
+	}
+	baseScratchEnv, baseScratchRoot, sweepBaseScratch, removeBaseScratch, err := oracleScratch(effectiveBaselineEnv)
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}

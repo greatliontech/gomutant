@@ -307,6 +307,12 @@ type Finding struct {
 	BodyHash       string            `json:"bodyHash"`
 	OperatorSet    string            `json:"operatorSet"`
 	Budget         int               `json:"budget"`
+	// Shape records a shaped target's declared form
+	// (REQ-target-structural, REQ-target-manual-recipes): identity and
+	// audit, with the shape digest riding BodyHash as the pin. A shaped
+	// finding carries no target evidence — its subject is the declared
+	// shape, not a resolvable symbol — and no compartment ledger.
+	Shape          *TargetShape      `json:"shape,omitempty"`
 	TargetEvidence SubjectEvidence   `json:"targetEvidence"`
 	OracleEvidence []SubjectEvidence `json:"oracleEvidence"`
 	OracleExplicit bool              `json:"oracleExplicit"`
@@ -384,6 +390,20 @@ func cloneFinding(f Finding) Finding {
 			Declarations: slices.Clone(f.CompartmentLedger.Declarations),
 			FileHeaders:  slices.Clone(f.CompartmentLedger.FileHeaders),
 		}
+	}
+	if f.Shape != nil {
+		shape := TargetShape{}
+		if f.Shape.Structural != nil {
+			structural := *f.Shape.Structural
+			structural.Packages = slices.Clone(structural.Packages)
+			shape.Structural = &structural
+		}
+		if f.Shape.Manual != nil {
+			manual := *f.Shape.Manual
+			manual.Edits = slices.Clone(manual.Edits)
+			shape.Manual = &manual
+		}
+		f.Shape = &shape
 	}
 	return f
 }
@@ -484,7 +504,13 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // release, so an older consumer's routine prune would classify every
 // init finding detached and destroy the records - the version boundary
 // refuses the destruction instead.
-const DocumentVersion = 8
+// Version 9 introduced shaped targets (structural classes and manual
+// recipes): their identities resolve to no symbol, so an older
+// consumer's routine prune would classify every shaped finding
+// detached and destroy the records - the same destruction class the
+// version-8 boundary refuses - and its serving would compare a zero
+// target-evidence row as if it were measured symbol evidence.
+const DocumentVersion = 9
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale
@@ -623,7 +649,18 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 			return false, fmt.Errorf("field %s is null", name)
 		}
 	}
-	if raw, ok := fields["targetEvidence"]; ok {
+	if finding.Shape != nil {
+		// A shaped finding's subject is its declared shape: target
+		// evidence must be absent (the zero row), never a measured
+		// symbol row a serving path could mistake for evidence
+		// (REQ-target-structural, REQ-target-manual-recipes).
+		if finding.TargetEvidence != (SubjectEvidence{}) {
+			complete = false
+		}
+		if finding.Shape.Structural == nil && finding.Shape.Manual == nil {
+			return false, fmt.Errorf("shape declares no form")
+		}
+	} else if raw, ok := fields["targetEvidence"]; ok {
 		valid, err := validateSubjectEvidence(raw)
 		if err != nil {
 			return false, fmt.Errorf("targetEvidence: %w", err)
@@ -655,11 +692,18 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 		}
 	}
 	if complete {
+		// The finding-wide runtime anchor: the target row for symbol
+		// findings, the first oracle row for shaped findings (whose
+		// target row is the zero value by contract).
+		anchor := finding.TargetEvidence
+		if finding.Shape != nil && len(finding.OracleEvidence) > 0 {
+			anchor = finding.OracleEvidence[0]
+		}
 		for _, evidence := range finding.OracleEvidence {
-			if evidence.RuntimeInputs != finding.TargetEvidence.RuntimeInputs ||
-				evidence.RuntimeDigest != finding.TargetEvidence.RuntimeDigest ||
-				evidence.RuntimeUnverifiable != finding.TargetEvidence.RuntimeUnverifiable ||
-				evidence.RuntimeReason != finding.TargetEvidence.RuntimeReason {
+			if evidence.RuntimeInputs != anchor.RuntimeInputs ||
+				evidence.RuntimeDigest != anchor.RuntimeDigest ||
+				evidence.RuntimeUnverifiable != anchor.RuntimeUnverifiable ||
+				evidence.RuntimeReason != anchor.RuntimeReason {
 				return false, fmt.Errorf("subject runtime evidence is not finding-wide")
 			}
 		}
@@ -1313,7 +1357,12 @@ func MergeWholeFindingsShedAgainst(prior, fresh []Finding, discovered []Target, 
 	merged, shed := MergeFindingsShedAgainst(prior, fresh, snapshot)
 	kept := merged[:0]
 	for _, finding := range merged {
-		if current[finding.Symbol] {
+		// A shaped finding's identity is never discovered: absence from
+		// the whole-tree target set is its normal state, so the shed
+		// spares it exactly as lifecycle pruning does — retirement is
+		// the caller's explicit edit (REQ-target-structural,
+		// REQ-target-manual-recipes).
+		if current[finding.Symbol] || finding.Shape != nil {
 			kept = append(kept, finding)
 		}
 	}

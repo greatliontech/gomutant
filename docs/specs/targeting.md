@@ -147,6 +147,44 @@ or ambiguous oracles are refused exactly as a run refuses them. Human and
 machine-readable CLI views and MCP discovery derive from the same target
 descriptions, so inspection cannot disagree with execution.
 
+**REQ-target-structural** (behavior): A target MAY declare a structural
+mutation class instead of a symbol — import-boundary (one candidate per
+scoped package, each blank-importing the forbidden path) or
+interface-satisfaction (one candidate per method of the interface's
+method set, each breaking the type's declaration of that method by
+rename, with a compile refusal counting as the kill: a static
+satisfaction assertion's natural teeth are the compiler's) — its Symbol
+then being a caller-chosen identity, its candidates synthesizing the
+forbidden structural state in a scratch copy of the tree, and its
+verdicts scoring against an explicitly declared oracle exactly as body
+mutants score: a surviving probe is a vacuous assertion surfaced as an
+ordinary open finding. A structural kill is evidence about the oracle's
+teeth, never about the soundness of whatever analyzer backs it. The
+finding records the declared shape; its pin is the shape digest — the
+declared parameters plus every synthesized replacement, which embeds
+the original content it derives from — beside the ordinary oracle
+evidence and pins, serving wholesale or re-measuring whole (the
+candidate-level carve-outs are body-mutant optimizations, not
+contract); a shaped identity resolves to no declaration, so lifecycle
+pruning keeps shaped findings and their retirement is the caller's
+explicit edit of the target set and document. An analyzer oracle
+commonly reads the analyzed sources at run time: the caller declares
+that surface as bracket paths, and an undeclared read keeps the
+finding honestly unverifiable-evidence-bearing and unservable rather
+than silently reusable.
+
+**REQ-target-manual-recipes** (behavior): A target MAY declare a manual
+recipe — a tree-relative file plus find/replace edits, applied in
+declaration order with each find occurring exactly once in the
+partially-edited content it applies to, the whole sequence one atomic
+candidate in the scratch copy — carrying the caller's intent through the ordinary
+labels: generated-value drift guards, dropped fail-closed mappings,
+removed parser guards, and resolver precedence edges are recipe
+shapes, and identifying the site is the target producer's job
+(targeting is an input, never a discovery) while the harness owns
+break-observe-restore, scoring, serving, and survivor reporting
+exactly as REQ-target-structural's findings do.
+
 **REQ-target-selection** (behavior): A run MAY declare a build selection
 — build tags and a GOTOOLCHAIN directive — and the declared selection
 MUST rewrite the run's one frozen environment before anything reads it,
@@ -177,6 +215,8 @@ package patterns match the target's Go import path and symbol patterns match
 its fully qualified symbol. A target matches when it matches at least one
 pattern of each supplied kind; omitting a kind imposes no constraint. An
 invalid pattern or a supplied filter set selecting no targets is refused
-rather than treated as a successful empty run. Filtering is scoped: it says
+rather than treated as a successful empty run. A package filter never
+selects a shaped target — its identity names no package — so symbol
+patterns are the shaped filter surface. Filtering is scoped: it says
 which existing targets to inspect or measure, never that unselected symbols
 ceased to exist.

@@ -755,6 +755,9 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding, prebui
 	if err := ctx.Err(); err != nil {
 		return FindingInspection{}, err
 	}
+	if f.Shape != nil {
+		return t.inspectShapedFindingContext(ctx, f)
+	}
 	declared, err := t.eng.DeclaredSymbolsContext(ctx)
 	if err != nil {
 		return FindingInspection{}, err
@@ -835,6 +838,69 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding, prebui
 		}
 		view := viewFor[evidence.Symbol]
 		inspection, err := view.inspectContext(ctx, evidence)
+		if err != nil {
+			return FindingInspection{}, err
+		}
+		if inspection.State != FindingCurrent {
+			inspection.Reason = "oracle " + evidence.Symbol + ": " + inspection.Reason
+			return inspection, nil
+		}
+	}
+	return FindingInspection{State: FindingCurrent}, nil
+}
+
+// inspectShapedFindingContext derives a shaped finding's state: the
+// declared shape re-derives against the current tree (a moved digest is
+// stale, a shape that no longer resolves — a departed scoped package,
+// type, or recipe file — is stale with the deriving refusal named,
+// never detached: retirement is the caller's explicit edit), and the
+// oracle evidence rows inspect exactly as a symbol finding's do
+// (REQ-target-structural, REQ-target-manual-recipes,
+// REQ-result-inspection).
+func (t *Tree) inspectShapedFindingContext(ctx context.Context, f Finding) (FindingInspection, error) {
+	if f.OperatorSet != shapedOperatorSet {
+		return FindingInspection{State: FindingStale, Reason: "shaped operator set changed"}, nil
+	}
+	if _, err := time.ParseDuration(f.OracleTimeout); err != nil {
+		return FindingInspection{}, fmt.Errorf("finding %s has invalid oracle timeout: %w", f.Symbol, err)
+	}
+	_, digest, err := t.shapedCandidates(ctx, Target{Symbol: f.Symbol, Structural: f.Shape.Structural, Manual: f.Shape.Manual, Oracle: []string{"-"}, OracleExplicit: true})
+	if err != nil {
+		if ctx.Err() != nil {
+			return FindingInspection{}, ctx.Err()
+		}
+		return FindingInspection{State: FindingStale, Reason: "shape no longer derives: " + err.Error()}, nil
+	}
+	if digest != f.BodyHash {
+		return FindingInspection{State: FindingStale, Reason: "the declared shape or a probed file moved"}, nil
+	}
+	oracle := sortedSubjectEvidence(f.OracleEvidence)
+	var symbols []string
+	validOracle := make(map[string]bool, len(oracle))
+	for _, evidence := range oracle {
+		if err := t.eng.ValidateOracleContext(ctx, []string{evidence.Symbol}); err == nil {
+			validOracle[evidence.Symbol] = true
+			symbols = append(symbols, evidence.Symbol)
+		}
+	}
+	viewFor := make(map[string]*subjectView, len(symbols))
+	if len(symbols) > 0 {
+		supplementary, err := t.newSubjectViews(ctx, symbols)
+		if err != nil {
+			return FindingInspection{}, err
+		}
+		for symbol, view := range supplementary.bySymbol {
+			viewFor[symbol] = view
+		}
+	}
+	for _, evidence := range oracle {
+		if err := ctx.Err(); err != nil {
+			return FindingInspection{}, err
+		}
+		if !validOracle[evidence.Symbol] {
+			return FindingInspection{State: FindingStale, Reason: "oracle " + evidence.Symbol + " no longer resolves"}, nil
+		}
+		inspection, err := viewFor[evidence.Symbol].inspectContext(ctx, evidence)
 		if err != nil {
 			return FindingInspection{}, err
 		}
@@ -1421,8 +1487,63 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 	return memo.verify(ctx)
 }
 
+// shapedEvidenceMatchesContext is the shaped-target serve check: the
+// ordinary pins and every oracle evidence row, with no target pair —
+// the shape digest is compared by the caller as the BodyHash pin
+// (REQ-target-structural, REQ-target-manual-recipes).
+func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*subjectView, operatorSet, timeout string, memoryPin int64, regime string) (bool, error) {
+	if prior.OperatorSet != operatorSet || !prior.OracleExplicit || prior.OracleTimeout != timeout ||
+		prior.OracleMemoryBytes != memoryPin || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) ||
+		len(prior.CandidateEvidence) != 0 {
+		return false, nil
+	}
+	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
+	for _, evidence := range prior.OracleEvidence {
+		if _, duplicate := bySymbol[evidence.Symbol]; duplicate {
+			return false, nil
+		}
+		bySymbol[evidence.Symbol] = evidence
+	}
+	pairs := make([]evidencePair, 0, len(oracle))
+	for _, subject := range oracle {
+		evidence, ok := bySymbol[subject.symbol]
+		if !ok {
+			return false, nil
+		}
+		pairs = append(pairs, evidencePair{subject: subject, evidence: evidence, accept: acceptValidVerdict})
+	}
+	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
+	ok, err := evidencePairsValid(ctx, pairs, memo.once)
+	if err != nil || !ok {
+		return ok, err
+	}
+	return memo.verify(ctx)
+}
+
 func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string) (bool, error) {
 	return evidenceSetMatchesContext(context.Background(), prior, target, oracle, oracleExplicit, operatorSet, timeout, memoryPin, regime)
+}
+
+// attachOracleEvidence attaches the completed-observation union to the
+// oracle views alone: the shaped-finding form, whose target pair does
+// not exist (REQ-target-structural).
+func attachOracleEvidence(oracle []*subjectView, observation runtimeinput.Observation) ([]SubjectEvidence, error) {
+	state, err := runtimeinput.CompletedState(observation)
+	if err != nil {
+		return nil, err
+	}
+	oracleEvidence := make([]SubjectEvidence, 0, len(oracle))
+	for _, subject := range oracle {
+		fp, err := subject.view.AttachObservation(subject.subject, subject.fp, observation)
+		if err != nil {
+			return nil, err
+		}
+		evidence := evidenceFromFingerprint(subject.symbol, fp, state)
+		evidence.ModuleBase = subject.moduleBase
+		oracleEvidence = append(oracleEvidence, evidence)
+	}
+	sort.Slice(oracleEvidence, func(i, j int) bool { return oracleEvidence[i].Symbol < oracleEvidence[j].Symbol })
+	return oracleEvidence, nil
 }
 
 func attachEvidence(target *subjectView, oracle []*subjectView, observation runtimeinput.Observation) (SubjectEvidence, []SubjectEvidence, error) {

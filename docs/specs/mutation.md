@@ -248,3 +248,13 @@ must not write into the tree through the tests it executes either — a
 property-test library that persists a failure reproducer on a mutant-induced
 failure is run with that persistence disabled, both to keep the tree clean
 and so one mutant's reproducer can never replay into the next mutant's run.
+Shaped candidates are the one carve-out from the overlay channel: a
+structural or recipe oracle analyzes or reads source at run time, and the
+overlay reaches only the oracle binary's own compilation, so the
+synthesized state materializes in a disposable scratch copy of the tree
+instead — the working tree stays exactly as untouched, the scratch copies
+are removed after the run, and the same content-addressed build cache is
+shared. The cost is stated, never silent: each shaped candidate execution
+copies the tree twice (the mutated scratch and its clean differential
+twin, which attributes package-scope failures and compile refusals the
+mutated copy cannot judge against itself), kill confirmation included.

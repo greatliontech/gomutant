@@ -585,9 +585,13 @@ type AttestationContradiction struct {
 // work is one target's resolved measurement state across the run's
 // three phases.
 type work struct {
-	target      int
-	oracle      []string
-	reason      string
+	target int
+	oracle []string
+	reason string
+	// shaped marks a shaped target's work: no target view, no
+	// compartment ledger, wholesale serve-or-remeasure, and survivor
+	// buckets stay unclassified (coverage is body semantics).
+	shaped      bool
 	candidates  []engine.Candidate
 	groups      []group
 	oracleSet   map[string]bool
@@ -637,6 +641,19 @@ type work struct {
 	drift          *Finding
 	driftMoved     []string
 	driftRemeasure map[int]bool
+}
+
+// executeWorkMutant dispatches one work item's mutant to its executor:
+// shaped candidates materialize in a scratch tree (a structural oracle
+// analyzes source at runtime, so the forbidden state must exist on
+// disk — the overlay reaches only the oracle binary's own
+// compilation), body mutants run through the build overlay.
+func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, runtimeinput.Observation, string, error) {
+	if w.shaped {
+		outcome, killer, err := t.executeShapedCandidate(ctx, w, m, opts, runEnv)
+		return outcome, killer, runtimeinput.Observation{}, "", err
+	}
+	return t.executeMutant(ctx, w, m, opts, runEnv)
 }
 
 // executeMutant runs one mutant through its oracle groups and merges
@@ -976,6 +993,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	type resolvedTarget struct {
 		index  int
 		oracle []string
+		// shaped carries a shaped target's pre-resolved candidates;
+		// nil for symbol targets (REQ-target-structural,
+		// REQ-target-manual-recipes).
+		shaped       []engine.Candidate
+		shapedDigest string
 	}
 	var resolvedTargets []resolvedTarget
 	var subjectSymbols []string
@@ -996,6 +1018,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		f := &findings[i]
 		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, OracleTimeout: opts.OracleTimeout.String(), OracleMemoryBytes: oracleMemoryPin}
+		if tg.Shaped() {
+			// Validation precedes oracle derivation: a shaped identity
+			// resolves to no package, so deriving an oracle from it
+			// would be a run fault where the contract wants a
+			// target-local refusal (an explicit oracle is required).
+			if err := validateShapedTarget(tg); err != nil {
+				f.Skipped = "shaped target refused: " + err.Error()
+				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+				continue
+			}
+		}
 		oracle, err := preparation.oracle(ctx, tg)
 		if err != nil {
 			return nil, err
@@ -1017,6 +1050,27 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// it governs freshness-proof construction).
 			f.Skipped = "oracle validation failed: " + err.Error()
 			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			continue
+		}
+		if tg.Shaped() {
+			// A shaped target resolves from its declared parameters:
+			// no body, no catalog, its own pin (REQ-target-structural,
+			// REQ-target-manual-recipes). Refusals are target-local
+			// skips exactly as resolution failures are.
+			candidates, digest, err := t.shapedCandidates(ctx, tg)
+			if err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				f.Skipped = "shaped resolution failed: " + err.Error()
+				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+				continue
+			}
+			f.BodyHash = digest
+			f.OperatorSet = shapedOperatorSet
+			f.Shape = &TargetShape{Structural: tg.Structural, Manual: tg.Manual}
+			resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, shaped: candidates, shapedDigest: digest})
+			subjectSymbols = append(subjectSymbols, oracle...)
 			continue
 		}
 		bodyHash, err := t.eng.BodyHashContext(ctx, tg.Symbol)
@@ -1065,7 +1119,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		kept := resolvedTargets[:0]
 		for _, rt := range resolvedTargets {
 			var cause error
-			for _, symbol := range append([]string{targets[rt.index].Symbol}, rt.oracle...) {
+			needed := rt.oracle
+			if rt.shaped == nil {
+				needed = append([]string{targets[rt.index].Symbol}, rt.oracle...)
+			}
+			for _, symbol := range needed {
 				if fault, ok := viewFaults[symbol]; ok {
 					cause = fault
 					break
@@ -1161,6 +1219,181 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		drifted = append(drifted, TargetDrift{Symbol: symbol, Reason: reason})
 		driftedMu.Unlock()
 	}
+	// prepareShaped is the shaped lane of target preparation: wholesale
+	// serve-or-remeasure on the shape digest and oracle evidence, then
+	// the same per-package oracle groups and baselines every measure
+	// target earns (REQ-target-structural, REQ-target-manual-recipes).
+	prepareShaped := func(ctx context.Context, resolved resolvedTarget) (*work, error) {
+		i := resolved.index
+		tg := targets[i]
+		f := &findings[i]
+		oracle := resolved.oracle
+		oracleViews := make([]*subjectView, 0, len(oracle))
+		for _, symbol := range oracle {
+			oracleViews = append(oracleViews, views.bySymbol[symbol])
+		}
+		rec, hasPrior := prior[tg.Symbol]
+		// The property-runtime regime is a measurement pin for shaped
+		// findings exactly as for symbol findings: a rapid oracle
+		// package pins its draws (REQ-exec-property-oracles).
+		targetRapid, err := preparation.rapidPackages(ctx, oraclePackages)
+		if err != nil {
+			return nil, err
+		}
+		regime := ""
+		for _, run := range pkgRuns(oracle) {
+			if targetRapid[run.pkg] {
+				regime = engine.PropertyRegimeRapid
+				break
+			}
+		}
+		f.PropertyRegime = regime
+		reason := "no-prior"
+		var decision RunDecision
+		if hasPrior && opts.Force {
+			reason = "forced"
+		}
+		if hasPrior && !opts.Force {
+			matches, err := shapedEvidenceMatchesContext(ctx, *rec, oracleViews, shapedOperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
+			if err != nil {
+				return nil, err
+			}
+			if matches && rec.BodyHash == resolved.shapedDigest && shapeEqual(rec.Shape, &TargetShape{Structural: tg.Structural, Manual: tg.Manual}) {
+				// Wholesale serve: shaped findings take no splice
+				// carve-outs — any moved pin re-measures every
+				// candidate, and the candidate sets are small by
+				// construction (REQ-result-stale). Provenance
+				// re-stamps and staged drift refuses exactly as a
+				// symbol serve (REQ-result-layers).
+				served := snapshotFindings([]Finding{*rec})[0]
+				served.Labels = append([]string(nil), tg.Labels...)
+				served.Cached = true
+				if stagedDrift, err := t.stampProvenance(ctx, repository, nil, oracleViews, &served); err != nil {
+					return nil, err
+				} else if stagedDrift != "" {
+					refuseTarget(tg.Symbol, stagedDrift+residue())
+					f.Skipped = "staged drift: " + stagedDrift
+					decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+					if opts.Decision != nil {
+						opts.Decision(decisions[i])
+					}
+					return nil, nil
+				}
+				*f = served
+				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: "served: shape and oracle pins unchanged"}
+				if opts.Decision != nil {
+					opts.Decision(decisions[i])
+				}
+				return nil, nil
+			}
+			reason = "stale"
+			if !matches {
+				reason = "stale: an oracle or measurement pin moved"
+			} else if rec.BodyHash != resolved.shapedDigest {
+				reason = "stale: the declared shape or a probed file moved"
+			}
+		}
+		// The measure path attaches evidence, so it needs the OBSERVED
+		// producer views — the decision views above serve only the pin
+		// checks; a shaped identity is not in the union, so the subset
+		// derives from the oracle symbols alone.
+		if err := buildProducerUnion(); err != nil {
+			return nil, err
+		}
+		producerViews, err := producerUnion.forTarget(oracle[0], oracle[1:], producerFaults)
+		if err != nil && ctx.Err() == nil {
+			probeGate.RLock()
+			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, oracle, preparation.packageContext, true, engines)
+			probeGate.RUnlock()
+		}
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			f.Skipped = "producer evidence unavailable: " + err.Error()
+			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			if opts.Decision != nil {
+				opts.Decision(decisions[i])
+			}
+			return nil, nil
+		}
+		oracleViews = oracleViews[:0]
+		for _, symbol := range oracle {
+			oracleViews = append(oracleViews, producerViews.bySymbol[symbol])
+		}
+		for _, module := range producerViews.modules {
+			module.producer = true
+		}
+		item := work{target: i, oracle: oracle, reason: reason, shaped: true, candidates: resolved.shaped, oracleViews: oracleViews, producer: producerViews}
+		w := &item
+		oracleSet := make(map[string]bool, len(oracle))
+		for _, o := range oracle {
+			oracleSet[o] = true
+		}
+		w.oracleSet = oracleSet
+		decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Candidates: len(w.candidates)}
+		f.Budget = 0
+		f.CandidateCount = len(w.candidates)
+		f.Generated = len(w.candidates)
+		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
+		if opts.PlanOnly {
+			if opts.Decision != nil {
+				opts.Decision(decision)
+			}
+			return nil, nil
+		}
+		runs := pkgRuns(w.oracle)
+		runtimes, err := preparation.propertyRuntimes(ctx, oraclePackages)
+		if err != nil {
+			return nil, err
+		}
+		for _, pr := range runs {
+			flags := propertyOracleFlags(slices.Contains(runtimes[pr.pkg], "rapid"))
+			moduleDir, packageDir, err := preparation.packageContext(ctx, pr.pkg)
+			if err != nil {
+				return nil, err
+			}
+			if _, seen := bracketPreflights[moduleDir]; !seen {
+				bracketPreflights[moduleDir] = preflightBracketPaths(ctx, moduleDir, opts.BracketPaths)
+			}
+			if err := bracketPreflights[moduleDir]; err != nil {
+				return nil, err
+			}
+			w.groups = append(w.groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
+		}
+		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
+		for _, group := range w.groups {
+			key := baselineKey{pkg: group.pkgs[0], run: group.runRegex, flags: strings.Join(group.flags, "\x00"), moduleDir: group.moduleDir, packageDir: group.packageDir}
+			state, ok := baselineCache[key]
+			if !ok {
+				reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0]})
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				probeGate.RLock()
+				ran, passed, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+				probeGate.RUnlock()
+				if err != nil {
+					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
+				}
+				if ran == 0 {
+					return nil, fmt.Errorf("target %s oracle baseline matched no tests in %s", tg.Symbol, group.pkgs[0])
+				}
+				if !passed {
+					return nil, fmt.Errorf("target %s oracle baseline does not pass in %s", tg.Symbol, group.pkgs[0])
+				}
+				state = observed
+				baselineCache[key] = state
+			}
+			w.baselines = append(w.baselines, state)
+		}
+		if opts.Decision != nil {
+			opts.Decision(decision)
+		}
+		preparedTargets.Add(1)
+		preparedCandidates.Add(int64(len(w.candidates)))
+		return w, nil
+	}
 	prepareTarget := func(ctx context.Context, resolved resolvedTarget) (*work, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -1173,6 +1406,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		oracleViews := make([]*subjectView, 0, len(oracle))
 		for _, symbol := range oracle {
 			oracleViews = append(oracleViews, views.bySymbol[symbol])
+		}
+		if resolved.shaped != nil {
+			return prepareShaped(ctx, resolved)
 		}
 		rec, hasPrior := prior[tg.Symbol]
 		// The target's property-runtime measurement regime: a rapid
@@ -1796,7 +2032,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if !runnable {
 						continue
 					}
-					outcome, killer, state, incompleteReason, err := t.executeMutant(poolCtx, w, m, opts, runEnv)
+					outcome, killer, state, incompleteReason, err := t.executeWorkMutant(poolCtx, w, m, opts, runEnv)
 					if err != nil {
 						if poolCtx.Err() != nil {
 							return
@@ -1934,7 +2170,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
 					})
 					probeGate.Lock()
-					outcome, killer, state, incomplete, err := t.executeMutant(ctx, window[wi], m, opts, runEnv)
+					outcome, killer, state, incomplete, err := t.executeWorkMutant(ctx, window[wi], m, opts, runEnv)
 					probeGate.Unlock()
 					if err != nil {
 						return confirmInconclusive, err
@@ -2178,7 +2414,19 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				continue
 			}
-			state, candidateEvidence, err := completedObservationUnion(ctx, t.dir, runEnv, w.baselines, w.candidates, outcomes[wi], observations[wi], incompletes[wi], nil)
+			unionCandidates := w.candidates
+			unionOutcomes := outcomes[wi]
+			unionObservations := observations[wi]
+			unionIncompletes := incompletes[wi]
+			if w.shaped {
+				// Shaped candidates run unobserved in the scratch tree:
+				// the union spans the baselines alone (observed on the
+				// real tree), and no candidate evidence exists — a
+				// shaped record with candidate evidence would never
+				// serve (REQ-target-structural).
+				unionCandidates, unionOutcomes, unionObservations, unionIncompletes = nil, nil, nil, nil
+			}
+			state, candidateEvidence, err := completedObservationUnion(ctx, t.dir, runEnv, w.baselines, unionCandidates, unionOutcomes, unionObservations, unionIncompletes, nil)
 			if err != nil {
 				return err
 			}
@@ -2189,13 +2437,25 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				return err
 			}
 			f.CandidateEvidence = candidateEvidence
-			targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, state)
-			if err != nil {
-				return err
+			if w.shaped {
+				// A shaped finding carries oracle evidence only: its
+				// subject is the declared shape, pinned by the shape
+				// digest in BodyHash, never a resolvable symbol
+				// (REQ-target-structural, REQ-target-manual-recipes).
+				oracleEvidence, err := attachOracleEvidence(w.oracleViews, state)
+				if err != nil {
+					return err
+				}
+				f.OracleEvidence = oracleEvidence
+			} else {
+				targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, state)
+				if err != nil {
+					return err
+				}
+				f.TargetEvidence = targetEvidence
+				f.OracleEvidence = oracleEvidence
+				f.CompartmentLedger = compartmentLedgerFromView(w.currentLedger)
 			}
-			f.TargetEvidence = targetEvidence
-			f.OracleEvidence = oracleEvidence
-			f.CompartmentLedger = compartmentLedgerFromView(w.currentLedger)
 			if err := w.producer.validateProducers(ctx); err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -2234,7 +2494,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					f.Kills = append(f.Kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[wi][mi]})
 				}
 			}
-			if err := t.bucketSurvivorExecution(ctx, f, w, opts, runEnv, coverageCache, 0); err != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if w.shaped {
+				// Survivor execution buckets are body semantics
+				// (coverage of the mutated symbol); a shaped survivor
+				// is a vacuous-oracle finding with nothing to bucket.
+			} else if err := t.bucketSurvivorExecution(ctx, f, w, opts, runEnv, coverageCache, 0); err != nil {
 				return err
 			}
 			// A re-measure with unchanged pins keeps prior attestations that
@@ -2706,7 +2973,13 @@ func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol
 // over: the subject views' source files, their historical package files,
 // module selection, and workspace inputs.
 func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView) ([]string, error) {
-	sourceFiles := append([]string(nil), targetView.sourceFiles...)
+	// A shaped target has no target view: provenance spans the oracle
+	// views alone, plus the shape's own probed files via the shape
+	// digest pin (REQ-target-structural).
+	var sourceFiles []string
+	if targetView != nil {
+		sourceFiles = append(sourceFiles, targetView.sourceFiles...)
+	}
 	for _, oracleView := range oracleViews {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -2752,8 +3025,17 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 	if err != nil {
 		return "", err
 	}
-	moduleDirs := map[string]string{targetView.symbol: targetView.moduleDir}
-	viewEnvs := map[string][]string{targetView.symbol: targetView.env}
+	// A shaped finding's probed files are provenance inputs the views
+	// cannot name: the recipe file and the declaring files ride the
+	// stamp (the synthesized probe file exists on no tree and is
+	// skipped), so a dirty probed file never stamps clean provenance.
+	sourceFiles = append(sourceFiles, shapedProbedFiles(t.dir, f.Shape)...)
+	moduleDirs := map[string]string{}
+	viewEnvs := map[string][]string{}
+	if targetView != nil {
+		moduleDirs[targetView.symbol] = targetView.moduleDir
+		viewEnvs[targetView.symbol] = targetView.env
+	}
 	for _, oracleView := range oracleViews {
 		moduleDirs[oracleView.symbol] = oracleView.moduleDir
 		viewEnvs[oracleView.symbol] = oracleView.env

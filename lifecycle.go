@@ -52,6 +52,16 @@ func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check boo
 	decide := func(all []Finding) []Finding {
 		kept := all[:0:0]
 		for _, f := range all {
+			if f.Shape != nil {
+				// A shaped finding's identity is declared, never a
+				// resolvable symbol: absence from the declaration set
+				// is its normal state, so prune keeps it — retirement
+				// is the caller's explicit edit of the target set and
+				// document (REQ-target-structural,
+				// REQ-target-manual-recipes).
+				kept = append(kept, f)
+				continue
+			}
 			if resolves(f.Symbol) {
 				kept = append(kept, f)
 				continue

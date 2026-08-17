@@ -40,6 +40,53 @@ type Target struct {
 	// nothing: the target reports as measurable by nothing rather than
 	// inheriting package tests it never claimed (REQ-target-default).
 	OracleExplicit bool `json:"oracleExplicit,omitempty"`
+	// Structural declares a shaped target whose candidates synthesize a
+	// forbidden structural state instead of mutating a body; Symbol is
+	// then the target's caller-chosen identity, never a resolvable
+	// reference. A structural kill is evidence about the oracle's
+	// teeth, never about the soundness of the analyzer behind it
+	// (REQ-target-structural).
+	Structural *StructuralSpec `json:"structural,omitempty"`
+	// Manual declares a recipe-shaped target: caller-authored file
+	// edits carrying the target's opaque intent through Labels;
+	// targeting stays an input, so identifying the site is the
+	// producer's job and the harness owns break-observe-restore
+	// (REQ-target-manual-recipes).
+	Manual *ManualSpec `json:"manual,omitempty"`
+}
+
+// StructuralSpec parameterizes one structural mutation class
+// (REQ-target-structural).
+type StructuralSpec struct {
+	// Class selects the mutation class: "import-boundary" or
+	// "interface-satisfaction".
+	Class string `json:"class"`
+	// Packages scopes an import-boundary probe: one candidate per
+	// scoped package, each injecting a blank import of Forbidden.
+	Packages []string `json:"packages,omitempty"`
+	// Forbidden is the import path an import-boundary oracle must
+	// refuse.
+	Forbidden string `json:"forbidden,omitempty"`
+	// Type and Interface parameterize an interface-satisfaction probe:
+	// each candidate breaks one method of Type's satisfaction of
+	// Interface, and the oracle must fail.
+	Type      string `json:"type,omitempty"`
+	Interface string `json:"interface,omitempty"`
+}
+
+// ManualEdit is one find/replace edit of a manual recipe; Find must
+// occur exactly once in the file, so the edit is position-stable
+// without carrying offsets that drift.
+type ManualEdit struct {
+	Find    string `json:"find"`
+	Replace string `json:"replace"`
+}
+
+// ManualSpec parameterizes one recipe-shaped target: every edit applies
+// to File atomically in one candidate (REQ-target-manual-recipes).
+type ManualSpec struct {
+	File  string       `json:"file"`
+	Edits []ManualEdit `json:"edits"`
 }
 
 // FilterTargets selects targets by package import path and fully qualified
@@ -100,6 +147,12 @@ func (t *Tree) FilterTargetsContext(ctx context.Context, targets []Target, packa
 			continue
 		}
 		if len(packages) != 0 {
+			if target.Shaped() {
+				// A shaped identity resolves to no package: a package
+				// filter simply never selects it — symbol patterns are
+				// the shaped filter surface (REQ-target-filtering).
+				continue
+			}
 			pkgPath, err := t.eng.PackagePathContext(ctx, target.Symbol)
 			if err != nil {
 				return nil, err
@@ -122,7 +175,12 @@ type TargetDescription struct {
 	Oracle         []string `json:"oracle"`
 	Labels         []string `json:"labels,omitempty"`
 	OracleExplicit bool     `json:"oracleExplicit"`
-	Skipped        string   `json:"skipped,omitempty"`
+	// Shaped names the declared shape class of a shaped target
+	// ("structural: import-boundary", "structural:
+	// interface-satisfaction", "manual: recipe"); empty for symbol
+	// targets (REQ-target-inspection).
+	Shaped  string `json:"shaped,omitempty"`
+	Skipped string `json:"skipped,omitempty"`
 }
 
 // DescribeTargets resolves and validates the effective oracle of every target
@@ -161,6 +219,21 @@ func (t *Tree) DescribeTargetsContext(ctx context.Context, targets []Target) ([]
 			OracleExplicit: target.OracleExplicit || len(target.Oracle) != 0,
 		}
 		switch {
+		case target.Shaped():
+			// Inspection cannot disagree with execution: a shaped
+			// identity resolves to no body, so description reports the
+			// declared class and the same validation refusals the run
+			// would issue (REQ-target-structural,
+			// REQ-target-manual-recipes).
+			switch {
+			case target.Structural != nil:
+				description.Shaped = "structural: " + target.Structural.Class
+			default:
+				description.Shaped = "manual: recipe"
+			}
+			if err := validateShapedTarget(target); err != nil {
+				description.Skipped = "shaped target refused: " + err.Error()
+			}
 		case len(oracle) == 0:
 			description.Skipped = "no oracle"
 		default:
@@ -495,7 +568,7 @@ func ParseTargets(data []byte) ([]Target, error) {
 		return nil, fmt.Errorf("gomutant: parse targets document: %w", err)
 	}
 	doc := targetsDocument{Targets: make([]Target, len(raw.Targets))}
-	known := map[string]bool{"symbol": true, "oracle": true, "labels": true, "oracleExplicit": true}
+	known := map[string]bool{"symbol": true, "oracle": true, "labels": true, "oracleExplicit": true, "structural": true, "manual": true}
 	for i, entry := range raw.Targets {
 		entryFields, err := decodeKnownObject(entry, known)
 		if err != nil {
