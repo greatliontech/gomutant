@@ -6,3 +6,4 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [killer-scoped-single-subject-confirmation](killer-scoped-single-subject-confirmation.md) | author's triage |
