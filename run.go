@@ -2163,8 +2163,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					wi := k.target
 					m, _ := window[wi].candidates[k.mi].Mutant()
 					reportExecuting(opts.Executing, ExecutionEvent{
-						Phase:       "confirming",
-						TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
+						Phase: "confirming",
+						// The confirmed kill's own target, not the
+						// window head: a window spans many targets
+						// and the walk crosses them, so a head-pinned
+						// index reads as a stuck campaign while the
+						// symbol changes underneath it.
+						TargetIndex: dispatchedTargets + wi + 1, TargetCount: int(preparedTargets.Load()),
 						Symbol:         targets[window[wi].target].Symbol,
 						CandidatesDone: mutantsDone, CandidatesTotal: int(preparedCandidates.Load()),
 						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
