@@ -656,6 +656,96 @@ func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, o
 	return t.executeMutant(ctx, w, m, opts, runEnv)
 }
 
+// confirmMutant is the serial kill confirmation's execution
+// (REQ-exec-attribution): a test-attributed kill runs KILLER-SCOPED
+// first — the killing test alone, same oracle bounds — and an
+// attributed test kill from that run is the scored measurement,
+// admitted only over a passing KILLER-SCOPED BASELINE of the
+// unmutated tree: differential attribution needs the vouching pass
+// to share the mutant run's shape (REQ-exec-attribution-symmetry's
+// "differ in the overlay alone", here on the run-regex axis — a
+// killer that fails standalone regardless of the mutant, a
+// prefix-dependent setup ordering, must never convert a
+// sibling-induced false kill into a confirmed one). The scoped
+// baseline memoizes per (group, killer) across the campaign — one
+// extra one-test probe per distinct killer, not per confirmation.
+// Anything weaker than an attributed scoped kill over a passing
+// scoped baseline — the killer passing, a timeout either side, a
+// discard, an unscopable killer — falls back to the full serial
+// oracle, whose verdict scores: a survivor verdict always rests on
+// the whole oracle.
+func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, killer string, scopedBaselines map[scopedBaselineKey]bool, opts Options, runEnv []string) (engine.MutantOutcome, string, runtimeinput.Observation, string, error) {
+	scopedGroup := func() *group {
+		if w.shaped || killer == TimeoutKiller || strings.HasPrefix(killer, PackageKillerPrefix) {
+			return nil
+		}
+		pkg, fn := splitTestSymbol(killer)
+		if pkg == "" || fn == "" {
+			return nil
+		}
+		// Defensive: the engine's attribution already truncates a
+		// subtest to its top-level function; a slash here would still
+		// scope soundly to the parent (which runs its children).
+		if i := strings.IndexByte(fn, '/'); i > 0 {
+			fn = fn[:i]
+		}
+		for i := range w.groups {
+			g := &w.groups[i]
+			// Group constructors build single-package groups; the
+			// length check is defensive against a future multi-pkg
+			// shape, which would fall back to the full oracle.
+			if len(g.pkgs) == 1 && g.pkgs[0] == pkg {
+				scoped := *g
+				scoped.runRegex = "^" + regexp.QuoteMeta(fn) + "$"
+				return &scoped
+			}
+		}
+		return nil
+	}()
+	if scopedGroup != nil && t.scopedBaselinePasses(ctx, *scopedGroup, scopedBaselines, opts, runEnv) {
+		out, gk, state, incomplete, diagnostic, err := engine.RunMutantObservedEnv(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, opts.OracleTimeout, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		if err != nil {
+			return out, gk, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: killer-scoped confirmation: %w", m.Symbol, m.Position, m.Operator, err)
+		}
+		if diagnostic == "" && out == engine.MutantKilled && gk != TimeoutKiller && !strings.HasPrefix(gk, PackageKillerPrefix) {
+			if aerr := attributedKill(gk, w.oracleSet); aerr != nil {
+				return out, gk, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, aerr)
+			}
+			merged, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, state)
+			if err != nil {
+				return out, gk, runtimeinput.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+			}
+			return out, gk, merged, incomplete, nil
+		}
+	}
+	return t.executeWorkMutant(ctx, w, m, opts, runEnv)
+}
+
+// scopedBaselineKey identifies one killer-scoped baseline probe: the
+// memo's identity is the probe's whole shape.
+type scopedBaselineKey struct {
+	pkg, run, flags, moduleDir, packageDir string
+}
+
+// scopedBaselinePasses reports whether the killing test passes ALONE
+// on the unmutated tree — the killer-scoped stage's differential
+// ground — memoized in the caller's Run-local map (this Run's probe
+// gate serializes every confirmation, so the memo needs no lock, and
+// Run-locality is what keeps the key complete across bounds). Any
+// non-pass — a standalone failure, a timeout, a probe error —
+// answers false and the confirmation falls back to the full oracle;
+// the probe is best-effort ground, never a campaign abort.
+func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scopedBaselineKey]bool, opts Options, runEnv []string) bool {
+	key := scopedBaselineKey{pkg: g.pkgs[0], run: g.runRegex, flags: strings.Join(g.flags, "\x00"), moduleDir: g.moduleDir, packageDir: g.packageDir}
+	if passed, ok := memo[key]; ok {
+		return passed
+	}
+	ran, passed, _, err := engine.TestProbeObservedEnv(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+	ok := err == nil && ran > 0 && passed
+	memo[key] = ok
+	return ok
+}
+
 // executeMutant runs one mutant through its oracle groups and merges
 // the process observations - the shared execution the worker pool and
 // the serial kill confirmation both use.
@@ -1005,6 +1095,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		pkg, run, flags, moduleDir, packageDir string
 	}
 	baselineCache := map[baselineKey]runtimeinput.Observation{}
+	// scopedBaselines memoizes killer-scoped baseline probes for the
+	// serial confirmation's differential ground — Run-local like
+	// baselineCache, which is what makes the key complete (bounds,
+	// brackets, namespaces, and the injected env are per-Run pins)
+	// and the lock-free access true (this Run's probe gate serializes
+	// every confirmation; a Tree-scoped map would race across the
+	// MCP server's concurrent campaigns over one cached Tree).
+	scopedBaselines := map[scopedBaselineKey]bool{}
 	coverageCache := map[string]engine.Coverage{}
 	guidanceCache := map[string]oracleAttribution{}
 	decisions := make([]RunDecision, len(targets))
@@ -2175,7 +2273,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
 					})
 					probeGate.Lock()
-					outcome, killer, state, incomplete, err := t.executeWorkMutant(ctx, window[wi], m, opts, runEnv)
+					outcome, killer, state, incomplete, err := t.confirmMutant(ctx, window[wi], m, killers[wi][k.mi], scopedBaselines, opts, runEnv)
 					probeGate.Unlock()
 					if err != nil {
 						return confirmInconclusive, err
@@ -2237,7 +2335,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error() + residue())
+					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
 				}
 				// Served prefix + re-executed candidates both validated
@@ -2265,7 +2363,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error() + residue())
+					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
 				}
 				// The grown record carries the current tree's evidence, so its
@@ -2334,7 +2432,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error() + residue())
+					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
 				}
 				// The drifted record carries the current tree's evidence — the
@@ -2392,7 +2490,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error() + residue())
+					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
 				}
 				// Advisory execution buckets: a verifiable extension's suffix
@@ -2465,7 +2563,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				refuseTarget(targets[w.target].Symbol, err.Error() + residue())
+				refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 				continue
 			}
 			if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, f); err != nil {

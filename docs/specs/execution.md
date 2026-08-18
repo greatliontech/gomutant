@@ -38,7 +38,40 @@ scored measurement - outcome, killer, observation, and candidate
 evidence replaced wholesale - so a sibling-induced collision never
 reads as a kill and a kill that does not reproduce alone scores as the
 serial run says (a survivor is a finding, the anti-flattering
-direction). Confirmation is stride-gated on evidence from the same
+direction). A test-attributed kill confirms KILLER-SCOPED first: the
+serial run executes the killing test alone (the top-level test
+function, subtests riding their parent), under the same oracle
+bounds, and a killer-scoped run reporting an attributed test failure
+is the scored serial measurement — admitted only over a passing
+KILLER-SCOPED BASELINE of the unmutated tree, because differential
+attribution is sound only when the vouching pass shares the mutant
+run's shape (the symmetry rule's "differ in the overlay alone",
+here on the run-regex axis): an order-dependent killer that fails
+standalone regardless of the mutant must refuse the scope, never
+convert a sibling-induced false kill into a confirmed one. The
+scoped baseline memoizes per distinct killer for the campaign, and
+any non-pass — failure, timeout, error — refuses the scope.
+Anything weaker than an attributed test kill over a passing scoped
+baseline — the killer passing, a timeout on either side, a
+discard — scores nothing by itself: the full serial oracle runs and
+ITS verdict is the scored measurement, so a survivor verdict always
+rests on the whole oracle (the anti-flattering direction is
+untouched) and a flip remains "a serial run scoring the mutant a
+survivor" over the full oracle alone; a scoped run that times out
+therefore costs its oracle budget twice before the fallback
+resolves, the accepted price of never scoring from a timeout. The
+fallback's scoring run is the mutant's third look, one more than
+the two-stage-free confirmation gave it — a look-count-sensitive
+oracle carries that on its own idempotence, exactly as re-drives
+do. A confirmed kill's runtime observation covers the scoped run;
+the window's volatility judgment keeps its floor in the full-shape
+baselines and in the pool observations as sampled before the
+target's first confirmation — the sampling order, not the
+replacement discipline, is what preserves the floor once scoped
+observations overwrite confirmed candidates' pool rows.
+Package-scope and unattributed kills have no killer to scope and
+confirm against the full oracle directly.
+Confirmation is stride-gated on evidence from the same
 window under the same load: per target, the first
 confirmations run serially in deterministic candidate order, and after
 a run of consecutive reproductions every further kill confirms at a
