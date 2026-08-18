@@ -40,4 +40,12 @@ rapid suites with testdata/rapid directories.
   (if rapid grows such a switch) — weakest, since it changes test
   behavior under measurement.
 
+Additional facet (2026-08-18, observed from tugboat): `ephemeral`
+probes leak the same failfiles as plain tree residue — a killed
+rapid property writes `testdata/rapid/...` into the real package
+dir, so "the tree is never touched" holds for source but not for
+the oracle's side effects; the consumer had to `rm -rf` the leak
+before staging its change set. The oracle-scratch classification
+above would cover both the refusal and the residue.
+
 Lands: author's triage.
