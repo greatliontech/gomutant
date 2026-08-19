@@ -7,3 +7,4 @@ is deleted (git holds history).
 | slug | summary | Lands |
 |------|---------|-------|
 | [structural-shaped-probe-provenance-gap](structural-shaped-probe-provenance-gap.md) | structural shapes' probe content escapes dirty judgment and serve re-observation | a demonstrated stale-serve path, or the next shaped serve-pin change |
+| [false-survivors-despite-killing-oracle](false-survivors-despite-killing-oracle.md) | campaign records survivors a killing package oracle refutes (tugboat 2026-08-19) | next execution-path change, or a second reproduction |
