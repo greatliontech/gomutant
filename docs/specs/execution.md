@@ -278,8 +278,30 @@ provenance on the decision line — a mutant of filesystem-writing code (or its
 oracle) can create files inside the tree during measurement, and the refusal
 then reads as the run's own residue rather than operator error, self-resolving
 once the residue is removed.
-A repository HEAD move remains campaign-wide: it breaks the commit provenance
-pin every finding carries — a global pin, not per-target source drift.
+A repository HEAD move is not a refusal class of its own: the capture commit a
+finding carries is read at stamp time — after the dirty judgment, so the pair
+is atomic under this requirement's own precondition, where the only legal
+mid-run repository event is a commit (a clean judgment means worktree, index,
+and HEAD agreed, and a commit landing between the reads cannot change
+worktree bytes) — and each
+finding pins the commit its just-validated evidence is true of, so ref motion
+between measurements changes later stamps and discards nothing, while a move
+that changes measured content is exactly ordinary drift, refused
+target-locally with completed findings retained: a measured target validates
+its producers from disk immediately before stamping, and a served target's
+evidence checks re-observe the view against disk when they close over the
+record's runtime-input evidence — evidence the record format requires and
+the serve precheck re-enforces per pair, on every serve flavor — so a
+content move past the run-start view capture surfaces at the serve's own
+evidence check, and any non-cancellation failure of that check is that
+target's condition — refused target-locally, never returned
+as a campaign failure. A mid-run
+git failure at the stamp resolves to the no-commit-provenance posture
+(commit omitted, `dirty=true`, machine-local), fail-safe and target-local;
+a staged run, whose records never persist dirty, refuses the target with
+the failure named instead.
+The findings document validates commit provenance per finding, so
+one campaign may truthfully record more than one capture commit.
 The same target-locality governs evidence construction — symbol
 resolution, oracle validation, target body-hash reads, and
 decision-evidence construction included: a target whose own
@@ -288,9 +310,9 @@ the cause on its decision line, one package's typed-load breakage
 skips exactly the targets whose own closure carries it (the batched
 decision views splinter per package on failure, so healthy same-module
 siblings keep their views), never overwriting a prior record and never
-taking sibling targets down; a campaign-wide abort remains reserved for conditions that
-invalidate every measurement (cancellation of the run itself, the HEAD
-move above).
+taking sibling targets down; a campaign-wide abort remains reserved for the one
+condition that invalidates every measurement — cancellation of the run
+itself.
 
 REQ-exec-quiescence's evidence-construction locality: enforced by
 `TestRunSkipsBrokenTargetLocally`.
@@ -501,8 +523,8 @@ from prior-record inspection, skip classes preparation itself decides —
 surfaces mechanically before any execution budget is committed,
 splitting the workflow into plan, fix preconditions, execute; a hole
 only execution can discover keeps surfacing at execution, and a plan
-refuses on the same tree-motion evidence (producer drift, a moved
-repository HEAD) an executing run's epilogue refuses on.
+refuses on the same tree-motion evidence (producer drift) an executing
+run's epilogue refuses on.
 
 Under INV-RESULT-CANDIDATE-CONSERVATION in [results.md](results.md), a measure
 decision reports its selected candidate count as
@@ -536,8 +558,11 @@ validation — under the same document lock the final merge takes, so an
 interrupted run keeps every finding committed before cancellation became
 observable while an unfinished target's work is discarded whole. The final
 merge of the complete result remains the authority; re-merging a committed
-finding is idempotent. A finding is committed, incrementally or finally, only
-while the capture commit still names repository HEAD. Preparation progress
+finding is idempotent. A finding's capture commit is read at stamp time, so
+an incremental or final commit records the repository state its evidence was
+validated against; repository ref motion never discards completed evidence,
+and content drift keeps its target-local refusal
+(REQ-exec-quiescence). Preparation progress
 and ordered decisions may contain only the prefix delivered before
 cancellation became observable. A cancelled run never reports or persists a
 partial per-target measurement.

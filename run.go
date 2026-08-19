@@ -1354,7 +1354,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if hasPrior && !opts.Force {
 			matches, err := shapedEvidenceMatchesContext(ctx, *rec, oracleViews, shapedOperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
 			if err != nil {
-				return nil, err
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				reason := serveCheckRefusal(err)
+				refuseTarget(tg.Symbol, reason+residue())
+				f.Skipped = reason
+				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+				if opts.Decision != nil {
+					opts.Decision(decisions[i])
+				}
+				return nil, nil
 			}
 			if matches && rec.BodyHash == resolved.shapedDigest && shapeEqual(rec.Shape, &TargetShape{Structural: tg.Structural, Manual: tg.Manual}) {
 				// Wholesale serve: shaped findings take no splice
@@ -1414,6 +1424,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				opts.Decision(decisions[i])
 			}
 			return nil, nil
+		}
+		// Producer enrollment mirrors the symbol path's: the global
+		// modules enter end-of-run producer validation so the epilogue's
+		// transient global-drift report covers shaped-only campaigns too;
+		// the narrowed sibling modules below get their own per-window
+		// validation. Enrollment happens only past the serve return, so a
+		// served or skipped shaped target never turns a target-local
+		// condition into a campaign-level drift report.
+		for _, oracleView := range oracleViews {
+			oracleView.module.producer = true
 		}
 		oracleViews = oracleViews[:0]
 		for _, symbol := range oracle {
@@ -1541,10 +1561,23 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		var growAdded []string
 		var drift *Finding
 		var driftMoved []string
+		// refuseServeCheck is the serve block's target-local exit for a
+		// failed evidence check (serveCheckRefusal, any non-ctx error):
+		// the condition is this target's own, the campaign proceeds.
+		refuseServeCheck := func(reason string) {
+			refuseTarget(tg.Symbol, reason+residue())
+			if opts.Decision != nil {
+				opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "refused", Reason: reason})
+			}
+		}
 		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
 			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
 			if err != nil {
-				return nil, err
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				refuseServeCheck(serveCheckRefusal(err))
+				return nil, nil
 			}
 			if !matches {
 				// A mismatch may be exactly the growth the third carve-out
@@ -1552,14 +1585,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// moved by an inert declaration delta (REQ-result-stale).
 				added, grows, gerr := evidenceSetCoversGrowthContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
 				if gerr != nil {
-					return nil, gerr
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					refuseServeCheck(serveCheckRefusal(gerr))
+					return nil, nil
 				}
 				if grows {
 					snapshot := snapshotFindings([]Finding{*rec})[0]
 					grow = &snapshot
 					growAdded = added
 				} else if moved, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime); derr != nil {
-					return nil, derr
+					if ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					refuseServeCheck(serveCheckRefusal(derr))
+					return nil, nil
 				} else if drifts {
 					// The compartment moved but the movement is attributable:
 					// kills keyed to unmoved oracles stand, the rest
@@ -1586,13 +1627,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if ledger, lerr := targetView.view.TestVariantLedger(targetView.subject); lerr == nil {
 					cached.CompartmentLedger = compartmentLedgerFromView(ledger)
 				} else {
+					// A subject missing from its own view is an internal
+					// fault, not tree drift — the ledger read consults the
+					// capture, never disk.
 					return nil, lerr
 				}
-				// The serve's freshness proof just validated every subject's
-				// evidence against the current tree, so provenance recomputes
-				// like a fresh measure's - a dirty-born record promotes to
-				// the portable layer once its paths are clean
-				// (REQ-result-stale, REQ-result-layers).
+				// The serve's freshness proof validated every subject's
+				// evidence against the run-start view capture, so provenance
+				// recomputes like a fresh measure's - a dirty-born record
+				// promotes to the portable layer once its paths are clean
+				// (REQ-result-stale, REQ-result-layers). A serve's evidence checks
+				// re-observe the view against disk when they close over the
+				// record's required runtime-input evidence, so a content
+				// move past the capture surfaces at the checks above and
+				// classifies target-locally (serveCheckRefusal) — no
+				// separate ref-motion gate is needed
+				// (REQ-exec-quiescence).
 				if stagedDrift, err := t.stampProvenance(ctx, repository, targetView, oracleViews, &cached); err != nil {
 					return nil, err
 				} else if stagedDrift != "" {
@@ -1606,7 +1656,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// Commit precedes the decision: a caller canceling at the
 				// decision callback still holds the persisted finding
 				// (REQ-exec-cancellation's incremental-commit clause).
-				if err := commitFinding(ctx, repository, opts.Commit, cached); err != nil {
+				if err := commitFinding(ctx, opts.Commit, cached); err != nil {
 					return nil, err
 				}
 				if opts.Decision != nil {
@@ -1961,16 +2011,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// A plan is a decision about committing budget, so it refuses
 		// on the same tree-motion evidence an executing run's epilogue
 		// checks — neither is a baseline probe or a mutant execution.
+		// Ref motion alone is not tree motion: capture commits are read
+		// at stamp time, so only content drift refuses
+		// (REQ-exec-quiescence).
 		if err := views.validateProducers(ctx); err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			return nil, &TreeDriftError{Transient: err.Error()}
-		}
-		if moved, err := repository.headMovedContext(ctx); err != nil {
-			return nil, err
-		} else if moved {
-			return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
 		}
 		// A staged drift refused during preparation surfaces exactly as
 		// an executing run's epilogue would surface it - a plan
@@ -2074,7 +2122,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	committed := make([]bool, len(targets))
 	commitAndAttribute := func(ctx context.Context, f Finding, w work) error {
 		findings[w.target] = f
-		if err := commitFinding(ctx, repository, opts.Commit, f); err != nil {
+		if err := commitFinding(ctx, opts.Commit, f); err != nil {
 			return err
 		}
 		committed[w.target] = true
@@ -2714,13 +2762,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, err
 		}
 	}
-	moved, err := repository.headMovedContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if moved {
-		return nil, fmt.Errorf("gomutant: repository HEAD moved during mutation run")
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -2808,23 +2849,42 @@ func gatherWindow(items <-chan work, budget int) ([]work, bool) {
 	return window, true
 }
 
+// serveCheckRefusal renders a serve-time evidence-check failure as that
+// target's own refusal reason: the check re-observes the view against
+// disk when it closes over the record's runtime-input evidence, so a
+// content move surfaces as a view-changed error and a move that breaks
+// the typed load as a plain one — either way the condition is the
+// target's, refused target-locally exactly as a measured target's
+// post-execution validation failure (the measured path refuses on any
+// non-ctx validateProducers error), never a campaign abort
+// (REQ-exec-quiescence). Callers check ctx first; a truly
+// campaign-fatal cause fails the run as N refusals, exactly as on the
+// measured side. The reason claims drift only where the error
+// establishes it — a view-changed failure; anything else passes
+// verbatim, the measured path's own attribution discipline (the
+// residue clause's misattribution class).
+func serveCheckRefusal(err error) string {
+	if errors.Is(err, gofresh.ErrViewChanged) {
+		return "drift: the tree moved past the run-start view capture: " + err.Error()
+	}
+	return err.Error()
+}
+
 // commitFinding delivers one finished finding to the caller's incremental
-// commit callback. The pre-delivery HEAD check mirrors the run's final one so
-// a finding whose capture-commit provenance no longer names HEAD is never
-// persisted incrementally: the run aborts exactly as it would at the end.
-func commitFinding(ctx context.Context, repository repositoryState, commit func(Finding) error, f Finding) error {
+// commit callback. The finding's capture commit was read at stamp time
+// (stampProvenance), so the record already names the repository state its
+// evidence was validated against — ref motion since is not grounds to
+// discard completed evidence, and content drift was refused target-locally
+// before the finding existed: measured paths validate their producers from
+// disk before stamping, and serve paths re-observe the view at their own
+// evidence checks (REQ-exec-quiescence,
+// REQ-exec-cancellation).
+func commitFinding(ctx context.Context, commit func(Finding) error, f Finding) error {
 	if commit == nil {
 		return nil
 	}
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	moved, err := repository.headMovedContext(ctx)
-	if err != nil {
-		return err
-	}
-	if moved {
-		return fmt.Errorf("gomutant: repository HEAD moved during mutation run")
 	}
 	return commit(f)
 }
@@ -3122,7 +3182,6 @@ func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, 
 // routes the target to its drift refusal instead of persisting a
 // record (REQ-result-staged); non-staged runs always return "".
 func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, f *Finding) (stagedDrift string, err error) {
-	f.Commit = repository.commit
 	f.StagedTree = repository.stagedTree
 	sourceFiles, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
 	if err != nil {
@@ -3227,6 +3286,32 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles)
 	if err != nil {
 		return "", err
+	}
+	// The capture commit is read at stamp time, not served from the
+	// run-start snapshot — the record names the repository state the
+	// finding's just-validated evidence is true of, so ref motion
+	// between measurements changes later stamps and discards nothing —
+	// and it is read AFTER the dirty judgment so the pair is atomic
+	// under REQ-exec-quiescence's precondition, where the only legal
+	// mid-run repository event is a commit: a clean judgment means
+	// worktree, index, and HEAD agreed when status ran, and a commit
+	// landing between the two reads cannot change worktree bytes, so
+	// the later-read commit still carries the judged content. A mid-run
+	// git failure resolves to the no-commit-provenance posture — Commit
+	// empty, Dirty true, machine-local — fail-safe and target-local,
+	// never a campaign abort; a staged run, whose records never persist
+	// dirty, refuses the target with the failure named instead
+	// (REQ-exec-quiescence, REQ-exec-cancellation, REQ-result-staged).
+	if commit, cerr := repository.currentCommitContext(ctx); cerr != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if repository.staged {
+			return "commit provenance unavailable at stamp time; the staged snapshot cannot be attributed", nil
+		}
+		f.Commit, f.Dirty = "", true
+	} else {
+		f.Commit = commit
 	}
 	if repository.staged {
 		if moved, merr := repository.snapshotMovedContext(ctx); merr != nil {

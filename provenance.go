@@ -37,8 +37,8 @@ func withModuleSelectionPaths(sourceFiles []string) []string {
 }
 
 type repositoryState struct {
-	root, commit string
-	available    bool
+	root      string
+	available bool
 	// staged marks the run as measuring the index snapshot
 	// (REQ-result-staged): the dirty judgment narrows to drift the
 	// snapshot cannot vouch for - worktree content diverging from the
@@ -67,19 +67,23 @@ func captureRepositoryStateContext(ctx context.Context, dir string, staged bool)
 		}
 		return repositoryState{}, nil
 	}
-	commit, err := gitOutputContext(ctx, dir, "rev-parse", "HEAD")
-	if ctx.Err() != nil {
-		return repositoryState{}, ctx.Err()
-	}
-	if err != nil {
+	// The rev-parse is an availability probe: capture commits are read
+	// at stamp time (currentCommitContext), never served from a
+	// run-start snapshot, so only the probe's success is kept.
+	if _, err := gitOutputContext(ctx, dir, "rev-parse", "HEAD"); err != nil {
+		if ctx.Err() != nil {
+			return repositoryState{}, ctx.Err()
+		}
 		if staged {
 			return repositoryState{}, fmt.Errorf("gomutant: staged mode needs commit provenance: %v", err)
 		}
 		return repositoryState{}, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return repositoryState{}, err
+	}
 	state := repositoryState{
 		root:      strings.TrimSpace(string(root)),
-		commit:    strings.TrimSpace(string(commit)),
 		available: true,
 	}
 	if staged {
@@ -244,20 +248,27 @@ func (s repositoryState) historicalPackageFilesContext(ctx context.Context, sour
 	return paths, nil
 }
 
-func (s repositoryState) headMoved() bool {
-	moved, _ := s.headMovedContext(context.Background())
-	return moved
-}
-
-func (s repositoryState) headMovedContext(ctx context.Context) (bool, error) {
+// currentCommitContext reads the commit HEAD names now — the capture
+// commit a finding stamps is the repository state its just-validated
+// evidence is true of, so it is read at stamp time, never served from
+// the run-start snapshot: ref motion between measurements changes later
+// stamps and discards nothing (REQ-exec-quiescence). An unavailable
+// repository stamps no commit, exactly as at capture; a mid-run git
+// failure surfaces as an error the stamp resolves to the same
+// no-commit-provenance posture (Commit empty, Dirty true), fail-safe
+// and target-local, never a campaign abort.
+func (s repositoryState) currentCommitContext(ctx context.Context) (string, error) {
 	if !s.available {
-		return false, nil
+		return "", nil
 	}
 	head, err := gitOutputContext(ctx, s.root, "rev-parse", "HEAD")
 	if ctx.Err() != nil {
-		return false, ctx.Err()
+		return "", ctx.Err()
 	}
-	return err != nil || strings.TrimSpace(string(head)) != s.commit, nil
+	if err != nil {
+		return "", fmt.Errorf("gomutant: commit provenance unavailable at stamp time: %v", err)
+	}
+	return strings.TrimSpace(string(head)), nil
 }
 
 func gitOutput(dir string, args ...string) ([]byte, error) {

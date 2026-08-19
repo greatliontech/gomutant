@@ -139,6 +139,173 @@ func TestRunDriftRefusesSplicedServeTargetLocally(t *testing.T) {
 	}
 }
 
+// driftGit initializes and drives a git repository over a fixture copy —
+// the shared harness of the ref-motion regressions below.
+func driftGit(t *testing.T, dir string) func(args ...string) string {
+	t.Helper()
+	return func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=gomutant", "GIT_AUTHOR_EMAIL=gomutant@example.invalid",
+			"GIT_COMMITTER_NAME=gomutant", "GIT_COMMITTER_EMAIL=gomutant@example.invalid",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+}
+
+// A mid-run ref-only commit — new content in a file no target's producer
+// set names, tree bytes identical for every measured package — discards
+// nothing: the run succeeds, every finding persists, and each stamp
+// carries the commit current at its stamp time, the moved ref included
+// (REQ-exec-quiescence, REQ-exec-cancellation). This is the motivating
+// defect's regression: the pre-fix engine aborted the whole campaign
+// here and discarded completed evidence.
+func TestRunPersistsAcrossMidRunRefOnlyCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	git := driftGit(t, dir)
+	git("init", "-q")
+	git("add", "-A")
+	git("commit", "-q", "-m", "fixture")
+	first := git("rev-parse", "HEAD")
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []Target{
+		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+		{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}},
+	}
+	var committed []Finding
+	findings, err := tr.Run(context.Background(), targets, Options{
+		Budget: 1,
+		Commit: func(f Finding) error { committed = append(committed, f); return nil },
+		afterExecution: func() {
+			if err := os.WriteFile(filepath.Join(dir, "unrelated.txt"), []byte("ref-only motion\n"), 0o644); err != nil {
+				t.Error(err)
+				return
+			}
+			git("add", "unrelated.txt")
+			git("commit", "-q", "-m", "mid-run ref motion")
+		},
+	})
+	if err != nil {
+		t.Fatalf("ref-only motion aborted the run: %v", err)
+	}
+	second := git("rev-parse", "HEAD")
+	if second == first {
+		t.Fatal("test setup produced no ref motion")
+	}
+	if len(findings) != 2 || len(committed) != 2 {
+		t.Fatalf("findings %d, committed %d, want both targets persisted", len(findings), len(committed))
+	}
+	for _, f := range findings {
+		if f.Dirty {
+			t.Fatalf("%s stamped dirty across a ref-only move", f.Symbol)
+		}
+		if f.Commit != second {
+			t.Fatalf("%s stamped commit %q, want the stamp-time HEAD %q", f.Symbol, f.Commit, second)
+		}
+	}
+}
+
+// A serve whose freshness proof ran against the run-start view capture
+// re-observes its modules from disk once the ref moves past that
+// capture: a mid-run commit that changes a served target's content
+// refuses exactly that target, target-locally, while the already-served
+// sibling stands committed (REQ-exec-quiescence's serve-path arm).
+func TestRunServeRefusesContentMovePastViewCapture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	git := driftGit(t, dir)
+	git("init", "-q")
+	git("add", "-A")
+	git("commit", "-q", "-m", "fixture")
+	targets := []Target{
+		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}},
+		{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}},
+	}
+	warm, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warmed, err := warm.Run(context.Background(), targets, Options{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Export(warmed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainPath := filepath.Join(dir, "plain", "plain.go")
+	src, err := os.ReadFile(plainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var committed []string
+	movedOnce := false
+	findings, err := fresh.Run(context.Background(), targets, Options{
+		Budget: 1,
+		Prior:  prior,
+		Commit: func(f Finding) error { committed = append(committed, f.Symbol); return nil },
+		Decision: func(d RunDecision) {
+			// The first target's serve is done (commit precedes the
+			// decision); move the SECOND target's content and the ref
+			// before its serve begins.
+			if movedOnce || d.Symbol != "example.com/fixture/lib.Add" {
+				return
+			}
+			movedOnce = true
+			if err := os.WriteFile(plainPath, append([]byte(nil), append(src, []byte("\n// moved past the capture\n")...)...), 0o644); err != nil {
+				t.Error(err)
+				return
+			}
+			git("add", "plain/plain.go")
+			git("commit", "-q", "-m", "content move past the view capture")
+		},
+	})
+	var drift *TreeDriftError
+	if !errors.As(err, &drift) {
+		t.Fatalf("content move past the capture = %v, want a TreeDriftError", err)
+	}
+	if len(drift.Drifted) != 1 || drift.Drifted[0].Symbol != "example.com/fixture/plain.Ok" ||
+		!strings.Contains(drift.Drifted[0].Reason, "moved past the run-start view capture") {
+		t.Fatalf("drift attribution = %+v", drift.Drifted)
+	}
+	if len(findings) != 1 || findings[0].Symbol != "example.com/fixture/lib.Add" || !findings[0].Cached {
+		t.Fatalf("completed retention = %+v, want the already-served sibling alone", findings)
+	}
+	for _, symbol := range committed {
+		if symbol == "example.com/fixture/plain.Ok" {
+			t.Fatal("a capture-stale serve was committed")
+		}
+	}
+}
+
 // A drift whose residue is an untracked file written under measurement
 // names the provenance on the decision line: the operator reads that a
 // mutant or oracle process can write into the tree, not generic drift

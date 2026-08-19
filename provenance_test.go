@@ -19,15 +19,15 @@ func TestRepositoryContextCancellation(t *testing.T) {
 	if state, err := captureRepositoryStateContext(ctx, t.TempDir(), false); !errors.Is(err, context.Canceled) || state.available {
 		t.Fatalf("cancelled capture = %+v, %v", state, err)
 	}
-	repository := repositoryState{root: t.TempDir(), commit: "commit", available: true}
+	repository := repositoryState{root: t.TempDir(), available: true}
 	if _, err := repository.pathsDirtyContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled dirty check = %v", err)
 	}
 	if _, err := repository.historicalPackageFilesContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled history check = %v", err)
 	}
-	if _, err := repository.headMovedContext(ctx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled head check = %v", err)
+	if _, err := repository.currentCommitContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled commit read = %v", err)
 	}
 }
 
@@ -94,8 +94,11 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	runGit("commit", "-q", "-m", "fixture")
 
 	repository := captureRepositoryState(root)
-	if !repository.available || repository.commit == "" {
+	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
+	}
+	if commit, err := repository.currentCommitContext(context.Background()); err != nil || commit == "" {
+		t.Fatalf("stamp-time commit = %q, %v", commit, err)
 	}
 	if repository.pathsDirty([]string{goMod, source}) {
 		t.Fatal("clean selected inputs reported dirty")
@@ -184,8 +187,11 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	runGit("add", "-A")
 	runGit("commit", "-q", "-m", "fixture")
 	repository := captureRepositoryState(root)
-	if !repository.available || repository.commit == "" {
+	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
+	}
+	if commit, err := repository.currentCommitContext(context.Background()); err != nil || commit == "" {
+		t.Fatalf("stamp-time commit = %q, %v", commit, err)
 	}
 	observed, err := runtimeinput.FromTestLog([]byte("open data/input.txt\n"), moduleDir, moduleDir, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
@@ -200,7 +206,11 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, &clean); err != nil {
 		t.Fatal(err)
 	}
-	if clean.Dirty || clean.Commit != repository.commit {
+	head, err := repository.currentCommitContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clean.Dirty || clean.Commit != head {
 		t.Fatalf("clean re-stamp = commit %q dirty %v, want the current HEAD and clean", clean.Commit, clean.Dirty)
 	}
 
@@ -275,8 +285,11 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	runGit("add", "-A")
 	runGit("commit", "-q", "-m", "fixture")
 	repository := captureRepositoryState(root)
-	if !repository.available || repository.commit == "" {
+	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
+	}
+	if commit, err := repository.currentCommitContext(context.Background()); err != nil || commit == "" {
+		t.Fatalf("stamp-time commit = %q, %v", commit, err)
 	}
 	alias := filepath.Join(base, "alias")
 	if err := os.Symlink(root, alias); err != nil {

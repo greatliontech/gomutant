@@ -5,9 +5,12 @@ import (
 	"strings"
 )
 
-// TargetDrift is one target refused because the tree changed under
-// measurement: its producer evidence no longer validated after execution
-// (REQ-exec-quiescence).
+// TargetDrift is one target refused target-locally under
+// REQ-exec-quiescence: a measured target whose producer evidence no
+// longer validated after execution, a served target whose evidence
+// check failed against the current tree (a view-changed drift, or any
+// other non-cancellation failure passed verbatim), or a staged target
+// whose snapshot could not be attributed.
 type TargetDrift struct {
 	Symbol string
 	Reason string

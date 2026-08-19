@@ -3032,10 +3032,33 @@ func TestRunCancellationKeepsCommittedFindings(t *testing.T) {
 	}
 }
 
-// TestCommitFindingRefusesMovedHead pins the incremental-commit HEAD guard
-// (REQ-exec-cancellation): a finding commits only while the capture commit
-// still names repository HEAD, mirroring the run's final check.
-func TestCommitFindingRefusesMovedHead(t *testing.T) {
+// TestCommitFindingDeliversPastRefMotion pins the incremental-commit
+// contract (REQ-exec-cancellation, REQ-exec-quiescence): a finding's
+// capture commit is read at stamp time, so ref motion between stamp and
+// delivery is not grounds to discard completed evidence — the callback
+// still receives the finding. Only context cancellation stops delivery.
+func TestCommitFindingDeliversPastRefMotion(t *testing.T) {
+	calls := 0
+	commit := func(Finding) error { calls++; return nil }
+	if err := commitFinding(context.Background(), commit, Finding{Symbol: "p.F"}); err != nil || calls != 1 {
+		t.Fatalf("commit = %v, calls %d", err, calls)
+	}
+	if err := commitFinding(context.Background(), nil, Finding{}); err != nil {
+		t.Fatalf("nil commit callback = %v", err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := commitFinding(cancelled, commit, Finding{Symbol: "p.F"}); !errors.Is(err, context.Canceled) || calls != 1 {
+		t.Fatalf("cancelled commit = %v, calls %d, want refusal without delivery", err, calls)
+	}
+}
+
+// TestStampProvenanceReadsCommitAtStampTime pins the stamp-time commit
+// read (REQ-exec-quiescence): two findings stamped around a ref-only
+// commit carry the commits their evidence was validated against — the
+// earlier stamp the old HEAD, the later stamp the new one — and neither
+// is refused.
+func TestStampProvenanceReadsCommitAtStampTime(t *testing.T) {
 	root := t.TempDir()
 	runGit := func(args ...string) {
 		t.Helper()
@@ -3049,8 +3072,17 @@ func TestCommitFindingRefusesMovedHead(t *testing.T) {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
-	path := filepath.Join(root, "file.txt")
-	if err := os.WriteFile(path, []byte("one\n"), 0o644); err != nil {
+	gitHead := func() string {
+		t.Helper()
+		cmd := exec.Command("git", "rev-parse", "HEAD")
+		cmd.Dir = root
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if err := os.WriteFile(filepath.Join(root, "file.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGit("init", "-q")
@@ -3060,21 +3092,25 @@ func TestCommitFindingRefusesMovedHead(t *testing.T) {
 	if err != nil || !repository.available {
 		t.Fatalf("repository state = %+v, %v", repository, err)
 	}
-	calls := 0
-	commit := func(Finding) error { calls++; return nil }
-	if err := commitFinding(context.Background(), repository, commit, Finding{Symbol: "p.F"}); err != nil || calls != 1 {
-		t.Fatalf("commit at unmoved HEAD = %v, calls %d", err, calls)
+	first := gitHead()
+	commit, err := repository.currentCommitContext(context.Background())
+	if err != nil || commit != first {
+		t.Fatalf("stamp-time commit before motion = %q, %v, want %q", commit, err, first)
 	}
-	if err := os.WriteFile(path, []byte("two\n"), 0o644); err != nil {
+	// A ref-only move: new content committed from a NEW file, leaving
+	// every previously measured path byte-identical.
+	if err := os.WriteFile(filepath.Join(root, "other.txt"), []byte("two\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit("add", "file.txt")
+	runGit("add", "other.txt")
 	runGit("commit", "-q", "-m", "two")
-	if err := commitFinding(context.Background(), repository, commit, Finding{Symbol: "p.F"}); err == nil || !strings.Contains(err.Error(), "HEAD moved") || calls != 1 {
-		t.Fatalf("commit past moved HEAD = %v, calls %d, want a refusal without delivery", err, calls)
+	second := gitHead()
+	if second == first {
+		t.Fatal("test setup produced no ref motion")
 	}
-	if err := commitFinding(context.Background(), repository, nil, Finding{}); err != nil {
-		t.Fatalf("nil commit callback = %v", err)
+	commit, err = repository.currentCommitContext(context.Background())
+	if err != nil || commit != second {
+		t.Fatalf("stamp-time commit after motion = %q, %v, want %q", commit, err, second)
 	}
 }
 
@@ -5152,5 +5188,20 @@ func TestInitTargetRefusalsNameTheirCause(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("BodyHash(%s) = %v, want %q", tc.symbol, err, tc.want)
 		}
+	}
+}
+
+// serveCheckRefusal claims drift only where the error establishes it: a
+// view-changed failure keeps the drift wording, every other cause passes
+// verbatim — the measured path's attribution discipline
+// (REQ-exec-quiescence's residue clause names the misattribution class).
+func TestServeCheckRefusalAttribution(t *testing.T) {
+	if got := serveCheckRefusal(errors.New("boom")); got != "boom" {
+		t.Fatalf("plain cause = %q, want it verbatim with no drift claim", got)
+	}
+	moved := fmt.Errorf("%w: closure for p.F", gofresh.ErrViewChanged)
+	got := serveCheckRefusal(moved)
+	if !strings.HasPrefix(got, "drift: the tree moved past the run-start view capture: ") || !strings.Contains(got, "closure for p.F") {
+		t.Fatalf("view-changed cause = %q, want the drift wording carrying the error", got)
 	}
 }
