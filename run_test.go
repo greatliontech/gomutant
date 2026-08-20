@@ -2509,7 +2509,12 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	}
 
 	// A non-inert compartment delta — the added test plus an edited existing
-	// one — refuses the arm: the whole target re-measures.
+	// one — refuses GROWTH and composes under the generalized killer-drift
+	// carve-out instead: the sole recorded oracle moved, so every one of
+	// its kills, every set-wide kill, and every survivor re-measures
+	// against the current oracle with the growth disclosed — no kill
+	// stands, but the serve is a drift serve, never a stale whole
+	// re-measure.
 	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(strings.Replace(files["gated_test.go"], "t.Fail()", "t.Fail() // edited", 1)+"\nfunc TestBig(t *testing.T) {\n\tif Gated(200) != 603 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2527,9 +2532,16 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if edited[0].Cached || len(editedDecisions) != 1 || !strings.HasPrefix(editedDecisions[0].Reason, "stale: ") ||
-		len(editedDispatched) != prior[0].Generated {
-		t.Fatalf("non-inert delta = %+v dispatching %d, want a whole re-measure", editedDecisions, len(editedDispatched))
+	remeasured := prior[0].Killed + len(prior[0].Survivors)
+	wantEdited := fmt.Sprintf(
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test)",
+		killNoun(0), candidateNoun(remeasured))
+	if edited[0].Cached || len(editedDecisions) != 1 || editedDecisions[0].Reason != wantEdited ||
+		len(editedDispatched) != remeasured {
+		t.Fatalf("non-inert delta = %+v dispatching %d, want the composed drift serve %q over %d", editedDecisions, len(editedDispatched), wantEdited, remeasured)
+	}
+	if len(edited[0].Kills) != edited[0].Killed {
+		t.Fatalf("composed serve broke kill attribution: %d attributions for %d kills", len(edited[0].Kills), edited[0].Killed)
 	}
 }
 

@@ -158,7 +158,9 @@ Measurement pins are never partially trusted: any moved pin remeasures the
 whole target, with exactly four precisely scoped carve-outs — candidate-local
 evidence, the budget when it is the only pin that fails to cover, derived
 oracle growth under an inert test-variant delta, and killer-scoped oracle
-drift under an attributable test-variant delta.
+drift under an attributable test-variant delta — the drift carve-out
+composing a grown derived set and flagged candidate evidence, so the
+strengthen loop's add-and-change rounds serve their standing kills.
 Candidate evidence is the first narrower axis: a record whose only
 unverifiable runtime evidence is candidate-local serves its covered candidates
 and re-executes exactly the unverifiable ones under a passing current baseline
@@ -285,34 +287,70 @@ type it reaches — reflection's only route to a compartment function — with
 the walk observing a delta declaration, an unknown starting declaration, or
 a served declaration with no reference list each classifying the oracle
 moved, fail-closed. When the record carries complete kill attribution and a
-compartment ledger, the oracle identity sets are equal (an added or removed
-oracle identity is growth's or the general rule's domain, never drift's),
-the scalar pins are equal, there is no candidate evidence, and the target's
-evidence checks plainly valid under the same refresh: kills whose recorded
-killer is an unmoved oracle stand, and every other candidate re-measures
-against the full current oracle — kills whose killer moved (the other
-oracles' outcomes on that candidate were never recorded), timeout and
-package-scope kills whenever any oracle moved (they rest on the whole
-recorded set's behavior), and, whenever any oracle moved, every survivor (a
-moved test may now kill it; with nothing moved, survivals stand exactly like
-kills) — with re-measured survivors' advisory buckets re-derived from the
-current probe, a newly killed attested survivor shedding its attestation
-through the same contradiction report as growth, and discards standing (a
+compartment ledger, the recorded oracle identity set is a subset of the
+current one — a removed identity stays the general rule's domain, while an
+added identity composes: the strengthen loop's usual round both adds tests
+and changes them, and the two keystones apply simultaneously. An added
+oracle is one whose function name NO recorded compartment declaration
+carries — the diff's own addition by construction, matched fail-closed on
+the bare name across both compartment variants (oracle symbols collapse
+the variants onto one identity, so a same-named declaration in either
+variant refuses — a name-keyed acceptance would be the laundering
+channel); the record's evidence list is never an
+identity oracle, so a current oracle the record merely fails to mention (a
+dropped evidence row) is no addition and refuses whole, a kill keyed to a
+killer outside the recorded evidence refuses the same way (a ghost the walk
+cannot classify), and a duplicated current oracle symbol refuses (a repeat
+could hide a removal in the retained count). An added
+oracle has no recorded evidence and joins every re-measure's oracle; by the
+growth keystone it cannot un-kill anything — a grown set only extends the
+recorded set's behavior — so it never moves a standing kill, set-wide kills
+included. A grown set serves only when the finding and the request are both
+non-explicit, exactly growth's rule: an explicit request that supersets the
+recorded set is the caller's selection, never derived growth. Candidate
+evidence composes rather than disqualifying: every flagged candidate joins
+the re-measure set and re-executes against the full current oracle — the
+candidate-local splice's own discipline, under this carve-out's baselines —
+its recorded disposition (kill, survival, or discard) replaced by the fresh
+execution and its evidence by the fresh capture; unflagged discards stand (a
 compile rejection is a pure function of the mutant source under the
-toolchain and build-configuration pins). The drifted record carries the
-current tree's evidence for every subject and the current compartment
-ledger. The carve-out is
-bounded fail-closed like its siblings: it never composes with candidate
-evidence or a budget shortfall; a record without complete kill attribution
+toolchain and build-configuration pins). With the scalar pins equal and the
+target's evidence checking plainly valid under the same refresh: kills whose
+recorded killer is an unmoved oracle stand, and every other candidate
+re-measures against the full current oracle — kills whose killer moved (the
+other oracles' outcomes on that candidate were never recorded), timeout and
+package-scope kills whenever any oracle moved (they rest on the whole
+recorded set's behavior, which a purely grown set can only extend: the
+oracle timeout bounds the whole group process's wall clock and a grown
+-run selection only lengthens the same process's run, a ground that would
+fail under a per-test timeout model — under
+growth alone they stand), and, whenever any oracle moved or the set grew,
+every survivor (a moved or added test may now kill it; with nothing moved
+and nothing added, survivals stand exactly like kills) — with re-measured
+survivors' advisory buckets re-derived from the current probe, a newly
+killed attested survivor shedding its attestation through the same
+contradiction report as growth, and a fresh kill — the added test's
+included — attributed like any other. The drifted record carries the
+current tree's evidence for every subject, the added oracles' included, and
+the current compartment ledger. The carve-out is
+bounded fail-closed like its siblings: it never composes with a budget
+shortfall; a record without complete kill attribution
 or without a compartment ledger re-measures whole; deterministic
-regeneration must re-identify the record's candidates, kills, and survivors
+regeneration must re-identify the record's candidates, kills, survivors,
+and flagged evidence identities (each flagged candidate runnable)
 or the target re-measures whole; the re-measure processes' completed union,
 merged over the record's persisted union, must equal that persisted union or
-the drifted finding is preserved but explicitly non-reusable; and a forced
-run re-measures whole. A delta reaching no recorded oracle serves the whole
+the drifted finding is preserved but explicitly non-reusable; a failing
+added test on the clean tree refuses at the per-group baseline exactly as
+any baseline failure; and a forced
+run re-measures whole. A delta reaching no recorded oracle, with nothing
+added and nothing flagged, serves the whole
 record with nothing re-measured. The drift decision reports "served: N kills
 stand on unmoved oracles; re-measuring M candidates against the current
-oracle" (count-aware nouns; a delta reaching no oracle reports "served:
+oracle" (count-aware nouns), appending " (derived oracle grew by K tests)"
+when the set grew and "; F candidates re-execute flagged evidence" when
+evidence is flagged (count-aware nouns and verb) (a delta reaching no oracle with nothing added or
+flagged reports "served:
 compartment delta reaches no recorded oracle; nothing re-measures") with
 `candidates` counting the re-measured candidates. When
 INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires

@@ -1368,40 +1368,76 @@ func (r *compartmentReach) walk(seeds []int) bool {
 
 // evidenceSetCoversKillerDriftContext reports whether prior's evidence covers
 // the request under the killer-drift carve-out (REQ-result-stale): the record
-// carries complete kill attribution and a compartment ledger; scalar pins and
-// the oracle identity set are equal; no candidate evidence; the compartment
-// delta is attributable; and the target's evidence checks plainly valid with
-// its compartment pin refreshed to the current one — the refresh licensed by
-// the attributable delta, whose every movement the per-oracle walk accounts
-// for. Each oracle then classifies moved or unmoved: moved when its own
-// evidence no longer checks plainly valid (target-package subjects checked
-// with the same refresh, any other subject as recorded — its own package's
-// compartment pin is untouched by this target's delta) or when its reference
-// walk over the current ledger reaches a delta declaration. Returns the
-// moved oracle symbols, sorted.
-func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string) ([]string, bool, error) {
+// carries complete kill attribution and a compartment ledger; scalar pins are
+// equal; the recorded oracle identity set is a subset of the current one — a
+// removed identity stays the general rule's domain, while an added identity
+// composes: it has no recorded evidence, joins every re-measure's oracle, and
+// by the growth keystone cannot un-kill a standing kill; when the set grew,
+// growth's non-explicit rule binds on both sides (growth is a derived-oracle
+// claim — an explicit request that supersets the recorded set is the caller's
+// selection). Candidate evidence composes rather than disqualifying: the
+// flagged candidates join the re-measure set downstream under the
+// candidate-splice discipline. The compartment delta is attributable; and the
+// target's evidence checks plainly valid with its compartment pin refreshed
+// to the current one — the refresh licensed by the attributable delta, whose
+// every movement the per-oracle walk accounts for. Each retained oracle then
+// classifies moved or unmoved: moved when its own evidence no longer checks
+// plainly valid (target-package subjects checked with the same refresh, any
+// other subject as recorded — its own package's compartment pin is untouched
+// by this target's delta) or when its reference walk over the current ledger
+// reaches a delta declaration. Returns the moved and added oracle symbols,
+// each sorted.
+func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string) (moved, added []string, drifts bool, err error) {
 	if prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
 		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
 		prior.OracleMemoryBytes != memoryPin || prior.PropertyRegime != regime ||
-		len(prior.OracleEvidence) != len(oracle) || len(prior.CandidateEvidence) != 0 ||
+		len(prior.OracleEvidence) > len(oracle) ||
 		len(prior.Kills) != prior.Killed {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
-	currentLedger, err := target.view.TestVariantLedger(target.subject)
-	if err != nil {
-		return nil, false, err
-	}
-	recordedLedger := prior.CompartmentLedger.ledger()
-	delta := gofresh.DiffTestVariantLedgers(recordedLedger, currentLedger)
-	if !killerDriftAttributable(delta, recordedLedger, currentLedger) {
-		return nil, false, nil
+	if len(prior.OracleEvidence) < len(oracle) && oracleExplicit {
+		// A grown set serves only as a derived-oracle claim on both sides
+		// (growth's rule): an explicit request that supersets the recorded
+		// set is the caller's selection, never derived growth. The head
+		// pinned the explicit flags equal, so one operand speaks for both.
+		return nil, nil, false, nil
 	}
 	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
 	for _, evidence := range prior.OracleEvidence {
 		if _, duplicate := bySymbol[evidence.Symbol]; duplicate {
-			return nil, false, nil
+			return nil, nil, false, nil
 		}
 		bySymbol[evidence.Symbol] = evidence
+	}
+	for _, kill := range prior.Kills {
+		if kill.Killer == TimeoutKiller || strings.HasPrefix(kill.Killer, PackageKillerPrefix) {
+			continue
+		}
+		if _, recorded := bySymbol[kill.Killer]; !recorded {
+			// A kill keyed to a killer with no recorded oracle evidence has
+			// no drift signal to classify it by: standing it would trust a
+			// ghost the walk cannot see (the flattering direction), so the
+			// whole target re-measures.
+			return nil, nil, false, nil
+		}
+	}
+	seenCurrent := make(map[string]bool, len(oracle))
+	for _, subject := range oracle {
+		if seenCurrent[subject.symbol] {
+			// A duplicated current oracle symbol would let a removal hide
+			// behind the repeat in the retained count; refuse.
+			return nil, nil, false, nil
+		}
+		seenCurrent[subject.symbol] = true
+	}
+	currentLedger, err := target.view.TestVariantLedger(target.subject)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	recordedLedger := prior.CompartmentLedger.ledger()
+	delta := gofresh.DiffTestVariantLedgers(recordedLedger, currentLedger)
+	if !killerDriftAttributable(delta, recordedLedger, currentLedger) {
+		return nil, nil, false, nil
 	}
 	refreshed := func(subject *subjectView, evidence SubjectEvidence) SubjectEvidence {
 		if subject.subject.Package == target.subject.Package && subject.fp.TestVariantClosure != "" {
@@ -1412,34 +1448,54 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
 	ok, err := evidencePairsValid(ctx, []evidencePair{{subject: target, evidence: refreshed(target, prior.TargetEvidence), accept: acceptValidVerdict}}, memo.once)
 	if err != nil || !ok {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	reach := newCompartmentReach(currentLedger, delta)
 	if reach.unconditionalRootReaches() {
 		// An unchanged var initializer, init function, or TestMain reaching
 		// the delta runs changed code around every test: no per-oracle
 		// partition is sound, so the whole target re-measures.
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
-	var moved []string
+	recordedFuncs := make(map[string]bool, len(recordedLedger.Declarations))
+	for _, decl := range recordedLedger.Declarations {
+		if decl.Kind == "func" {
+			recordedFuncs[decl.Name] = true
+		}
+	}
+	retained := 0
 	for _, subject := range oracle {
 		evidence, recorded := bySymbol[subject.symbol]
 		if !recorded {
-			// A recorded oracle absent from the current set (or vice versa,
-			// caught by the length pin above) is growth's or the general
-			// rule's domain, never drift's.
-			return nil, false, nil
+			// A current oracle without recorded evidence composes as growth
+			// only when the RECORDED compartment ledger declares no function
+			// of its name: a genuinely added test had no prior declaration,
+			// while a dropped evidence row's oracle always did — the
+			// record's evidence list is not an identity oracle (a dropped
+			// row must refuse, never serve the dropped oracle's kills as
+			// unmoved). The match is the bare function name across BOTH
+			// compartment variants, fail-closed: a same-named declaration
+			// in the sibling variant refuses too, because oracle symbols
+			// collapse the variants onto one identity and a name-keyed
+			// acceptance would be exactly the laundering channel.
+			_, fn := splitTestSymbol(subject.symbol)
+			if fn == "" || recordedFuncs[fn] {
+				return nil, nil, false, nil
+			}
+			added = append(added, subject.symbol)
+			continue
 		}
+		retained++
 		valid, err := evidencePairsValid(ctx, []evidencePair{{subject: subject, evidence: refreshed(subject, evidence), accept: acceptValidVerdict}}, memo.once)
 		if err != nil {
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		movedHere := !valid
 		if !movedHere && subject.subject.Package == target.subject.Package {
 			_, fn := splitTestSymbol(subject.symbol)
 			reachesDelta, known := reach.reaches(fn)
 			if !known {
-				return nil, false, nil
+				return nil, nil, false, nil
 			}
 			movedHere = reachesDelta
 		}
@@ -1447,11 +1503,17 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 			moved = append(moved, subject.symbol)
 		}
 	}
+	if retained != len(prior.OracleEvidence) {
+		// A recorded oracle absent from the current set is a removal — the
+		// general rule's domain, never drift's.
+		return nil, nil, false, nil
+	}
 	if ok, err := memo.verify(ctx); err != nil || !ok {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	sort.Strings(moved)
-	return moved, true, nil
+	sort.Strings(added)
+	return moved, added, true, nil
 }
 
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string) (bool, error) {

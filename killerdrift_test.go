@@ -182,21 +182,25 @@ func TestCompartmentReachSeesRemovedMethodThroughReceiver(t *testing.T) {
 	}
 }
 
-// driftRemeasureIndexes selects every survivor, every kill whose killer
-// moved, and every timeout or package-scope kill when anything moved, while
-// kills keyed to unmoved oracles stand; a kill identity regeneration cannot
-// re-identify refuses the serve (REQ-result-stale's killer-drift carve-out).
+// driftRemeasureIndexes selects every survivor when anything moved or the
+// derived set grew, every kill whose killer moved, every timeout or
+// package-scope kill when anything moved (a purely grown set can only extend
+// the recorded set's behavior, so those stand), and every candidate carrying
+// recorded candidate evidence, while kills keyed to unmoved oracles and
+// unflagged discards stand; a kill identity regeneration cannot re-identify
+// refuses the serve (REQ-result-stale's killer-drift carve-out).
 func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
-	generation := engine.Generation{CandidateCount: 5, Candidates: []engine.Candidate{
+	generation := engine.Generation{CandidateCount: 6, Candidates: []engine.Candidate{
 		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable}, // kill by unmoved
 		{Symbol: "p.F", Operator: "op-a", Position: "f.go:2:2", Replacements: runnable}, // kill by moved
 		{Symbol: "p.F", Operator: "op-a", Position: "f.go:3:3", Replacements: runnable}, // timeout kill
 		{Symbol: "p.F", Operator: "op-a", Position: "f.go:4:4", Replacements: runnable}, // package kill
 		{Symbol: "p.F", Operator: "op-a", Position: "f.go:5:5", Replacements: runnable}, // survivor
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:6:6", Replacements: runnable}, // recorded discard
 	}}
 	rec := Finding{
-		CandidateCount: 5, Generated: 5, Killed: 4, Mutants: 5,
+		CandidateCount: 6, Generated: 6, Killed: 4, Mutants: 5, Discarded: 1,
 		Kills: []Kill{
 			{Position: "f.go:1:1", Operator: "op-a", Killer: "p.TestSteady"},
 			{Position: "f.go:2:2", Operator: "op-a", Killer: "p.TestMoved"},
@@ -205,9 +209,9 @@ func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 		},
 		Survivors: []Survivor{{Position: "f.go:5:5", Operator: "op-a"}},
 	}
-	remeasure, stand, ok := driftRemeasureIndexes(generation, rec, []string{"p.TestMoved"})
-	if !ok || stand != 1 {
-		t.Fatalf("remeasure=%v stand=%d ok=%v, want ok with 1 standing kill", remeasure, stand, ok)
+	remeasure, stand, flagged, ok := driftRemeasureIndexes(generation, rec, []string{"p.TestMoved"}, nil)
+	if !ok || stand != 1 || flagged != 0 {
+		t.Fatalf("remeasure=%v stand=%d flagged=%d ok=%v, want ok with 1 standing kill", remeasure, stand, flagged, ok)
 	}
 	wantIndexes := map[int]bool{1: true, 2: true, 3: true, 4: true}
 	if len(remeasure) != len(wantIndexes) {
@@ -221,17 +225,49 @@ func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 
 	// Nothing moved: no oracle's behavior changed, so survivals stand
 	// exactly like kills and nothing re-measures.
-	remeasure, stand, ok = driftRemeasureIndexes(generation, rec, nil)
-	if !ok || stand != 4 || len(remeasure) != 0 {
+	remeasure, stand, flagged, ok = driftRemeasureIndexes(generation, rec, nil, nil)
+	if !ok || stand != 4 || flagged != 0 || len(remeasure) != 0 {
 		t.Fatalf("no-movement remeasure=%v stand=%d ok=%v, want nothing re-measured", remeasure, stand, ok)
+	}
+
+	// The set grew with nothing moved: every kill stands — the set-wide
+	// kills too, a purely grown oracle only extends the recorded set's
+	// behavior — and every survivor re-measures (an added test may kill
+	// it).
+	remeasure, stand, flagged, ok = driftRemeasureIndexes(generation, rec, nil, []string{"p.TestNew"})
+	if !ok || stand != 4 || flagged != 0 || len(remeasure) != 1 || !remeasure[4] {
+		t.Fatalf("grown-set remeasure=%v stand=%d ok=%v, want only the survivor re-measured", remeasure, stand, ok)
+	}
+
+	// Candidate evidence composes: the flagged kill re-executes even with
+	// its killer unmoved, the flagged discard re-executes — the evidence
+	// loop is its ONLY route into the re-measure set — and the standing
+	// count drops accordingly.
+	evidenced := rec
+	evidenced.CandidateEvidence = []CandidateEvidence{
+		{Position: "f.go:1:1", Operator: "op-a", Reason: "runtime inputs unverifiable", Disposition: "killed"},
+		{Position: "f.go:6:6", Operator: "op-a", Reason: "mutant test process timed out", Disposition: "discarded"},
+	}
+	remeasure, stand, flagged, ok = driftRemeasureIndexes(generation, evidenced, nil, nil)
+	if !ok || stand != 3 || flagged != 2 || len(remeasure) != 2 || !remeasure[0] || !remeasure[5] {
+		t.Fatalf("flagged remeasure=%v stand=%d flagged=%d ok=%v, want the flagged kill and discard re-executed", remeasure, stand, flagged, ok)
 	}
 
 	// A kill regeneration cannot re-identify refuses the serve.
 	misplaced := rec
 	misplaced.Kills = append([]Kill(nil), rec.Kills...)
 	misplaced.Kills[0].Position = "f.go:9:9"
-	if _, _, ok := driftRemeasureIndexes(generation, misplaced, nil); ok {
+	if _, _, _, ok := driftRemeasureIndexes(generation, misplaced, nil, nil); ok {
 		t.Fatalf("unidentifiable kill served under drift")
+	}
+
+	// A flagged identity regeneration cannot re-identify refuses too.
+	strayEvidence := rec
+	strayEvidence.CandidateEvidence = []CandidateEvidence{
+		{Position: "f.go:9:9", Operator: "op-a", Reason: "runtime inputs unverifiable", Disposition: "killed"},
+	}
+	if _, _, _, ok := driftRemeasureIndexes(generation, strayEvidence, nil, nil); ok {
+		t.Fatalf("unidentifiable flagged candidate served under drift")
 	}
 }
 
@@ -270,9 +306,12 @@ func TestDriftFindingCountsRescoresRemeasured(t *testing.T) {
 			{Position: "f.go:4:4", Operator: "op-b", Reason: "still equivalent"},
 		},
 	}
-	remeasured := map[int]bool{1: true, 2: true, 3: true}
-	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantKilled, engine.MutantSurvived, 0, 0}
+	remeasured := map[int]bool{1: true, 2: true, 3: true, 4: true}
+	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantKilled, engine.MutantSurvived, engine.MutantDiscarded, 0}
 	killers := []string{"", "", "p.TestMoved", "", "", ""}
+	// Index 4 is a recorded discard re-executing through the
+	// candidate-evidence composition; it discards again, conserving its
+	// recorded disposition through a fresh execution.
 	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, outcomes, killers, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -573,5 +612,442 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 	}
 	if len(rootDecisions) != 1 || !strings.HasPrefix(rootDecisions[0].Reason, "stale: ") || len(rootDispatched) != prior[0].Generated {
 		t.Fatalf("unconditional-root delta = %+v dispatching %d, want a whole re-measure", rootDecisions, len(rootDispatched))
+	}
+}
+
+// The generalized drift gate: a removed oracle identity stays the general
+// rule's domain, a grown set under an explicit oracle on either side is the
+// caller's selection, and incomplete kill attribution refuses — each before
+// any evidence check. Candidate evidence no longer disqualifies at the gate;
+// it composes downstream as re-executed flagged candidates
+// (REQ-result-stale's killer-drift carve-out).
+func TestEvidenceSetCoversKillerDriftEarlyGate(t *testing.T) {
+	ledger := &CompartmentLedger{}
+	base := Finding{
+		OperatorSet: "go/12", OracleTimeout: "1m0s", CompartmentLedger: ledger,
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.TestA"}, {Symbol: "p.TestB"}},
+	}
+	ctx := context.Background()
+	for name, tc := range map[string]struct {
+		prior    Finding
+		oracle   []*subjectView
+		explicit bool
+	}{
+		"removed oracle identity": {prior: base, oracle: make([]*subjectView, 1)},
+		"grown set under an explicit oracle": {prior: func() Finding { f := base; f.OracleExplicit = true; return f }(),
+			oracle: make([]*subjectView, 3), explicit: true},
+		"incomplete kill attribution": {prior: func() Finding {
+			f := base
+			f.Killed = 2
+			f.Kills = []Kill{{Position: "f.go:1:1", Operator: "op", Killer: "p.TestA"}}
+			return f
+		}(), oracle: make([]*subjectView, 2)},
+		"missing ledger": {prior: func() Finding { f := base; f.CompartmentLedger = nil; return f }(),
+			oracle: make([]*subjectView, 2)},
+		"duplicated current oracle": {prior: base, oracle: func() []*subjectView {
+			a := &subjectView{symbol: "p.TestA"}
+			return []*subjectView{a, a}
+		}()},
+		// Under a mutant that admits this row past the gate, the nil
+		// TARGET view panics at the ledger read — a deterministic kill;
+		// the clean pass proves the refusal precedes every view read.
+		"ghost killer": {prior: func() Finding {
+			f := base
+			f.Killed = 1
+			f.Kills = []Kill{{Position: "f.go:1:1", Operator: "op", Killer: "p.TestVanished"}}
+			return f
+		}(), oracle: []*subjectView{{symbol: "p.TestA"}, {symbol: "p.TestB"}}},
+	} {
+		// The head pins the explicit flags equal, so the grown-explicit
+		// refusal is exercised with both sides explicit — the only state
+		// the pin admits.
+		moved, added, ok, err := evidenceSetCoversKillerDriftContext(ctx, tc.prior, nil, tc.oracle, tc.explicit, "go/12", "1m0s", 0, "")
+		if err != nil || ok || moved != nil || added != nil {
+			t.Fatalf("%s: drift gate = %v %v %v %v, want a refusal before any evidence check", name, moved, added, ok, err)
+		}
+	}
+}
+
+// TestRunServesGrownAndDriftedComposition pins the generalized carve-out end
+// to end (REQ-result-stale): one round both ADDS a test and CHANGES a helper
+// — the strengthen-loop's usual shape — while the record carries flagged
+// candidate evidence. Kills keyed to the unmoved oracle stand; the moved
+// oracle's kills, every survivor (the added test may kill one — and provably
+// does), and the flagged candidate re-execute against the full current
+// oracle; the added test's fresh kill lands attributed; the decision names
+// the standing kills, the growth, and the flagged re-execution.
+func TestRunServesGrownAndDriftedComposition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the oracle per mutant")
+	}
+	dir := t.TempDir()
+	const testSource = "package gated\n\nimport \"testing\"\n\nfunc sink(v int) int {\n\treturn v\n}\n\nfunc TestSmall(t *testing.T) {\n\tif Gated(5) != 6 {\n\t\tt.Fail()\n\t}\n}\n\nfunc TestAux(t *testing.T) {\n\tif sink(Gated(200)) != 603 {\n\t\tt.Fail()\n\t}\n}\n"
+	files := map[string]string{
+		"go.mod":        "module example.com/composed\n\ngo 1.26\n",
+		"gated.go":      "package gated\n\nfunc Gated(x int) int {\n\ty := x + 1\n\tif y > 100 {\n\t\treturn y * 3\n\t}\n\treturn y\n}\n",
+		"gated_test.go": testSource,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "example.com/composed.Gated"}
+	first, err := tr.Run(ctx, []Target{target}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := first[0]
+	if f.Killed == 0 || len(f.Kills) != f.Killed || f.CompartmentLedger == nil {
+		t.Fatalf("baseline fixture = %+v, want attributed kills and a ledger", f)
+	}
+	// The boundary mutant at y > 100 survives round one: neither test
+	// crosses at y == 100 exactly, and only the added test's Gated(99)
+	// discriminates > from >=.
+	boundary := Survivor{}
+	for _, s := range f.Survivors {
+		if s.Operator == "relational boundary: > -> >=" {
+			boundary = s
+			break
+		}
+	}
+	if boundary.Position == "" {
+		t.Fatalf("fixture survivors = %+v, want the > -> >= boundary mutant open so growth has a provable kill", f.Survivors)
+	}
+	auxKills, smallKills, setWide := 0, 0, 0
+	for _, kill := range f.Kills {
+		switch kill.Killer {
+		case "example.com/composed.TestAux":
+			auxKills++
+		case "example.com/composed.TestSmall":
+			smallKills++
+		default:
+			setWide++
+		}
+	}
+	if auxKills == 0 || smallKills == 0 {
+		t.Fatalf("fixture kills = %+v, want both oracles attributed so the split has teeth", f.Kills)
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Flag one unmoved-killer kill with candidate evidence: the composition
+	// must re-execute it rather than refuse the whole record.
+	var flaggedKill Kill
+	for _, kill := range prior[0].Kills {
+		if kill.Killer == "example.com/composed.TestSmall" {
+			flaggedKill = kill
+			break
+		}
+	}
+	prior[0].CandidateEvidence = []CandidateEvidence{{
+		Position: flaggedKill.Position, Operator: flaggedKill.Operator,
+		Reason: "mutant test process exited before observation finalization", Disposition: "killed",
+	}}
+
+	// The composed round: the helper only TestAux reaches changes, and
+	// TestExtra is added.
+	changed := strings.Replace(testSource, "return v\n", "w := v\n\treturn w\n", 1) +
+		"\nfunc TestExtra(t *testing.T) {\n\tif Gated(99) != 100 {\n\t\tt.Fail()\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	composedTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	var dispatched []int
+	composed, err := composedTree.Run(ctx, []Target{target}, Options{
+		Prior:      prior,
+		Decision:   func(d RunDecision) { decisions = append(decisions, d) },
+		dispatched: func(_ string, mi int) { dispatched = append(dispatched, mi) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	remeasured := len(prior[0].Survivors) + auxKills + setWide + 1 // + the flagged unmoved-killer kill
+	stand := smallKills - 1
+	wantReason := fmt.Sprintf(
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test); 1 candidate re-executes flagged evidence",
+		killNoun(stand), candidateNoun(remeasured))
+	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != remeasured {
+		t.Fatalf("composed decision = %+v, want %q over %d candidates", decisions, wantReason, remeasured)
+	}
+	if len(dispatched) != remeasured {
+		t.Fatalf("dispatched %d candidates, want exactly the %d re-measured", len(dispatched), remeasured)
+	}
+	cf := composed[0]
+	if cf.Cached {
+		t.Fatal("composed serve marked cached; it measured")
+	}
+	if len(cf.Kills) != cf.Killed {
+		t.Fatalf("composed record persisted %d attributions for %d kills", len(cf.Kills), cf.Killed)
+	}
+	// The added test's provable kill: the boundary survivor died to
+	// TestExtra, attributed like any fresh kill.
+	boundaryKilled := false
+	for _, kill := range cf.Kills {
+		if kill.Position == boundary.Position && kill.Operator == boundary.Operator {
+			boundaryKilled = true
+			if kill.Killer != "example.com/composed.TestExtra" {
+				t.Fatalf("boundary kill attributed to %s, want the added test", kill.Killer)
+			}
+		}
+	}
+	if !boundaryKilled {
+		t.Fatalf("the added test's provable kill did not land: kills=%+v survivors=%+v", cf.Kills, cf.Survivors)
+	}
+	// The flagged kill re-executed and re-killed; its evidence is replaced
+	// by the fresh execution's.
+	flaggedStillKilled := false
+	for _, kill := range cf.Kills {
+		if kill.Position == flaggedKill.Position && kill.Operator == flaggedKill.Operator {
+			flaggedStillKilled = true
+		}
+	}
+	if !flaggedStillKilled {
+		t.Fatalf("the flagged kill vanished: %+v", cf.Kills)
+	}
+	for _, evidence := range cf.CandidateEvidence {
+		if evidence.Reason == "mutant test process exited before observation finalization" {
+			t.Fatalf("stale flagged evidence survived the re-execution: %+v", cf.CandidateEvidence)
+		}
+	}
+
+	// A record whose oracle-evidence list lost a row (a hand edit, a bad
+	// merge) must refuse: the absent oracle still exists and CHANGED in
+	// this very delta — classifying it "added" would exempt it from the
+	// walk and let recorded outcomes stand on a moved ground. The delta's
+	// own Added list is the authority on what growth composed; the
+	// record's evidence list is not an identity oracle. The tamper
+	// relabels the dropped oracle's kills onto the surviving one so the
+	// ghost-killer refusal cannot mask this guard — the dropped-row state
+	// must refuse on the delta authority itself.
+	tampered, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := tampered[0].OracleEvidence[:0]
+	for _, evidence := range tampered[0].OracleEvidence {
+		if evidence.Symbol != "example.com/composed.TestAux" {
+			kept = append(kept, evidence)
+		}
+	}
+	if len(kept) != len(tampered[0].OracleEvidence)-1 {
+		t.Fatal("setup: the tampered record did not drop exactly TestAux's evidence row")
+	}
+	tampered[0].OracleEvidence = kept
+	relabeled := append([]Kill(nil), tampered[0].Kills...)
+	for i := range relabeled {
+		if relabeled[i].Killer == "example.com/composed.TestAux" {
+			relabeled[i].Killer = "example.com/composed.TestSmall"
+		}
+	}
+	tampered[0].Kills = relabeled
+	tampered[0].CandidateEvidence = nil
+	decisions = nil
+	if _, err := composedTree.Run(ctx, []Target{target}, Options{
+		Prior:    tampered,
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || strings.HasPrefix(decisions[0].Reason, "served:") {
+		t.Fatalf("dropped-evidence-row decision = %+v, want a whole re-measure, never a serve", decisions)
+	}
+
+	// A same-length oracle SWAP — a killer renamed — is a removal even
+	// though the set sizes match: the recorded killer's evidence names an
+	// oracle the current set no longer carries, and serving its kills as
+	// "unmoved" would let a vanished test's kills stand (the flattering
+	// direction). The whole target re-measures instead.
+	renamed := strings.Replace(changed, "func TestAux(", "func TestAuxRenamed(", 1)
+	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(renamed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	renamedTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions = nil
+	renamedFindings, err := renamedTree.Run(ctx, []Target{target}, Options{
+		Prior:    composed,
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "measure" || strings.HasPrefix(decisions[0].Reason, "served:") {
+		t.Fatalf("renamed-killer decision = %+v, want a whole re-measure, never a serve", decisions)
+	}
+	if decisions[0].Candidates != renamedFindings[0].Generated {
+		t.Fatalf("renamed-killer re-measured %d of %d candidates, want the whole target", decisions[0].Candidates, renamedFindings[0].Generated)
+	}
+}
+
+// TestRunDriftAddedOnlyServesKillsAndBucketsSurvivors pins the moved-empty,
+// grown-set shape: a changed helper NO recorded oracle reaches plus an added
+// test. Every kill stands — set-wide included — every survivor re-measures
+// against the current oracle (the added test provably kills one), and the
+// re-measured survivors' advisory buckets re-derive from the current probe
+// (REQ-result-stale's killer-drift carve-out).
+func TestRunDriftAddedOnlyServesKillsAndBucketsSurvivors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the oracle per mutant")
+	}
+	dir := t.TempDir()
+	const testSource = "package gated\n\nimport \"testing\"\n\nfunc spare(v int) int {\n\treturn v\n}\n\nfunc TestSmall(t *testing.T) {\n\tif Gated(5) != 6 {\n\t\tt.Fail()\n\t}\n}\n\nfunc TestAux(t *testing.T) {\n\tif Gated(200) != 603 {\n\t\tt.Fail()\n\t}\n}\n"
+	files := map[string]string{
+		"go.mod":        "module example.com/addedonly\n\ngo 1.26\n",
+		"gated.go":      "package gated\n\nfunc Gated(x int) int {\n\ty := x + 1\n\tif y > 100 {\n\t\treturn y * 3\n\t}\n\treturn y\n}\n",
+		"gated_test.go": testSource,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "example.com/addedonly.Gated"}
+	first, err := tr.Run(ctx, []Target{target}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := first[0]
+	if f.Killed == 0 || len(f.Kills) != f.Killed || len(f.Survivors) == 0 {
+		t.Fatalf("baseline fixture = %+v, want attributed kills and survivors", f)
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Change the helper neither test references, and add the
+	// boundary-discriminating test.
+	changed := strings.Replace(testSource, "return v\n", "w := v\n\treturn w\n", 1) +
+		"\nfunc TestExtra(t *testing.T) {\n\tif Gated(99) != 100 {\n\t\tt.Fail()\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grownTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	grown, err := grownTree.Run(ctx, []Target{target}, Options{
+		Prior:    prior,
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReason := fmt.Sprintf(
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test)",
+		killNoun(prior[0].Killed), candidateNoun(len(prior[0].Survivors)))
+	if len(decisions) != 1 || decisions[0].Reason != wantReason {
+		t.Fatalf("added-only decision = %+v, want %q", decisions, wantReason)
+	}
+	gf := grown[0]
+	extraKilled := false
+	for _, kill := range gf.Kills {
+		if kill.Killer == "example.com/addedonly.TestExtra" {
+			extraKilled = true
+		}
+	}
+	if !extraKilled {
+		t.Fatalf("the added test killed nothing: kills=%+v survivors=%+v", gf.Kills, gf.Survivors)
+	}
+	if gf.TargetEvidence.RuntimeUnverifiable {
+		t.Fatalf("added-only serve landed non-reusable: %+v", gf.TargetEvidence)
+	}
+	for _, survivor := range gf.Survivors {
+		if survivor.Execution == "" {
+			t.Fatalf("re-measured survivor %s %s carries no advisory bucket — the grown re-measure must re-derive them", survivor.Position, survivor.Operator)
+		}
+	}
+}
+
+// TestRunDriftGrownFullyKilledRecordKeepsGrowthWording pins the decision
+// wording on the empty re-measure set that is NOT a no-reach serve: a
+// fully-killed record, a helper delta no oracle reaches, and an added test
+// leave nothing to re-measure — yet the set grew, and the decision must say
+// so rather than claim "reaches no recorded oracle"
+// (REQ-result-stale's killer-drift carve-out).
+func TestRunDriftGrownFullyKilledRecordKeepsGrowthWording(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the oracle per mutant")
+	}
+	dir := t.TempDir()
+	const testSource = "package tiny\n\nimport \"testing\"\n\nfunc spare(v int) int {\n\treturn v\n}\n\nfunc TestOne(t *testing.T) {\n\tif Tiny(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n\nfunc TestTwo(t *testing.T) {\n\tif Tiny(-3) != -2 {\n\t\tt.Fail()\n\t}\n}\n"
+	files := map[string]string{
+		"go.mod":       "module example.com/tinyfixture\n\ngo 1.26\n",
+		"tiny.go":      "package tiny\n\nfunc Tiny(x int) int {\n\treturn x + 1\n}\n",
+		"tiny_test.go": testSource,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "example.com/tinyfixture.Tiny"}
+	first, err := tr.Run(ctx, []Target{target}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first[0].Survivors) != 0 || first[0].Killed == 0 {
+		t.Fatalf("fixture = %+v, want a fully-killed record so the re-measure set is empty", first[0])
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(testSource, "return v\n", "w := v\n\treturn w\n", 1) +
+		"\nfunc TestMore(t *testing.T) {\n\tif Tiny(7) != 8 {\n\t\tt.Fail()\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "tiny_test.go"), []byte(changed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grownTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	if _, err := grownTree.Run(ctx, []Target{target}, Options{
+		Prior:    prior,
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wantReason := fmt.Sprintf(
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test)",
+		killNoun(prior[0].Killed), candidateNoun(0))
+	if len(decisions) != 1 || decisions[0].Reason != wantReason || decisions[0].Candidates != 0 {
+		t.Fatalf("fully-killed grown decision = %+v, want %q with nothing re-measured", decisions, wantReason)
 	}
 }

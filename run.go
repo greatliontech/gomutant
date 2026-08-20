@@ -632,14 +632,20 @@ type work struct {
 	// (REQ-result-stale): the target package's compartment moved by an
 	// attributable delta, driftMoved names the oracles whose evidence or
 	// reference walk observed it, and only the candidate indexes in
-	// driftRemeasure — every survivor, every kill whose killer moved, and
+	// driftRemeasure — every survivor when the set grew or anything moved
+	// (driftAdded names the current derived oracles with no recorded
+	// evidence: the grown-set composition, whose added tests join the
+	// re-measure oracle and cannot un-kill a standing kill), every
+	// candidate carrying recorded candidate evidence, every kill whose
+	// killer moved, and
 	// every timeout or package-scope kill when anything moved — re-execute
 	// against the full current oracle; kills keyed to unmoved oracles and
-	// all discards keep their recorded dispositions, and phase three
+	// unflagged discards keep their recorded dispositions, and phase three
 	// splices the fresh outcomes into the record under the current tree's
 	// evidence.
 	drift          *Finding
 	driftMoved     []string
+	driftAdded     []string
 	driftRemeasure map[int]bool
 }
 
@@ -1561,6 +1567,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		var growAdded []string
 		var drift *Finding
 		var driftMoved []string
+		var driftAdded []string
 		// refuseServeCheck is the serve block's target-local exit for a
 		// failed evidence check (serveCheckRefusal, any non-ctx error):
 		// the condition is this target's own, the campaign proceeds.
@@ -1595,19 +1602,21 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					snapshot := snapshotFindings([]Finding{*rec})[0]
 					grow = &snapshot
 					growAdded = added
-				} else if moved, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime); derr != nil {
+				} else if moved, addedOracles, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime); derr != nil {
 					if ctx.Err() != nil {
 						return nil, ctx.Err()
 					}
 					refuseServeCheck(serveCheckRefusal(derr))
 					return nil, nil
 				} else if drifts {
-					// The compartment moved but the movement is attributable:
-					// kills keyed to unmoved oracles stand, the rest
-					// re-measures (REQ-result-stale's killer-drift carve-out).
+					// The compartment moved but the movement is attributable
+					// (a grown set composing as added oracles): kills keyed
+					// to unmoved oracles stand, the rest re-measures
+					// (REQ-result-stale's killer-drift carve-out).
 					snapshot := snapshotFindings([]Finding{*rec})[0]
 					drift = &snapshot
 					driftMoved = moved
+					driftAdded = addedOracles
 				} else {
 					// The moved pin is named so a caller who just wrote
 					// kill-tests sees the tool noticing them instead of
@@ -1772,7 +1781,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err != nil {
 			return nil, err
 		}
-		item := work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, currentLedger: currentLedger, serve: serve, extend: extend, grow: grow, growAdded: growAdded, drift: drift, driftMoved: driftMoved}
+		item := work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, currentLedger: currentLedger, serve: serve, extend: extend, grow: grow, growAdded: growAdded, drift: drift, driftMoved: driftMoved, driftAdded: driftAdded}
 		w := &item
 		var decision RunDecision
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
@@ -1860,11 +1869,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 		if w.drift != nil {
-			if remeasure, stand, ok := driftRemeasureIndexes(generation, *w.drift, w.driftMoved); ok {
+			if remeasure, stand, flagged, ok := driftRemeasureIndexes(generation, *w.drift, w.driftMoved, w.driftAdded); ok {
 				w.candidates = generation.Candidates
 				w.driftRemeasure = remeasure
 				reason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle", killNoun(stand), candidateNoun(len(remeasure)))
-				if len(w.driftMoved) == 0 {
+				if len(w.driftAdded) != 0 {
+					reason += fmt.Sprintf(" (derived oracle grew by %s)", testNoun(len(w.driftAdded)))
+				}
+				if flagged != 0 {
+					reason += fmt.Sprintf("; %s re-execute%s flagged evidence", candidateNoun(flagged), map[bool]string{true: "s"}[flagged == 1])
+				}
+				if len(remeasure) == 0 && len(w.driftAdded) == 0 {
+					// Flagged evidence always re-measures, so an empty set
+					// here means nothing moved, nothing flagged, and — by
+					// the guard — nothing added: the no-reach serve. With
+					// added tests and an empty set (a fully-killed record),
+					// the grown wording above stands.
 					reason = "served: compartment delta reaches no recorded oracle; nothing re-measures"
 				}
 				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Candidates: len(remeasure)}
@@ -2224,10 +2244,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				if window[wi].drift != nil && !window[wi].driftRemeasure[mi] {
 					// A drifted record's kills keyed to unmoved oracles and its
-					// discards stand; only moved-killer kills, set-wide kills
-					// under any movement, and survivors re-execute, against the
-					// full current oracle (REQ-result-stale's killer-drift
-					// carve-out).
+					// unflagged discards stand; only moved-killer kills,
+					// set-wide kills under any movement, survivors under any
+					// movement or growth, and flagged candidates re-execute,
+					// against the full current oracle (REQ-result-stale's
+					// killer-drift carve-out).
 					continue
 				}
 				if opts.dispatched != nil {
@@ -2493,13 +2514,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
 					continue
 				}
-				// With any oracle moved, every surviving candidate was
-				// re-measured against the full current oracle, so advisory
-				// buckets re-derive from the current probe exactly as a
-				// fresh measure's do; a no-reach serve re-measured nothing
-				// and carries every recorded bucket verbatim, paying no
-				// coverage probe.
-				if len(w.driftMoved) != 0 && !unstableForBuckets(&spliced, opts.Exemptions) {
+				// With any oracle moved or the set grown, every surviving
+				// candidate was re-measured against the full current
+				// oracle, so advisory buckets re-derive from the current
+				// probe exactly as a fresh measure's do; a no-reach serve
+				// with nothing added re-measured nothing and carries every
+				// recorded bucket verbatim, paying no coverage probe.
+				if (len(w.driftMoved) != 0 || len(w.driftAdded) != 0) && !unstableForBuckets(&spliced, opts.Exemptions) {
 					if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
 						return err
 					}
@@ -3535,9 +3556,11 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 // standing candidate keeps its recorded one
 // (INV-RESULT-CANDIDATE-CONSERVATION). The kill list is rebuilt in candidate
 // order: standing kills carry their recorded killer, re-measured candidates
-// that die again (or a re-measured survivor a moved test now kills) record
-// their fresh killer. Survivors are rebuilt fresh — every recorded survivor
-// was re-measured against the full current oracle — classifying
+// that die again (or a re-measured survivor a moved or added test now kills)
+// record their fresh killer. A re-measured candidate neither killed nor
+// surviving is a recorded discard (a flagged one re-executing through the
+// candidate-evidence composition). Survivors are rebuilt fresh when
+// re-measured against the full current oracle, classifying
 // unstable-oracle when the spliced evidence landed non-reusable; a newly
 // killed attested survivor's attestation is shed and returned — evidence
 // beats attestation (REQ-attest-survivor).
@@ -3588,7 +3611,10 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 		case wasSurvivor:
 			recordedDisposition = "survived"
 		default:
-			return Finding{}, nil, fmt.Errorf("gomutant: drifted candidate %s %s has no recorded disposition", candidate.Position, candidate.Operator)
+			// Neither killed nor surviving is a recorded discard — reachable
+			// only through the candidate-evidence composition, whose flagged
+			// discards re-execute like the candidate-local splice's.
+			recordedDisposition = "discarded"
 		}
 		applyDisposition(&operators[i], recordedDisposition, -1)
 		disposition := outcomeDisposition(outcomes[mi])
@@ -3692,38 +3718,57 @@ func killNoun(n int) string { return countNoun(n, "kill") }
 
 // driftRemeasureIndexes deterministically re-identifies a drifted record's
 // candidates within the regenerated set and selects the re-measure set: every
-// recorded survivor, every kill whose recorded killer is a moved oracle, and
+// recorded survivor when any oracle moved or the derived set grew (an added
+// test may kill it; with nothing moved and nothing added, survivals stand
+// exactly like kills), every kill whose recorded killer is a moved oracle,
 // every timeout or package-scope kill when any oracle moved — those rest on
-// the whole recorded set's behavior. Kills keyed to unmoved oracles and all
+// the whole recorded set's behavior, which a purely grown set can only
+// extend — and every candidate carrying recorded candidate evidence (the
+// candidate-splice composition: flagged evidence re-executes rather than
+// disqualifying the record). Kills keyed to unmoved oracles and unflagged
 // discards stand. stand counts the standing kills for the decision line. Any
 // re-identification failure refuses the drift serve so the whole target
 // re-measures (REQ-result-stale's killer-drift carve-out).
-func driftRemeasureIndexes(generation engine.Generation, rec Finding, moved []string) (map[int]bool, int, bool) {
+func driftRemeasureIndexes(generation engine.Generation, rec Finding, moved, added []string) (map[int]bool, int, int, bool) {
 	if generation.CandidateCount != rec.CandidateCount || len(generation.Candidates) != rec.Generated {
-		return nil, 0, false
+		return nil, 0, 0, false
 	}
 	byIdentity, unique := candidateIdentityIndex(generation.Candidates)
 	if !unique {
-		return nil, 0, false
+		return nil, 0, 0, false
 	}
 	movedSet := make(map[string]bool, len(moved))
 	for _, symbol := range moved {
 		movedSet[symbol] = true
 	}
 	remeasure := map[int]bool{}
+	flagged := make(map[int]bool, len(rec.CandidateEvidence))
+	for _, evidence := range rec.CandidateEvidence {
+		i, ok := byIdentity[survivorKey{evidence.Position, evidence.Operator}]
+		if !ok {
+			return nil, 0, 0, false
+		}
+		if _, runnable := generation.Candidates[i].Mutant(); !runnable {
+			return nil, 0, 0, false
+		}
+		flagged[i] = true
+		remeasure[i] = true
+	}
+	survivorAt := make(map[int]bool, len(rec.Survivors))
 	for _, survivor := range rec.Survivors {
 		i, ok := byIdentity[survivorKey{survivor.Position, survivor.Operator}]
 		if !ok {
-			return nil, 0, false
+			return nil, 0, 0, false
 		}
-		if len(moved) == 0 {
-			// No oracle observed the delta, so no oracle's behavior moved:
-			// survivals stand exactly like kills and the whole record
-			// serves with nothing re-measured.
+		survivorAt[i] = true
+		if len(moved) == 0 && len(added) == 0 {
+			// No oracle observed the delta and none were added, so no
+			// oracle's behavior moved: survivals stand exactly like kills
+			// (a flagged survivor still re-executes through its evidence).
 			continue
 		}
 		if _, runnable := generation.Candidates[i].Mutant(); !runnable {
-			return nil, 0, false
+			return nil, 0, 0, false
 		}
 		remeasure[i] = true
 	}
@@ -3731,18 +3776,18 @@ func driftRemeasureIndexes(generation engine.Generation, rec Finding, moved []st
 	for _, kill := range rec.Kills {
 		i, ok := byIdentity[survivorKey{kill.Position, kill.Operator}]
 		if !ok {
-			return nil, 0, false
+			return nil, 0, 0, false
 		}
-		if remeasure[i] {
+		if survivorAt[i] {
 			// The identity is already a survivor's: a record naming one
 			// candidate both killed and surviving is corrupt (parse refuses
 			// persisted documents; an in-memory prior can still carry it).
-			return nil, 0, false
+			return nil, 0, 0, false
 		}
 		setWide := kill.Killer == TimeoutKiller || strings.HasPrefix(kill.Killer, PackageKillerPrefix)
-		if movedSet[kill.Killer] || (setWide && len(moved) != 0) {
+		if movedSet[kill.Killer] || (setWide && len(moved) != 0) || flagged[i] {
 			if _, runnable := generation.Candidates[i].Mutant(); !runnable {
-				return nil, 0, false
+				return nil, 0, 0, false
 			}
 			remeasure[i] = true
 			continue
@@ -3752,7 +3797,7 @@ func driftRemeasureIndexes(generation engine.Generation, rec Finding, moved []st
 		// source reproduces the recorded runnability.
 		stand++
 	}
-	return remeasure, stand, true
+	return remeasure, stand, len(flagged), true
 }
 
 // grownSurvivorIndexes deterministically re-identifies a grown record's
