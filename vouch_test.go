@@ -130,7 +130,8 @@ func TestCount(t *testing.T) {
 		return SubjectEvidence{Symbol: symbol, MaximalClosure: fp.MaximalClosure, TestVariantClosure: fp.TestVariantClosure,
 			Toolchain: fp.Guards.Toolchain, BuildConfig: fp.Guards.BuildConfig, ObservationAssertion: "caller assertion",
 			ObservationStrategy: "proof/v1", ObservationSubjectPackage: "example.com/vouchmut", ObservationSubjectSymbol: symbol,
-			ObservationObservable: true, ObservationEvidence: "proof", DynamicStateVouches: fp.DynamicStateVouches, RuntimeInputs: emptyManifest, RuntimeDigest: current.Digest}
+			ObservationObservable: true, ObservationEvidence: "proof", DynamicStateVouches: fp.DynamicStateVouches,
+			DynamicStateStrategy: fp.DynamicStateStrategy, RuntimeInputs: emptyManifest, RuntimeDigest: current.Digest}
 	}
 	finding := Finding{Symbol: "example.com/vouchmut.Count", BodyHash: "h", OperatorSet: engine.OperatorSet,
 		OracleTimeout: "1m0s", Commit: "abc",
@@ -284,5 +285,153 @@ func TestRunStampsTheResolvedMemoryPin(t *testing.T) {
 	}
 	if findings[0].OracleMemoryBytes != want {
 		t.Fatalf("stamped pin = %d, want the entry-resolved %d (mid-campaign flip leaked)", findings[0].OracleMemoryBytes, want)
+	}
+}
+
+// The recorded package-process discharges are audit metadata exactly
+// as the vouches: excluded from the attestation-pin comparison, so an
+// execution-mode change alone never sheds a disposition.
+//
+//gofresh:pure
+func TestAttestationPinsIgnoreRecordedPackageProcessDischarges(t *testing.T) {
+	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
+		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}}
+	discharged := base
+	discharged.TargetEvidence.PackageProcessDischarges = "a.example/wire.reg"
+	discharged.OracleEvidence = []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o", PackageProcessDischarges: "a.example/wire.reg"}}
+	if !sameAttestationPins(base, discharged) {
+		t.Fatal("a discharge-set change alone shed attestation pins")
+	}
+}
+
+// The package-process attestation is honest exactly when every oracle
+// symbol's package equals its target's — the pairing gate the run and
+// the record inspections share.
+//
+//gofresh:pure
+func TestPackageProcessAttestablePairing(t *testing.T) {
+	cases := []struct {
+		target string
+		oracle []string
+		want   bool
+	}{
+		{"example.com/mod/node.Host.Drain", []string{"example.com/mod/node.TestDrain"}, true},
+		{"example.com/mod/node.Host.Drain", []string{"example.com/mod/node.TestA", "example.com/mod/other.TestB"}, false},
+		{"example.com/mod/node.F", nil, true},
+		{"example.com/mod/v2.F", []string{"example.com/mod/v2.TestF"}, true},
+	}
+	for _, tc := range cases {
+		if got := packageProcessAttestable(tc.target, tc.oracle); got != tc.want {
+			t.Fatalf("attestable(%s, %v) = %v, want %v", tc.target, tc.oracle, got, tc.want)
+		}
+	}
+	f := Finding{Symbol: "example.com/mod/node.Host.Drain", OracleEvidence: []SubjectEvidence{
+		{Symbol: "example.com/mod/node.TestDrain"}, {Symbol: "example.com/mod/other.TestB"},
+	}}
+	if findingPackageProcessAttestable(f) {
+		t.Fatal("a cross-package oracle row read as attestable")
+	}
+}
+
+// TestRunRecordsPackageProcessDischarges pins the integration end to
+// end: a same-package derived-oracle run carries the package-process
+// attestation, its binary-scoped discharge lifts a linked armer's
+// downgrade, and the acceptance rides the evidence; an explicit
+// cross-package oracle drops the attestation for the run, and the
+// evidence carries no discharge.
+func TestRunRecordsPackageProcessDischarges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the oracle per mutant")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":            "module example.com/ppd\n\ngo 1.26\n",
+		"wire/wire.go":      "package wire\n\nvar reg func() int\n\nfunc Arm() func() {\n\treg = func() int { return 1 }\n\treturn func() { reg = nil }\n}\n\nfunc Armed() bool { return reg != nil }\n",
+		"wire/wire_test.go": "package wire\n\nimport \"testing\"\n\nfunc TestArmed(t *testing.T) {\n\tdisarm := Arm()\n\tdefer disarm()\n\tif !Armed() {\n\t\tt.Fail()\n\t}\n}\n",
+		"gated.go":          "package gated\n\nimport \"example.com/ppd/wire\"\n\nfunc Gated(x int) int {\n\tif wire.Armed() {\n\t\treturn x\n\t}\n\treturn x + 1\n}\n\nfunc Two(x int) int {\n\treturn x + 2\n}\n",
+		"gated_test.go":     "package gated\n\nimport \"testing\"\n\nfunc TestSmall(t *testing.T) {\n\tif Gated(5) != 6 {\n\t\tt.Fail()\n\t}\n\tif Two(5) != 7 {\n\t\tt.Fail()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attested, err := tr.Run(ctx, []Target{{Symbol: "example.com/ppd.Gated"}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := attested[0].TargetEvidence.PackageProcessDischarges; got != "example.com/ppd/wire.reg" {
+		t.Fatalf("attested run recorded discharges %q, want the linked armer's culprit lifted and on the evidence", got)
+	}
+	crossTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cross, err := crossTree.Run(ctx, []Target{{
+		Symbol: "example.com/ppd.Gated",
+		Oracle: []string{"example.com/ppd.TestSmall", "example.com/ppd/wire.TestArmed"}, OracleExplicit: true,
+	}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cross[0].Skipped != "" || cross[0].Generated == 0 {
+		t.Fatalf("cross-package run did not measure: skipped=%q generated=%d", cross[0].Skipped, cross[0].Generated)
+	}
+	if got := cross[0].TargetEvidence.PackageProcessDischarges; got != "" {
+		t.Fatalf("cross-package explicit oracle still recorded discharges %q — the pairing gate must drop the attestation", got)
+	}
+	// The semantics behind the strings: the attested record inspects
+	// current (the armer's downgrade lifted and recorded), the cross
+	// record unverifiable naming the armer's culprit — so a gofresh
+	// change that kept emitting the discharge string while dropping the
+	// lift would fail here, not silently pass.
+	attestedInspection, err := crossTree.InspectFindingContext(ctx, attested[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attestedInspection.State != FindingCurrent {
+		t.Fatalf("attested record inspects %v (%s), want current under the recorded discharge", attestedInspection.State, attestedInspection.Reason)
+	}
+	crossInspection, err := crossTree.InspectFindingContext(ctx, cross[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if crossInspection.State != FindingUnverifiable || !strings.Contains(crossInspection.Reason, "example.com/ppd/wire.reg") {
+		t.Fatalf("cross record inspects %v (%s), want unverifiable naming the armer's culprit", crossInspection.State, crossInspection.Reason)
+	}
+
+	// A MIXED run: the attestation is per target, so a cross-package
+	// sibling in the same run never strips a same-package target's
+	// discharge — the run builds one engine and view set per mode.
+	mixedTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mixed, err := mixedTree.Run(ctx, []Target{
+		{Symbol: "example.com/ppd.Two"},
+		{Symbol: "example.com/ppd.Gated",
+			Oracle: []string{"example.com/ppd.TestSmall", "example.com/ppd/wire.TestArmed"}, OracleExplicit: true},
+	}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bySymbol := map[string]Finding{}
+	for _, f := range mixed {
+		bySymbol[f.Symbol] = f
+	}
+	if got := bySymbol["example.com/ppd.Two"].TargetEvidence.PackageProcessDischarges; got != "example.com/ppd/wire.reg" {
+		t.Fatalf("mixed run: the attested target recorded discharges %q — a cross-package sibling stripped a per-target attestation", got)
+	}
+	if got := bySymbol["example.com/ppd.Gated"].TargetEvidence.PackageProcessDischarges; got != "" {
+		t.Fatalf("mixed run: the cross target recorded discharges %q", got)
 	}
 }

@@ -11,3 +11,4 @@ is deleted (git holds history).
 | [planonly-gatherwindow-suite-hang](planonly-gatherwindow-suite-hang.md) | when the hang reproduces with a mechanism-showing dump, or with the next Tree.Run work-window change |
 | fold-growth-into-generalized-drift | growth is a strict special case of generalized drift; fold and generalize the survivor-delta narrowing | with consolidate-reidentification-and-bucket-policy |
 | consolidate-reidentification-and-bucket-policy | one re-identification helper, one advisory-bucket policy across the serve carve-outs | with fold-growth-into-generalized-drift |
+| [symbol-cutter-duality](symbol-cutter-duality.md) | two symbol cutters over one grammar, relationship unstated | with the next change touching either cutter's callers |

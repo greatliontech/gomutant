@@ -18,7 +18,7 @@ import (
 
 func observedSubjectViews(t *testing.T, tree *Tree, symbols []string) *subjectViewSet {
 	t.Helper()
-	views, err := tree.newSubjectViewsWithPackageContext(context.Background(), symbols, tree.eng.PackageContextContext, true, tree.newSubjectEngines(nil))
+	views, err := tree.newSubjectViewsWithPackageContext(context.Background(), symbols, tree.eng.PackageContextContext, true, tree.newSubjectEngines(nil, false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestSubjectViewsBatchByModule(t *testing.T) {
 		"example.com/fixture/lib.TestAdd",
 		"example.com/fixture/methods.Counter.Inc",
 	}
-	views, err := tr.newSubjectViews(context.Background(), symbols)
+	views, err := tr.newSubjectViews(context.Background(), symbols, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestSubjectViewsPartitionWorkspaceModules(t *testing.T) {
 		"example.com/ws/sub.Nested",
 		"example.com/ws/sub.TestNested",
 	}
-	views, err := tree.newSubjectViews(context.Background(), symbols)
+	views, err := tree.newSubjectViews(context.Background(), symbols, false)
 	if err != nil {
 		t.Fatal(err)
 	}

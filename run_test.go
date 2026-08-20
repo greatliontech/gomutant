@@ -2316,7 +2316,7 @@ func TestGrowthGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	}
 	views, err := grown.newSubjectViews(context.Background(), []string{
 		"example.com/growthgate.Value", "example.com/growthgate.TestSmall", "example.com/growthgate.TestMore",
-	})
+	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3664,7 +3664,7 @@ func TestStrictViewBuildRefusesUnresolvableSymbol(t *testing.T) {
 		t.Skip("builds views")
 	}
 	tr := fixtureTree(t)
-	if _, err := tr.newSubjectViews(context.Background(), []string{"example.com/fixture/nosuchpackage.F"}); err == nil {
+	if _, err := tr.newSubjectViews(context.Background(), []string{"example.com/fixture/nosuchpackage.F"}, false); err == nil {
 		t.Fatal("strict view build tolerated an unresolvable symbol, want refusal")
 	}
 }

@@ -59,6 +59,22 @@ type SubjectEvidence struct {
 	// here, and the field rides the current document version (an old
 	// reader dropping it changes no verdict).
 	DynamicStateVouches string `json:"dynamicStateVouches,omitempty"`
+	// PackageProcessDischarges names the package-level variables whose
+	// shared-dynamic-state downgrade the package-process attestation's
+	// binary-scoped reachability judgment discharged for this subject
+	// (gofresh REQ-closure-shared-dynamic-state). An attestation-borne
+	// acceptance riding the evidence — audit metadata exactly as
+	// DynamicStateVouches: excluded from the attestation-pin
+	// comparison (verdicts re-derive from current facts, so serving
+	// soundness never rests on the recorded field).
+	PackageProcessDischarges string `json:"packageProcessDischarges,omitempty"`
+	// DynamicStateStrategy records the shared-dynamic-state derivation
+	// the evidence was computed under (gofresh's structural twin of the
+	// observation strategy): a strategy move — or a record predating
+	// the field — re-measures at the evidence check rather than serving
+	// verdicts under semantics it was not computed by. A measured pin,
+	// never zeroed from the attestation-pin view.
+	DynamicStateStrategy string `json:"dynamicStateStrategy,omitempty"`
 	// ModuleBase is the subject module's tree-relative slash base ("" =
 	// the tree root): manifest identities are module-relative, and the
 	// store has no views at write time, so committability resolves each
@@ -88,6 +104,8 @@ func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtim
 		ObservationEvidence:       fp.ObservationProof.Evidence,
 		PurityAssertion:           fp.PurityAssertion,
 		DynamicStateVouches:       fp.DynamicStateVouches,
+		PackageProcessDischarges:  fp.PackageProcessDischarges,
+		DynamicStateStrategy:      fp.DynamicStateStrategy,
 		RuntimeInputs:             fp.RuntimeInputs,
 		RuntimeDigest:             fp.RuntimeDigest,
 		RuntimeUnverifiable:       state.Unverifiable,
@@ -97,12 +115,14 @@ func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtim
 
 func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
 	return gofresh.Fingerprint{
-		MaximalClosure:       e.MaximalClosure,
-		TestVariantClosure:   e.TestVariantClosure,
-		Guards:               guard.Guards{Toolchain: e.Toolchain, BuildConfig: e.BuildConfig},
-		PurityAssertion:      e.PurityAssertion,
-		DynamicStateVouches:  e.DynamicStateVouches,
-		ObservationAssertion: e.ObservationAssertion,
+		MaximalClosure:           e.MaximalClosure,
+		TestVariantClosure:       e.TestVariantClosure,
+		Guards:                   guard.Guards{Toolchain: e.Toolchain, BuildConfig: e.BuildConfig},
+		PurityAssertion:          e.PurityAssertion,
+		DynamicStateVouches:      e.DynamicStateVouches,
+		PackageProcessDischarges: e.PackageProcessDischarges,
+		DynamicStateStrategy:     e.DynamicStateStrategy,
+		ObservationAssertion:     e.ObservationAssertion,
 		ObservationProof: gofresh.ObservationProof{
 			Strategy:   e.ObservationStrategy,
 			Subject:    gofresh.Subject{Package: e.ObservationSubjectPackage, Symbol: e.ObservationSubjectSymbol},
@@ -304,9 +324,9 @@ type Finding struct {
 
 	// The pins (REQ-result-stale): any moved pin re-measures the whole
 	// target.
-	BodyHash       string            `json:"bodyHash"`
-	OperatorSet    string            `json:"operatorSet"`
-	Budget         int               `json:"budget"`
+	BodyHash    string `json:"bodyHash"`
+	OperatorSet string `json:"operatorSet"`
+	Budget      int    `json:"budget"`
 	// Shape records a shaped target's declared form
 	// (REQ-target-structural, REQ-target-manual-recipes): identity and
 	// audit, with the shape digest riding BodyHash as the pin. A shaped
@@ -510,7 +530,14 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // detached and destroy the records - the same destruction class the
 // version-8 boundary refuses - and its serving would compare a zero
 // target-evidence row as if it were measured symbol evidence.
-const DocumentVersion = 9
+// Version 10 introduced the dynamic-state strategy pin on every
+// subject's evidence: the field is what stales a record across a
+// dynamic-state derivation move, so an older consumer's tolerance
+// would have dropped the pin and served verdicts computed under
+// semantics its engine does not implement. The package-process
+// discharge field landed beside it WITHOUT narrowing reuse (an audit
+// acceptance, the vouches' class) and needed no boundary of its own.
+const DocumentVersion = 10
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale
@@ -924,6 +951,9 @@ var subjectEvidenceFields = []struct {
 	{"observationReason", false, nil},
 	{"observationEvidence", true, func(e SubjectEvidence) string { return e.ObservationEvidence }},
 	{"purityAssertion", false, nil},
+	{"dynamicStateVouches", false, nil},
+	{"packageProcessDischarges", false, nil},
+	{"dynamicStateStrategy", false, nil},
 	{"moduleBase", false, nil},
 	{"runtimeInputs", true, func(e SubjectEvidence) string { return e.RuntimeInputs }},
 	{"runtimeDigest", true, func(e SubjectEvidence) string { return e.RuntimeDigest }},
@@ -1091,7 +1121,7 @@ func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget
 		return false, err
 	}
 	symbols := append([]string{tg.Symbol}, oracle...)
-	views, err := t.newSubjectViews(ctx, symbols)
+	views, err := t.newSubjectViews(ctx, symbols, packageProcessAttestable(tg.Symbol, oracle))
 	if err != nil {
 		return false, err
 	}

@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/greatliontech/glob v0.1.0
-	github.com/greatliontech/gofresh v0.78.0
+	github.com/greatliontech/gofresh v0.80.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9

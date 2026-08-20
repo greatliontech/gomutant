@@ -92,12 +92,22 @@ type subjectEngines struct {
 	evidenceEnv []string
 	vouches     []string
 	progress    func(phase, pkg string)
-	byDir       map[string]*gofresh.Engine
+	// packageProcess carries the package-process attestation
+	// (gofresh WithPackageProcessExecution) for the engines this set
+	// builds, fixed at construction: gomutant runs every oracle as
+	// `go test` of the oracle packages, and the processes that
+	// ATTRIBUTE a subject's verdicts are exactly its own target's
+	// oracle-package binaries — so the attestation is honest per
+	// target when that target's oracle packages equal its own, and a
+	// mixed run builds one engine set per mode rather than flipping a
+	// shared flag.
+	packageProcess bool
+	byDir          map[string]*gofresh.Engine
 }
 
-func (t *Tree) newSubjectEngines(progress func(phase, pkg string)) *subjectEngines {
+func (t *Tree) newSubjectEngines(progress func(phase, pkg string), packageProcess bool) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, progress: progress, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, progress: progress, packageProcess: packageProcess, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
@@ -105,6 +115,9 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 		return engine, nil
 	}
 	opts := []gofresh.Option{gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...)}
+	if e.packageProcess {
+		opts = append(opts, gofresh.WithPackageProcessExecution())
+	}
 	if len(e.vouches) > 0 {
 		opts = append(opts, gofresh.WithDynamicStateVouches(e.vouches...))
 	}
@@ -120,8 +133,45 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	return engine, nil
 }
 
-func (t *Tree) newSubjectViews(ctx context.Context, symbols []string) (*subjectViewSet, error) {
-	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil))
+// symbolPackage cuts a subject symbol's package path: the first dot
+// after the last slash bounds the path — a plain function's name and a
+// method's Type.Method spelling alike follow it.
+func symbolPackage(symbol string) string {
+	slash := strings.LastIndex(symbol, "/")
+	dot := strings.Index(symbol[slash+1:], ".")
+	if dot < 0 {
+		return symbol
+	}
+	return symbol[:slash+1+dot]
+}
+
+// packageProcessAttestable reports whether a target's measurement
+// processes are its own package's test binary: every oracle symbol's
+// package equals the target's (gofresh WithPackageProcessExecution's
+// honesty condition — gomutant runs oracles as `go test` of the oracle
+// packages).
+func packageProcessAttestable(targetSymbol string, oracle []string) bool {
+	targetPkg := symbolPackage(targetSymbol)
+	for _, symbol := range oracle {
+		if symbolPackage(symbol) != targetPkg {
+			return false
+		}
+	}
+	return true
+}
+
+// findingPackageProcessAttestable is packageProcessAttestable over a
+// record's evidence rows.
+func findingPackageProcessAttestable(f Finding) bool {
+	oracle := make([]string, 0, len(f.OracleEvidence))
+	for _, evidence := range f.OracleEvidence {
+		oracle = append(oracle, evidence.Symbol)
+	}
+	return packageProcessAttestable(f.Symbol, oracle)
+}
+
+func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packageProcess bool) (*subjectViewSet, error) {
+	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil, packageProcess))
 }
 
 // newSubjectViewsFaultTolerant builds the decision-evidence view set
@@ -504,7 +554,7 @@ func (s *subjectViewSet) forTarget(target string, oracle []string, faults map[st
 }
 
 func (t *Tree) newSubjectView(symbol string) (*subjectView, error) {
-	views, err := t.newSubjectViews(context.Background(), []string{symbol})
+	views, err := t.newSubjectViews(context.Background(), []string{symbol}, false)
 	if err != nil {
 		return nil, err
 	}
@@ -810,7 +860,7 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding, prebui
 		if inspectionSupplementaryViewHook != nil {
 			inspectionSupplementaryViewHook(missing)
 		}
-		supplementary, err := t.newSubjectViews(ctx, missing)
+		supplementary, err := t.newSubjectViews(ctx, missing, findingPackageProcessAttestable(f))
 		if err != nil {
 			return FindingInspection{}, err
 		}
@@ -885,7 +935,7 @@ func (t *Tree) inspectShapedFindingContext(ctx context.Context, f Finding) (Find
 	}
 	viewFor := make(map[string]*subjectView, len(symbols))
 	if len(symbols) > 0 {
-		supplementary, err := t.newSubjectViews(ctx, symbols)
+		supplementary, err := t.newSubjectViews(ctx, symbols, findingPackageProcessAttestable(f))
 		if err != nil {
 			return FindingInspection{}, err
 		}
@@ -925,6 +975,7 @@ func sortedSubjectEvidence(evidence []SubjectEvidence) []SubjectEvidence {
 // disposition whose every measured pin still holds.
 func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
 	evidence.DynamicStateVouches = ""
+	evidence.PackageProcessDischarges = ""
 	// ModuleBase is resolution metadata for the store's portable-line
 	// walk, never a measured pin: a record grown the field on its first
 	// post-upgrade measure must not shed its dispositions over it.

@@ -21,7 +21,15 @@ from the current engine's own vouch set, so a withdrawn vouch resurfaces
 its culprit without any comparison here, and like labels the record is
 correlation metadata excluded from the attestation-pin comparison — a
 vouch-set change alone never sheds a disposition whose every measured
-pin still holds), and the completed processes'
+pin still holds), the recorded package-process discharges (the
+binary-scoped reachability judgment's attestation-borne acceptances,
+gofresh's PackageProcessDischarges — the same audit class as the
+vouches, excluded from the attestation-pin comparison on the same
+ground: verdicts re-derive from the current engine, so a mode change
+resurfaces the culprit without any comparison here), the recorded
+dynamic-state strategy (a MEASURED pin, the observation strategy's
+structural twin: a strategy move or a pre-field record re-measures at
+the evidence check), and the completed processes'
 merged runtime-input manifest, digest,
 and explicit unverifiable disposition.
 
@@ -425,7 +433,7 @@ refuses the target (staged) rather than vouching for bytes git was told not
 to watch (enforced by `TestPathsDirtyDetectsTrackingOptOutFlags`).
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable version-7 document that gomutant owns — carrying, per mutated
+portable versioned document that gomutant owns — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,
 each carrying its package's test-variant compartment hash beside the maximal
 closure;
@@ -447,7 +455,13 @@ consumer re-splitting the document without it could promote a
 workspace member's machine-local record. A subject's recorded dynamic-state vouches ride the evidence as audit and
 never narrow reuse — an old consumer dropping the field changes no
 verdict — so the field rides the current version without a bump, the
-kill-attribution precedent. This is the inverse of the targeting seam: gomutant
+kill-attribution precedent; the recorded package-process discharges are
+the same audit class and ride the same way. The recorded dynamic-state
+STRATEGY is the opposite disposition: it is what stales a record across
+a derivation move, so an older consumer's tolerance would drop the pin
+and serve verdicts computed under semantics its engine does not
+implement — it rides the version bump that introduced it (version 10),
+the candidate-evidence precedent. This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 a spec-driven producer recovering findings by label — consumes gomutant's contract, never

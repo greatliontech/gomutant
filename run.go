@@ -1051,14 +1051,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// engines: their evidence env - the revalidation and producer env -
 	// captures the delivered width at construction.
 	engine.SetOracleParallelism(jobs)
-	engines := t.newSubjectEngines(opts.AnalysisProgress)
-	// The campaign's one evidence environment: every oracle spawn,
-	// ingest mirror, merge, and splice below judges under this single
-	// width-composed value, so a mid-campaign move of the process-wide
-	// width atomic (a scoped probe override in a long-lived server)
-	// cannot split the campaign's evidence - the engine-level
+	// The campaign's one evidence environment, mode-independent (env plus
+	// the installed width; the per-mode engine sets are built after
+	// resolution, when each target's attestation is known): every oracle
+	// spawn, ingest mirror, merge, and splice below judges under this
+	// single width-composed value, so a mid-campaign move of the
+	// process-wide width atomic (a scoped probe override in a long-lived
+	// server) cannot split the campaign's evidence - the engine-level
 	// compositions are idempotent on an already-composed environment.
-	runEnv := engines.evidenceEnv
+	runEnv := engine.OracleEvidenceEnv(t.eng.GoEnv())
 	// The pin the run's evidence records and compares: resolved once, so
 	// gates never read ambient process state.
 	oracleMemoryPin := engine.OracleMemoryLimitBytes()
@@ -1089,6 +1090,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	type resolvedTarget struct {
 		index  int
 		oracle []string
+		// attested carries this target's package-process pairing: its
+		// oracle packages all equal its own, so the processes that
+		// attribute its subjects' verdicts are its own package's test
+		// binaries (gofresh WithPackageProcessExecution's honesty
+		// condition, held per target — a cross-package sibling never
+		// drops it for the rest of the run).
+		attested bool
 		// shaped carries a shaped target's pre-resolved candidates;
 		// nil for symbol targets (REQ-target-structural,
 		// REQ-target-manual-recipes).
@@ -1096,7 +1104,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		shapedDigest string
 	}
 	var resolvedTargets []resolvedTarget
-	var subjectSymbols []string
 	type baselineKey struct {
 		pkg, run, flags, moduleDir, packageDir string
 	}
@@ -1173,8 +1180,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			f.BodyHash = digest
 			f.OperatorSet = shapedOperatorSet
 			f.Shape = &TargetShape{Structural: tg.Structural, Manual: tg.Manual}
-			resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, shaped: candidates, shapedDigest: digest})
-			subjectSymbols = append(subjectSymbols, oracle...)
+			resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, shaped: candidates, shapedDigest: digest, attested: packageProcessAttestable(tg.Symbol, oracle)})
 			continue
 		}
 		bodyHash, err := t.eng.BodyHashContext(ctx, tg.Symbol)
@@ -1202,37 +1208,90 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle})
-		subjectSymbols = append(subjectSymbols, tg.Symbol)
-		subjectSymbols = append(subjectSymbols, oracle...)
+		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, attested: packageProcessAttestable(tg.Symbol, oracle)})
 	}
-	views := &subjectViewSet{bySymbol: map[string]*subjectView{}}
-	viewFaults := map[string]error{}
-	if len(subjectSymbols) != 0 {
-		var err error
-		views, viewFaults, err = t.newSubjectViewsFaultTolerant(ctx, subjectSymbols, preparation.packageContext, engines)
-		if err != nil {
-			return nil, fmt.Errorf("freshness: %w", err)
+	// Per-mode view bundles: each target's attestation is its own (the
+	// pairing above), so a mixed run builds one engine and view set per
+	// mode present rather than dropping the attestation run-wide — the
+	// coupling that made an unrelated cross-package target re-measure a
+	// same-package sibling's verifiable records.
+	type modeViews struct {
+		engines        *subjectEngines
+		symbols        []string
+		views          *subjectViewSet
+		viewFaults     map[string]error
+		producerUnion  *subjectViewSet
+		producerFaults map[string]error
+		producerBuilt  bool
+	}
+	modes := map[bool]*modeViews{}
+	// eachMode walks the modes present in a fixed order (cross-package
+	// first): with at most two entries the order carries no semantics,
+	// but a map range would make which mode's error text surfaces
+	// nondeterministic when both fail.
+	eachMode := func(fn func(mv *modeViews) error) error {
+		for _, attested := range []bool{false, true} {
+			if mv, ok := modes[attested]; ok {
+				if err := fn(mv); err != nil {
+					return err
+				}
+			}
 		}
+		return nil
+	}
+	modeFor := func(attested bool) *modeViews {
+		mv, ok := modes[attested]
+		if !ok {
+			mv = &modeViews{
+				engines:        t.newSubjectEngines(opts.AnalysisProgress, attested),
+				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}},
+				viewFaults:     map[string]error{},
+				producerUnion:  &subjectViewSet{bySymbol: map[string]*subjectView{}},
+				producerFaults: map[string]error{},
+			}
+			modes[attested] = mv
+		}
+		return mv
+	}
+	for _, resolved := range resolvedTargets {
+		mv := modeFor(resolved.attested)
+		if resolved.shaped == nil {
+			mv.symbols = append(mv.symbols, targets[resolved.index].Symbol)
+		}
+		mv.symbols = append(mv.symbols, resolved.oracle...)
+	}
+	if err := eachMode(func(mv *modeViews) error {
+		if len(mv.symbols) == 0 {
+			return nil
+		}
+		var err error
+		mv.views, mv.viewFaults, err = t.newSubjectViewsFaultTolerant(ctx, mv.symbols, preparation.packageContext, mv.engines)
+		if err != nil {
+			return fmt.Errorf("freshness: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	// Decision-evidence faults route target-locally exactly as the
 	// observed union's do (REQ-exec-quiescence): a target whose own
 	// symbol or any of whose oracle symbols has no decision view skips
 	// with the cause, and its siblings proceed.
-	if len(viewFaults) != 0 {
+	{
 		kept := resolvedTargets[:0]
 		for _, rt := range resolvedTargets {
+			mv := modeFor(rt.attested)
 			var cause error
 			needed := rt.oracle
 			if rt.shaped == nil {
 				needed = append([]string{targets[rt.index].Symbol}, rt.oracle...)
 			}
 			for _, symbol := range needed {
-				if fault, ok := viewFaults[symbol]; ok {
+				if fault, ok := mv.viewFaults[symbol]; ok {
 					cause = fault
 					break
 				}
-				if views.bySymbol[symbol] == nil {
+				if mv.views.bySymbol[symbol] == nil {
 					cause = fmt.Errorf("no decision view for %s", symbol)
 					break
 				}
@@ -1247,6 +1306,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		resolvedTargets = kept
 	}
+	// probeGate serializes producer-side oracle probes against serial kill
+	// confirmations: a confirmation's scored run shares no process with any
+	// preparation probe, so a probe's test-level side effects (an exclusive
+	// port, a file lock) can never manufacture a false reproduction or a
+	// false flip. Probes hold it shared among themselves; each confirmation
+	// holds it exclusively (REQ-exec-attribution).
+	var probeGate sync.RWMutex
 	// One observed union over every target and oracle replaces the
 	// per-target proof builds the campaign previously paid (the measured
 	// ~270 observation passes per warm campaign): per-subject evidence is
@@ -1255,27 +1321,27 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// as the bounded retry (REQ-exec-quiescence). The union is built at
 	// the first target that needs a proof: a fully-cached warm run —
 	// every target served — pays no observation pass at all.
-	producerUnion := &subjectViewSet{bySymbol: map[string]*subjectView{}}
-	producerFaults := map[string]error{}
-	producerUnionBuilt := false
-	// The union build runs observed captures (test processes) without the
-	// probe gate: it is always triggered by the first measure target's
-	// preparation, strictly before that target's work item is emitted, so
-	// no execution window — and no serial confirmation — can be in flight
-	// yet. The per-target retry build below has no such ordering and holds
-	// the gate shared like any probe.
-	buildProducerUnion := func() error {
-		if producerUnionBuilt {
+	// The union build runs observed captures (test processes) under the
+	// probe gate held shared, exactly like the per-target retry builds:
+	// with one union per MODE present, a later mode's first measure target
+	// prepares while earlier targets' windows execute (preparation is
+	// pipelined with execution), so a serial confirmation can be in
+	// flight — the gate, not any ordering premise, is what keeps the
+	// build's processes out of a confirmation's isolation window.
+	buildProducerUnion := func(mv *modeViews) error {
+		if mv.producerBuilt {
 			return nil
 		}
-		producerUnionBuilt = true
+		mv.producerBuilt = true
 		if opts.proofAttempt != nil {
 			opts.proofAttempt("", 1)
 		}
+		probeGate.RLock()
+		defer probeGate.RUnlock()
 		var err error
-		producerUnion, producerFaults, err = t.newObservedUnionViews(ctx, subjectSymbols, preparation.packageContext, engines)
+		mv.producerUnion, mv.producerFaults, err = t.newObservedUnionViews(ctx, mv.symbols, preparation.packageContext, mv.engines)
 		if err != nil {
-			return fmt.Errorf("freshness proofs (union over %d subjects): %w", len(subjectSymbols), err)
+			return fmt.Errorf("freshness proofs (union over %d subjects): %w", len(mv.symbols), err)
 		}
 		return nil
 	}
@@ -1298,13 +1364,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// the campaign-wide totals as preparation completes
 	// (REQ-exec-run-status's advisory classes).
 	var preparedTargets, preparedCandidates atomic.Int64
-	// probeGate serializes producer-side oracle probes against serial kill
-	// confirmations: a confirmation's scored run shares no process with any
-	// preparation probe, so a probe's test-level side effects (an exclusive
-	// port, a file lock) can never manufacture a false reproduction or a
-	// false flip. Probes hold it shared among themselves; each confirmation
-	// holds it exclusively (REQ-exec-attribution).
-	var probeGate sync.RWMutex
 	// prepareTarget runs one target's whole preparation — reuse gates,
 	// candidate generation, decision, oracle groups, and baseline probes —
 	// and returns its work item, or nil when the target completed without
@@ -1331,10 +1390,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		i := resolved.index
 		tg := targets[i]
 		f := &findings[i]
+		mv := modeFor(resolved.attested)
 		oracle := resolved.oracle
 		oracleViews := make([]*subjectView, 0, len(oracle))
 		for _, symbol := range oracle {
-			oracleViews = append(oracleViews, views.bySymbol[symbol])
+			oracleViews = append(oracleViews, mv.views.bySymbol[symbol])
 		}
 		rec, hasPrior := prior[tg.Symbol]
 		// The property-runtime regime is a measurement pin for shaped
@@ -1411,13 +1471,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// producer views — the decision views above serve only the pin
 		// checks; a shaped identity is not in the union, so the subset
 		// derives from the oracle symbols alone.
-		if err := buildProducerUnion(); err != nil {
+		if err := buildProducerUnion(mv); err != nil {
 			return nil, err
 		}
-		producerViews, err := producerUnion.forTarget(oracle[0], oracle[1:], producerFaults)
+		producerViews, err := mv.producerUnion.forTarget(oracle[0], oracle[1:], mv.producerFaults)
 		if err != nil && ctx.Err() == nil {
 			probeGate.RLock()
-			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, oracle, preparation.packageContext, true, engines)
+			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, oracle, preparation.packageContext, true, mv.engines)
 			probeGate.RUnlock()
 		}
 		if err != nil {
@@ -1525,11 +1585,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		i := resolved.index
 		tg := targets[i]
 		f := &findings[i]
+		mv := modeFor(resolved.attested)
 		oracle := resolved.oracle
-		targetView := views.bySymbol[tg.Symbol]
+		targetView := mv.views.bySymbol[tg.Symbol]
 		oracleViews := make([]*subjectView, 0, len(oracle))
 		for _, symbol := range oracle {
-			oracleViews = append(oracleViews, views.bySymbol[symbol])
+			oracleViews = append(oracleViews, mv.views.bySymbol[symbol])
 		}
 		if resolved.shaped != nil {
 			return prepareShaped(ctx, resolved)
@@ -1622,8 +1683,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					// kill-tests sees the tool noticing them instead of
 					// forcing defensively (REQ-result-stale). The class comes
 					// from the inspection, not an assumed "stale": an
-					// unverifiable prior is not stale.
-					reason = t.movedPinAttribution(ctx, *rec, views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
+					// unverifiable prior is not stale. The attribution may
+					// build a supplementary view for a recorded oracle the
+					// current resolution lacks — analysis-pass work gated
+					// shared exactly like the union build above.
+					probeGate.RLock()
+					reason = t.movedPinAttribution(ctx, *rec, mv.views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
+					probeGate.RUnlock()
 				}
 			}
 			if matches && len(rec.CandidateEvidence) == 0 {
@@ -1709,16 +1775,21 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				} else {
 					// The budget was not the only moved pin, so the prefix
 					// cannot stand; the appended attribution keeps the
-					// re-measure reason honest (REQ-result-stale).
-					reason += "; " + t.movedPinAttribution(ctx, *rec, views, "a measurement pin also moved, so the measured prefix cannot stand")
+					// re-measure reason honest (REQ-result-stale). Gated
+					// shared like the other attribution site: the call may
+					// build a supplementary view.
+					probeGate.RLock()
+					attribution := t.movedPinAttribution(ctx, *rec, mv.views, "a measurement pin also moved, so the measured prefix cannot stand")
+					probeGate.RUnlock()
+					reason += "; " + attribution
 				}
 			}
 		}
 
-		if err := buildProducerUnion(); err != nil {
+		if err := buildProducerUnion(mv); err != nil {
 			return nil, err
 		}
-		producerViews, err := producerUnion.forTarget(tg.Symbol, oracle, producerFaults)
+		producerViews, err := mv.producerUnion.forTarget(tg.Symbol, oracle, mv.producerFaults)
 		if err != nil && ctx.Err() == nil {
 			// One bounded retry (REQ-exec-quiescence): the field failure
 			// mode is transient pressure faulting one symbol or module
@@ -1731,7 +1802,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				opts.proofAttempt(tg.Symbol, 2)
 			}
 			probeGate.RLock()
-			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, engines)
+			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, mv.engines)
 			probeGate.RUnlock()
 		}
 		if err != nil {
@@ -2034,7 +2105,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// Ref motion alone is not tree motion: capture commits are read
 		// at stamp time, so only content drift refuses
 		// (REQ-exec-quiescence).
-		if err := views.validateProducers(ctx); err != nil {
+		if err := eachMode(func(mv *modeViews) error {
+			return mv.views.validateProducers(ctx)
+		}); err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
@@ -2772,7 +2845,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if opts.afterExecution != nil {
 		opts.afterExecution()
 	}
-	if err := views.validateProducers(ctx); err != nil {
+	if err := eachMode(func(mv *modeViews) error {
+		return mv.views.validateProducers(ctx)
+	}); err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
