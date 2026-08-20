@@ -185,9 +185,9 @@ shapes, and identifying the site is the target producer's job
 break-observe-restore, scoring, serving, and survivor reporting
 exactly as REQ-target-structural's findings do.
 
-**REQ-target-selection** (behavior): A run MAY declare a build selection
-— build tags and a GOTOOLCHAIN directive — and the declared selection
-MUST rewrite the run's one frozen environment before anything reads it,
+**REQ-target-selection** (behavior): A run's declared build selection
+— build tags and a GOTOOLCHAIN directive, each optional — MUST
+rewrite the run's one frozen environment before anything reads it,
 so package loading, target discovery, build-constraint matching, oracle
 spawns, and the measurement pins all observe the same selection: a
 `//go:build`-gated symbol or oracle under the declared tags is loaded,
