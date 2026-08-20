@@ -48,4 +48,4 @@ the oracle's side effects; the consumer had to `rm -rf` the leak
 before staging its change set. The oracle-scratch classification
 above would cover both the refusal and the residue.
 
-Lands: author's triage.
+Lands: user decision.

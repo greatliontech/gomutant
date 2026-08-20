@@ -12,3 +12,5 @@ is deleted (git holds history).
 | fold-growth-into-generalized-drift | growth is a strict special case of generalized drift; fold and generalize the survivor-delta narrowing | with consolidate-reidentification-and-bucket-policy |
 | consolidate-reidentification-and-bucket-policy | one re-identification helper, one advisory-bucket policy across the serve carve-outs | with fold-growth-into-generalized-drift |
 | [symbol-cutter-duality](symbol-cutter-duality.md) | two symbol cutters over one grammar, relationship unstated | with the next change touching either cutter's callers |
+| [campaign-refuses-tree-change-from-rapid-failfiles](campaign-refuses-tree-change-from-rapid-failfiles.md) | rapid failfile persistence poisons campaign analysis views and ephemeral tree cleanliness | user decision |
+| [staged-campaign-reports-clean-index-as-drift](staged-campaign-reports-clean-index-as-drift.md) | staged campaign refuses an executed target as unstaged drift without a changed path | user decision |
