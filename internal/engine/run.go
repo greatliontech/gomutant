@@ -820,22 +820,22 @@ func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Durat
 
 // TestProbeEnv is TestProbe under an already-frozen complete environment.
 func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (ran int, passed bool, err error) {
-	ran, passed, _, err = testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, nil, env)
+	ran, passed, _, _, err = testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, nil, env)
 	return ran, passed, err
 }
 
 // TestProbeObservedEnv is TestProbe under a frozen environment with a
 // runtime-input observation rooted at moduleDir and packageDir.
-func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, state runtimeinput.Observation, err error) {
-	ran, passed, first, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, failed []string, state runtimeinput.Observation, err error) {
+	ran, passed, failed, first, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
 	if err != nil {
-		return ran, passed, first, err
+		return ran, passed, failed, first, err
 	}
 	if !passed {
-		return ran, false, first, nil
+		return ran, false, failed, first, nil
 	}
 	if ran == 0 {
-		return 0, true, first, nil
+		return 0, true, nil, first, nil
 	}
 	// The repeat guards baseline VALIDITY (a flaky pass fabricating
 	// verdicts), which no observation bracket subsumes: it runs even
@@ -843,47 +843,47 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	// Only the empty-observation shortcut below needs verifiable
 	// evidence to be meaningful.
 	if !first.OK {
-		return ran, passed, first, err
+		return ran, passed, nil, first, err
 	}
 	empty, err := runtimeinput.MergeEnv(moduleDir, env)
 	if err != nil {
-		return 0, false, runtimeinput.Observation{}, err
+		return 0, false, nil, runtimeinput.Observation{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, false, runtimeinput.Observation{}, err
+		return 0, false, nil, runtimeinput.Observation{}, err
 	}
 	empty, err = runtimeinput.AbsoluteEnv(empty, moduleDir, env)
 	if err != nil {
-		return 0, false, runtimeinput.Observation{}, err
+		return 0, false, nil, runtimeinput.Observation{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, false, runtimeinput.Observation{}, err
+		return 0, false, nil, runtimeinput.Observation{}, err
 	}
 	if !first.Unverifiable && first.State == empty.State {
-		return ran, passed, first, nil
+		return ran, passed, nil, first, nil
 	}
-	secondRan, secondPassed, second, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+	secondRan, secondPassed, secondFailed, second, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
 	if err != nil {
-		return secondRan, secondPassed, second, err
+		return secondRan, secondPassed, secondFailed, second, err
 	}
 	if secondRan != ran {
-		return secondRan, secondPassed, runtimeinput.Observation{}, fmt.Errorf("baseline test count changed between discovery and measurement")
+		return secondRan, secondPassed, secondFailed, runtimeinput.Observation{}, fmt.Errorf("baseline test count changed between discovery and measurement")
 	}
 	if !secondPassed {
-		return secondRan, false, runtimeinput.Observation{}, fmt.Errorf("baseline result changed between discovery and measurement")
+		return secondRan, false, secondFailed, runtimeinput.Observation{}, fmt.Errorf("baseline result changed between discovery and measurement (failed: %s)", strings.Join(secondFailed, ", "))
 	}
 	// The repeat guards baseline VALIDITY only; the evidence is the scored
 	// second run's own bracket-vouched observation - the historical
 	// cross-run evidence comparison is retired (REQ-exec-observation).
-	return secondRan, secondPassed, second, nil
+	return secondRan, secondPassed, nil, second, nil
 }
 
-func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, state runtimeinput.Observation, err error) {
+func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, failed []string, state runtimeinput.Observation, err error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	scratchEnv, scratchRoot, sweepScratch, removeScratch, err := oracleScratch(env)
 	if err != nil {
-		return 0, false, runtimeinput.Observation{}, err
+		return 0, false, nil, runtimeinput.Observation{}, err
 	}
 	defer removeScratch()
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
@@ -895,7 +895,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if capture {
 		tmp, err := os.MkdirTemp("", "gomutant-probe-*")
 		if err != nil {
-			return 0, false, runtimeinput.Observation{}, err
+			return 0, false, nil, runtimeinput.Observation{}, err
 		}
 		defer os.RemoveAll(tmp)
 		testlog = filepath.Join(tmp, "baseline.testlog")
@@ -918,32 +918,36 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if ctx2.Err() == context.DeadlineExceeded {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, "baseline test process timed out", env, scratchRoot, capture, oracleFrame, namespaces)
 		if observationErr != nil {
-			return 0, false, runtimeinput.Observation{}, observationErr
+			return 0, false, nil, runtimeinput.Observation{}, observationErr
 		}
-		return 0, false, state, fmt.Errorf("baseline test timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", timeout)
+		return 0, false, nil, state, fmt.Errorf("baseline test timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", timeout)
 	}
 	if err := ctx2.Err(); err != nil {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, "baseline test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces)
 		if observationErr != nil {
-			return 0, false, runtimeinput.Observation{}, observationErr
+			return 0, false, nil, runtimeinput.Observation{}, observationErr
 		}
-		return 0, false, state, err
+		return 0, false, nil, state, err
 	}
 	if strings.Contains(buf.String(), "[build failed]") {
 		if diagnostic := compileDiagnostics(buf.Bytes(), nil); diagnostic != "" {
-			return 0, false, runtimeinput.Observation{}, fmt.Errorf("baseline test failed to build:\n%s", diagnostic)
+			return 0, false, nil, runtimeinput.Observation{}, fmt.Errorf("baseline test failed to build:\n%s", diagnostic)
 		}
-		return 0, false, runtimeinput.Observation{}, fmt.Errorf("baseline test failed to build")
+		return 0, false, nil, runtimeinput.Observation{}, fmt.Errorf("baseline test failed to build")
 	}
 	ran, err = countTopTests(buf.Bytes())
 	if err != nil {
-		return 0, false, runtimeinput.Observation{}, fmt.Errorf("parse baseline test output: %w", err)
+		return 0, false, nil, runtimeinput.Observation{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
 	state, _, err = processObservationContext(ctx, testlog, moduleDir, "", env, scratchRoot, capture, oracleFrame, namespaces)
 	if err != nil {
-		return 0, false, runtimeinput.Observation{}, err
+		return 0, false, nil, runtimeinput.Observation{}, err
 	}
-	return ran, runErr == nil, state, nil
+	failedNames := []string(nil)
+	if runErr != nil {
+		failedNames = FailedTopTests(buf.Bytes())
+	}
+	return ran, runErr == nil, failedNames, state, nil
 }
 
 // compileDiagnostics extracts the compiler's own text from a failed
@@ -1121,6 +1125,30 @@ func testFailureCompleted(stream []byte, failingTest string) bool {
 		expected := strings.TrimPrefix(failingTest, e.Package+".")
 		if name == expected && strings.HasPrefix(strings.TrimSpace(e.Output), "--- FAIL: "+name) {
 			marker = true
+		}
+	}
+}
+
+// FailedTopTests names the distinct top-level tests the -json stream
+// reports failed — the baseline refusal's evidence: "does not pass"
+// without the failing test's name sends the operator back to a rerun
+// for what the runner already knew.
+func FailedTopTests(stream []byte) []string {
+	type event struct{ Action, Test string }
+	seen := map[string]bool{}
+	var out []string
+	dec := json.NewDecoder(bytes.NewReader(stream))
+	for {
+		var e event
+		if err := dec.Decode(&e); err != nil {
+			return out
+		}
+		if e.Test == "" || strings.Contains(e.Test, "/") || e.Action != "fail" {
+			continue
+		}
+		if !seen[e.Test] {
+			seen[e.Test] = true
+			out = append(out, e.Test)
 		}
 	}
 }
