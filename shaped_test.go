@@ -250,9 +250,9 @@ func TestShapedWorkspaceCompileKill(t *testing.T) {
 	}
 	root := t.TempDir()
 	for name, content := range map[string]string{
-		"go.work":             "go 1.26\n\nuse ./mod\n",
-		"mod/go.mod":          "module example.com/ws\n\ngo 1.26\n",
-		"mod/iface/iface.go":  "package iface\n\ntype Doer interface {\n\tDo() int\n}\n\ntype Impl struct{}\n\nfunc (Impl) Do() int { return 1 }\n",
+		"go.work":                 "go 1.26\n\nuse ./mod\n",
+		"mod/go.mod":              "module example.com/ws\n\ngo 1.26\n",
+		"mod/iface/iface.go":      "package iface\n\ntype Doer interface {\n\tDo() int\n}\n\ntype Impl struct{}\n\nfunc (Impl) Do() int { return 1 }\n",
 		"mod/iface/iface_test.go": "package iface\n\nimport \"testing\"\n\nvar _ Doer = Impl{}\n\nfunc TestSatisfies(t *testing.T) {\n\tvar d Doer = Impl{}\n\tif d.Do() != 1 {\n\t\tt.Fatal()\n\t}\n}\n",
 	} {
 		path := filepath.Join(root, name)

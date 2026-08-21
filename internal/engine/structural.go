@@ -182,4 +182,3 @@ func receiverTypeName(fn *ast.FuncDecl) string {
 		}
 	}
 }
-
