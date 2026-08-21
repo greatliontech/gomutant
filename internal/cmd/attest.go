@@ -58,7 +58,7 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// The echo states what the disposition did and where the record
 	// lives; a record that cannot serve as it stands says so, because
 	// the next measure judges the equivalence afresh and sheds the
-	// disposition if its pins moved (REQ-attest-survivor).
+	// disposition if its mutation domain moved (REQ-attest-survivor).
 	layer, layerReason := store.Layer(attested)
 	switch layer {
 	case "repo":

@@ -221,6 +221,23 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	postMerge := map[string]gomutant.Finding{}
 	contradicted := map[string]bool{}
+	// A shed is reported the moment its strip persists: the incremental
+	// commit survives an aborted run (that is its purpose), so a shed
+	// buffered for the epilogue is silently dropped exactly when the
+	// document kept the stripped record (REQ-attest-survivor's "loudly, in
+	// every mode"). The epilogue renders only what no commit streamed - the
+	// final merge's residue. A mutant whose fate the contradiction line
+	// already told is not retold: execution precedes its target's commit,
+	// so the filter is complete at print time.
+	printedSheds := map[string]bool{}
+	streamShed := func(d gomutant.AttestationShed) {
+		key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
+		if printedSheds[key] || contradicted[key] {
+			return
+		}
+		printedSheds[key] = true
+		fmt.Fprintf(out, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)
+	}
 	var analysisMu sync.Mutex
 	var analysisLast time.Time
 	priorLayer := map[string]string{}
@@ -277,6 +294,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 		},
 		AttestationSiteShed: func(d gomutant.AttestationShed) {
 			commitSheds = append(commitSheds, d)
+			streamShed(d)
+		},
+		AttestationCarried: func(c gomutant.AttestationCarry) {
+			fmt.Fprintf(out, "attestation carried: %s %s %s - measurement pins moved; the mutated source is unchanged and the mutant survived re-execution\n", c.Symbol, c.Position, c.Operator)
 		},
 		PropertyOracle: func(n gomutant.PropertyOracleNote) {
 			fmt.Fprintf(out, "property  %s  %s: %s\n", n.Package, n.Runtime, n.Note)
@@ -287,7 +308,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// Plan mode suppresses this at the library boundary — the run owns
 		// the plan clause's no-write guarantee.
 		Commit: func(finding gomutant.Finding) error {
-			return docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			var dropped []gomutant.AttestationShed
+			err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -295,8 +317,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 				// actually happens against the prior document - the final
 				// merge sees an already-stripped record, so the shed must
 				// be collected here or it is silent (REQ-attest-survivor).
-				merged, dropped := gomutant.MergeFindingsShedAgainst(current, []gomutant.Finding{finding}, attestSnapshot)
-				commitSheds = append(commitSheds, dropped...)
+				merged, shed := gomutant.MergeFindingsShedAgainst(current, []gomutant.Finding{finding}, attestSnapshot)
+				dropped = shed
 				for _, m := range merged {
 					if m.Symbol == finding.Symbol {
 						postMerge[finding.Symbol] = m
@@ -304,6 +326,16 @@ func runCommand(ctx context.Context, o runOptions) error {
 				}
 				return merged, nil
 			})
+			if err != nil {
+				return err
+			}
+			// Streamed after the update returns: the strip persisted, and
+			// terminal writes must not extend the document-lock hold.
+			commitSheds = append(commitSheds, dropped...)
+			for _, d := range dropped {
+				streamShed(d)
+			}
+			return nil
 		},
 	})
 	var drift *gomutant.TreeDriftError
@@ -390,12 +422,14 @@ func runCommand(ctx context.Context, o runOptions) error {
 		fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
 	} else {
 		// A shed disposition is surfaced once, never silently dropped
-		// (REQ-attest-survivor): the first report wins, and a mutant
-		// whose fate the contradiction line already told - killed
-		// evidence with the shed reasoning attached - is not retold
-		// with the merge layer's vaguer reason.
+		// (REQ-attest-survivor): the first report wins - a shed the
+		// incremental commit already streamed, or a mutant whose fate the
+		// contradiction line already told (killed evidence with the shed
+		// reasoning attached), is not retold with a vaguer reason. What
+		// remains here is the final merge's residue.
 		for _, d := range gomutant.DedupeAttestationSheds(append(append([]gomutant.AttestationShed(nil), commitSheds...), finalSheds...)) {
-			if contradicted[d.Symbol+"\x00"+d.Position+"\x00"+d.Operator] {
+			key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
+			if contradicted[key] || printedSheds[key] {
 				continue
 			}
 			fmt.Fprintf(&terminal, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)

@@ -1222,12 +1222,12 @@ func DedupeAttestationSheds(sheds []AttestationShed) []AttestationShed {
 // MergeFindingsShedAgainst is MergeFindingsShed with the caller's
 // run-start snapshot of attested dispositions per symbol. With the
 // snapshot in hand the graft is pin-correct (REQ-attest-survivor):
-// a disposition the fresh record already carries rode the pin-hold
+// a disposition the fresh record already carries rode the domain-hold
 // re-measure carry and stays; a disposition present in the live
 // document but absent from the snapshot is a concurrent attestation
 // and grafts onto a still-reported survivor; every other prior
-// disposition was judged afresh and rejected - its pins moved - and
-// sheds loudly. Without a snapshot the graft anchors on survivor
+// disposition was judged afresh and rejected - its mutation domain
+// moved - and sheds loudly. Without a snapshot the graft anchors on survivor
 // identity and site alone, the pre-snapshot behavior.
 func MergeFindingsShedAgainst(prior, fresh []Finding, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
 	var shed []AttestationShed
@@ -1299,11 +1299,11 @@ func graftAttestations(prior, fresh []Attestation, survivors []Survivor) ([]Atte
 // graftAttestationsAgainst is graftAttestations under the caller's
 // run-start snapshot: when snapped, a prior disposition the snapshot
 // already held and the fresh record does not carry was judged afresh
-// by the pin-hold carry and rejected - it sheds as pins-moved instead
-// of grafting (REQ-attest-survivor's shed-whenever-any-pin-moves);
-// only concurrent attestations (absent from the snapshot) graft. A
-// disposition whose survivor the fresh record no longer reports sheds
-// loudly in every mode - never silently dropped.
+// by the domain-hold carry and rejected - its mutation domain moved,
+// so it sheds instead of grafting (REQ-attest-survivor's
+// shed-on-domain-move); only concurrent attestations (absent from the
+// snapshot) graft. A disposition whose survivor the fresh record no
+// longer reports sheds loudly in every mode - never silently dropped.
 func graftAttestationsAgainst(prior, fresh []Attestation, survivors []Survivor, snapshot map[survivorKey]Attestation, snapped bool) ([]Attestation, []AttestationShed) {
 	siteOf := make(map[survivorKey]string, len(survivors))
 	surviving := make(map[survivorKey]bool, len(survivors))
@@ -1343,16 +1343,17 @@ func graftAttestationsAgainst(prior, fresh []Attestation, survivors []Survivor, 
 		}
 		if snapped {
 			// The run started with this exact disposition on record and
-			// the pin-hold carry did not keep it: its pins moved and the
-			// equivalence is judged afresh (REQ-attest-survivor). A
-			// same-mutant disposition whose content differs from the
-			// snapshot entry was recorded concurrently - a re-judgment
-			// against the current record - and grafts instead.
+			// the domain-hold carry did not keep it: its mutation domain
+			// moved and the equivalence is judged afresh
+			// (REQ-attest-survivor). A same-mutant disposition whose
+			// content differs from the snapshot entry was recorded
+			// concurrently - a re-judgment against the current record -
+			// and grafts instead.
 			if snapAtt, held := snapshot[key]; held && snapAtt == attestation {
 				shed = append(shed, AttestationShed{
 					Position: attestation.Position,
 					Operator: attestation.Operator,
-					Reason:   "attestation pins moved - the equivalence is judged afresh",
+					Reason:   "the mutation domain moved or cannot be shown held - the equivalence is judged afresh",
 				})
 				continue
 			}

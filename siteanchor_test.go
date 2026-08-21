@@ -214,7 +214,55 @@ func TestAttestationNeverInheritsAcrossShiftedSameShapedSites(t *testing.T) {
 	}
 }
 
-// carryAnchoredAttestations is the pin-hold carry's core: matched
+// Evidence beats attestation with the killer named: only prior
+// dispositions whose mutant the kill ledger names contradict; a
+// still-surviving or vanished mutant's disposition is the carry and
+// merge layers' business (REQ-attest-survivor).
+func TestContradictKilledDispositions(t *testing.T) {
+	prior := []Attestation{
+		{Position: "f.go:1:1", Operator: "op", Reason: "still surviving"},
+		{Position: "f.go:2:2", Operator: "op", Reason: "killed equivalent claim"},
+		{Position: "f.go:3:3", Operator: "op", Reason: "vanished"},
+	}
+	survivors := []Survivor{{Position: "f.go:1:1", Operator: "op"}}
+	kills := []Kill{{Position: "f.go:2:2", Operator: "op", Killer: "p.TestKiller"}}
+	var got []AttestationContradiction
+	contradictKilledDispositions("pkg.F", prior, survivors, kills, func(c AttestationContradiction) { got = append(got, c) })
+	want := AttestationContradiction{Symbol: "pkg.F", Position: "f.go:2:2", Operator: "op", Killer: "p.TestKiller", Reason: "killed equivalent claim"}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("contradictions = %+v, want exactly the killed disposition with its killer", got)
+	}
+	// A nil emitter is a legal drop, never a panic.
+	contradictKilledDispositions("pkg.F", prior, survivors, kills, nil)
+}
+
+// The carry gate is the mutation domain alone - the mutated body and the
+// operator grammar - never a measurement pin: either component moving
+// breaks the candidate identity a disposition is a judgment about
+// (REQ-attest-survivor).
+func TestMutationDomainHeld(t *testing.T) {
+	base := Finding{BodyHash: "body", OperatorSet: "go/12", OracleTimeout: "1m0s"}
+	if !mutationDomainHeld(base, base) {
+		t.Fatal("identical domain not held")
+	}
+	pinsMoved := base
+	pinsMoved.OracleTimeout = "2m0s"
+	if !mutationDomainHeld(base, pinsMoved) {
+		t.Fatal("a moved measurement pin broke the domain")
+	}
+	bodyMoved := base
+	bodyMoved.BodyHash = "edited"
+	if mutationDomainHeld(base, bodyMoved) {
+		t.Fatal("a moved body held the domain")
+	}
+	operatorsMoved := base
+	operatorsMoved.OperatorSet = "go/13"
+	if mutationDomainHeld(base, operatorsMoved) {
+		t.Fatal("a moved operator set held the domain")
+	}
+}
+
+// carryAnchoredAttestations is the domain-hold carry's core: matched
 // dispositions adopt their survivor's site, a moved site is a surfaced
 // site shed, a vanished survivor's disposition lands in gone.
 func TestCarryAnchoredAttestationsPartition(t *testing.T) {

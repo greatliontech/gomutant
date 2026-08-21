@@ -17,16 +17,16 @@ func TestMergeGraftGatesDispositionCarryOnTheRunStartSnapshot(t *testing.T) {
 	snapshot := map[string][]Attestation{"pkg.F": {attestation}}
 
 	// The re-measure reports the survivor again - same site - but did
-	// not keep the disposition: its pins moved and the equivalence was
-	// judged afresh. The pin-blind graft re-attached here; the gated
-	// merge sheds loudly.
+	// not keep the disposition: its mutation domain moved and the
+	// equivalence was judged afresh. The domain-blind graft re-attached
+	// here; the gated merge sheds loudly.
 	fresh := []Finding{{Symbol: "pkg.F", Survivors: []Survivor{survivor}}}
 	merged, shed := MergeFindingsShedAgainst(prior, fresh, snapshot)
 	if len(merged) != 1 || len(merged[0].Attested) != 0 {
 		t.Fatalf("rejected disposition re-attached across a pin move: %+v", merged)
 	}
-	if len(shed) != 1 || shed[0].Symbol != "pkg.F" || !strings.Contains(shed[0].Reason, "pins moved") {
-		t.Fatalf("pin-move shed not surfaced: %+v", shed)
+	if len(shed) != 1 || shed[0].Symbol != "pkg.F" || !strings.Contains(shed[0].Reason, "mutation domain moved") {
+		t.Fatalf("domain-move shed not surfaced: %+v", shed)
 	}
 
 	// A disposition recorded concurrently during the run - in the live
@@ -57,7 +57,7 @@ func TestMergeGraftGatesDispositionCarryOnTheRunStartSnapshot(t *testing.T) {
 	}
 
 	// A disposition the fresh record already carries rode the in-run
-	// pin-hold carry: it stays and nothing sheds.
+	// domain-hold carry: it stays and nothing sheds.
 	carried := []Finding{{Symbol: "pkg.F", Survivors: []Survivor{survivor}, Attested: []Attestation{attestation}}}
 	merged, shed = MergeFindingsShedAgainst(prior, carried, snapshot)
 	if len(merged) != 1 || len(merged[0].Attested) != 1 || len(shed) != 0 {
@@ -115,8 +115,8 @@ func TestRenderedFindingsSubstitutePostMergeRows(t *testing.T) {
 func TestDedupeAttestationShedsKeepsTheFirstReport(t *testing.T) {
 	sheds := []AttestationShed{
 		{Symbol: "pkg.F", Position: "f.go:3:2", Operator: "op", Reason: "site content changed under the position - the surviving mutant is not the attested one"},
-		{Symbol: "pkg.F", Position: "f.go:3:2", Operator: "op", Reason: "attestation pins moved - the equivalence is judged afresh"},
-		{Symbol: "pkg.G", Position: "g.go:1:1", Operator: "op", Reason: "attestation pins moved - the equivalence is judged afresh"},
+		{Symbol: "pkg.F", Position: "f.go:3:2", Operator: "op", Reason: "the mutation domain moved - the equivalence is judged afresh"},
+		{Symbol: "pkg.G", Position: "g.go:1:1", Operator: "op", Reason: "the mutation domain moved - the equivalence is judged afresh"},
 	}
 	got := DedupeAttestationSheds(sheds)
 	if len(got) != 2 {

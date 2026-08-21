@@ -983,6 +983,18 @@ func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
 	return evidence
 }
 
+// mutationDomainHeld reports whether two findings describe the same
+// mutation domain: the mutated body and the operator grammar that
+// generates candidates from it. Candidate identity is budget-independent
+// (INV-RESULT-CANDIDATE-CONSERVATION assigns occurrence suffixes over the
+// complete ordered set before budget selection), so body hash and
+// operator set together decide whether a recorded position+operator
+// names the same mutant today - the identity an equivalence disposition
+// is a judgment about (REQ-attest-survivor).
+func mutationDomainHeld(prior, current Finding) bool {
+	return prior.BodyHash == current.BodyHash && prior.OperatorSet == current.OperatorSet
+}
+
 func sameAttestationPins(prior, current Finding) bool {
 	if prior.PropertyRegime != current.PropertyRegime {
 		return false

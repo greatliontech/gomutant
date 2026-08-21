@@ -56,6 +56,9 @@ func lockCallbacks(opts Options) Options {
 	if fn := opts.AttestationSiteShed; fn != nil {
 		opts.AttestationSiteShed = func(d AttestationShed) { mu.Lock(); defer mu.Unlock(); fn(d) }
 	}
+	if fn := opts.AttestationCarried; fn != nil {
+		opts.AttestationCarried = func(c AttestationCarry) { mu.Lock(); defer mu.Unlock(); fn(c) }
+	}
 	if fn := opts.afterExecution; fn != nil {
 		opts.afterExecution = func() { mu.Lock(); defer mu.Unlock(); fn() }
 	}
@@ -209,6 +212,14 @@ type Options struct {
 	// site content under its position changed - surfaced, never silent
 	// (REQ-attest-survivor).
 	AttestationSiteShed func(AttestationShed)
+	// AttestationCarried reports a disposition carried across moved
+	// measurement pins: the mutation domain held and the mutant survived
+	// re-execution under the current pins, so the reasoning rides - an
+	// acceptance outliving the environment it was judged in, auditable at
+	// the moment it rides (REQ-attest-survivor). Nil drops the reports;
+	// the carry itself is unconditional. A pins-held carry is not
+	// reported - it restores the record verbatim.
+	AttestationCarried func(AttestationCarry)
 	// dispatched observes each candidate index handed to the worker pool —
 	// a test seam pinning suffix-only dispatch under a budget extension,
 	// flagged-only dispatch under a candidate-evidence serve, and
@@ -569,6 +580,51 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 		}
 	}
 	return attr, nil
+}
+
+// contradictKilledDispositions reports each prior disposition whose
+// mutant the current outcomes killed — evidence beats attestation, the
+// killer named from the durable keystone (REQ-attest-survivor). A
+// disposition whose mutant still survives, or is absent from the kill
+// ledger (vanished, de-selected), is left to the carry and merge layers.
+// A served record whose kill ledger is incomplete (predating kill
+// attribution) is deliberately in the second class: with no ledger, a
+// killed disposition cannot be told from a vanished one, and an
+// attribution-less contradiction would misfire on the vanished — the
+// merge layer's loud no-longer-reported shed covers both honestly.
+func contradictKilledDispositions(symbol string, prior []Attestation, survivors []Survivor, kills []Kill, emit func(AttestationContradiction)) {
+	if emit == nil || len(prior) == 0 {
+		return
+	}
+	surviving := make(map[survivorKey]bool, len(survivors))
+	for _, survivor := range survivors {
+		surviving[survivorKey{survivor.Position, survivor.Operator}] = true
+	}
+	killerOf := make(map[survivorKey]string, len(kills))
+	for _, kill := range kills {
+		killerOf[survivorKey{kill.Position, kill.Operator}] = kill.Killer
+	}
+	for _, attestation := range prior {
+		key := survivorKey{attestation.Position, attestation.Operator}
+		if surviving[key] {
+			continue
+		}
+		if killer, killed := killerOf[key]; killed {
+			emit(AttestationContradiction{
+				Symbol: symbol, Position: attestation.Position,
+				Operator: attestation.Operator, Killer: killer, Reason: attestation.Reason,
+			})
+		}
+	}
+}
+
+// AttestationCarry reports one disposition carried across moved
+// measurement pins under a held mutation domain (REQ-attest-survivor).
+type AttestationCarry struct {
+	Symbol   string
+	Position string
+	Operator string
+	Reason   string
 }
 
 // AttestationContradiction reports one attested survivor a growth serve's
@@ -2489,6 +2545,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
 					continue
 				}
+				// Evidence beats attestation on the flagged re-execution
+				// exactly as on a fresh measure: an attested flagged
+				// candidate the re-execution killed contradicts its
+				// equivalence claim, with the killer named, before the
+				// commit - never left to the merge layer's vaguer
+				// no-longer-reported shed (REQ-attest-survivor).
+				contradictKilledDispositions(spliced.Symbol, w.serve.Attested, spliced.Survivors, spliced.Kills, opts.Contradiction)
 				if err := commitAndAttribute(ctx, spliced, w); err != nil {
 					return err
 				}
@@ -2541,13 +2604,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						}
 					}
 				}
-				if err := commitAndAttribute(ctx, grown, w); err != nil {
-					return err
-				}
 				// Evidence beats attestation: each shed disposition names its
 				// killer so the contradiction — a mutant judged equivalent was
 				// just distinguished — reaches a human (REQ-attest-survivor,
-				// REQ-result-stale's growth carve-out).
+				// REQ-result-stale's growth carve-out). Fired BEFORE the
+				// commit: the commit is where a consumer streams merge sheds,
+				// and first-report-wins needs the contradiction on record by
+				// then — the specific reason outranks the merge layer's
+				// vaguer one. The accepted trade: a commit that then fails
+				// (a canceled context) was preceded by a report about a
+				// persist that never happened — the run aborts regardless,
+				// while the inverse order re-opens the silent-strip hole
+				// this ordering closes.
 				if opts.Contradiction != nil && len(shed) != 0 {
 					byIdentity, _ := candidateIdentityIndex(w.candidates)
 					for _, attestation := range shed {
@@ -2560,6 +2628,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 							Operator: attestation.Operator, Killer: killer, Reason: attestation.Reason,
 						})
 					}
+				}
+				if err := commitAndAttribute(ctx, grown, w); err != nil {
+					return err
 				}
 				continue
 			}
@@ -2598,12 +2669,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						return err
 					}
 				}
-				if err := commitAndAttribute(ctx, spliced, w); err != nil {
-					return err
-				}
 				// Evidence beats attestation, exactly as under growth: a
 				// re-measured attested survivor a moved test now kills sheds
-				// its attestation with the contradiction reported.
+				// its attestation with the contradiction reported — before
+				// the commit, so a commit-time shed stream finds it on
+				// record (first-report-wins).
 				if opts.Contradiction != nil && len(shed) != 0 {
 					byIdentity, _ := candidateIdentityIndex(w.candidates)
 					for _, attestation := range shed {
@@ -2616,6 +2686,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 							Operator: attestation.Operator, Killer: killer, Reason: attestation.Reason,
 						})
 					}
+				}
+				if err := commitAndAttribute(ctx, spliced, w); err != nil {
+					return err
 				}
 				continue
 			}
@@ -2749,14 +2822,47 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			} else if err := t.bucketSurvivorExecution(ctx, f, w, opts, runEnv, coverageCache, 0); err != nil {
 				return err
 			}
-			// A re-measure with unchanged pins keeps prior attestations that
-			// still name the exact survivor; changed pins shed them, so every
-			// evidence version's equivalences are re-judged (REQ-attest-survivor).
-			if rec, ok := prior[targets[w.target].Symbol]; ok && sameAttestationPins(*rec, *f) {
-				kept, siteSheds, _ := carryAnchoredAttestations(rec.Attested, f.Survivors)
+			// A re-measure carries prior dispositions exactly when the
+			// mutation domain holds - the judged subject (body hash,
+			// operator set) unchanged, the same position and operator
+			// surviving re-execution, site content unchanged - regardless
+			// of moved measurement pins: "judged afresh" is delivered by
+			// the re-execution itself, and a disposition whose mutant a
+			// test now kills sheds as a contradiction naming the killer
+			// (REQ-attest-survivor).
+			domainHeld := func(rec Finding) bool {
+				if w.shaped {
+					// A shaped target's domain is unobservable from its
+					// digest: content-independent for import-boundary,
+					// and covering only the one rewritten file for the
+					// other classes - never the wider surface the
+					// oracle analyzes, which is pinned only by the
+					// oracle's runtime evidence - and shaped candidates
+					// carry no site anchor. So a shaped disposition
+					// carries only under the full pin gate
+					// (REQ-attest-survivor's shaped clause).
+					return sameAttestationPins(rec, *f)
+				}
+				return mutationDomainHeld(rec, *f)
+			}
+			if rec, ok := prior[targets[w.target].Symbol]; ok && domainHeld(*rec) {
+				kept, siteSheds, gone := carryAnchoredAttestations(rec.Attested, f.Survivors)
 				f.Attested = append(f.Attested, kept...)
-				// Equal attestation pins do NOT imply equal sites: the
-				// site window spans raw file lines and can overhang the
+				// A carry across moved pins is an acceptance that outlives
+				// the environment it was judged in - reported distinctly
+				// at the moment it rides, so it is auditable
+				// (REQ-attest-survivor). A pins-held carry restores the
+				// record verbatim and stays quiet, as it always has.
+				if !sameAttestationPins(*rec, *f) && opts.AttestationCarried != nil {
+					for _, attestation := range kept {
+						opts.AttestationCarried(AttestationCarry{
+							Symbol: f.Symbol, Position: attestation.Position,
+							Operator: attestation.Operator, Reason: attestation.Reason,
+						})
+					}
+				}
+				// Domain identity does NOT imply equal sites: the site
+				// window spans raw file lines and can overhang the
 				// symbol's closure by one line, so an adjacent-line edit
 				// under a forced re-measure reaches this arm - surfaced,
 				// never silent (REQ-attest-survivor).
@@ -2766,6 +2872,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						opts.AttestationSiteShed(d)
 					}
 				}
+				// Evidence beats attestation: an attested mutant the
+				// re-execution killed contradicts its equivalence claim -
+				// the specific story, with the killer named, told before
+				// the commit so the merge layer's vaguer shed defers to it
+				// (REQ-attest-survivor).
+				contradictKilledDispositions(f.Symbol, gone, f.Survivors, f.Kills, opts.Contradiction)
 			}
 			if err := commitAndAttribute(ctx, *f, w); err != nil {
 				return err

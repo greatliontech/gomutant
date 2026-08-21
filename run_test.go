@@ -139,9 +139,10 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatalf("attestation lost across cache: %+v", second[0].Attested)
 	}
 
-	// A moved pin re-measures instead of serving the cache, and sheds the
-	// attestation: every source-evidence version's equivalences are re-judged
-	// (REQ-result-stale, REQ-attest-survivor).
+	// A moved pin re-measures instead of serving the cache, while the
+	// disposition rides the held mutation domain - the body hash is
+	// untouched, so the judged mutant is the same and the re-execution
+	// is the fresh judgment (REQ-result-stale, REQ-attest-survivor).
 	tampered := append([]Finding(nil), prior...)
 	tampered[0].TargetEvidence.MaximalClosure = "not-the-current-closure"
 	var movedDecisions []RunDecision
@@ -154,8 +155,8 @@ func TestRunEndToEnd(t *testing.T) {
 	if moved[0].Cached {
 		t.Fatal("a moved pin served from cache")
 	}
-	if len(moved[0].Attested) != 0 {
-		t.Fatalf("attestation survived a pin move: %+v", moved[0].Attested)
+	if len(moved[0].Attested) != 1 || moved[0].Attested[0].Reason != "equivalent by inspection" {
+		t.Fatalf("disposition did not ride the held domain across the pin move: %+v", moved[0].Attested)
 	}
 	if len(movedDecisions) != 1 || !strings.HasPrefix(movedDecisions[0].Reason, "stale: ") ||
 		!strings.Contains(movedDecisions[0].Reason, "target") {
@@ -3925,8 +3926,10 @@ func TestRunExtendsCappedFindingMeasuringOnlyTheSuffix(t *testing.T) {
 	}
 
 	// A moved non-budget pin refuses the extension: the whole target
-	// re-measures, the attestation sheds, and the decision names both the
-	// budget shortfall and the moved pin (REQ-result-stale).
+	// re-measures with the decision naming both the budget shortfall and
+	// the moved pin, and the disposition rides the held mutation domain -
+	// the body hash is untouched, so the re-execution is the fresh
+	// judgment (REQ-result-stale, REQ-attest-survivor).
 	tampered := append([]Finding(nil), prior...)
 	tampered[0].TargetEvidence.MaximalClosure = "not-the-current-closure"
 	moved, movedDecisions, movedDispatched := collect(Options{Budget: 3, Prior: tampered})
@@ -3934,8 +3937,8 @@ func TestRunExtendsCappedFindingMeasuringOnlyTheSuffix(t *testing.T) {
 		!strings.Contains(movedDecisions[0].Reason, "stale") || !strings.Contains(movedDecisions[0].Reason, "target") {
 		t.Fatalf("moved-pin decisions = %+v, want the budget shortfall with the moved pin attributed", movedDecisions)
 	}
-	if !slices.Equal(movedDispatched, []int{0, 1, 2}) || len(moved[0].Attested) != 0 {
-		t.Fatalf("moved-pin run dispatched %v with attestations %+v, want a whole re-measure shedding the disposition", movedDispatched, moved[0].Attested)
+	if !slices.Equal(movedDispatched, []int{0, 1, 2}) || len(moved[0].Attested) != 1 {
+		t.Fatalf("moved-pin run dispatched %v with attestations %+v, want a whole re-measure carrying the held-domain disposition", movedDispatched, moved[0].Attested)
 	}
 
 	// Prior candidate evidence never composes with the extension: the whole

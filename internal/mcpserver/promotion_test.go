@@ -106,32 +106,37 @@ func TestToolRunReportsPromotedRecords(t *testing.T) {
 		t.Fatalf("birth-stale attest echo = %+v", echo)
 	}
 
-	// The re-measure judges the birth-stale disposition afresh: a
-	// different oracle timeout moves a measurement pin without touching
-	// source geometry, so the survivor re-appears at its exact site and
-	// only the run-start snapshot can shed the disposition - loudly,
-	// with the response rows agreeing with the document
-	// (REQ-attest-survivor, REQ-mcp-findings-doc).
+	// The re-measure judges the birth-stale disposition afresh - by
+	// re-executing the mutant under the current oracle. The mutation
+	// domain held (the body and operator set are untouched; only oracle
+	// pins moved), the survivor re-appears at its exact site, and the
+	// edited oracle still cannot distinguish the mutant - so the
+	// disposition rides, reported as a carry, with the response rows
+	// agreeing with the document (REQ-attest-survivor,
+	// REQ-mcp-findings-doc).
 	reIn := in
 	reIn.OracleTimeoutSec = 180
 	_, reMeasured, err := s.toolRun(ctx, nil, reIn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	shedSeen := false
-	for _, shed := range reMeasured.AttestationSheds {
-		if strings.Contains(shed, "pins moved") {
-			shedSeen = true
+	carrySeen := false
+	for _, carry := range reMeasured.AttestationCarries {
+		if strings.Contains(carry, "measurement pins moved") {
+			carrySeen = true
 		}
 	}
-	if !shedSeen {
-		t.Fatalf("re-measure did not shed the birth-stale disposition: %+v", reMeasured.AttestationSheds)
+	if !carrySeen {
+		t.Fatalf("re-measure did not report the carried disposition: carries %+v sheds %+v", reMeasured.AttestationCarries, reMeasured.AttestationSheds)
 	}
-	if len(reMeasured.Findings) != 1 || reMeasured.Findings[0].Attested != 0 {
-		t.Fatalf("re-measure response still counts the disposition: %+v", reMeasured.Findings)
+	if len(reMeasured.AttestationSheds) != 0 {
+		t.Fatalf("held-domain re-measure shed the disposition: %+v", reMeasured.AttestationSheds)
+	}
+	if len(reMeasured.Findings) != 1 || reMeasured.Findings[0].Attested != 1 {
+		t.Fatalf("re-measure response lost the disposition: %+v", reMeasured.Findings)
 	}
 	final, err := s.loadFindings("")
-	if err != nil || len(final) != 1 || len(final[0].Attested) != 0 {
-		t.Fatalf("document kept the shed disposition: %+v, %v", final, err)
+	if err != nil || len(final) != 1 || len(final[0].Attested) != 1 {
+		t.Fatalf("document lost the carried disposition: %+v, %v", final, err)
 	}
 }

@@ -329,6 +329,24 @@ func TestToolRunCommandTimeoutPreservesOrdinaryErrors(t *testing.T) {
 	}
 }
 
+// An aborted run's persisted sheds ride its error: the SDK discards the
+// typed output when a handler errors, so the error text is the one
+// channel a token-less client is guaranteed to read
+// (REQ-attest-survivor's "loudly, in every mode").
+func TestShedsRidingAbortAttachesToTheError(t *testing.T) {
+	base := context.Canceled
+	if got := shedsRidingAbort(base, nil); got != base {
+		t.Fatalf("shed-free abort rewrapped: %v", got)
+	}
+	got := shedsRidingAbort(base, []string{"pkg.F f.go:1:1 op - reason"})
+	if !errors.Is(got, context.Canceled) {
+		t.Fatalf("wrapped abort lost its cause: %v", got)
+	}
+	if !strings.Contains(got.Error(), "attestation sheds persisted before this abort") || !strings.Contains(got.Error(), "pkg.F f.go:1:1 op - reason") {
+		t.Fatalf("abort error does not carry the sheds: %v", got)
+	}
+}
+
 func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {

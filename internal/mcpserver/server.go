@@ -220,7 +220,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolExplain)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "attest_survivor",
-		Description: "Disposition a surviving mutant as equivalent, with the reasoning on record. Refused unless the mutant is among the finding's current survivors; shed automatically when any pin moves, so every body version is re-judged.",
+		Description: "Disposition a surviving mutant as equivalent, with the reasoning on record. Refused unless the mutant is among the finding's current survivors. The disposition rides re-measures while the mutated source is unchanged and the mutant keeps surviving; it sheds when the mutation domain moves (body or operator set) or when evidence contradicts it (a test kills the mutant), so every body version is re-judged.",
 	}, s.toolAttest)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "prune",
@@ -513,22 +513,23 @@ type findingOut struct {
 }
 
 type runOut struct {
-	Summary          gomutant.RunSummary         `json:"summary"`
-	Document         string                      `json:"document"`
-	Findings         []findingOut                `json:"findings"`
-	OmittedFindings  int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
-	Guidance         []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
-	Contradictions   []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
-	PropertyOracles  []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
-	AttestationSheds []string                    `json:"attestationSheds,omitempty" jsonschema:"dispositions refused only because the site content under their position changed: the surviving mutant is not the attested one - re-review and re-attest if genuinely equivalent"`
-	Promoted         int                         `json:"promoted,omitempty" jsonschema:"records this run carried from the machine-local overlay into the committed findings document - the document changed, commit it"`
-	MachineLocalOnly int                         `json:"machineLocalOnly,omitempty" jsonschema:"records this run routed to the machine-local overlay - the repo findings document gains nothing from them until their per-record disqualifiers clear; the capped findings list may omit some, this count never does"`
-	Residue          []gomutant.Residue          `json:"residue,omitempty"`
-	OmittedResidue   int                         `json:"omittedResidue,omitempty"`
-	Preparation      []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
-	PreparationCount int                         `json:"preparationCount"`
-	Decisions        []gomutant.RunDecision      `json:"decisions,omitempty" jsonschema:"absent when a progress token streamed the decisions; decisionsCount still totals them"`
-	DecisionsCount   int                         `json:"decisionsCount"`
+	Summary            gomutant.RunSummary         `json:"summary"`
+	Document           string                      `json:"document"`
+	Findings           []findingOut                `json:"findings"`
+	OmittedFindings    int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
+	Guidance           []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
+	Contradictions     []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
+	PropertyOracles    []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
+	AttestationSheds   []string                    `json:"attestationSheds,omitempty" jsonschema:"dispositions shed with the cause named - the mutation domain moved, the site content under the position changed, or the attested survivor is no longer reported - re-review and re-attest if genuinely equivalent"`
+	AttestationCarries []string                    `json:"attestationCarries,omitempty" jsonschema:"dispositions carried across moved measurement pins: the mutated source is unchanged and the mutant survived re-execution, so the equivalence reasoning rides - auditable acceptances, no action needed"`
+	Promoted           int                         `json:"promoted,omitempty" jsonschema:"records this run carried from the machine-local overlay into the committed findings document - the document changed, commit it"`
+	MachineLocalOnly   int                         `json:"machineLocalOnly,omitempty" jsonschema:"records this run routed to the machine-local overlay - the repo findings document gains nothing from them until their per-record disqualifiers clear; the capped findings list may omit some, this count never does"`
+	Residue            []gomutant.Residue          `json:"residue,omitempty"`
+	OmittedResidue     int                         `json:"omittedResidue,omitempty"`
+	Preparation        []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
+	PreparationCount   int                         `json:"preparationCount"`
+	Decisions          []gomutant.RunDecision      `json:"decisions,omitempty" jsonschema:"absent when a progress token streamed the decisions; decisionsCount still totals them"`
+	DecisionsCount     int                         `json:"decisionsCount"`
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
@@ -691,6 +692,33 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	postMerge := map[string]gomutant.Finding{}
 	contradicted := map[string]bool{}
+	// A shed is recorded the moment its strip persists: the incremental
+	// commit survives an aborted run (that is its purpose), so a shed
+	// buffered for the epilogue is silently dropped exactly when the
+	// document kept the stripped record (REQ-attest-survivor's "loudly,
+	// in every mode"). Delivery on abort: the SDK discards the typed
+	// output when the handler errors, so the abort returns below ride
+	// the recorded sheds on the error itself (the drift-refusal
+	// precedent); a client that sent a progress token additionally hears
+	// each one as it lands. The epilogue appends only what no commit
+	// recorded. The library emits contradictions before their target's
+	// commit, so the filter is complete at record time. recordShed is
+	// never called under the findings-document lock - the notification
+	// writes to the client transport, and a slow client must not extend
+	// the lock hold.
+	recordedSheds := map[string]bool{}
+	recordShed := func(d gomutant.AttestationShed) {
+		key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
+		if recordedSheds[key] || contradicted[key] {
+			return
+		}
+		recordedSheds[key] = true
+		line := fmt.Sprintf("%s %s %s - %s", d.Symbol, d.Position, d.Operator, d.Reason)
+		out.AttestationSheds = append(out.AttestationSheds, line)
+		if notify != nil {
+			notify("attestation shed: " + line)
+		}
+	}
 	priorLayer := map[string]string{}
 	scratchNamespaces, err := gomutant.ParseScratchNamespaces(in.ScratchNamespaces)
 	if err != nil {
@@ -719,6 +747,14 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		},
 		AttestationSiteShed: func(d gomutant.AttestationShed) {
 			commitSheds = append(commitSheds, d)
+			recordShed(d)
+		},
+		AttestationCarried: func(c gomutant.AttestationCarry) {
+			line := fmt.Sprintf("%s %s %s - measurement pins moved; the mutated source is unchanged and the mutant survived re-execution", c.Symbol, c.Position, c.Operator)
+			out.AttestationCarries = append(out.AttestationCarries, line)
+			if notify != nil {
+				notify("attestation carried: " + line)
+			}
 		},
 		PropertyOracle: func(n gomutant.PropertyOracleNote) {
 			out.PropertyOracles = append(out.PropertyOracles, fmt.Sprintf("%s %s: %s", n.Package, n.Runtime, n.Note))
@@ -730,7 +766,8 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
 		Commit: func(finding gomutant.Finding) error {
-			return s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			var dropped []gomutant.AttestationShed
+			err := s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -738,8 +775,8 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 				// actually happens against the prior document - the final
 				// merge sees an already-stripped record, so the shed must
 				// be collected here or it is silent (REQ-attest-survivor).
-				merged, dropped := gomutant.MergeFindingsShedAgainst(current, []gomutant.Finding{finding}, attestSnapshot)
-				commitSheds = append(commitSheds, dropped...)
+				merged, shed := gomutant.MergeFindingsShedAgainst(current, []gomutant.Finding{finding}, attestSnapshot)
+				dropped = shed
 				for _, m := range merged {
 					if m.Symbol == finding.Symbol {
 						postMerge[finding.Symbol] = m
@@ -747,6 +784,16 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 				}
 				return merged, nil
 			})
+			if err != nil {
+				return err
+			}
+			// Recorded after the update returns: the strip persisted, and
+			// the client notification must not run under the document lock.
+			commitSheds = append(commitSheds, dropped...)
+			for _, d := range dropped {
+				recordShed(d)
+			}
+			return nil
 		},
 	}
 	if notify != nil {
@@ -791,10 +838,10 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	findings, err := tree.Run(ctx, targets, options)
 	var drift *gomutant.TreeDriftError
 	if err != nil && !errors.As(err, &drift) {
-		return nil, out, err
+		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, out, err
+		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
 	}
 	// The final merge runs before anything renders: the response reads
 	// the rows the document actually holds - a disposition recorded
@@ -819,13 +866,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return merged, nil
 	})
 	if err != nil {
-		return nil, out, err
+		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
 	}
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	out.Summary = gomutant.SummarizeRun(rendered)
 	runStore, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
 	if err != nil {
-		return nil, out, err
+		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
 	}
 	for _, f := range prior {
 		priorLayer[f.Symbol], _ = runStore.Layer(f)
@@ -833,11 +880,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	out.Findings, out.OmittedFindings = capRunFindings(rendered, runStore.Layer)
 	out.Residue, out.OmittedResidue = capResidue(out.Residue)
 	// A shed disposition is surfaced once, never silently dropped
-	// (REQ-attest-survivor): the first report wins, and a mutant whose
-	// fate the contradiction row already told is not retold with the
-	// merge layer's vaguer reason.
+	// (REQ-attest-survivor): the first report wins - a shed the
+	// incremental commit already recorded, or a mutant whose fate the
+	// contradiction row already told, is not retold with the merge
+	// layer's vaguer reason.
 	for _, d := range gomutant.DedupeAttestationSheds(append(append([]gomutant.AttestationShed(nil), commitSheds...), attestationSheds...)) {
-		if contradicted[d.Symbol+"\x00"+d.Position+"\x00"+d.Operator] {
+		key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
+		if contradicted[key] || recordedSheds[key] {
 			continue
 		}
 		out.AttestationSheds = append(out.AttestationSheds, fmt.Sprintf("%s %s %s - %s", d.Symbol, d.Position, d.Operator, d.Reason))
@@ -875,6 +924,30 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	return nil, out, nil
 }
 
+// cappedSheds bounds an error-riding shed list with the remainder
+// counted (REQ-mcp-envelope): a field campaign can shed dozens of
+// dispositions, and an error string is a signal surface, not the
+// document - the findings document names every shed mutant as open.
+func cappedSheds(sheds []string) string {
+	const exemplars = 5
+	if len(sheds) <= exemplars {
+		return strings.Join(sheds, "; ")
+	}
+	return fmt.Sprintf("%s; ... (+%d more - the shed mutants are the document's open survivors)", strings.Join(sheds[:exemplars], "; "), len(sheds)-exemplars)
+}
+
+// shedsRidingAbort attaches persisted attestation sheds to an abort's
+// error: the SDK discards the typed output when a handler errors, so the
+// error text is the one channel an aborted run's client is guaranteed to
+// read - the incremental commits kept the stripped records, and the
+// strips must reach the caller loudly (REQ-attest-survivor).
+func shedsRidingAbort(err error, sheds []string) error {
+	if len(sheds) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w; attestation sheds persisted before this abort (re-review and re-attest if genuinely equivalent): %s", err, cappedSheds(sheds))
+}
+
 // driftError folds attestation sheds into a drift refusal: the SDK
 // renders only the error text on failure, and the document already
 // stripped the sheds, so this text is their one surfacing - never
@@ -883,7 +956,7 @@ func driftError(drift error, sheds []string) error {
 	if len(sheds) == 0 {
 		return drift
 	}
-	return fmt.Errorf("%w; attestation sheds riding this refusal (re-review and re-attest if genuinely equivalent): %s", drift, strings.Join(sheds, "; "))
+	return fmt.Errorf("%w; attestation sheds riding this refusal (re-review and re-attest if genuinely equivalent): %s", drift, cappedSheds(sheds))
 }
 
 // capResidue bounds a run response's residue rows with the remainder
@@ -1347,7 +1420,7 @@ type attestOut struct {
 	Open        int    `json:"open" jsonschema:"the symbol's open findings after the disposition"`
 	Layer       string `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
 	LayerReason string `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
-	Warning     string `json:"warning,omitempty" jsonschema:"set when the record cannot serve as it stands - the next measure judges the equivalence afresh and sheds the disposition if its pins moved"`
+	Warning     string `json:"warning,omitempty" jsonschema:"set when the record cannot serve as it stands - the next measure judges the equivalence afresh and sheds the disposition if its mutation domain moved"`
 }
 
 func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in attestIn) (*mcp.CallToolResult, attestOut, error) {

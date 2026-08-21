@@ -278,3 +278,54 @@ func TestShapedWorkspaceCompileKill(t *testing.T) {
 		t.Fatalf("workspace satisfaction probe not killed: %+v", f)
 	}
 }
+
+// A shaped disposition never rides the domain gate: the shape digest is
+// content-independent by design, the analyzed surface is pinned only by
+// the oracle's runtime evidence, and shaped candidates carry no site
+// anchor — so a moved measurement pin sheds a shaped disposition rather
+// than carrying it (REQ-attest-survivor's shaped clause).
+func TestShapedDispositionShedsOnMovedPins(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per shaped candidate")
+	}
+	tmp := writeShapedFixture(t)
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/core"}, Forbidden: "example.com/shaped/forbidden"}
+	target := Target{Symbol: "structural:core-no-forbidden-vacuous", Structural: spec,
+		Oracle: []string{"example.com/shaped/arch.TestVacuous"}, OracleExplicit: true}
+	findings, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute, BracketPaths: []string{"core"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || len(findings[0].Survivors) != 1 {
+		t.Fatalf("vacuous shaped measure = %+v, want one survivor to attest", findings)
+	}
+	survivor := findings[0].Survivors[0]
+	if err := findings[0].Attest(survivor.Position, survivor.Operator, "vacuous oracle accepted for the harness"); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Export(findings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rerun, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 3 * time.Minute, BracketPaths: []string{"core"}, Prior: prior})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rerun[0].Cached {
+		t.Fatal("moved-pin shaped record served")
+	}
+	if len(rerun[0].Attested) != 0 {
+		t.Fatalf("shaped disposition rode the domain gate across moved pins: %+v", rerun[0].Attested)
+	}
+	if len(rerun[0].Survivors) != 1 {
+		t.Fatalf("re-measure lost the shaped survivor: %+v", rerun[0].Survivors)
+	}
+}

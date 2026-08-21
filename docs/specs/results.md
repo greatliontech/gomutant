@@ -580,25 +580,49 @@ an earlier discarded candidate can therefore reserve an occurrence number.
 
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among
-the record's current survivors, and shed whenever any pin moves — every subject
-evidence or mutation-domain pin's equivalences are judged afresh, and a record's
-open findings are its survivors less its attested ones. Positions are location
-metadata only: a remeasurement under identical pins carries a disposition only
-when the same position and operator survive again; source-evidence drift sheds it
-rather than attempting to infer that a closure change was location-only. An
+the record's current survivors; a record's open findings are its survivors
+less its attested ones. A disposition is a judgment about the mutated
+source, so its lifecycle is keyed to the mutation domain, never to
+measurement pins: a re-measure carries a disposition exactly when the
+domain holds — the target's body hash and operator set unchanged (candidate
+identity is budget-independent: occurrence suffixes are assigned over the
+complete ordered set), the same position and operator surviving
+re-execution again, site content unchanged — and sheds it whenever the
+domain moves, judging every domain move's equivalences afresh. A moved
+measurement pin forces the full re-execution, and that re-execution IS the
+fresh judgment: an oracle test that can now distinguish the mutant kills it
+and the disposition sheds as a contradiction naming the killer — evidence
+beats attestation — while a disposition carried across moved pins is
+reported distinctly at the moment it rides, so the acceptance outliving the
+environment it was judged in stays auditable — the accepted risk, stated:
+a judgment premised on environment semantics ("equivalent because this
+path cannot execute here") can outlive its premise while the mutant keeps
+surviving tests that never covered it, and the carry report is what keeps
+that acceptance visible for re-review. A shaped target's mutation domain
+is unobservable from its record: the shape digest is content-independent
+for the import-boundary class and covers only the single rewritten file
+for the others — never the wider surface the oracle analyzes, which is
+pinned only by the oracle's runtime evidence — and no shaped candidate
+carries a site anchor. A shaped
+disposition therefore carries only under the full measurement-pin gate,
+never the domain gate. Source drift of the mutated
+body sheds rather than attempting to infer that a change was
+location-only. An
 attestation's equivalence reasoning is site-specific, so every disposition
 carry that can observe moved source — the concurrent-attest graft and the
-pin-hold re-measure carry — additionally anchors on the survivor's site
+domain-hold re-measure carry — additionally anchors on the survivor's site
 content: a same-shaped mutant at a different site (a neighbor shifted into
 the old coordinates by an edit) never inherits a disposition, and a
 position-and-operator match whose site moved is surfaced as a shed, never
-silently dropped or silently carried. The merge graft is gated by the pins,
-not blind to them: a disposition already on record when a run began, whose
-pin-hold re-measure carry judged the equivalence afresh and did not keep it,
-sheds at merge rather than re-attaching — only a disposition recorded
-concurrently during the run grafts onto a still-reported survivor — and a
-disposition whose survivor the fresh record no longer reports sheds with its
-mutant, loudly, in every mode. The carve-out carries run under
+silently dropped or silently carried. The merge graft is gated by the
+domain, not blind to it: a disposition already on record when a run began,
+whose domain-hold re-measure carry judged the equivalence afresh and did
+not keep it, sheds at merge rather than re-attaching — only a disposition
+recorded concurrently during the run grafts onto a still-reported
+survivor — and a disposition whose survivor the fresh record no longer
+reports sheds with its mutant, loudly, in every mode — a contradiction is
+emitted before its strip persists, and an aborted run's persisted strips
+ride its every reporting mode, the error channel included. The carve-out carries run under
 gates that pin the mutated source, so they anchor by position and
 operator over that pinned source; a document whose recorded sites diverge
 from its own survivors (external divergence — the tool never persists
@@ -607,7 +631,7 @@ The disposition surface echoes what it did: the attested position and
 operator, the record's remaining open count, its persistence layer with the
 disqualifying clause when machine-local, and a warning when the record
 cannot serve as it stands — the next measure judges the equivalence afresh
-and sheds the disposition if its pins moved.
+and sheds the disposition if its mutation domain moved.
 A disposition recorded before site anchors existed matches by position
 and operator alone and adopts the matched survivor's site on its first
 contact with any carry path — one carry in which the pre-upgrade
@@ -615,6 +639,19 @@ permissiveness (a wrong-site adoption, the field bug replayed once per
 grandfathered disposition) remains possible; the alternative, shedding
 every pre-site disposition wholesale, would destroy user-authored
 equivalence reasoning with no audit trail.
+
+REQ-attest-survivor's carry and reporting clauses: enforced by
+`TestRunCarriesAcrossPinsAndShedsOnDomainMove` (the domain-keyed carry
+with its distinct report, and the domain-move shed),
+`TestMutationDomainHeld` (the gate's components),
+`TestShapedDispositionShedsOnMovedPins` (the shaped clause's pin gate),
+`TestRunFullRemeasureContradictionNamesKiller`,
+`TestContradictKilledDispositions`, and
+`TestRunCommandContradictionIsTheSingleReport` (killer-naming
+contradictions ahead of the vaguer merge shed, on the full re-measure
+and serve paths), and `TestRunCommandAbortAfterCommitReportsSheds`
+with `TestShedsRidingAbortAttachesToTheError` (sheds loud on the abort
+modes, terminal and error channel).
 
 **REQ-result-findings** (behavior): gomutant MUST present survivors as
 findings awaiting disposition, never as a pass/fail verdict — strengthen a

@@ -545,6 +545,114 @@ func TestRunCommandCancellationLinearizesAtFindingsCommit(t *testing.T) {
 	}
 }
 
+// shedCancellingWriter cancels its context the moment the streamed output
+// contains an attestation-shed line, capturing everything written.
+type shedCancellingWriter struct {
+	buf    bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (w *shedCancellingWriter) Write(p []byte) (int, error) {
+	w.buf.Write(p)
+	if bytes.Contains(w.buf.Bytes(), []byte("attestation shed: ")) {
+		w.cancel()
+	}
+	return len(p), nil
+}
+
+// A shed is reported by the commit that persists it: an aborted run keeps
+// its completed targets' stripped records (REQ-exec-cancellation), so a
+// shed buffered for the never-reached epilogue is dropped silently -
+// REQ-attest-survivor demands it loudly in every mode, and the field
+// failure was a stopped campaign wiping 49 dispositions without a line of
+// output. The cancelling writer fires on the shed line itself, so the run
+// ending in context.Canceled proves the line streamed from the commit,
+// before any epilogue could have rendered it.
+func TestRunCommandAbortAfterCommitReportsSheds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":       "module example.com/shed\n\ngo 1.26.5\n",
+		"shed.go":      "package shed\nfunc Value() int { return 1 }\n",
+		"shed_test.go": "package shed\nimport \"testing\"\nfunc TestValue(t *testing.T) { Value() }\n",
+		"targets.json": `{"targets":[{"symbol":"example.com/shed.Value","oracle":["example.com/shed.TestValue"]}]}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	document, err := gomutant.Export(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".gomutant"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(dir, ".gomutant", "findings.json")
+	if err := os.WriteFile(docPath, document, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A committed git tree keeps the records on the repo layer, where the
+	// prior document's attestations are the merge graft's input.
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"add", "-A"},
+		{"-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "fixture"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	// The assertion-free oracle leaves every mutant surviving.
+	targetsFile := filepath.Join(dir, "targets.json")
+	var first bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{dir: dir, targetsFile: targetsFile, findingsFile: docPath, oracleTimeout: time.Minute, output: &first}); err != nil {
+		t.Fatalf("first run: %v\n%s", err, first.String())
+	}
+	raw, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := gomutant.ParseFindings(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || len(findings[0].Survivors) == 0 {
+		t.Fatalf("first run left no survivor to attest: %+v", findings)
+	}
+	survivor := findings[0].Survivors[0]
+	if err := findings[0].Attest(survivor.Position, survivor.Operator, "regression-harness equivalence"); err != nil {
+		t.Fatal(err)
+	}
+	attested, err := gomutant.Export(findings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(docPath, attested, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Editing the target's body moves the mutation domain: the record
+	// re-measures whole and the disposition sheds at the target's
+	// incremental commit - where the cancel fires.
+	if err := os.WriteFile(filepath.Join(dir, "shed.go"), []byte("package shed\nfunc Value() int { return 0 + 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &shedCancellingWriter{cancel: cancel}
+	err = runCommand(ctx, runOptions{dir: dir, targetsFile: targetsFile, findingsFile: docPath, oracleTimeout: time.Minute, output: writer})
+	if !bytes.Contains(writer.buf.Bytes(), []byte("attestation shed: ")) {
+		t.Fatalf("no shed line streamed; output:\n%s", writer.buf.String())
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("run after the shed line = %v: the shed reached the output only at the epilogue, after the abort window\n%s", err, writer.buf.String())
+	}
+}
+
 // TestInspectFindingsCarriesCandidateEvidence: a candidate-flagged record
 // classifies unverifiable even with current-shaped subject evidence, and the
 // view carries the candidate evidence for rendering (REQ-result-inspection).
