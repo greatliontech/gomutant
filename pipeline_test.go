@@ -176,15 +176,13 @@ func TestRunJoinsPreparationOnEarlyReturn(t *testing.T) {
 	}
 }
 
-// TestRunPreparationFailureKeepsMeasuredWindows pins the error-path
-// aggregation (REQ-exec-attribution's abort terms: an abort that discards
-// completed measurements is reserved for corrupted orchestration state): a
-// later target's failing baseline — deterministically slow, so both earlier
-// windows provably execute first — aborts the run with its error, but every
-// executed window, the one held for aggregation included, commits before
-// the error surfaces. A gathered-but-unexecuted window is just preparation
-// and drops without loss.
-func TestRunPreparationFailureKeepsMeasuredWindows(t *testing.T) {
+// TestRunFailingBaselineSkipsBesideMeasuredWindows pins baseline
+// locality at the window pipeline (REQ-exec-quiescence): a later
+// target's failing baseline skips that target alone - the run
+// succeeds, both measured siblings' windows commit, and the skipped
+// target commits nothing. The error path's held-window aggregation is
+// pinned separately by TestRunPreparationErrorCommitsHeldWindow.
+func TestRunFailingBaselineSkipsBesideMeasuredWindows(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the oracle per mutant")
 	}
@@ -196,7 +194,7 @@ func TestRunPreparationFailureKeepsMeasuredWindows(t *testing.T) {
 		"pb/pb.go":      "package pb\n\nfunc G(x int) int {\n\treturn x + 2\n}\n",
 		"pb/pb_test.go": "package pb\n\nimport \"testing\"\n\nfunc TestG(t *testing.T) {\n\tif G(1) != 3 {\n\t\tt.Fail()\n\t}\n}\n",
 		"pc/pc.go":      "package pc\n\nfunc H(x int) int {\n\treturn x + 3\n}\n",
-		"pc/pc_test.go": "package pc\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestH(t *testing.T) {\n\ttime.Sleep(20 * time.Second)\n\tt.Fail()\n}\n",
+		"pc/pc_test.go": "package pc\n\nimport \"testing\"\n\nfunc TestH(t *testing.T) {\n\tt.Fail()\n}\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
@@ -224,14 +222,89 @@ func TestRunPreparationFailureKeepsMeasuredWindows(t *testing.T) {
 		Budget: 1,
 		Commit: func(f Finding) error { committed = append(committed, f.Symbol); return nil },
 	})
-	if err == nil || !strings.Contains(err.Error(), "oracle baseline does not pass") {
-		t.Fatalf("run error = %v, want pc's failing baseline surfaced", err)
+	if err != nil {
+		t.Fatalf("run error = %v, want pc's failing baseline target-local", err)
 	}
 	if !slices.Contains(committed, "example.com/keep/pa.F") || !slices.Contains(committed, "example.com/keep/pb.G") {
-		t.Fatalf("committed = %v, want both measured targets kept despite the later preparation failure", committed)
+		t.Fatalf("committed = %v, want both measured targets kept beside the failing sibling", committed)
 	}
 	if slices.Contains(committed, "example.com/keep/pc.H") {
-		t.Fatalf("committed = %v: the unmeasurable target must not commit", committed)
+		t.Fatalf("committed = %v, want the failing-baseline target skipped, not measured", committed)
+	}
+}
+
+// TestRunPreparationErrorCommitsHeldWindow pins the error path's
+// aggregation (REQ-exec-attribution's abort terms: an abort that
+// discards completed measurements is reserved for corrupted
+// orchestration state): a preparation error surfacing mid-campaign
+// returns as the run's error AND every EXECUTED window - the one held
+// for aggregation included - commits first. Which window is held when
+// the error lands depends on goroutine scheduling, so the pin is
+// schedule-proof: every dispatched target's window must be committed,
+// whichever one the error-path aggregation was holding.
+func TestRunPreparationErrorCommitsHeldWindow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the oracle per mutant")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/keep\n\ngo 1.26\n",
+		"pa/pa.go":      "package pa\n\nfunc F(x int) int {\n\treturn x + 1\n}\n",
+		"pa/pa_test.go": "package pa\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n",
+		"pb/pb.go":      "package pb\n\nfunc G(x int) int {\n\treturn x + 2\n}\n",
+		"pb/pb_test.go": "package pb\n\nimport \"testing\"\n\nfunc TestG(t *testing.T) {\n\tif G(1) != 3 {\n\t\tt.Fail()\n\t}\n}\n",
+		"pc/pc.go":      "package pc\n\nfunc H(x int) int {\n\treturn x + 3\n}\n",
+		"pc/pc_test.go": "package pc\n\nimport \"testing\"\n\nfunc TestH(t *testing.T) {\n\tif H(1) != 4 {\n\t\tt.Fail()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prevWindow := runWindowCandidates
+	runWindowCandidates = 1
+	prevTrunc := runTruncateAfterItems
+	runTruncateAfterItems = 2
+	prevErr := runTruncateErr
+	runTruncateErr = errors.New("preparation broke mid-campaign")
+	defer func() {
+		runWindowCandidates = prevWindow
+		runTruncateAfterItems = prevTrunc
+		runTruncateErr = prevErr
+	}()
+
+	var committed []string
+	dispatched := map[string]bool{}
+	_, err = tr.Run(context.Background(), []Target{
+		{Symbol: "example.com/keep/pa.F"},
+		{Symbol: "example.com/keep/pb.G"},
+		{Symbol: "example.com/keep/pc.H"},
+	}, Options{
+		Budget:     1,
+		Commit:     func(f Finding) error { committed = append(committed, f.Symbol); return nil },
+		dispatched: func(symbol string, _ int) { dispatched[symbol] = true },
+	})
+	if err == nil || !strings.Contains(err.Error(), "preparation broke mid-campaign") {
+		t.Fatalf("run error = %v, want the preparation error surfaced", err)
+	}
+	if len(dispatched) == 0 {
+		t.Fatal("nothing dispatched - the fixture never exercised the held-window path")
+	}
+	for symbol := range dispatched {
+		if !slices.Contains(committed, symbol) {
+			t.Fatalf("dispatched %v, committed %v: an executed window was discarded by the error path", dispatched, committed)
+		}
+	}
+	if slices.Contains(committed, "example.com/keep/pc.H") {
+		t.Fatalf("committed = %v: the undelivered target must not commit", committed)
 	}
 }
 

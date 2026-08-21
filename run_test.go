@@ -1771,23 +1771,63 @@ func TestRunNoOracle(t *testing.T) {
 	}
 }
 
-func TestRunRejectsFailingOracleBaseline(t *testing.T) {
+// A failing oracle baseline is the target's own condition, never a
+// campaign abort: the target skips with the failing tests named (a
+// flaky baseline reads as itself), a healthy sibling in another
+// package measures normally, and the failure is memoized per package
+// group - the second target sharing the failing oracle skips on the
+// recorded reason without a second probe
+// (REQ-exec-quiescence's baseline locality).
+func TestRunSkipsFailingBaselineTargetLocally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs oracle baseline")
+	}
 	tr := fixtureTree(t)
 	var preparation []PreparationEvent
 	var decisions []RunDecision
-	findings, err := tr.Run(context.Background(), []Target{{
-		Symbol: "example.com/fixture/lib.Add",
-		Oracle: []string{"example.com/fixture/failing.TestAlwaysFails"},
-	}}, Options{
+	findings, err := tr.Run(context.Background(), []Target{
+		{Symbol: "example.com/fixture/lib.Add",
+			Oracle: []string{"example.com/fixture/failing.TestAlwaysFails"}},
+		{Symbol: "example.com/fixture/lib.Weak",
+			Oracle: []string{"example.com/fixture/failing.TestAlwaysFails"}},
+		{Symbol: "example.com/fixture/lib.PickInput",
+			Oracle: []string{"example.com/fixture/lib.TestPickInput"}},
+	}, Options{
 		Budget:   1,
 		Progress: func(event PreparationEvent) { preparation = append(preparation, event) },
 		Decision: func(decision RunDecision) { decisions = append(decisions, decision) },
 	})
-	if err == nil || !strings.Contains(err.Error(), "oracle baseline does not pass") || findings != nil {
-		t.Fatalf("failing oracle baseline = findings %+v, error %v", findings, err)
+	if err != nil {
+		t.Fatalf("a failing baseline aborted the campaign: %v", err)
 	}
-	if len(preparation) != 4 || preparation[3].Stage != PreparationBaseline || len(decisions) != 0 {
-		t.Fatalf("failing baseline status = preparation %+v, decisions %+v", preparation, decisions)
+	for i, want := range []string{"TestAlwaysFails", "TestAlwaysFails", ""} {
+		if want == "" {
+			if findings[i].Skipped != "" {
+				t.Fatalf("healthy sibling skipped: %+v", findings[i])
+			}
+			continue
+		}
+		if !strings.Contains(findings[i].Skipped, "oracle baseline does not pass") || !strings.Contains(findings[i].Skipped, want) {
+			t.Fatalf("finding %d = %+v, want the baseline skip naming %s", i, findings[i], want)
+		}
+	}
+	probes := 0
+	for _, event := range preparation {
+		if event.Stage == PreparationBaseline && event.Package == "example.com/fixture/failing" {
+			probes++
+		}
+	}
+	if probes != 1 {
+		t.Fatalf("failing package probed %d times, want the memoized single probe", probes)
+	}
+	skips := 0
+	for _, decision := range decisions {
+		if decision.Action == "skipped" {
+			skips++
+		}
+	}
+	if skips != 2 {
+		t.Fatalf("decisions = %+v, want exactly the two baseline skips", decisions)
 	}
 }
 

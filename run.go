@@ -1438,6 +1438,59 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		drifted = append(drifted, TargetDrift{Symbol: symbol, Reason: reason})
 		driftedMu.Unlock()
 	}
+	// baselineFailures memoizes a package group's failing baseline for
+	// the campaign: siblings sharing the flaky package skip on the
+	// recorded reason without re-probing.
+	baselineFailures := map[baselineKey]string{}
+	// probeGroupBaselines fills w.baselines for the target's oracle
+	// groups. A non-cancellation baseline condition - a probe failure,
+	// an empty match, a failing test - is the target's own condition:
+	// returned as a skip reason with the cause named (a flaky test
+	// reads as itself, with the failing tests listed, never as a
+	// campaign failure), and memoized per package group. A
+	// campaign-wide abort remains reserved for cancellation of the run
+	// itself (REQ-exec-quiescence's baseline locality).
+	probeGroupBaselines := func(ctx context.Context, tg Target, w *work) (string, error) {
+		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
+		for _, group := range w.groups {
+			key := baselineKey{pkg: group.pkgs[0], run: group.runRegex, flags: strings.Join(group.flags, "\x00"), moduleDir: group.moduleDir, packageDir: group.packageDir}
+			if reason, failed := baselineFailures[key]; failed {
+				return reason, nil
+			}
+			state, ok := baselineCache[key]
+			if !ok {
+				reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0]})
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
+				probeGate.RLock()
+				ran, passed, failedTests, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+				probeGate.RUnlock()
+				var reason string
+				switch {
+				case err != nil && ctx.Err() != nil:
+					return "", ctx.Err()
+				case err != nil:
+					reason = fmt.Sprintf("oracle baseline probe failed in %s: %v", group.pkgs[0], err)
+				case ran == 0:
+					reason = fmt.Sprintf("oracle baseline matched no tests in %s", group.pkgs[0])
+				case !passed:
+					reason = fmt.Sprintf("oracle baseline does not pass in %s (failed: %s)", group.pkgs[0], strings.Join(failedTests, ", "))
+				}
+				if reason != "" {
+					baselineFailures[key] = reason
+					return reason, nil
+				}
+				state = observed
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
+				baselineCache[key] = state
+			}
+			w.baselines = append(w.baselines, state)
+		}
+		return "", nil
+	}
 	// prepareShaped is the shaped lane of target preparation: wholesale
 	// serve-or-remeasure on the shape digest and oracle evidence, then
 	// the same per-package oracle groups and baselines every measure
@@ -1601,31 +1654,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			w.groups = append(w.groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
 		}
-		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
-		for _, group := range w.groups {
-			key := baselineKey{pkg: group.pkgs[0], run: group.runRegex, flags: strings.Join(group.flags, "\x00"), moduleDir: group.moduleDir, packageDir: group.packageDir}
-			state, ok := baselineCache[key]
-			if !ok {
-				reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0]})
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				probeGate.RLock()
-				ran, passed, failedTests, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
-				probeGate.RUnlock()
-				if err != nil {
-					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
-				}
-				if ran == 0 {
-					return nil, fmt.Errorf("target %s oracle baseline matched no tests in %s", tg.Symbol, group.pkgs[0])
-				}
-				if !passed {
-					return nil, fmt.Errorf("target %s oracle baseline does not pass in %s (failed: %s)", tg.Symbol, group.pkgs[0], strings.Join(failedTests, ", "))
-				}
-				state = observed
-				baselineCache[key] = state
+		if reason, err := probeGroupBaselines(ctx, tg, w); err != nil {
+			return nil, err
+		} else if reason != "" {
+			f.Skipped = reason
+			if opts.Decision != nil {
+				opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason})
 			}
-			w.baselines = append(w.baselines, state)
+			return nil, nil
 		}
 		if opts.Decision != nil {
 			opts.Decision(decision)
@@ -2042,7 +2078,8 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// (REQ-mut-overlay). A growth serve builds its groups over the added
 		// tests alone — the recorded kills already rest on the recorded set
 		// (REQ-core-attributed-kills) — each delta group earning its own
-		// baseline below, so a failing added test refuses the run.
+		// baseline below, so a failing added test skips this target with
+		// the failure named (REQ-exec-quiescence's baseline locality).
 		if opts.PlanOnly {
 			// The plan needs candidate counts and decisions, never
 			// baseline probes: group construction and probing are
@@ -2085,34 +2122,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			w.groups = append(w.groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
 		}
-		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
-		for _, group := range w.groups {
-			key := baselineKey{pkg: group.pkgs[0], run: group.runRegex, flags: strings.Join(group.flags, "\x00"), moduleDir: group.moduleDir, packageDir: group.packageDir}
-			state, ok := baselineCache[key]
-			if !ok {
-				reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0]})
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				probeGate.RLock()
-				ran, passed, failedTests, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
-				probeGate.RUnlock()
-				if err != nil {
-					return nil, fmt.Errorf("target %s oracle baseline: %w", tg.Symbol, err)
-				}
-				if ran == 0 {
-					return nil, fmt.Errorf("target %s oracle baseline matched no tests in %s", tg.Symbol, group.pkgs[0])
-				}
-				if !passed {
-					return nil, fmt.Errorf("target %s oracle baseline does not pass in %s (failed: %s)", tg.Symbol, group.pkgs[0], strings.Join(failedTests, ", "))
-				}
-				state = observed
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				baselineCache[key] = state
+		if reason, err := probeGroupBaselines(ctx, tg, w); err != nil {
+			return nil, err
+		} else if reason != "" {
+			f.Skipped = reason
+			if opts.Decision != nil {
+				opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason})
 			}
-			w.baselines = append(w.baselines, state)
+			return nil, nil
 		}
 		// The target's own preparation events — mutants and baselines —
 		// all precede its decision (REQ-exec-run-status).
@@ -2233,7 +2250,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if errors.Is(err, errTruncateSeam) {
 			// The seam models the failure REQ-exec-completion exists
 			// for: a pipeline that ends early with its error lost.
-			err = nil
+			// With runTruncateErr set it models the OTHER failure - a
+			// preparation error that surfaces - so the error path's
+			// held-window aggregation is testable.
+			err = runTruncateErr
 		}
 		prepErr = err
 	}()
@@ -3032,6 +3052,13 @@ var runWindowCandidates int
 var runTruncateAfterItems int
 
 var errTruncateSeam = errors.New("truncation seam")
+
+// runTruncateErr, when non-nil beside runTruncateAfterItems, is
+// surfaced as the preparation pipeline's own error instead of being
+// swallowed: the seam for the error path's held-window aggregation -
+// completed windows, the held one included, commit before the error
+// returns (REQ-exec-attribution's abort terms).
+var runTruncateErr error
 
 // gatherWindow blocks for the next prepared work item and keeps blocking
 // until the window's candidate budget is met or preparation ends. Blocking —

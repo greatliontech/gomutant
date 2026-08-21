@@ -303,19 +303,29 @@ the failure named instead.
 The findings document validates commit provenance per finding, so
 one campaign may truthfully record more than one capture commit.
 The same target-locality governs evidence construction — symbol
-resolution, oracle validation, target body-hash reads, and
-decision-evidence construction included: a target whose own
+resolution, oracle validation, target body-hash reads,
+decision-evidence construction, and oracle baseline probes included: a
+target whose own
 freshness-proof construction fails — after one bounded retry — skips with
 the cause on its decision line, one package's typed-load breakage
 skips exactly the targets whose own closure carries it (the batched
 decision views splinter per package on failure, so healthy same-module
-siblings keep their views), never overwriting a prior record and never
-taking sibling targets down; a campaign-wide abort remains reserved for the one
+siblings keep their views), and a failing oracle baseline — a probe
+failure, an empty match, or a failing test — skips exactly the targets
+whose oracles run in that package group (same package, same oracle
+test set, same flags — a sibling whose oracle subset excludes the
+failing test probes its own group and measures), the failing tests named so a
+flaky baseline reads as itself, with the failure memoized per package
+group for the campaign (siblings skip on the recorded reason without
+re-probing); never overwriting a prior record and never
+taking sibling targets down. A campaign-wide abort remains reserved for the one
 condition that invalidates every measurement — cancellation of the run
 itself.
 
 REQ-exec-quiescence's evidence-construction locality: enforced by
-`TestRunSkipsBrokenTargetLocally`.
+`TestRunSkipsBrokenTargetLocally` and
+`TestRunSkipsFailingBaselineTargetLocally` (the baseline arm, with the
+per-package-group memo).
 
 **REQ-exec-property-oracles** (behavior): gomutant MUST detect recognized
 property runtimes in an oracle package's imports (test variants included)
