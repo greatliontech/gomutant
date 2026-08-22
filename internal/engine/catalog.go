@@ -2,9 +2,12 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
+	"io/fs"
 	"os"
 
 	"golang.org/x/tools/go/packages"
@@ -38,7 +41,22 @@ func (t *Tree) candidateCatalog(ctx context.Context, symbol string) (*catalog, e
 	}
 	source, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			// A loaded file that vanished is drift exactly as a
+			// modified one - same refusal vocabulary, target-local
+			// (REQ-exec-quiescence).
+			return nil, &SourceDriftError{Path: path}
+		}
 		return nil, err
+	}
+	// The coherence guard: token offsets come from the load-time
+	// parse, the splice targets these bytes — a digest mismatch means
+	// the tree moved under the run, and generating from it would
+	// splice mutations at stale offsets (REQ-exec-quiescence's
+	// target-local drift refusal; the caller skips the target with
+	// the drift named).
+	if want, pinned := t.sourceDigests[path]; pinned && sha256.Sum256(source) != want {
+		return nil, &SourceDriftError{Path: path}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err

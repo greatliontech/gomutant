@@ -260,6 +260,13 @@ type ExecutionEvent struct {
 	// gate finishes below it in every clean window.
 	ConfirmationsDone  int
 	ConfirmationsTotal int
+	// FlipPosition/FlipKiller are set exactly on a confirmation-flip
+	// event: the serial re-run re-scored a provisional kill (initially
+	// attributed to FlipKiller) as a survivor. A demotion is never
+	// silent — a false-survivor field report is self-diagnosing from
+	// the log (docs/issues/growth-serve-misses-modified-oracle-bodies.md).
+	FlipPosition string
+	FlipKiller   string
 }
 
 // PreparationEvent reports one operation before it begins. Symbol is set for
@@ -1093,6 +1100,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// state, and the naming needs the residue set, not a per-target
 	// re-listing.
 	residue := sync.OnceValue(func() string { return measurementResidue(ctx, repository, runStart) })
+	// driftedMu guards drifted: the preparation goroutine's cached-serve
+	// refusal and the aggregation loop's refusals append concurrently
+	// (the pipeline runs preparation ahead of execution).
+	var driftedMu sync.Mutex
+	var drifted []TargetDrift
+	refuseTarget := func(symbol, reason string) {
+		driftedMu.Lock()
+		drifted = append(drifted, TargetDrift{Symbol: symbol, Reason: reason})
+		driftedMu.Unlock()
+	}
+
 	preparation := newRunPreparation(t)
 	jobs := opts.Jobs
 	if jobs <= 0 {
@@ -1229,6 +1247,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
+				// A drift-shaped cause (a recipe or probe file moved or
+				// vanished since load) refuses into the operational-
+				// failure set exactly as the phase-one paths do — the
+				// amended contract holds universally, shaped targets
+				// included (REQ-exec-quiescence).
+				var sourceDrift *engine.SourceDriftError
+				if errors.As(err, &sourceDrift) || errors.Is(err, iofs.ErrNotExist) {
+					reason := "shaped source drifted since load: " + err.Error() + " - re-run when the tree settles" + residue()
+					refuseTarget(tg.Symbol, reason)
+					decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason}
+					continue
+				}
 				f.Skipped = "shaped resolution failed: " + err.Error()
 				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
 				continue
@@ -1251,10 +1281,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			// The target package failing its typed load (a type error is
-			// parse-clean, so this is the first site that sees it) is
-			// this target's own breakage - a skip with the cause, never
-			// a campaign abort (REQ-exec-quiescence).
+			// A resolution failure caused by a loaded file VANISHING is
+			// drift exactly like a modified one (a checkout mid-run) —
+			// refused into the operational-failure set, never a quiet
+			// skip a pipeline reads as success. Every other typed-load
+			// breakage stays this target's own skip with the cause
+			// (REQ-exec-quiescence).
+			if errors.Is(err, iofs.ErrNotExist) {
+				reason := "source vanished since load: " + err.Error() + " - re-run when the tree settles" + residue()
+				refuseTarget(tg.Symbol, reason)
+				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason}
+				continue
+			}
 			f.Skipped = "target resolution failed: " + err.Error()
 			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
 			continue
@@ -1428,16 +1466,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// (REQ-exec-run-status); the caller drives it serially, either inline
 	// (plan-only) or from the preparation goroutine pipelined with the
 	// execution windows.
-	// driftedMu guards drifted: the preparation goroutine's cached-serve
-	// refusal and the aggregation loop's refusals append concurrently
-	// (the pipeline runs preparation ahead of execution).
-	var driftedMu sync.Mutex
-	var drifted []TargetDrift
-	refuseTarget := func(symbol, reason string) {
-		driftedMu.Lock()
-		drifted = append(drifted, TargetDrift{Symbol: symbol, Reason: reason})
-		driftedMu.Unlock()
-	}
 	// baselineFailures memoizes a package group's failing baseline for
 	// the campaign: siblings sharing the flaky package skip on the
 	// recorded reason without re-probing.
@@ -1686,6 +1714,24 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		if resolved.shaped != nil {
 			return prepareShaped(ctx, resolved)
+		}
+		// driftSkip converts a source-drift refusal from candidate
+		// generation into the contracted target-local skip: the tree
+		// moved under the run, so this target refuses with the drift
+		// named while completed siblings keep their findings
+		// (REQ-exec-quiescence); a true generator fault still aborts.
+		driftSkip := func(err error) bool {
+			var sourceDrift *engine.SourceDriftError
+			if !errors.As(err, &sourceDrift) {
+				return false
+			}
+			reason := "source changed since load: " + sourceDrift.Path + " - re-run when the tree settles" + residue()
+			refuseTarget(tg.Symbol, reason)
+			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason}
+			if opts.Decision != nil {
+				opts.Decision(decisions[i])
+			}
+			return true
 		}
 		rec, hasPrior := prior[tg.Symbol]
 		// The target's property-runtime measurement regime: a rapid
@@ -1972,8 +2018,25 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// (REQ-result-stale's killer-drift carve-out).
 			budget = w.drift.Budget
 		}
+		// regenerateAtBudget re-enumerates at the request budget when a
+		// carve-out's record-shaped regeneration cannot be spliced —
+		// one exit for the three carve-out fallbacks (drift skips
+		// target-locally, any other failure aborts as ever).
+		regenerateAtBudget := func() (engine.Generation, bool, error) {
+			g, gerr := t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
+			if gerr != nil {
+				if driftSkip(gerr) {
+					return engine.Generation{}, true, nil
+				}
+				return engine.Generation{}, false, fmt.Errorf("target %s: %w", tg.Symbol, gerr)
+			}
+			return g, false, nil
+		}
 		generation, err := t.eng.CandidatesContext(ctx, tg.Symbol, budget)
 		if err != nil {
+			if driftSkip(err) {
+				return nil, nil
+			}
 			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
 		}
 		if w.serve != nil {
@@ -1987,9 +2050,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// spliced: the whole target re-measures (REQ-result-stale).
 				w.serve, w.flagged = nil, nil
 				if budget != opts.Budget {
-					generation, err = t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
-					if err != nil {
-						return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
+					var regenerated bool
+					if generation, regenerated, err = regenerateAtBudget(); regenerated {
+						return nil, nil
+					} else if err != nil {
+						return nil, err
 					}
 				}
 			}
@@ -2024,9 +2089,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				w.grow = nil
 				w.reason = fmt.Sprintf("derived oracle grew by %s, but deterministic regeneration cannot re-identify the recorded candidates and survivors", testNoun(len(w.growAdded)))
 				if budget != opts.Budget {
-					generation, err = t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
-					if err != nil {
-						return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
+					var regenerated bool
+					if generation, regenerated, err = regenerateAtBudget(); regenerated {
+						return nil, nil
+					} else if err != nil {
+						return nil, err
 					}
 				}
 			}
@@ -2059,9 +2126,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				w.drift = nil
 				w.reason = "killer drift is attributable, but deterministic regeneration cannot re-identify the recorded candidates, kills, and survivors"
 				if budget != opts.Budget {
-					generation, err = t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
-					if err != nil {
-						return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
+					var regenerated bool
+					if generation, regenerated, err = regenerateAtBudget(); regenerated {
+						return nil, nil
+					} else if err != nil {
+						return nil, err
 					}
 				}
 			}
@@ -2497,11 +2566,20 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						return confirmInconclusive, err
 					}
 					confirmDone++
+					initialKiller := killers[wi][k.mi]
 					outcomes[wi][k.mi] = outcome
 					killers[wi][k.mi] = killer
 					observations[wi][k.mi] = interner.intern(state)
 					incompletes[wi][k.mi] = incomplete
-					return classifyConfirmation(outcome, killer), nil
+					classified := classifyConfirmation(outcome, killer)
+					if classified == confirmFlipped {
+						reportConfirmationFlip(opts.Executing,
+							targets[window[wi].target].Symbol,
+							window[wi].candidates[k.mi].Position,
+							initialKiller,
+							dispatchedTargets+wi+1, int(preparedTargets.Load()))
+					}
+					return classified, nil
 				},
 				func(k windowKill) bool {
 					return observations[k.target][k.mi].Unverifiable
@@ -3195,6 +3273,21 @@ func (g *confirmationGate) observe(outcome confirmOutcome) (retroactive bool) {
 	first := !g.flipped
 	g.flipped = true
 	return first
+}
+
+// reportConfirmationFlip emits the loud demotion event: a provisional
+// kill the serial re-run re-scored as a survivor names its mutant and
+// withdrawn killer on every advisory face — a demotion is never
+// silent (REQ-exec-run-status's confirmation-flip class).
+func reportConfirmationFlip(executing func(ExecutionEvent), symbol, position, withdrawnKiller string, targetIndex, targetCount int) {
+	reportExecuting(executing, ExecutionEvent{
+		Phase:        "confirmation-flip",
+		TargetIndex:  targetIndex,
+		TargetCount:  targetCount,
+		Symbol:       symbol,
+		FlipPosition: position,
+		FlipKiller:   withdrawnKiller,
+	})
 }
 
 func reportExecuting(callback func(ExecutionEvent), event ExecutionEvent) {

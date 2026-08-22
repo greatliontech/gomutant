@@ -12,14 +12,19 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/mod/modfile"
@@ -33,6 +38,15 @@ type Tree struct {
 	pkgs            []*packages.Package
 	env             []string
 	importProcessor importProcessor
+	// sourceDigests pins every loaded Go file's content AT THE PARSE
+	// (the loader's ParseFile hook hashes the exact bytes it parses,
+	// so pin and token offsets are one observation — no window).
+	// candidateCatalog re-reads source from disk and refuses on a
+	// digest mismatch: a mid-run tree edit surfaces as the contracted
+	// target-local drift refusal instead of splicing mutations at
+	// stale offsets into moved bytes (REQ-exec-quiescence's
+	// generation-time pin).
+	sourceDigests map[string][sha256.Size]byte
 	// dir is the absolute tree root Load resolved, kept to reconcile
 	// Fset-absolute file paths back to the tree-relative paths callers speak.
 	dir string
@@ -90,6 +104,13 @@ func loadContextWith(ctx context.Context, dir string, sel Selection, executionSu
 		return nil, err
 	}
 	var pkgs []*packages.Package
+	// The content pins are taken FROM THE PARSE: the loader hands this
+	// hook the exact bytes it parses, so the digest and the token
+	// offsets are one observation — no window exists in which an edit
+	// can pin new bytes against old offsets (REQ-exec-quiescence's
+	// generation-time pin). candidateCatalog compares its re-read
+	// against these.
+	digests := &sourceDigestCapture{pins: map[string][sha256.Size]byte{}}
 	for _, m := range members {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -99,9 +120,10 @@ func loadContextWith(ctx context.Context, dir string, sel Selection, executionSu
 			Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 				packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule |
 				packages.NeedForTest,
-			Dir:   filepath.Join(dir, m),
-			Env:   env,
-			Tests: true,
+			Dir:       filepath.Join(dir, m),
+			Env:       env,
+			Tests:     true,
+			ParseFile: digests.parseAndPin,
 		}
 		loaded, err := loadPackages(cfg, "./...")
 		if err != nil {
@@ -118,7 +140,20 @@ func loadContextWith(ctx context.Context, dir string, sel Selection, executionSu
 	if err != nil {
 		return nil, fmt.Errorf("resolving tree root %s: %w", dir, err)
 	}
-	return &Tree{pkgs: pkgs, dir: abs, env: append([]string(nil), env...)}, nil
+	return &Tree{pkgs: pkgs, dir: abs, env: append([]string(nil), env...), sourceDigests: digests.snapshot()}, nil
+}
+
+// SourceDriftError names a source file whose on-disk content no longer
+// matches the bytes the load parsed: mutation offsets against it would
+// splice garbage, so the target refuses locally with the drift named —
+// never a generated mutant from moved bytes, never a campaign abort
+// (REQ-exec-quiescence's target-local drift refusal).
+type SourceDriftError struct {
+	Path string
+}
+
+func (e *SourceDriftError) Error() string {
+	return "source changed since load: " + e.Path
 }
 
 // PackagesHealthyContext reports the first load or type error any
@@ -307,3 +342,37 @@ func GoEnv(dir string) []string {
 // GoEnv returns the environment used by this tree's package loads and test
 // processes.
 func (t *Tree) GoEnv() []string { return append([]string(nil), t.env...) }
+
+// sourceDigestCapture pins loaded file content at the parse itself:
+// the loader's ParseFile hook hands over the exact bytes it parses,
+// so the pin and the parse are one observation of the file
+// (REQ-exec-quiescence). Concurrent by the loader's contract.
+type sourceDigestCapture struct {
+	mu   sync.Mutex
+	pins map[string][sha256.Size]byte
+}
+
+// parseAndPin reproduces the loader's default parse exactly
+// (comments kept, all errors reported, ast.Object resolution KEPT —
+// the loader's own default promises it and downstream AST walks may
+// read Ident.Obj) and records the parsed bytes' digest.
+func (c *sourceDigestCapture) parseAndPin(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
+	if filepath.Ext(filename) == ".go" {
+		sum := sha256.Sum256(src)
+		c.mu.Lock()
+		c.pins[filename] = sum
+		c.mu.Unlock()
+	}
+	return parser.ParseFile(fset, filename, src, parser.AllErrors|parser.ParseComments)
+}
+
+// snapshot hands the pinned set over once loading completes.
+func (c *sourceDigestCapture) snapshot() map[string][sha256.Size]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pins := make(map[string][sha256.Size]byte, len(c.pins))
+	for path, sum := range c.pins {
+		pins[path] = sum
+	}
+	return pins
+}

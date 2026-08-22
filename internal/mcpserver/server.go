@@ -808,6 +808,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		// channel (REQ-exec-run-status's advisory classes): phase,
 		// window position, and exact campaign tallies.
 		options.Executing = func(e gomutant.ExecutionEvent) {
+			if e.Phase == "confirmation-flip" {
+				// The demotion carries its payload on every face: a
+				// provisional kill re-scored survivor names its mutant
+				// and withdrawn killer (REQ-exec-run-status).
+				notify(fmt.Sprintf("confirmation FLIP: %s %s - provisional kill by %s re-scored survivor on serial re-run", e.Symbol, e.FlipPosition, e.FlipKiller))
+				return
+			}
 			message := fmt.Sprintf("%s target %d/%d %s candidates %d/%d", e.Phase, e.TargetIndex, e.TargetCount, e.Symbol, e.CandidatesDone, e.CandidatesTotal)
 			if e.ConfirmationsTotal > 0 {
 				message += fmt.Sprintf(" confirmations %d/%d", e.ConfirmationsDone, e.ConfirmationsTotal)

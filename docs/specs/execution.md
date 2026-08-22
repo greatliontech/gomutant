@@ -266,7 +266,16 @@ REQ-exec-oracle-guidance: enforced by `TestRunAttributesOracleInstability`,
 mutation from target loading through run completion. gomutant validates captured
 source views after execution and refuses ordinary drift, but, like its Gofresh
 producer boundary, cannot prove that an external actor did not change and restore an
-input while a compiler read it. Drift refusal is target-local: a target whose own
+input while a compiler read it. Mutation generation additionally pins
+every loaded file's content AT THE PARSE — the digest is taken from
+the same bytes the loader parsed, so no window exists between the
+parse and the pin — and a generation-time re-read whose digest moved
+refuses the target BEFORE any candidate is spliced: a mutation is
+never generated against offsets from bytes the tree no longer holds.
+A loaded file that has VANISHED at generation or resolution time is
+the same drift, refused the same way — a checkout or branch switch
+mid-run is drift, never a quiet skip a pipeline reads as success.
+Drift refusal is target-local: a target whose own
 producer evidence no longer validates is refused with the drift named, while every
 target whose evidence still validates keeps its completed finding — committed
 incrementally, so a partial campaign retains its sound results. A drift-refused run
@@ -480,7 +489,10 @@ diagnostic, carry no ordering or completion guarantee, and never enter a
 decision or finding. Advisory execution-phase progress events join the
 same class: at each execution window boundary the run may report the
 window's phase (executing, then one confirming event per serially
-confirmed kill with the window's confirmation progress), the 1-based
+confirmed kill with the window's confirmation progress, and one
+confirmation-flip event per kill the serial re-run demotes — naming
+the phase, symbol, mutant position, and the withdrawn provisional
+killer, so a demotion is never silent on any face), the 1-based
 index of the window's first measure target among those dispatched and the
 count of measure targets prepared so far (growing to campaign-wide as
 pipelined preparation completes), a representative symbol,

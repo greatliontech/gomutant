@@ -479,6 +479,13 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 }
 
 func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent) {
+	if event.Phase == "confirmation-flip" {
+		// A demoted kill is never silent: the serial re-run re-scored
+		// this mutant a survivor and withdrew its provisional killer.
+		fmt.Fprintf(w, "confirmation FLIP: %s %s - provisional kill by %s re-scored survivor on serial re-run\n",
+			event.Symbol, event.FlipPosition, event.FlipKiller)
+		return
+	}
 	line := fmt.Sprintf("%-9s target %d/%d %s", event.Phase, event.TargetIndex, event.TargetCount, event.Symbol)
 	// A confirming window's candidate tally is saturated by
 	// construction - the confirmations counter is the signal - so the

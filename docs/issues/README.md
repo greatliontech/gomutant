@@ -22,3 +22,4 @@ is deleted (git holds history).
 | [actionable-unverifiable-refusals](actionable-unverifiable-refusals.md) | each unverifiable reason names its discharge channel (vouch/directive/restructure) | user decision |
 | [findings-inspection-cost](findings-inspection-cost.md) | inspection without re-judging freshness; summary reads O(targets); 28MB/85-target audit | user decision |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | user decision |
+| [refusal-exit-collapse](refusal-exit-collapse.md) | one refuse(symbol, reason) exit — the hand-picked subsets bred two review-caught defects in one round | with the next change to run.go's refusal surface |

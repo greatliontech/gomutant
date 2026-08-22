@@ -7,9 +7,12 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/types"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -97,7 +100,12 @@ func (t *Tree) MethodProbes(ctx context.Context, typeSymbol, ifaceSymbol string)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		file, src, ok := t.methodDeclarationRewrite(typeSymbol, typeName, method)
+		file, src, ok, err := t.methodDeclarationRewrite(typeSymbol, typeName, method)
+		if err != nil {
+			// Drift (a moved or vanished declaring file) names itself —
+			// never the embedding misdiagnosis below.
+			return nil, err
+		}
 		if !ok {
 			return nil, fmt.Errorf("method probe: %s declares no method %s in a loaded source file — the type may satisfy %s through embedding, which this class does not break", typeSymbol, method, ifaceSymbol)
 		}
@@ -124,7 +132,7 @@ func interfaceMethodNames(obj types.Object) ([]string, error) {
 // methodDeclarationRewrite finds typeName's declaration of method in
 // the type's package and returns the declaring file rewritten with the
 // method renamed — a rename no interface can see through.
-func (t *Tree) methodDeclarationRewrite(typeSymbol, typeName, method string) (string, []byte, bool) {
+func (t *Tree) methodDeclarationRewrite(typeSymbol, typeName, method string) (string, []byte, bool, error) {
 	pkgPath, _ := t.splitSymbol(typeSymbol)
 	for _, pkg := range t.pkgs {
 		if pkg.PkgPath != pkgPath {
@@ -142,21 +150,30 @@ func (t *Tree) methodDeclarationRewrite(typeSymbol, typeName, method string) (st
 				file := pkg.Fset.Position(fn.Name.Pos()).Filename
 				src, err := os.ReadFile(file)
 				if err != nil {
-					return "", nil, false
+					if errors.Is(err, fs.ErrNotExist) {
+						return "", nil, false, &SourceDriftError{Path: file}
+					}
+					return "", nil, false, err
+				}
+				// The same parse-time pin candidate generation checks:
+				// a moved file reads as drift, never as "declares no
+				// method" (the embedding misdiagnosis).
+				if want, pinned := t.sourceDigests[file]; pinned && sha256.Sum256(src) != want {
+					return "", nil, false, &SourceDriftError{Path: file}
 				}
 				offset := pkg.Fset.Position(fn.Name.Pos()).Offset
 				end := pkg.Fset.Position(fn.Name.End()).Offset
 				if offset < 0 || end > len(src) || string(src[offset:end]) != method {
-					return "", nil, false
+					return "", nil, false, nil
 				}
 				renamed := append([]byte(nil), src[:offset]...)
 				renamed = append(renamed, []byte(method+"_gomutantStructuralProbe")...)
 				renamed = append(renamed, src[end:]...)
-				return file, renamed, true
+				return file, renamed, true, nil
 			}
 		}
 	}
-	return "", nil, false
+	return "", nil, false, nil
 }
 
 // receiverTypeName unwraps a method receiver to its named type.

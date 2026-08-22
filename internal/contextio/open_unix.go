@@ -4,6 +4,7 @@ package contextio
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -20,7 +21,10 @@ func openRegularWrite(path string, mode os.FileMode) (*os.File, error) {
 func openRegularUnix(path string, flags int, mode uint32, operation string) (*os.File, error) {
 	fd, err := unix.Open(path, flags, mode)
 	if err != nil {
-		return nil, err
+		// The bare errno names no file; every consumer's message —
+		// the drift refusals above all — needs the path
+		// (fs.PathError keeps errors.Is matching on the errno).
+		return nil, &fs.PathError{Op: operation, Path: path, Err: err}
 	}
 	file := os.NewFile(uintptr(fd), path)
 	info, err := file.Stat()

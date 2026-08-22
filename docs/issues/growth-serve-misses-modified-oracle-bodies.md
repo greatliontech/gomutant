@@ -16,12 +16,25 @@ open. (4) `gomutant ephemeral` on the identical mutant: KILLED by
 TestUnitBumpPacking. Run B's record is false, and it sits in the
 findings document as an attested-lookalike truth.
 
-Hypotheses consistent with the evidence, to discriminate at fix time:
-the survivor re-run under the monotone-growth carve-out executes only
-the ADDED delta (or the pre-edit body), and/or the oracle-evidence
-pin compares test-set membership without each test's source closure —
-either way the documented pin ("every oracle test's source closure")
-did not invalidate on a body edit.
+Hypotheses, revised after a source walk (2026-08-23): the original
+serve-scope hypothesis is REFUTED — the derived oracle is the whole
+package's test set (runPreparation.oracle → testsOf, not
+coverage-filtered), the decision was a full MEASURE (not a growth
+serve), and gofresh's compartment ledger provably marks body edits
+non-inert (closure/testvariant_test.go pins it). So run B re-measured
+all 13 candidates against an oracle that INCLUDED the strengthened
+test — and still recorded the survivor, with an executed-and-passed
+bucket, while ephemeral kills it. Remaining candidates, for the
+reproducer to discriminate: (a) kill-then-confirmation demotion — the
+initial suite run kills, the serial confirmation re-runs a
+mis-attributed killer solo, passes, and the flip demotes to survivor;
+(b) an oracle-invocation scope defect (the -run regex or failfast
+interaction dropping the killer for exactly this mutant's schedule);
+(c) a stale build/overlay serving the pre-edit test body to the
+mutant processes despite the fresh load. The reproducer is the field
+scenario verbatim: measure with a surviving mutant, strengthen the
+existing killer-to-be in place plus unrelated additions, re-measure,
+assert the flip.
 
 Asks, all three: (a) a changed oracle test BODY invalidates the
 target's pin exactly as an added test does; (b) when any existing
@@ -34,7 +47,21 @@ one edit, survivor must flip.
 Reporter's workaround: --force on the affected symbols (logs:
 ~/.claude/jobs/038121fe/tmp/targeted-run2..4.txt).
 
-Lands: user decision (flagged for immediate fix: every findings
-document measured under the growth carve-out since it shipped may
-carry false survivors from strengthen-in-place edits; the fix should
-state the re-measure guidance for standing stores).
+Reproduction attempts (2026-08-23): the field scenario verbatim at
+the library tier — weak-oracle survivor, strengthen-in-place plus an
+added sibling, fresh load, prior passed — PASSES: the survivor flips
+to killed (TestRunSurvivorFlipsWhenExistingOracleTestStrengthens,
+now a standing regression net). The field state itself is
+unrecoverable (the pando session's tree was never committed and its
+job directory is gone), so the divergence lives in a variable the
+minimal rig lacks: the Store/CLI path over a 28 MB document, the
+prior's candidate-evidence rows, the confirmation stride under the
+single-vouch set, or a schedule-dependent kill-then-confirmation
+demotion. Watch posture until the next occurrence: the reproducer
+stands guard; the progress/exit-reporting issue's
+confirmation-mode line and a LOUD log line on any
+kill-demoted-by-confirmation event are the instrumentation that
+makes the next field hit self-diagnosing.
+
+Lands: user decision (the next field occurrence with retained state,
+or the confirmation-demotion instrumentation surfacing a hit).

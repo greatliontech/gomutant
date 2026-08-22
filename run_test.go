@@ -4535,6 +4535,10 @@ func TestRunExecutingEventsAdvisory(t *testing.T) {
 				t.Fatalf("confirmation progress = %+v after %d, want monotonic k/m with k < m", e, lastConfirmed)
 			}
 			lastConfirmed = e.ConfirmationsDone
+		case "confirmation-flip":
+			// A load-induced flip on this clean fixture is itself a
+			// diagnosis - name it instead of "unknown phase".
+			t.Fatalf("a kill flipped on serial re-run under this clean fixture: %s %s (withdrawn killer %s)", e.Symbol, e.FlipPosition, e.FlipKiller)
 		default:
 			t.Fatalf("unknown phase %q", e.Phase)
 		}
