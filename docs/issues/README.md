@@ -15,3 +15,4 @@ is deleted (git holds history).
 | [campaign-refuses-tree-change-from-rapid-failfiles](campaign-refuses-tree-change-from-rapid-failfiles.md) | rapid failfile persistence poisons campaign analysis views and ephemeral tree cleanliness | user decision |
 | [staged-campaign-reports-clean-index-as-drift](staged-campaign-reports-clean-index-as-drift.md) | staged campaign refuses an executed target as unstaged drift without a changed path | user decision |
 | [semantic-closure-in-the-carry-gate](semantic-closure-in-the-carry-gate.md) | a comment-insensitive closure identity would dominate both poles of the carry gate | when gofresh exposes a comment/format-insensitive closure identity |
+| [inline-interface-assert-negation-parse-error](inline-interface-assert-negation-parse-error.md) | negate candidates over inline-interface type-assert conditions fail to re-parse and abort the campaign | user decision |
