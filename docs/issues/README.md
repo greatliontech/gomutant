@@ -16,9 +16,11 @@ is deleted (git holds history).
 | [staged-campaign-reports-clean-index-as-drift](staged-campaign-reports-clean-index-as-drift.md) | staged campaign refuses an executed target as unstaged drift without a changed path | user decision |
 | [semantic-closure-in-the-carry-gate](semantic-closure-in-the-carry-gate.md) | a comment-insensitive closure identity would dominate both poles of the carry gate | when gofresh exposes a comment/format-insensitive closure identity |
 | [growth-serve-misses-modified-oracle-bodies](growth-serve-misses-modified-oracle-bodies.md) | VERDICT INTEGRITY: strengthen-in-place oracle edit leaves a false survivor served | user decision (flagged for immediate fix) |
-| [progress-and-exit-reporting](progress-and-exit-reporting.md) | summary cadence, exit-path banked-state reports, named confirmation mode, remaining-of-total denominators | user decision |
 | [coverage-guided-oracle-ordering](coverage-guided-oracle-ordering.md) | run symbol-reaching tests first with failfast; schedule, never narrowing | user decision |
 | [actionable-unverifiable-refusals](actionable-unverifiable-refusals.md) | each unverifiable reason names its discharge channel (vouch/directive/restructure) | user decision |
+| [findings-doc-unbounded-growth](findings-doc-unbounded-growth.md) | repo-layer findings.json at 70 MB after one campaign; nothing bounds or compacts it | with the tool-phase gomutant visit, or a consumer push refusal |
 | [findings-inspection-cost](findings-inspection-cost.md) | inspection without re-judging freshness; summary reads O(targets); 28MB/85-target audit | user decision |
+| [go127-generic-method-closure-analysis](go127-generic-method-closure-analysis.md) | consumer-filed: go1.27 generic-method shapes fail gofresh closure analysis | with the gofresh generic-method analysis fix (shared engine; pew files the twin), then a gomutant bump |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | user decision |
+| [progress-and-exit-reporting](progress-and-exit-reporting.md) | summary cadence, exit-path banked-state reports, named confirmation mode, remaining-of-total denominators | user decision |
 | [refusal-exit-collapse](refusal-exit-collapse.md) | one refuse(symbol, reason) exit — the hand-picked subsets bred two review-caught defects in one round | with the next change to run.go's refusal surface |
