@@ -630,24 +630,39 @@ measurement through final merge — acquired fail-fast: a second campaign
 against the same document refuses immediately, naming the holder,
 instead of interleaving measurements whose merges race. The lock
 releases with the holding process, so a crashed campaign never leaves a
-stale lock. Short document operations — dispositions, lifecycle verbs,
-inspection — serialize under the document lock alone and remain
-available while a campaign runs. The lock is flock-based and
-unix-scoped; on other hosts campaigns run without this exclusivity —
-the supported platform carries it. The lock file persists by design
-(the flock is the lock; removing it would race two waiters onto
-different inodes of one name), so inside the tool-owned document
-directory the tool maintains an ignore entry covering it —
-add-everything staging loops cannot commit a file whose lifecycle its
-name does not reveal — while a document placed in a user-owned
+stale lock. Short document WRITES — dispositions, lifecycle verbs,
+merges — serialize under the document lock alone and remain
+available while a campaign runs; inspection takes no lock at all —
+reads serve from the atomically-replaced document, so they can
+neither block nor be blocked. The document lock carries the same
+liveness discipline: it releases with its holding process, so a
+crashed writer's residue never blocks a later session, and because
+the holder behind a refusal is then live by construction, the refusal
+names it — a document-lock refusal never prescribes hand-removing a
+marker on the supported platform. A contended write waits a bounded
+budget before that refusal, and the caller's cancellation aborts the
+wait at once — a client whose deadline expired is never held for the
+remaining budget. Both locks are flock-based and
+unix-scoped; on other hosts campaigns run without the campaign
+lock's exclusivity, while the document lock stays exclusive there
+through an O_EXCL marker that is not self-releasing — its refusal
+names the recorded holder and the removal step. The lock files persist
+by design (the flock is the lock; removing one would race two waiters
+onto different inodes of one name), so inside the tool-owned document
+directory the tool maintains ignore entries covering them — minted by
+whichever lock first persists there, a document write with no campaign
+ever run included — while a document placed in a user-owned
 directory keeps that directory untouched and relies on this
 documented lifecycle.
 
 REQ-exec-exclusivity: enforced by
 `TestCampaignLockExcludesSecondCampaign`,
 `TestRunRefusesWhileCampaignLockHeld`,
-`TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed`, and
-`TestCampaignLockIgnoreMinted`.
+`TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed`,
+`TestCampaignLockIgnoreMinted`,
+`TestDocumentLockAbsorbsCrashedHolderResidue`,
+`TestDocumentLockRefusalNamesLiveHolder`, and
+`TestUpdateDocument` (the bounded wait and its cancellation).
 
 **REQ-exec-oracle-scratch** (behavior): Every oracle process tree MUST
 run with its own scratch temp directory (its `TMPDIR`), removed as soon

@@ -98,6 +98,33 @@ func TestControlCatalog(t *testing.T) {
 	}
 }
 
+// An ok-guard whose init statement carries an inline interface type in
+// the assertion generates cleanly: every condition candidate's
+// replacement source survives the generate-time format pass (a field
+// filing claimed the negate printed unparseable code here; the abort it
+// saw was the stale-offset drift splice, refused target-locally since
+// the source-digest pin).
+func TestInlineInterfaceAssertConditionGenerates(t *testing.T) {
+	tr := fixtureTree(t)
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.InlineAssertCondition", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	negated := false
+	for _, candidate := range generation.Candidates {
+		if candidate.Operator != "condition: negate" {
+			continue
+		}
+		negated = true
+		if len(candidate.Replacements) != 1 || !strings.Contains(string(candidate.Replacements[0].Source), "if c, ok := v.(interface{ Close() }); !(ok) {") {
+			t.Fatalf("negate replacement = %q, want the guard negated in place", candidate.Replacements)
+		}
+	}
+	if !negated {
+		t.Fatal("no negate candidate over the inline-interface ok-guard")
+	}
+}
+
 func TestLoopControlLegality(t *testing.T) {
 	tr := fixtureTree(t)
 	for _, test := range []struct {

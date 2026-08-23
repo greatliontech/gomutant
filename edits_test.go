@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 type cancelWhenTempWrittenContext struct {
@@ -205,13 +206,28 @@ func TestUpdateDocument(t *testing.T) {
 		t.Fatalf("pre-commit cancellation changed document: %v\n%s", err, after)
 	}
 
-	// A held lock is surfaced, never bypassed.
-	if err := os.WriteFile(path+".lock", nil, 0o644); err != nil {
+	// A held lock is surfaced, never bypassed - and the caller's
+	// cancellation aborts the bounded wait promptly: an MCP client whose
+	// deadline expires must not be held for the full retry budget
+	// (REQ-mcp-envelope's no-silent-stretch discipline at the lock).
+	// (A lockfile WITHOUT a live holder is crashed residue and is
+	// absorbed - TestDocumentLockAbsorbsCrashedHolderResidue; the
+	// budget-exhausted refusal naming the holder is
+	// TestDocumentLockRefusalNamesLiveHolder.)
+	release, err := acquireDocumentLock(context.Background(), path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	err = UpdateDocument(path, func(p []Finding) ([]Finding, error) { return p, nil })
-	if err == nil || !strings.Contains(err.Error(), ".lock") {
-		t.Fatalf("held lock bypassed: %v", err)
+	defer release()
+	shortCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err = UpdateDocumentContext(shortCtx, path, func(p []Finding) ([]Finding, error) { return p, nil })
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("held-lock wait under an expired ctx = %v, want DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("cancellation took %v; the wait must abort at the deadline, not the retry budget", elapsed)
 	}
 }
 

@@ -624,6 +624,89 @@ func TestToolFindingsCapsSummaryRows(t *testing.T) {
 	}
 }
 
+// The findings inspection stretch is never silent: a request carrying a
+// progress token hears the stretch announce itself before judging
+// begins, so a long freshness pass reads as work, not a hang
+// (REQ-mcp-envelope; the field report read a silent inspection as a
+// wedged session for 30 minutes).
+func TestToolFindingsAnnouncesInspection(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{seededFinding("example.com/empty.Gone")}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	serverSession, err := s.MCP().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	var mu sync.Mutex
+	var messages []string
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, &mcp.ClientOptions{
+		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			mu.Lock()
+			defer mu.Unlock()
+			if req.Params.ProgressToken == "tok" {
+				messages = append(messages, req.Params.Message)
+			}
+		},
+	})
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	params := &mcp.CallToolParams{Name: "findings", Arguments: map[string]any{}}
+	params.SetProgressToken("tok")
+	result, err := clientSession.CallTool(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("findings tool errored: %+v", result)
+	}
+	awaitMessage := func(want string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			mu.Lock()
+			joined := strings.Join(messages, "\n")
+			mu.Unlock()
+			if strings.Contains(joined, want) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("progress notifications = %q, want %q", joined, want)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	awaitMessage("inspecting 1 record(s)")
+
+	// The explain tool's single-symbol inspection is the same
+	// minutes-class stretch; its announcement rides the same channel.
+	params = &mcp.CallToolParams{Name: "explain", Arguments: map[string]any{"symbol": "example.com/empty.Gone"}}
+	params.SetProgressToken("tok")
+	result, err = clientSession.CallTool(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("explain tool errored: %+v", result)
+	}
+	awaitMessage("inspecting example.com/empty.Gone")
+}
+
 // Run-response residue rows cap with the remainder counted on every
 // exit path (REQ-mcp-envelope).
 func TestCapResidueCountsTheRemainder(t *testing.T) {

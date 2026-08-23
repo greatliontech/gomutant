@@ -1400,13 +1400,15 @@ func MergeWholeFindingsShedAgainst(prior, fresh []Finding, discovered []Target, 
 	return kept, shed
 }
 
-// UpdateDocument applies update to the findings document at path under an
-// exclusive lockfile, re-reading the document inside the lock so a
+// UpdateDocument applies update to the findings document at path under the
+// exclusive document lock, re-reading the document inside the lock so a
 // concurrent session's dispositions are never clobbered by a stale snapshot
 // (REQ-mcp-findings-doc): load-then-long-run-then-write is the caller's
 // shape, but the merge always runs against the freshest document. A missing
-// document reads as empty; a lock held elsewhere is retried briefly and then
-// surfaced with the lock path, so a crashed holder is operator-removable.
+// document reads as empty; a lock held elsewhere is waited on briefly and
+// then refused with the holder named (REQ-exec-exclusivity's liveness
+// discipline: a crashed holder never leaves a stale block on the supported
+// platform).
 func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)) error {
 	return UpdateDocumentContext(context.Background(), path, update)
 }
@@ -1418,36 +1420,11 @@ func UpdateDocumentContext(ctx context.Context, path string, update func(prior [
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	lock := path + ".lock"
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	release, err := acquireDocumentLock(ctx, path)
+	if err != nil {
 		return err
 	}
-	acquired := false
-	for range 50 {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			f.Close()
-			acquired = true
-			break
-		}
-		if !os.IsExist(err) {
-			return err
-		}
-		timer := time.NewTimer(100 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	if !acquired {
-		return fmt.Errorf("gomutant: findings document locked by another session; remove %s if its holder is gone", lock)
-	}
-	defer os.Remove(lock)
+	defer release()
 
 	var prior []Finding
 	mode := os.FileMode(0o644)

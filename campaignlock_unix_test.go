@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The campaign lock excludes a second campaign fail-fast, naming the
@@ -20,7 +21,17 @@ func TestCampaignLockExcludesSecondCampaign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AcquireCampaignLock(path); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("pid %d", os.Getpid())) {
+	// Fail-fast is contract, not tuning (REQ-exec-exclusivity:
+	// "refuses immediately"): the refusal must return without ever
+	// entering the retry cadence — a single flock attempt is
+	// microseconds; one 100ms retry wait would already breach this
+	// bound.
+	started := time.Now()
+	_, err = AcquireCampaignLock(path)
+	if elapsed := time.Since(started); elapsed > 80*time.Millisecond {
+		t.Fatalf("second campaign refused after %v; fail-fast means no retry wait", elapsed)
+	}
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("pid %d", os.Getpid())) {
 		t.Fatalf("second campaign = %v, want the refusal naming the holder", err)
 	}
 	release()

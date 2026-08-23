@@ -1198,53 +1198,75 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if len(all) == 0 {
 		return nil, out, nil
 	}
-	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
-	if err != nil {
-		return nil, out, err
-	}
+	matched := make([]gomutant.Finding, 0, len(all))
 	for _, finding := range all {
-		if err := ctx.Err(); err != nil {
-			return nil, out, err
-		}
 		if in.Label != "" && !containsLabel(finding.Labels, in.Label) {
 			continue
 		}
 		if in.Symbol != "" && finding.Symbol != in.Symbol {
 			continue
 		}
-		inspection, err := tree.InspectFindingContext(ctx, finding)
-		if err != nil {
-			return nil, out, err
-		}
-		if in.State != "" && string(inspection.State) != in.State {
-			continue
-		}
-		layer, layerReason := store.Layer(finding)
-		if layer == "repo" {
-			out.RepoCommittable++
-		} else {
-			out.LocalOnly++
-		}
-		if !in.Detail {
-			out.Summary = append(out.Summary, findingSummary{
-				Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
-				Layer: layer, Open: len(finding.Open()), Attested: len(finding.AttestedDispositions()),
-			})
-			continue
-		}
-		labels := append([]string(nil), finding.Labels...)
-		sort.Strings(labels)
-		out.Findings = append(out.Findings, inspectedFinding{
-			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-			Layer: layer, LayerReason: layerReason,
-			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
-			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
-			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
-			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
-			Candidates: inspection.CandidateEvidence,
-		})
+		matched = append(matched, finding)
 	}
+	notify := progressNotifier(ctx, req)
+	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+	if err != nil {
+		return nil, out, err
+	}
+	// The inspection stretch announces itself once and rides the
+	// heartbeat: freshness judging over a large document is
+	// minutes-class work, and a silent stretch reads as a hang
+	// (REQ-mcp-envelope). Rows build one inspection at a time so
+	// summary reads never retain per-candidate evidence for the whole
+	// document.
+	if notify != nil {
+		notify(fmt.Sprintf("inspecting %d record(s)", len(matched)))
+	}
+	rows, err := withHeartbeat(ctx, notify, fmt.Sprintf("inspecting %d record(s)", len(matched)), func(ctx context.Context) (findingsOut, error) {
+		var res findingsOut
+		for _, finding := range matched {
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
+			inspection, err := tree.InspectFindingContext(ctx, finding)
+			if err != nil {
+				return res, err
+			}
+			if in.State != "" && string(inspection.State) != in.State {
+				continue
+			}
+			layer, layerReason := store.Layer(finding)
+			if layer == "repo" {
+				res.RepoCommittable++
+			} else {
+				res.LocalOnly++
+			}
+			if !in.Detail {
+				res.Summary = append(res.Summary, findingSummary{
+					Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
+					Layer: layer, Open: len(finding.Open()), Attested: len(finding.AttestedDispositions()),
+				})
+				continue
+			}
+			labels := append([]string(nil), finding.Labels...)
+			sort.Strings(labels)
+			res.Findings = append(res.Findings, inspectedFinding{
+				Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
+				Layer: layer, LayerReason: layerReason,
+				CandidateCount: finding.CandidateCount, Generated: finding.Generated,
+				Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
+				Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
+				Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
+				Candidates: inspection.CandidateEvidence,
+			})
+		}
+		return res, nil
+	})
+	if err != nil {
+		return nil, out, err
+	}
+	out.RepoCommittable, out.LocalOnly = rows.RepoCommittable, rows.LocalOnly
+	out.Summary, out.Findings = rows.Summary, rows.Findings
 	sort.Slice(out.Summary, func(i, j int) bool { return out.Summary[i].Symbol < out.Summary[j].Symbol })
 	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].Symbol < out.Findings[j].Symbol })
 	if len(out.Summary) > findingsRowCap {
@@ -1326,7 +1348,15 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			if err != nil {
 				return nil, explainOut{}, err
 			}
-			inspection, err := tree.InspectFindingContext(ctx, finding)
+			// Freshness judging can be minutes-class; the stretch
+			// announces itself and rides the heartbeat so it never
+			// reads as a hang (REQ-mcp-envelope).
+			if notify != nil {
+				notify("inspecting " + finding.Symbol)
+			}
+			inspection, err := withHeartbeat(ctx, notify, "inspecting "+finding.Symbol, func(ctx context.Context) (gomutant.FindingInspection, error) {
+				return tree.InspectFindingContext(ctx, finding)
+			})
 			if err != nil {
 				return nil, explainOut{}, err
 			}
