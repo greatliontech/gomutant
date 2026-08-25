@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"context"
+	"runtime"
 	"testing"
 )
 
@@ -27,8 +27,11 @@ func TestParseGoVersionFloorsBuildEventToolchains(t *testing.T) {
 			t.Fatalf("parseGoVersion(%q) = %d, %d, %v; want %d, %d, %v", c.version, major, minor, ok, c.major, c.minor, c.ok)
 		}
 	}
-	if err := toolchainSupportsBuildEvents(context.Background(), "testdata/fixturemod", GoEnv("testdata/fixturemod")); err != nil {
+	if err := toolchainSupportsBuildEvents(runtime.Version()); err != nil {
 		t.Fatalf("current toolchain refused: %v", err)
+	}
+	if err := toolchainSupportsBuildEvents("go1.23.4"); err == nil {
+		t.Fatal("below-floor toolchain accepted")
 	}
 	if !belowBuildEventFloor(1, 23) || belowBuildEventFloor(1, 24) || belowBuildEventFloor(2, 0) {
 		t.Fatal("build-event floor is not exactly go1.24")

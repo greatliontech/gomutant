@@ -36,6 +36,12 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	if o.symbol == "" || o.position == "" || o.operator == "" || o.reason == "" {
 		return fmt.Errorf("attest needs --symbol, --position, --operator, and --reason")
 	}
+	// Provenance BEFORE the write: attest mutates the findings
+	// document first, and a skewed binary must refuse outright rather
+	// than write, echo success, and then fail (REQ-exec-provenance).
+	if err := gomutant.CheckToolchainProvenance(ctx, o.dir, selectionOf(o.tags, o.toolchain)); err != nil {
+		return err
+	}
 	store, err := gomutant.OpenStore(findingsAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err

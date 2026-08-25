@@ -20,7 +20,6 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -96,7 +95,14 @@ func loadContextWith(ctx context.Context, dir string, sel Selection, executionSu
 	if err != nil {
 		return nil, err
 	}
-	if err := toolchainSupportsBuildEvents(ctx, dir, env); err != nil {
+	// Provenance first: a skewed frontend must refuse before it
+	// parses anything. The one sample also serves the build-events
+	// floor.
+	sampledToolchain, err := toolchainProvenance(ctx, dir, env)
+	if err != nil {
+		return nil, err
+	}
+	if err := toolchainSupportsBuildEvents(sampledToolchain); err != nil {
 		return nil, err
 	}
 	members, err := workspaceMembersContext(ctx, dir)
@@ -254,28 +260,15 @@ func workspaceMembersContext(ctx context.Context, dir string) ([]string, error) 
 // test2json streams do not emit — an uncompilable mutant would fall through
 // to the differential probe and score as a kill, the forbidden flattering
 // direction. A version string that does not parse (a devel toolchain) is
-// modern by construction and passes. The probe reads the PATH binary, which
+// modern by construction and passes THE FLOOR — though the
+// provenance guard upstream refuses unidentifiable versions before
+// this check runs, so the leniency is defense in depth for the pure
+// function's own contract, not a reachable load-path behavior. The probe reads the PATH binary, which
 // GOTOOLCHAIN=auto could switch UP for the actual test runs when the target's
 // go.mod directs a newer toolchain — that shape refuses loudly where the runs
 // would in fact have been sound: the chosen direction is the conservative
 // one, never a silent kill on an event-less stream.
-func toolchainSupportsBuildEvents(ctx context.Context, dir string, env []string) error {
-	cmd := commandContext(ctx, "go", "version")
-	cmd.Dir = dir
-	cmd.Env = env
-	out, err := cmd.Output()
-	if err != nil {
-		// The probe is the first consumer of a declared toolchain
-		// directive, so its refusal must name go's own cause (an
-		// unknown or undownloadable toolchain), never a bare exit
-		// status.
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
-			return fmt.Errorf("gomutant: probe toolchain version: %w: %s", err, strings.TrimSpace(string(exit.Stderr)))
-		}
-		return fmt.Errorf("gomutant: probe toolchain version: %w", err)
-	}
-	version := strings.TrimSpace(string(out))
+func toolchainSupportsBuildEvents(version string) error {
 	if major, minor, ok := parseGoVersion(version); ok && belowBuildEventFloor(major, minor) {
 		return fmt.Errorf("gomutant: toolchain %q is below go1.24: build-failure classification requires the harness's build-fail events", version)
 	}

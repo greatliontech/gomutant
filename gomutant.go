@@ -357,6 +357,18 @@ func LoadContext(ctx context.Context, dir string) (*Tree, error) {
 // toolchain directive); the zero value selects nothing.
 type Selection = engine.Selection
 
+// CheckToolchainProvenance runs the load-time toolchain guard
+// standalone (REQ-exec-provenance) — for verbs that mutate state
+// before any tree load would fire it. The directory resolves exactly
+// as the load's does, so the two guards name one path.
+func CheckToolchainProvenance(ctx context.Context, dir string, sel Selection) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
+	}
+	return engine.CheckToolchainProvenance(ctx, abs, sel)
+}
+
 // LoadContextSelection is LoadContext under a declared build selection:
 // the selection rewrites the tree's one frozen environment before
 // anything reads it, so package loading, target discovery, constraint

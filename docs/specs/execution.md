@@ -590,6 +590,32 @@ survivors, confirms kills serially like any measured run, and attributes
 kills against the full current oracle set (the run pattern already bounds
 execution to the added tests).
 
+**REQ-exec-provenance** (behavior): Every tree load MUST refuse
+outright — at the shared load path, so every entry on every face
+inherits the guard by construction rather than per-verb discipline —
+when the binary's compiled-in frontend cannot soundly judge the
+toolchain that serves the load: within a major, a frontend OLDER
+than the serving toolchain's language series refuses (it predates
+the sources; a newer frontend reads older language under the Go 1
+compatibility promise, which the declared-toolchain workflows
+depend on); across majors both directions refuse; an unidentifiable
+version on either side refuses — unidentifiable is not agreement.
+The serving toolchain is sampled in the TARGET directory under the
+SELECTION-APPLIED environment — the declared toolchain directive
+honored and stray workspace variables stripped — so the witnessed
+version is the one the run's loads and executions actually use,
+never the tool's own cwd default. A verb that mutates state before
+any load (attestation writes the findings document first) runs the
+same check before its write: a skewed binary never writes, echoes
+success, and then fails. The refusal names both toolchains, and on an
+identified skew their language series and the rebuild direction; the
+unidentifiable refusal names the versions it could not identify.
+
+REQ-exec-provenance: enforced by
+`TestLoadRefusesToolchainSkewUnderSelectionEnv`,
+`TestCheckToolchainProvenanceSharesTheGuard`, and
+`TestAttestRefusesToolchainSkewBeforeWriting`.
+
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
 caller-context cancellation, including expiry of an operator-supplied command
 timeout, MUST stop package loading and every subsequent
@@ -609,16 +635,7 @@ and content drift keeps its target-local refusal
 (REQ-exec-quiescence). Preparation progress
 and ordered decisions may contain only the prefix delivered before
 cancellation became observable. A cancelled run never reports or persists a
-partial per-target measurement. A run that reached measurement and exits on
-cancellation — command-timeout expiry, signal, or abort — MUST render a
-banked-state summary naming the exit cause, the count of findings whose
-incremental commit RETURNED SUCCESSFULLY (with their kill and open
-tallies), and the selection's disposition so far; the summary claims only
-committed findings — never in-flight work and never a finding whose commit
-failed — so what it reports is exactly what the findings document holds. A
-run cancelled before measurement began stays silent — there is no banked
-state to report — and the drift exit renders its full result rows and
-summary instead, which are its banked state.
+partial per-target measurement.
 
 The command timeout bounds CLI or MCP work through its result commit. Omitted,
 it is unlimited on the CLI, while the MCP tools default it to 300 seconds —
@@ -639,6 +656,22 @@ changing the command timeout alone never stales a finding. The
 inner-parallelism width is deliberately not such a pin: it reaches verdicts
 through wall-clock speed and, where an oracle observably reads it, through
 the recorded environment evidence (REQ-exec-oracle-parallelism).
+
+**REQ-exec-banked-summary** (behavior): A run that reached measurement and
+exits on cancellation — command-timeout expiry, signal, or abort — MUST
+render a banked-state summary naming the exit cause, the count of findings
+whose incremental commit RETURNED SUCCESSFULLY (with their kill and open
+tallies), and the selection's disposition so far; the summary claims only
+committed findings — never in-flight work and never a finding whose commit
+failed — so what it reports is exactly what the findings document holds. A
+run cancelled before measurement began stays silent — there is no banked
+state to report — and the drift exit renders its full result rows and
+summary instead, which are its banked state.
+
+REQ-exec-banked-summary: enforced by
+`TestBankedStateNamesOnlyCommittedFindings`,
+`TestRunCommandInterruptRendersBankedState`, and
+`TestBankedStateExcludesFailedCommits`.
 
 **REQ-exec-completion** (behavior): A run that returns success MUST have
 dispositioned every announced target: measured and committed, served,

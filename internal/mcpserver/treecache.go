@@ -124,6 +124,10 @@ func treeStateKeyContext(ctx context.Context, dir string) (string, error) {
 		if bytes.HasPrefix(line, []byte("GOGCCFLAGS=")) || bytes.HasPrefix(line, []byte("GOMOD=")) || bytes.HasPrefix(line, []byte("GOWORK=")) {
 			continue
 		}
+		// GOVERSION stays in the fingerprint and is LOAD-BEARING for
+		// the provenance guard (REQ-exec-provenance): a cache hit
+		// skips the load-time skew check, so a toolchain move must
+		// change this key and force the reload that re-runs it.
 		hash.Write(line)
 		hash.Write([]byte{'\n'})
 	}
