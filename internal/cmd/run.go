@@ -38,7 +38,8 @@ type runOptions struct {
 	budget, jobs                             int
 	oracleMemoryMiB                          int64
 	timeout, oracleTimeout                   time.Duration
-	force, plan, staged                      bool
+	force, plan, staged, jsonl               bool
+	progressEvery                            time.Duration
 	bracketPaths, scratchNamespaces, vouches []string
 	output                                   io.Writer
 }
@@ -66,6 +67,8 @@ func newRunCommand() *cobra.Command {
 	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
 	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
 	selectionFlags(f, &o.tags, &o.toolchain)
+	f.BoolVar(&o.jsonl, "jsonl", false, "structured output: every progress event, decision, result row, and summary as one JSON object per line — the CLI's machine-readable face; the human rendering is suppressed")
+	f.DurationVar(&o.progressEvery, "progress-interval", 30*time.Second, "cadence of the cumulative progress line (targets committed, candidates, kills, elapsed); 0 disables")
 	f.BoolVar(&o.plan, "plan", false, "preflight only: run the full preparation sequence and print every target decision — cached, skipped with reason, or measure with candidate count — then stop before baseline probes and mutant execution, persisting nothing; precondition holes surface before any budget is spent")
 	return cmd
 }
@@ -95,7 +98,13 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	renderPreparation(out, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
+	rep := newRunReporter(out, o.jsonl, 0)
+	defer rep.stop()
+	if o.jsonl {
+		rep.emit("prepare", gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
+	} else {
+		renderPreparation(out, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
+	}
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
@@ -150,6 +159,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 		return err
 	}
 	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
+	rep.setSelected(len(targets))
+	if !o.plan {
+		rep.startCadence(o.progressEvery)
+	}
 	docPath := findingsAt(o.dir, o.findingsFile)
 	// The campaign lock spans measurement through the final merge:
 	// a second campaign against the same document refuses immediately
@@ -182,16 +195,28 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		fmt.Fprintln(&terminal, "no targets")
-		if !o.plan {
-			renderRunSummary(&terminal, gomutant.RunSummary{})
+		if o.jsonl {
+			// Residue rows flush FIRST — the same order the human
+			// face prints them in.
+			if err := rep.flushProse(terminal.String()); err != nil {
+				return err
+			}
+			terminal.Reset()
+			rep.emit("note", map[string]string{"text": "no targets"})
+			if !o.plan {
+				rep.emit("summary", gomutant.RunSummary{})
+			}
+		} else {
+			fmt.Fprintln(&terminal, "no targets")
+			if !o.plan {
+				renderRunSummary(&terminal, gomutant.RunSummary{})
+			}
 		}
 		if o.plan {
 			// The plan clause's no-write guarantee covers the empty
 			// whole-tree reconciliation too: a plan never prunes.
 			fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
-			_, err := io.Copy(out, &terminal)
-			return err
+			return rep.flushProse(terminal.String())
 		}
 		if wholeTree {
 			if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
@@ -203,8 +228,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 				return err
 			}
 		}
-		_, err := io.Copy(out, &terminal)
-		return err
+		return rep.flushProse(terminal.String())
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -236,7 +260,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 			return
 		}
 		printedSheds[key] = true
-		fmt.Fprintf(out, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)
+		rep.line("attestation-shed", d, func(w io.Writer) {
+			fmt.Fprintf(w, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)
+		})
 	}
 	var analysisMu sync.Mutex
 	var analysisLast time.Time
@@ -248,10 +274,20 @@ func runCommand(ctx context.Context, o runOptions) error {
 		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
 		PlanOnly: o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
-			renderExecutionEvent(out, event)
+			rep.executing(event)
+			if o.jsonl {
+				rep.emit("execution", event)
+				return
+			}
+			renderExecutionEvent(out, event, rep.selectionNote(event.TargetCount), rep.confirmationModeSuffix(event))
 		},
 		Decision: func(decision gomutant.RunDecision) {
+			rep.decision(decision)
 			if !o.plan {
+				if o.jsonl {
+					rep.emit("decision", decision)
+					return
+				}
 				renderRunDecision(out, decision)
 				return
 			}
@@ -264,9 +300,17 @@ func runCommand(ctx context.Context, o runOptions) error {
 			case "skipped":
 				planSkipped++
 			}
+			if o.jsonl {
+				rep.emit("decision", decision)
+				return
+			}
 			renderRunDecision(out, decision)
 		},
 		Progress: func(event gomutant.PreparationEvent) {
+			if o.jsonl {
+				rep.emit("prepare", event)
+				return
+			}
 			renderPreparation(out, event)
 		},
 		// The analysis keep-alive, time-gated to a heartbeat: the run's
@@ -283,24 +327,36 @@ func runCommand(ctx context.Context, o runOptions) error {
 				return
 			}
 			analysisLast = now
-			fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(phase+" "+pkg))
+			if o.jsonl {
+				rep.emit("analysis", map[string]string{"phase": phase, "package": pkg})
+				return
+			}
+			fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(analysisPhrase(phase)+" "+pkg))
 		},
 		Guidance: func(g gomutant.OracleGuidance) {
-			fmt.Fprintf(out, "guidance  %s  unstable oracle evidence (%s): %s\n", g.Symbol, g.Reason, g.Suggestion)
+			rep.line("guidance", g, func(w io.Writer) {
+				fmt.Fprintf(w, "guidance  %s  unstable oracle evidence (%s): %s\n", g.Symbol, g.Reason, g.Suggestion)
+			})
 		},
 		Contradiction: func(c gomutant.AttestationContradiction) {
 			contradicted[c.Symbol+"\x00"+c.Position+"\x00"+c.Operator] = true
-			fmt.Fprintf(out, "contradiction  %s  attested survivor %s (%s) killed by %s; attestation shed (was: %s)\n", c.Symbol, c.Position, c.Operator, c.Killer, c.Reason)
+			rep.line("contradiction", c, func(w io.Writer) {
+				fmt.Fprintf(w, "contradiction  %s  attested survivor %s (%s) killed by %s; attestation shed (was: %s)\n", c.Symbol, c.Position, c.Operator, c.Killer, c.Reason)
+			})
 		},
 		AttestationSiteShed: func(d gomutant.AttestationShed) {
 			commitSheds = append(commitSheds, d)
 			streamShed(d)
 		},
 		AttestationCarried: func(c gomutant.AttestationCarry) {
-			fmt.Fprintf(out, "attestation carried: %s %s %s - measurement pins moved; the mutated source is unchanged and the mutant survived re-execution\n", c.Symbol, c.Position, c.Operator)
+			rep.line("attestation-carried", c, func(w io.Writer) {
+				fmt.Fprintf(w, "attestation carried: %s %s %s - measurement pins moved; the mutated source is unchanged and the mutant survived re-execution\n", c.Symbol, c.Position, c.Operator)
+			})
 		},
 		PropertyOracle: func(n gomutant.PropertyOracleNote) {
-			fmt.Fprintf(out, "property  %s  %s: %s\n", n.Package, n.Runtime, n.Note)
+			rep.line("property", n, func(w io.Writer) {
+				fmt.Fprintf(w, "property  %s  %s: %s\n", n.Package, n.Runtime, n.Note)
+			})
 		},
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
@@ -329,6 +385,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 			if err != nil {
 				return err
 			}
+			// Banked ONLY after the update returned: a failed or
+			// cancelled commit is work the findings document does not
+			// hold, and the exit summary must never claim it
+			// (REQ-exec-cancellation's claims-only-committed clause).
+			rep.bankedFinding(finding)
 			// Streamed after the update returns: the strip persisted, and
 			// terminal writes must not extend the document-lock hold.
 			commitSheds = append(commitSheds, dropped...)
@@ -338,8 +399,15 @@ func runCommand(ctx context.Context, o runOptions) error {
 			return nil
 		},
 	})
+	rep.stop()
 	var drift *gomutant.TreeDriftError
 	if err != nil && !errors.As(err, &drift) {
+		// The banked-state exit summary (REQ-exec-cancellation's
+		// rendering half): a budget, signal, or abort exit names what
+		// the findings document kept instead of ending on a bare
+		// context error. Only incrementally committed findings are
+		// claimed.
+		rep.bankedState(exitCause(err))
 		return err
 	}
 	// The final merge runs before anything renders: the output reads
@@ -374,6 +442,25 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		var layer, layerReason string
+		if f.Skipped == "" {
+			// Whether the record is safe to stage is answered here, not by
+			// inspecting JSON (REQ-result-layers): a record the store routes
+			// to the machine-local overlay names its disqualifier, so a run
+			// that rendered healthy counts never leaves the repo document
+			// silently missing the record.
+			if l, reason := docStore.Layer(f); l == "local" {
+				localOnly++
+				layer, layerReason = l, reason
+			}
+		}
+		if o.jsonl {
+			if f.Skipped != "" {
+				continue // the decision event already carried the skip
+			}
+			rep.emit("result", resultRow(f, layer, layerReason))
+			continue
+		}
 		switch {
 		case f.Skipped != "":
 			// The skip already printed as its decision line; a second
@@ -384,16 +471,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 		default:
 			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
 		}
-		if f.Skipped == "" {
-			// Whether the record is safe to stage is answered here, not by
-			// inspecting JSON (REQ-result-layers): a record the store routes
-			// to the machine-local overlay names its disqualifier, so a run
-			// that rendered healthy counts never leaves the repo document
-			// silently missing the record.
-			if layer, reason := docStore.Layer(f); layer == "local" {
-				localOnly++
-				fmt.Fprintf(&terminal, "          machine-local: %s\n", reason)
-			}
+		if layer == "local" {
+			fmt.Fprintf(&terminal, "          machine-local: %s\n", layerReason)
 		}
 		for _, s := range f.Open() {
 			if s.Execution != "" {
@@ -410,7 +489,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// A plan renders its own tallies; the zeroed run summary would
 	// claim a measurement that never happened (REQ-exec-plan).
 	if !o.plan {
-		renderRunSummary(&terminal, gomutant.SummarizeRun(rendered))
+		if o.jsonl {
+			rep.emit("summary", gomutant.SummarizeRun(rendered))
+		} else {
+			renderRunSummary(&terminal, gomutant.SummarizeRun(rendered))
+		}
 	}
 	// The class line earns its place only when it aggregates: a single
 	// skip's decision line already said everything.
@@ -430,6 +513,13 @@ func runCommand(ctx context.Context, o runOptions) error {
 		for _, d := range gomutant.DedupeAttestationSheds(append(append([]gomutant.AttestationShed(nil), commitSheds...), finalSheds...)) {
 			key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
 			if contradicted[key] || printedSheds[key] {
+				continue
+			}
+			if o.jsonl {
+				// One wire shape per class: the final-merge residue
+				// emits the same structured event the streamed sheds
+				// do, never a prose note.
+				rep.emit("attestation-shed", d)
 				continue
 			}
 			fmt.Fprintf(&terminal, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)
@@ -455,7 +545,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			fmt.Fprintf(&terminal, "%d record(s) machine-local only (disqualifiers named above) - the repo findings document gains nothing from them until the disqualifiers clear; a pre-commit loop can measure the staged index clean with --staged\n", localOnly)
 		}
 	}
-	if _, err := io.Copy(out, &terminal); err != nil {
+	if err := rep.flushProse(terminal.String()); err != nil {
 		return err
 	}
 	// A drift-refused campaign keeps its rendered completed findings and
@@ -464,7 +554,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if drift != nil {
 		return drift
 	}
-	return nil
+	// A broken structured-face pipe fails the command rather than
+	// truncating the stream silently.
+	return rep.firstWriteError()
 }
 
 func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
@@ -478,7 +570,7 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 	}
 }
 
-func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent) {
+func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent, selectionNote, modeSuffix string) {
 	if event.Phase == "confirmation-flip" {
 		// A demoted kill is never silent: the serial re-run re-scored
 		// this mutant a survivor and withdrew its provisional killer.
@@ -487,6 +579,12 @@ func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent) {
 		return
 	}
 	line := fmt.Sprintf("%-9s target %d/%d %s", event.Phase, event.TargetIndex, event.TargetCount, event.Symbol)
+	// The event's TargetCount is measure targets prepared so far, not
+	// the request: the reporter's selection note beside it keeps a
+	// resumed run's shrunken denominator honest ("7/71" reads as
+	// remaining work of the same 85-target request, not a different
+	// campaign).
+	line += selectionNote
 	// A confirming window's candidate tally is saturated by
 	// construction - the confirmations counter is the signal - so the
 	// line drops the dead segment (display only; the event carries the
@@ -497,7 +595,22 @@ func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent) {
 	if event.ConfirmationsTotal > 0 {
 		line += fmt.Sprintf("  confirmations %d/%d", event.ConfirmationsDone, event.ConfirmationsTotal)
 	}
+	line += modeSuffix
 	fmt.Fprintln(w, line)
+}
+
+// exitCause names the exit path for the banked-state summary.
+func exitCause(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "command timeout"
+	case errors.Is(err, context.Canceled):
+		// The CLI's err descends from the ctx it passed, so a
+		// Canceled error always accompanies a canceled ctx — one arm.
+		return "interrupt/cancellation"
+	default:
+		return fmt.Sprintf("aborted (%v)", err)
+	}
 }
 
 func renderRunDecision(w io.Writer, decision gomutant.RunDecision) {

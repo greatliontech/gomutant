@@ -819,6 +819,12 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 			if e.ConfirmationsTotal > 0 {
 				message += fmt.Sprintf(" confirmations %d/%d", e.ConfirmationsDone, e.ConfirmationsTotal)
 			}
+			if e.ConfirmationMode != "" {
+				// The gate state rides every face: the disarmed stride
+				// must be distinguishable from the armed one for MCP
+				// operators too (REQ-exec-run-status).
+				message += " mode=" + e.ConfirmationMode
+			}
 			notify(message)
 		}
 	}

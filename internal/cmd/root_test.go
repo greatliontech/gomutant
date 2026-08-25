@@ -359,8 +359,8 @@ func TestRunCommandPlanRendersDecisionsWithoutSummary(t *testing.T) {
 // keep it (display only; the event carries the tallies unchanged).
 func TestRenderExecutionEventDropsSaturatedCandidatesWhileConfirming(t *testing.T) {
 	var out bytes.Buffer
-	renderExecutionEvent(&out, gomutant.ExecutionEvent{Phase: "executing", TargetIndex: 1, TargetCount: 2, Symbol: "p.F", CandidatesDone: 3, CandidatesTotal: 7})
-	renderExecutionEvent(&out, gomutant.ExecutionEvent{Phase: "confirming", TargetIndex: 1, TargetCount: 2, Symbol: "p.F", CandidatesDone: 7, CandidatesTotal: 7, ConfirmationsDone: 1, ConfirmationsTotal: 4})
+	renderExecutionEvent(&out, gomutant.ExecutionEvent{Phase: "executing", TargetIndex: 1, TargetCount: 2, Symbol: "p.F", CandidatesDone: 3, CandidatesTotal: 7}, "", "")
+	renderExecutionEvent(&out, gomutant.ExecutionEvent{Phase: "confirming", TargetIndex: 1, TargetCount: 2, Symbol: "p.F", CandidatesDone: 7, CandidatesTotal: 7, ConfirmationsDone: 1, ConfirmationsTotal: 4}, "", "")
 	want := "executing target 1/2 p.F  candidates 3/7\n" +
 		"confirming target 1/2 p.F  confirmations 1/4\n"
 	if out.String() != want {

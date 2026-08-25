@@ -4708,7 +4708,7 @@ func TestConfirmWindowKillsFlipDrainsWholeWindow(t *testing.T) {
 	err := confirmWindowKills(
 		func(int) bool { return false },
 		kills,
-		func(k windowKill) (confirmOutcome, error) {
+		func(k windowKill, _ string) (confirmOutcome, error) {
 			confirmed = append(confirmed, k)
 			if k.target == 0 && k.mi == 6 {
 				return confirmFlipped, nil // the stride-confirmed kill collides
@@ -4742,7 +4742,7 @@ func TestConfirmWindowKillsCrossTargetRetroaction(t *testing.T) {
 	err := confirmWindowKills(
 		func(int) bool { return false },
 		kills,
-		func(k windowKill) (confirmOutcome, error) {
+		func(k windowKill, _ string) (confirmOutcome, error) {
 			confirmed = append(confirmed, k)
 			if k.target == 1 {
 				return confirmFlipped, nil
@@ -4775,7 +4775,7 @@ func TestConfirmWindowKillsVolatileReArm(t *testing.T) {
 	err := confirmWindowKills(
 		func(int) bool { return false },
 		kills,
-		func(k windowKill) (confirmOutcome, error) {
+		func(k windowKill, _ string) (confirmOutcome, error) {
 			confirmed = append(confirmed, k)
 			return confirmReproduced, nil
 		},
@@ -5334,6 +5334,87 @@ func assertSurvivorExtents(t *testing.T, findings []Finding) {
 			if s.Extent == "" {
 				t.Fatalf("%s survivor %s %s carries no extent", f.Symbol, s.Position, s.Operator)
 			}
+		}
+	}
+}
+
+// The confirmation mode handed to each serial confirmation names the
+// gate state deciding it: serial-full through the opening streak (and
+// under volatility or a flip), stride-sampled once the streak has
+// earned sampling — the advisory vocabulary the execution events
+// carry (REQ-exec-run-status's confirmation-mode clause).
+func TestConfirmWindowKillsNamesConfirmationMode(t *testing.T) {
+	var kills []windowKill
+	for mi := 0; mi < 8; mi++ {
+		kills = append(kills, windowKill{target: 0, mi: mi})
+	}
+	var modes []string
+	err := confirmWindowKills(
+		func(int) bool { return false },
+		kills,
+		func(k windowKill, mode string) (confirmOutcome, error) {
+			modes = append(modes, mode)
+			return confirmReproduced, nil
+		},
+		func(windowKill) bool { return false },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Streak 0-2 confirm serial-full; 3-5 stride-skip; 6 confirms as
+	// the stride sample — the gate is past its streak, so the mode
+	// names the sampled state; 7 skips again (nothing more confirms).
+	want := []string{"serial-full", "serial-full", "serial-full", "stride-sampled"}
+	if !slices.Equal(modes, want) {
+		t.Fatalf("confirmation modes = %v, want %v", modes, want)
+	}
+
+	// A flip re-arms the window: the retroactive drain and everything
+	// after it confirm serial-full — the label must track the flip,
+	// not just the opening streak.
+	modes = nil
+	err = confirmWindowKills(
+		func(int) bool { return false },
+		kills,
+		func(k windowKill, mode string) (confirmOutcome, error) {
+			modes = append(modes, mode)
+			if len(modes) == 4 {
+				return confirmFlipped, nil // the stride sample collides
+			}
+			return confirmReproduced, nil
+		},
+		func(windowKill) bool { return false },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(modes) < 5 {
+		t.Fatalf("flip did not drain retroactively: modes %v", modes)
+	}
+	for i, m := range modes[4:] {
+		if m != "serial-full" {
+			t.Fatalf("post-flip confirmation %d mode = %q, want serial-full", i+4, m)
+		}
+	}
+
+	// A volatile target never samples: every confirmation is named
+	// serial-full.
+	modes = nil
+	err = confirmWindowKills(
+		func(int) bool { return true },
+		kills[:5],
+		func(k windowKill, mode string) (confirmOutcome, error) {
+			modes = append(modes, mode)
+			return confirmReproduced, nil
+		},
+		func(windowKill) bool { return false },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, m := range modes {
+		if m != "serial-full" {
+			t.Fatalf("volatile confirmation %d mode = %q, want serial-full throughout", i, m)
 		}
 	}
 }

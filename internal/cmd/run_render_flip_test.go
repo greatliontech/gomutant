@@ -15,7 +15,7 @@ func TestRenderExecutionEventFlipLine(t *testing.T) {
 	renderExecutionEvent(&out, gomutant.ExecutionEvent{
 		Phase: "confirmation-flip", Symbol: "example.com/m.Pager.flushBump",
 		FlipPosition: "pager.go:695:44", FlipKiller: "TestUnitBumpPacking",
-	})
+	}, "", "")
 	line := out.String()
 	if !strings.Contains(line, "confirmation FLIP") ||
 		!strings.Contains(line, "pager.go:695:44") ||

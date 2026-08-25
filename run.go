@@ -248,25 +248,32 @@ const (
 // window's serial confirmation progress. Advisory only —
 // timing-dependent, outside the deterministic run-status sequence.
 type ExecutionEvent struct {
-	Phase           string
-	TargetIndex     int
-	TargetCount     int
-	Symbol          string
-	CandidatesDone  int
-	CandidatesTotal int
+	Phase           string `json:"phase"`
+	TargetIndex     int    `json:"targetIndex"`
+	TargetCount     int    `json:"targetCount"`
+	Symbol          string `json:"symbol"`
+	CandidatesDone  int    `json:"candidatesDone"`
+	CandidatesTotal int    `json:"candidatesTotal"`
 	// ConfirmationsDone/Total report the window's serial kill
 	// confirmation progress; zero totals outside confirming phases.
 	// Total is the upper bound (every confirmable kill) — the stride
 	// gate finishes below it in every clean window.
-	ConfirmationsDone  int
-	ConfirmationsTotal int
+	ConfirmationsDone  int `json:"confirmationsDone,omitempty"`
+	ConfirmationsTotal int `json:"confirmationsTotal,omitempty"`
+	// ConfirmationMode names the gate state deciding THIS confirmation:
+	// serial-full while the gate confirms every kill (opening streak,
+	// volatile evidence, or a flip re-arming the window), stride-sampled
+	// once the streak has earned sampling. Set on confirming events
+	// only — the disarmed-stride state is otherwise indistinguishable
+	// from the armed one in the log (the field report's ask).
+	ConfirmationMode string `json:"confirmationMode,omitempty"`
 	// FlipPosition/FlipKiller are set exactly on a confirmation-flip
 	// event: the serial re-run re-scored a provisional kill (initially
 	// attributed to FlipKiller) as a survivor. A demotion is never
 	// silent — a false-survivor field report is self-diagnosing from
 	// the log (docs/issues/growth-serve-misses-modified-oracle-bodies.md).
-	FlipPosition string
-	FlipKiller   string
+	FlipPosition string `json:"flipPosition,omitempty"`
+	FlipKiller   string `json:"flipKiller,omitempty"`
 }
 
 // PreparationEvent reports one operation before it begins. Symbol is set for
@@ -2584,7 +2591,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					return v
 				},
 				kills,
-				func(k windowKill) (confirmOutcome, error) {
+				func(k windowKill, confirmMode string) (confirmOutcome, error) {
 					if err := ctx.Err(); err != nil {
 						return confirmInconclusive, err
 					}
@@ -2601,6 +2608,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						Symbol:         targets[window[wi].target].Symbol,
 						CandidatesDone: mutantsDone, CandidatesTotal: int(preparedCandidates.Load()),
 						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
+						ConfirmationMode: confirmMode,
 					})
 					probeGate.Lock()
 					outcome, killer, state, incomplete, err := t.confirmMutant(ctx, window[wi], m, killers[wi][k.mi], scopedBaselines, opts, runEnv)
@@ -3273,12 +3281,19 @@ type confirmationGate struct {
 	flipped     bool
 }
 
-// confirmNow reports whether the next kill confirms serially. A gate
-// that is volatile, flipped, or still inside the opening streak always
-// confirms; otherwise every confirmStrideth kill confirms and the rest
-// stride-skip.
+// armed reports whether the gate confirms every kill: volatile
+// evidence, a flip, or the opening streak. One predicate serves both
+// the confirmation decision and the advisory mode label — two copies
+// would let the label lie about the gate.
+func (g *confirmationGate) armed() bool {
+	return g.volatile || g.flipped || g.streak < confirmStreak
+}
+
+// confirmNow reports whether the next kill confirms serially. An
+// armed gate always confirms; otherwise every confirmStrideth kill
+// confirms and the rest stride-skip.
 func (g *confirmationGate) confirmNow() bool {
-	if g.volatile || g.flipped || g.streak < confirmStreak {
+	if g.armed() {
 		return true
 	}
 	g.sinceSample++
@@ -4847,7 +4862,7 @@ type windowKill struct{ target, mi int }
 // path, so a collision observed during a drain still un-samples the
 // window. Deterministic by construction: candidate order in, explicit
 // FIFO processing, no worker-timing input.
-func confirmWindowKills(volatile func(target int) bool, kills []windowKill, confirm func(windowKill) (confirmOutcome, error), unverifiable func(windowKill) bool) error {
+func confirmWindowKills(volatile func(target int) bool, kills []windowKill, confirm func(windowKill, string) (confirmOutcome, error), unverifiable func(windowKill) bool) error {
 	gates := map[int]*confirmationGate{}
 	windowFlipped := false
 	var skipped []windowKill
@@ -4871,6 +4886,14 @@ func confirmWindowKills(volatile func(target int) bool, kills []windowKill, conf
 		skipped = kept
 		return taken
 	}
+	// mode names the gate state deciding the next confirmation — the
+	// advisory vocabulary the events carry (ExecutionEvent.ConfirmationMode).
+	mode := func(g *confirmationGate) string {
+		if g.armed() {
+			return "serial-full"
+		}
+		return "stride-sampled"
+	}
 	for _, k := range kills {
 		if !gateFor(k.target).confirmNow() {
 			skipped = append(skipped, k)
@@ -4880,7 +4903,7 @@ func confirmWindowKills(volatile func(target int) bool, kills []windowKill, conf
 		for len(queue) > 0 {
 			next := queue[0]
 			queue = queue[1:]
-			outcome, err := confirm(next)
+			outcome, err := confirm(next, mode(gateFor(next.target)))
 			if err != nil {
 				return err
 			}

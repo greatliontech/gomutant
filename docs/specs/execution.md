@@ -494,7 +494,10 @@ diagnostic, carry no ordering or completion guarantee, and never enter a
 decision or finding. Advisory execution-phase progress events join the
 same class: at each execution window boundary the run may report the
 window's phase (executing, then one confirming event per serially
-confirmed kill with the window's confirmation progress, and one
+confirmed kill with the window's confirmation progress and the
+gate's confirmation mode — serial-full while every kill confirms,
+stride-sampled once the streak earns sampling, so the disarmed
+stride is distinguishable from the armed one in the log — and one
 confirmation-flip event per kill the serial re-run demotes — naming
 the phase, symbol, mutant position, and the withdrawn provisional
 killer, so a demotion is never silent on any face), the 1-based
@@ -506,7 +509,21 @@ selected candidates, carried and non-runnable ones included, exactly as the
 decisions count them, growing to the campaign-wide totals as pipelined
 preparation completes — timing-dependent by nature, outside the
 deterministic sequence, never entering a decision or finding, so an
-operator can read phase and progress from the log alone. Event data never enters a run
+operator can read phase and progress from the log alone. The CLI
+additionally renders, in the same advisory class: the requested
+selection size beside the prepared-target denominator whenever the
+two differ or serves and skips have offset an equality (a resumed
+run's shrunken count reads as remaining work of the same request,
+never a different campaign, and the context must not vanish exactly
+when equality is coincidental); a cumulative progress line on a
+fixed cadence — commits (cached serves included) against the
+SELECTION, the served and skipped splits, candidate tallies, kills,
+and elapsed time — with the cadence an operator flag defaulting on;
+and a structured JSON-lines face as an option, carrying every event,
+decision, per-target result row, and summary as one JSON object per
+line with an event-kind field, human prose wrapped as note events —
+the structured stream never loses a line the human face would show,
+and no human line leaks into it. Event data never enters a run
 decision or finding, and run inputs are snapshotted before delivery. Callbacks
 execute synchronously as trusted caller code and must return normally; their
 external side effects have ordinary process semantics. An error or cancellation
@@ -592,7 +609,16 @@ and content drift keeps its target-local refusal
 (REQ-exec-quiescence). Preparation progress
 and ordered decisions may contain only the prefix delivered before
 cancellation became observable. A cancelled run never reports or persists a
-partial per-target measurement.
+partial per-target measurement. A run that reached measurement and exits on
+cancellation — command-timeout expiry, signal, or abort — MUST render a
+banked-state summary naming the exit cause, the count of findings whose
+incremental commit RETURNED SUCCESSFULLY (with their kill and open
+tallies), and the selection's disposition so far; the summary claims only
+committed findings — never in-flight work and never a finding whose commit
+failed — so what it reports is exactly what the findings document holds. A
+run cancelled before measurement began stays silent — there is no banked
+state to report — and the drift exit renders its full result rows and
+summary instead, which are its banked state.
 
 The command timeout bounds CLI or MCP work through its result commit. Omitted,
 it is unlimited on the CLI, while the MCP tools default it to 300 seconds —

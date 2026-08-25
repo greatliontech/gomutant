@@ -23,5 +23,4 @@ is deleted (git holds history).
 | [library-suite-exceeds-default-test-timeout](library-suite-exceeds-default-test-timeout.md) | root-package suite ~16m on go1.27; plain go test panics verdictless at the 10m default | with the CI workflows, or the first task runner |
 | [go127-generic-method-closure-analysis](go127-generic-method-closure-analysis.md) | consumer-filed: go1.27 generic-method shapes fail gofresh closure analysis | with the gofresh generic-method analysis fix (shared engine; pew files the twin), then a gomutant bump |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | user decision |
-| [progress-and-exit-reporting](progress-and-exit-reporting.md) | summary cadence, exit-path banked-state reports, named confirmation mode, remaining-of-total denominators | user decision |
 | [refusal-exit-collapse](refusal-exit-collapse.md) | one refuse(symbol, reason) exit — the hand-picked subsets bred two review-caught defects in one round | with the next change to run.go's refusal surface |
