@@ -21,9 +21,17 @@ type sourceEdit struct {
 }
 
 type candidateSpec struct {
-	operator                  string
-	start, end                token.Pos
-	position                  token.Pos
+	operator   string
+	start, end token.Pos
+	position   token.Pos
+	// extentStart/extentEnd, when set, override start/end as the
+	// EXECUTION extent the coverage probe intersects — for operators
+	// whose ordering anchor (the whole statement) is wider than the
+	// region the mutation touches (range-body suppression: the break
+	// empties the BODY; a header-only execution must not read as
+	// executing it). Zero values fall back to start/end. Ordering
+	// never reads these.
+	extentStart, extentEnd    token.Pos
 	family, variant, index    int
 	edits                     []sourceEdit
 	preservesImportReferences bool
@@ -73,6 +81,32 @@ func candidatePositions(pkg *packages.Package, specs []candidateSpec) []string {
 		positions[i] = position
 	}
 	return positions
+}
+
+// candidateExtents renders each spec's mutated-node range as
+// "line:col-line:col" (half-open, go/token End semantics) — the
+// coverage-intersection geometry candidatePositions' single anchor
+// cannot carry.
+func candidateExtents(pkg *packages.Package, specs []candidateSpec) []string {
+	extents := make([]string, len(specs))
+	for i, spec := range specs {
+		start, end := spec.start, spec.end
+		// Each side overrides independently: a half-set override is
+		// likelier a narrowed side than an intent to discard both.
+		if spec.extentStart.IsValid() {
+			start = spec.extentStart
+		}
+		if spec.extentEnd.IsValid() {
+			end = spec.extentEnd
+		}
+		if !start.IsValid() || !end.IsValid() {
+			continue
+		}
+		s := pkg.Fset.Position(start)
+		e := pkg.Fset.Position(end)
+		extents[i] = fmt.Sprintf("%d:%d-%d:%d", s.Line, s.Column, e.Line, e.Column)
+	}
+	return extents
 }
 
 // candidateSites hashes each spec's site window into the attestation
@@ -180,6 +214,7 @@ func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symb
 			return imports.Process(filename, source, nil)
 		}
 	}
+	extents := candidateExtents(catalog.pkg, specs)
 	renderedSeen := map[string]bool{}
 	effectiveSeen := map[string]bool{string(baseline): true}
 	candidates := make([]Candidate, 0, len(specs))
@@ -187,7 +222,7 @@ func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symb
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		candidate := Candidate{Symbol: symbol, Operator: spec.operator, Position: positions[i], Site: sites[i]}
+		candidate := Candidate{Symbol: symbol, Operator: spec.operator, Position: positions[i], Site: sites[i], Extent: extents[i]}
 		mutated, err := spec.apply(catalog.source)
 		if err != nil {
 			return nil, fmt.Errorf("candidate %s %s: %w", candidate.Position, candidate.Operator, err)

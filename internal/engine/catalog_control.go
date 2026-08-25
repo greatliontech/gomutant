@@ -37,6 +37,11 @@ func emitConditions(c *catalog, node ast.Node, _ []ast.Node) []candidateSpec {
 		}
 		end := statement.For + token.Pos(len(token.FOR.String()))
 		return []candidateSpec{{
+			// The extent stays the `for` keyword although the edit
+			// lands at the header semicolon: the condition evaluates
+			// iff the statement is reached, so keyword-reachability IS
+			// the mutated region's execution — the one operator whose
+			// extent legitimately differs from its edit range.
 			operator: "condition: force false", start: statement.For, end: end,
 			position: statement.For, family: 27, variant: 1,
 			edits:                     []sourceEdit{conditionlessForEdit(c, statement)},
@@ -150,6 +155,11 @@ func emitRangeSuppression(c *catalog, node ast.Node, _ []ast.Node) []candidateSp
 	insert := c.tokens.Offset(statement.Body.Lbrace) + 1
 	return []candidateSpec{{
 		operator: "range body: prepend break", start: statement.Pos(), end: statement.End(),
+		// The execution extent is the BODY the break empties, not the
+		// ordering anchor's whole statement: a header-only execution
+		// (loop never entered) must not read as executing the mutated
+		// region.
+		extentStart: statement.Body.Lbrace, extentEnd: statement.Body.End(),
 		position: statement.Range, family: 28, variant: 1,
 		edits:                     []sourceEdit{{start: insert, end: insert, replacement: []byte("\nbreak")}},
 		preservesImportReferences: true,

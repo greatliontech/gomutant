@@ -30,7 +30,14 @@ type Candidate struct {
 	// Site is the attestation anchor's site component: a hash of the
 	// mutated range's line window in the original source - never a
 	// measurement pin (REQ-attest-survivor).
-	Site         string
+	Site string
+	// Extent is the mutated node's source range, "line:col-line:col"
+	// half-open in Position's file: the execution-relevant region a
+	// coverage probe intersects. Point positions alone sit on
+	// toolchain-dependent block boundaries (go1.27 moved body spans
+	// off the brace token), so the bucket probes the range. Advisory
+	// geometry, never a measurement pin.
+	Extent       string
 	Replacements []Replacement
 }
 

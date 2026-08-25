@@ -267,7 +267,7 @@ func TestConditionlessForIgnoresNestedSemicolons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "package lib\n\nfunc SemicolonNestedCondition() {\n\tfor function := func() { println() }; false; {\n\t\t_ = function\n\t\tbreak\n\t}\n}\n"
+	want := "package lib\n\n// The func-literal body's INTERNAL semicolon is load-bearing: a ';'\n// at brace depth 1 inside the for header, which the conditionless-for\n// scanner must skip to find the real depth-0 separator. An internal\n// separator between two statements survives gofmt; a trailing one\n// does not \u2014 the fixture must keep this exact shape under any\n// formatting pass.\nfunc SemicolonNestedCondition() {\n\tfor function := func() { println(); println() }; false; {\n\t\t_ = function\n\t\tbreak\n\t}\n}\n"
 	found := false
 	for _, candidate := range generation.Candidates {
 		if candidate.Operator != "condition: force false" {
@@ -351,6 +351,12 @@ func TestBooleanOperandAndRangeSources(t *testing.T) {
 			wantPosition := map[string]string{"RangeOnce": "control_range.go:5:18", "RangeEmpty": "control_range.go:12:6"}[symbol]
 			if candidate.Position != wantPosition {
 				t.Errorf("%s range position = %s, want %s", symbol, candidate.Position, wantPosition)
+			}
+			// The extent is the BODY the break empties — a header-only
+			// execution (loop never entered) must not intersect it.
+			wantExtent := map[string]string{"RangeOnce": "5:31-7:3", "RangeEmpty": "12:19-13:3"}[symbol]
+			if candidate.Extent != wantExtent {
+				t.Errorf("%s range extent = %s, want the body %s", symbol, candidate.Extent, wantExtent)
 			}
 		}
 		if !found {

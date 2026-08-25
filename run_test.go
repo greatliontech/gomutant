@@ -50,12 +50,18 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	add, iface := first[0], first[1]
+	// Extents pinned exactly: the mutated node's range is what the
+	// execution bucket intersects with coverage, and the brace-anchored
+	// block-empty row (24:12, extent through the body) is the go1.27
+	// regression shape — a point probe on the brace reads never-executed
+	// under the new cover geometry while the body demonstrably ran.
 	wantAddSurvivors := []Survivor{
-		{Position: "lib.go:24:2", Operator: "statement: delete", Execution: "executed-and-passed"},
-		{Position: "lib.go:24:5", Operator: "condition: force false", Execution: "executed-and-passed"},
-		{Position: "lib.go:24:12", Operator: "block: empty", Execution: "executed-and-passed"},
-		{Position: "lib.go:25:3", Operator: "statement: delete", Execution: "executed-and-passed"},
+		{Position: "lib.go:24:2", Operator: "statement: delete", Extent: "24:2-26:3", Execution: "executed-and-passed"},
+		{Position: "lib.go:24:5", Operator: "condition: force false", Extent: "24:5-24:11", Execution: "executed-and-passed"},
+		{Position: "lib.go:24:12", Operator: "block: empty", Extent: "24:13-26:2", Execution: "executed-and-passed"},
+		{Position: "lib.go:25:3", Operator: "statement: delete", Extent: "25:3-25:11", Execution: "executed-and-passed"},
 	}
+	assertSurvivorExtents(t, first)
 	gotAddSurvivors := append([]Survivor(nil), add.Survivors...)
 	for i := range gotAddSurvivors {
 		if gotAddSurvivors[i].Site == "" {
@@ -3856,6 +3862,7 @@ func TestRunExtendsCappedFindingMeasuringOnlyTheSuffix(t *testing.T) {
 		t.Fatalf("dispatched candidate indexes = %v, want exactly the suffix [1 2]", dispatched)
 	}
 	extended := extendedFindings[0]
+	assertSurvivorExtents(t, extendedFindings)
 	if extended.Cached {
 		t.Fatal("an extended finding reported itself cached")
 	}
@@ -4105,11 +4112,11 @@ func TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets(t *testing.T) {
 func TestExtendFindingCountsAppendsSuffixOutcomes(t *testing.T) {
 	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
 	candidates := []engine.Candidate{
-		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable}, // prefix kill
-		{Symbol: "p.F", Operator: "op-b", Position: "f.go:2:2", Replacements: runnable}, // prefix survivor, attested
-		{Symbol: "p.F", Operator: "op-a", Position: "f.go:3:3", Replacements: runnable}, // suffix survivor
-		{Symbol: "p.F", Operator: "op-c", Position: "f.go:4:4", Replacements: runnable}, // suffix kill, new operator
-		{Symbol: "p.F", Operator: "op-b", Position: "f.go:5:5"},                         // suffix pre-execution discard
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable},                    // prefix kill
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:2:2", Replacements: runnable},                    // prefix survivor, attested
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:3:3", Extent: "3:3-3:9", Replacements: runnable}, // suffix survivor
+		{Symbol: "p.F", Operator: "op-c", Position: "f.go:4:4", Replacements: runnable},                    // suffix kill, new operator
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:5:5"},                                            // suffix pre-execution discard
 	}
 	rec := Finding{
 		Symbol: "p.F", Budget: 2, CandidateCount: 5, Generated: 2, Mutants: 2, Killed: 1,
@@ -4140,7 +4147,11 @@ func TestExtendFindingCountsAppendsSuffixOutcomes(t *testing.T) {
 	}
 	wantSurvivors := []Survivor{
 		{Position: "f.go:2:2", Operator: "op-b", Execution: "executed-and-passed"},
-		{Position: "f.go:3:3", Operator: "op-a"},
+		// The suffix survivor carries its candidate's extent — the
+		// extension path is a construction site like any other
+		// (dropping the carry reverts that path to the anchor-point
+		// probe).
+		{Position: "f.go:3:3", Operator: "op-a", Extent: "3:3-3:9"},
 	}
 	if !slices.Equal(extended.Survivors, wantSurvivors) {
 		t.Fatalf("extended survivors = %+v, want the prefix survivor carried and the suffix survivor appended", extended.Survivors)
@@ -5262,5 +5273,67 @@ func TestServeCheckRefusalAttribution(t *testing.T) {
 	got := serveCheckRefusal(moved)
 	if !strings.HasPrefix(got, "drift: the tree moved past the run-start view capture: ") || !strings.Contains(got, "closure for p.F") {
 		t.Fatalf("view-changed cause = %q, want the drift wording carrying the error", got)
+	}
+}
+
+// survivorCovered is the one coverage question fresh classification
+// and the growth-upgrade pass share: extent intersection when the
+// record carries one, the anchor point only for prior-generation
+// extent-less records. The brace-anchored shape (extent through an
+// executed body, anchor on no block) is the go1.27 regression both
+// call sites must answer the same way.
+func TestSurvivorCoveredProbesExtentOverAnchor(t *testing.T) {
+	coverage := engine.CoverageForTest(map[string][]engine.CoverSpanForTest{
+		"p/lib.go": {{StartLine: 24, StartCol: 2, EndLine: 24, EndCol: 12}, {StartLine: 25, StartCol: 3, EndLine: 26, EndCol: 1}},
+	})
+	braced := Survivor{Position: "lib.go:24:12", Operator: "block: empty", Extent: "24:13-26:2"}
+	mustCovered := func(s Survivor, c engine.Coverage) bool {
+		t.Helper()
+		covered, ok := survivorCovered(c, "p", s)
+		if !ok {
+			t.Fatalf("position %q unparseable", s.Position)
+		}
+		return covered
+	}
+	if !mustCovered(braced, coverage) {
+		t.Fatal("extent through the executed body read never-executed — the go1.27 anchor miss")
+	}
+	pointOnly := braced
+	pointOnly.Extent = ""
+	if mustCovered(pointOnly, coverage) {
+		t.Fatal("an extent-less record left the anchor-point fallback")
+	}
+	condOnly := engine.CoverageForTest(map[string][]engine.CoverSpanForTest{
+		"p/lib.go": {{StartLine: 24, StartCol: 2, EndLine: 24, EndCol: 12}},
+	})
+	if mustCovered(braced, condOnly) {
+		t.Fatal("a never-entered body claimed execution through the condition span")
+	}
+	// Malformed extents fall back to the anchor point: under FULL
+	// coverage the extent form would claim the body, the fallback's
+	// anchor sits on no block — a junk-tolerant parse flips this.
+	malformed := braced
+	malformed.Extent = "24:13-26:2xyz"
+	if mustCovered(malformed, coverage) {
+		t.Fatal("a malformed extent probed as a range instead of falling back to the anchor point")
+	}
+	if _, ok := survivorCovered(coverage, "p", Survivor{Position: "garbage", Extent: "1:1-2:2"}); ok {
+		t.Fatal("an unparseable position claimed a coverage verdict")
+	}
+}
+
+// Every freshly measured survivor carries the mutated node's extent —
+// the invariant that keeps every construction site (fresh runs,
+// budget-extension suffixes, growth re-measures) on the range-shaped
+// probe; a site dropping it silently reverts that path to the
+// boundary-fragile anchor point.
+func assertSurvivorExtents(t *testing.T, findings []Finding) {
+	t.Helper()
+	for _, f := range findings {
+		for _, s := range f.Survivors {
+			if s.Extent == "" {
+				t.Fatalf("%s survivor %s %s carries no extent", f.Symbol, s.Position, s.Operator)
+			}
+		}
 	}
 }

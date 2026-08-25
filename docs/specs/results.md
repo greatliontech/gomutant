@@ -69,7 +69,11 @@ the mutant count, the kill count, each kill's candidate identity and killer
 marker — REQ-core-attributed-kills made durable; a record carries either
 every kill's attribution or none, and a partial list is malformed and
 refused), each survivor's position
-and operator, plus per-operator generated, discarded, killed, and survived
+and operator — the mutated node's source extent optional beside them:
+advisory coverage-probe geometry (REQ-exec-survivor-evidence's
+range-shaped bucket), never a reuse input, and a row without one is
+answered by its anchor point — plus per-operator generated, discarded,
+killed, and survived
 counts whose sums equal the finding totals. The oracle is pinned by identity and complete Gofresh evidence,
 not merely by name: strengthening a test or any source it
 depends on moves its closure, so a record cannot keep reporting a survivor a

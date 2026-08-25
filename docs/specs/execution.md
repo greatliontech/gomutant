@@ -198,10 +198,13 @@ contributes its completed or incomplete observation even when compilation reject
 classifies the candidate as discarded rather than measured.
 
 **REQ-exec-survivor-evidence** (behavior): A measured finding's survivors MUST
-carry execution evidence bucketing why each lived: `never-executed` when the
-oracle's baseline coverage never reaches the mutated position (a coverage
-gap), `executed-and-passed` when the position runs and the oracle still
-passes (a weak assertion or an equivalent mutant), `overlay-bypassed` when
+carry execution evidence bucketing why each lived: `never-executed` when no
+executed block of the oracle's baseline coverage intersects the mutated
+node's half-open source extent (a coverage gap), `executed-and-passed` when
+the extent intersects executed coverage and the oracle still passes (a weak
+assertion or an equivalent mutant) — one range-shaped probe shared by fresh
+classification and the growth-upgrade pass, with a survivor row that
+carries no extent answered by its anchor point alone — `overlay-bypassed` when
 the finding's observed union recorded a read of a mutated file's own
 on-disk path - the mutant executes through the build overlay, so a
 disk-walking oracle's verdict derived from the unmutated tree and the
@@ -231,7 +234,9 @@ the serve verified, a flip into survival staying unbucketed like a
 probe-refused survivor; and on either splice, re-measured survivors of a
 non-reusable (unverifiable) spliced record classify unstable-oracle.
 
-REQ-exec-survivor-evidence: enforced by `TestRunBucketsSurvivorExecution`,
+REQ-exec-survivor-evidence: enforced by
+`TestCoverageIntersectsHalfOpenBoundaries`, `TestRunEndToEnd`'s
+pinned extents and buckets, `TestRunBucketsSurvivorExecution`,
 `TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets`,
 `TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence`,
 `TestRunExtendsCappedFindingMeasuringOnlyTheSuffix`,

@@ -20,7 +20,7 @@ is deleted (git holds history).
 | [actionable-unverifiable-refusals](actionable-unverifiable-refusals.md) | each unverifiable reason names its discharge channel (vouch/directive/restructure) | user decision |
 | [findings-doc-unbounded-growth](findings-doc-unbounded-growth.md) | repo-layer findings.json at 70 MB after one campaign; nothing bounds or compacts it | with the tool-phase gomutant visit, or a consumer push refusal |
 | [findings-inspection-cost](findings-inspection-cost.md) | inspection without re-judging freshness; summary reads O(targets); 28MB/85-target audit | user decision |
-| [go127-execution-buckets-and-suite-red](go127-execution-buckets-and-suite-red.md) | go1.27 shifts survivor execution buckets (never-executed vs executed-and-passed) and the library suite reds at HEAD | with the tool-phase go1.27 support; buckets re-verified before go1.27 campaign triage trusts them |
+| [library-suite-exceeds-default-test-timeout](library-suite-exceeds-default-test-timeout.md) | root-package suite ~16m on go1.27; plain go test panics verdictless at the 10m default | with the CI workflows, or the first task runner |
 | [go127-generic-method-closure-analysis](go127-generic-method-closure-analysis.md) | consumer-filed: go1.27 generic-method shapes fail gofresh closure analysis | with the gofresh generic-method analysis fix (shared engine; pew files the twin), then a gomutant bump |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | user decision |
 | [progress-and-exit-reporting](progress-and-exit-reporting.md) | summary cadence, exit-path banked-state reports, named confirmation mode, remaining-of-total denominators | user decision |

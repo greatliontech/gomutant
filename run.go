@@ -913,17 +913,60 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 	}
 	coverPkg := w.targetView.subject.Package
 	for si := from; si < len(f.Survivors); si++ {
-		file, line, col, ok := splitSurvivorPosition(f.Survivors[si].Position)
+		covered, ok := survivorCovered(coverage, coverPkg, f.Survivors[si])
 		if !ok {
+			// An unparseable position leaves the bucket UNSET — the
+			// best-effort posture — never a claimed never-executed.
 			continue
 		}
-		if coverage.Covered(coverPkg+"/"+file, line, col) {
+		if covered {
 			f.Survivors[si].Execution = "executed-and-passed"
 		} else {
 			f.Survivors[si].Execution = "never-executed"
 		}
 	}
 	return nil
+}
+
+// survivorCovered is the one coverage question every bucket decision
+// asks — fresh classification and the growth upgrade pass alike: does
+// any executed block intersect the mutated node's extent? A point
+// anchor sits on toolchain-dependent block boundaries (go1.27 moved
+// body spans off the brace token), so the range is the probe;
+// extent-less records — prior generations — keep the anchor-point
+// form they were bucketed under.
+func survivorCovered(coverage engine.Coverage, coverPkg string, s Survivor) (covered, ok bool) {
+	file, line, col, posOK := splitSurvivorPosition(s.Position)
+	if !posOK {
+		// Not a coverage verdict: the caller owns unparseable-position
+		// policy (fresh classification leaves the bucket unset; the
+		// growth upgrade leaves the recorded bucket standing).
+		return false, false
+	}
+	if sl, sc, el, ec, extOK := parseSurvivorExtent(s.Extent); extOK {
+		return coverage.Intersects(coverPkg+"/"+file, sl, sc, el, ec), true
+	}
+	return coverage.Covered(coverPkg+"/"+file, line, col), true
+}
+
+// parseSurvivorExtent splits "line:col-line:col"; ok is false on the
+// empty extents of prior-generation records. A carried survivor may
+// pair a current candidate's extent with a bucket recorded under the
+// point probe — the extent describes the mutant, never which probe
+// produced the bucket.
+func parseSurvivorExtent(extent string) (startLine, startCol, endLine, endCol int, ok bool) {
+	if extent == "" {
+		return 0, 0, 0, 0, false
+	}
+	if n, err := fmt.Sscanf(extent, "%d:%d-%d:%d", &startLine, &startCol, &endLine, &endCol); err != nil || n != 4 {
+		return 0, 0, 0, 0, false
+	}
+	if fmt.Sprintf("%d:%d-%d:%d", startLine, startCol, endLine, endCol) != extent {
+		// Sscanf tolerates trailing bytes; a round-trip mismatch is a
+		// malformed extent, and malformed means the point fallback.
+		return 0, 0, 0, 0, false
+	}
+	return startLine, startCol, endLine, endCol, true
 }
 
 // coverageUpgradeAllowed reports whether a coverage-probe re-derivation
@@ -2695,8 +2738,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 							if !coverageUpgradeAllowed(grown.Survivors[si].Execution) {
 								continue
 							}
-							file, line, col, ok := splitSurvivorPosition(grown.Survivors[si].Position)
-							if ok && coverage.Covered(coverPkg+"/"+file, line, col) {
+							if covered, ok := survivorCovered(coverage, coverPkg, grown.Survivors[si]); ok && covered {
 								grown.Survivors[si].Execution = "executed-and-passed"
 							}
 						}
@@ -2901,7 +2943,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				switch outcomes[wi][mi] {
 				case engine.MutantSurvived:
-					f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site})
+					f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent})
 				case engine.MutantKilled:
 					// The keystone persisted: every kill names its killer
 					// (REQ-core-attributed-kills), so reuse can key the kill
@@ -3772,7 +3814,7 @@ func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Can
 			if stamp {
 				execution = "unstable-oracle"
 			}
-			stillSurviving = append(stillSurviving, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: execution})
+			stillSurviving = append(stillSurviving, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution})
 		case "killed":
 			if killsComplete {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -3902,7 +3944,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 				// stands exactly like a standing kill — carries its
 				// recorded advisory bucket verbatim
 				// (REQ-exec-survivor-evidence).
-				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: prior.Execution})
+				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution})
 			}
 			continue
 		}
@@ -3932,7 +3974,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 			if stamp {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: execution})
+			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution})
 		case "killed":
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
 		}
@@ -4433,7 +4475,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 		applyDisposition(&operators[i], disposition, 1)
 		switch disposition {
 		case "survived":
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: suffixExecution})
+			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: suffixExecution})
 		case "killed":
 			if killsComplete {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -4653,7 +4695,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 				// A covered survivor carries its recorded advisory bucket
 				// verbatim, like its disposition and attestation
 				// (REQ-exec-survivor-evidence).
-				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: prior.Execution})
+				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution})
 			}
 			if killer, ok := recordedKills[key]; ok {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killer})
@@ -4682,7 +4724,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 			if unstableForBuckets(&rec, exemptions) {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Execution: execution})
+			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution})
 		}
 		if disposition == "killed" && killsComplete {
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})

@@ -802,7 +802,7 @@ func TestRunUsesEnvironmentFrozenAtLoad(t *testing.T) {
 	if len(findings) == 1 && len(findings[0].Survivors) == 1 && findings[0].Survivors[0].Site == "" {
 		t.Fatalf("survivor carries no site anchor: %+v", findings[0].Survivors)
 	}
-	if len(findings) != 1 || findings[0].Mutants != 2 || findings[0].Killed != 1 || len(findings[0].Survivors) != 1 || findings[0].Survivors[0] != (Survivor{Position: "lib.go:24:2", Operator: "statement: delete", Site: findings[0].Survivors[0].Site, Execution: "executed-and-passed"}) {
+	if len(findings) != 1 || findings[0].Mutants != 2 || findings[0].Killed != 1 || len(findings[0].Survivors) != 1 || findings[0].Survivors[0] != (Survivor{Position: "lib.go:24:2", Operator: "statement: delete", Extent: "24:2-26:3", Site: findings[0].Survivors[0].Site, Execution: "executed-and-passed"}) {
 		t.Fatalf("frozen-environment finding = %+v, want exact two-candidate prefix outcomes", findings)
 	}
 }

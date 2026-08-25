@@ -17,6 +17,11 @@ func emitStatementLists(c *catalog, node ast.Node, ancestors []ast.Node) []candi
 		if blockCanBeEmptied(list, ancestors) {
 			specs = append(specs, candidateSpec{
 				operator: "block: empty", start: list.Lbrace, end: list.Rbrace + 1,
+				// The execution extent is the emptied INTERIOR — the
+				// edit range — not the braces: brace columns are
+				// toolchain-placed cover-block boundaries, the exact
+				// dependence the extent probe removes.
+				extentStart: list.Lbrace + 1, extentEnd: list.Rbrace,
 				position: list.Lbrace, family: 29, variant: 1,
 				edits: []sourceEdit{c.edit(list.Lbrace+1, list.Rbrace, nil)},
 			})
@@ -63,11 +68,18 @@ func clauseCandidates(c *catalog, colon token.Pos, statements []ast.Stmt) []cand
 		end = statements[len(statements)-1].End()
 		editStart, editEnd = statements[0].Pos(), end
 	}
-	specs = append(specs, candidateSpec{
+	spec := candidateSpec{
 		operator: "block: empty", start: colon, end: end,
 		position: colon, family: 29, variant: 1,
 		edits: []sourceEdit{c.edit(editStart, editEnd, nil)},
-	})
+	}
+	if len(statements) != 0 {
+		// The execution extent is the emptied statement range — the
+		// edit — never the clause's colon column (a toolchain-placed
+		// boundary).
+		spec.extentStart, spec.extentEnd = statements[0].Pos(), end
+	}
+	specs = append(specs, spec)
 	return specs
 }
 

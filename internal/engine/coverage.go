@@ -82,6 +82,22 @@ func (c Coverage) Merge(other Coverage) Coverage {
 
 // Covered reports whether the import-path-qualified file position falls
 // inside any executed block.
+// Intersects reports whether any executed block overlaps the
+// half-open source range [start, end): the range-shaped question a
+// mutant's execution bucket asks. Point containment alone sits on
+// toolchain-dependent block boundaries — go1.27 moved body spans off
+// the brace token, flipping brace-anchored mutants to never-executed
+// while their bodies demonstrably ran.
+func (c Coverage) Intersects(qualifiedFile string, startLine, startCol, endLine, endCol int) bool {
+	before := func(l1, c1, l2, c2 int) bool { return l1 < l2 || (l1 == l2 && c1 < c2) }
+	for _, s := range c.covered[qualifiedFile] {
+		if before(startLine, startCol, s.endLine, s.endCol) && before(s.startLine, s.startCol, endLine, endCol) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c Coverage) Covered(qualifiedFile string, line, col int) bool {
 	for _, s := range c.covered[qualifiedFile] {
 		if (line > s.startLine || (line == s.startLine && col >= s.startCol)) &&
@@ -107,4 +123,22 @@ func coverageTail(s string, n int) string {
 // never reached).
 func (c Coverage) CoversFile(qualifiedFile string) bool {
 	return len(c.covered[qualifiedFile]) > 0
+}
+
+// CoverSpanForTest is one literal executed block for CoverageForTest.
+type CoverSpanForTest struct {
+	StartLine, StartCol, EndLine, EndCol int
+}
+
+// CoverageForTest builds a Coverage from literal spans — the
+// cross-package seam for bucket-probe tests; production coverage
+// comes only from CoveredPositions' profile parse.
+func CoverageForTest(spans map[string][]CoverSpanForTest) Coverage {
+	covered := map[string][]coverSpan{}
+	for file, list := range spans {
+		for _, s := range list {
+			covered[file] = append(covered[file], coverSpan{startLine: s.StartLine, startCol: s.StartCol, endLine: s.EndLine, endCol: s.EndCol})
+		}
+	}
+	return Coverage{covered: covered}
 }

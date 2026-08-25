@@ -213,6 +213,13 @@ func (l *CompartmentLedger) ledger() gofresh.TestVariantLedger {
 type Survivor struct {
 	Position string `json:"position"`
 	Operator string `json:"operator"`
+	// Extent is the mutated node's source range "line:col-line:col"
+	// (half-open, in Position's file): the geometry the execution
+	// bucket's coverage probe intersects — a point anchor alone sits
+	// on toolchain-dependent block boundaries. Empty on records
+	// measured before extents existed (the probe falls back to the
+	// point). Advisory, never a measurement pin.
+	Extent string `json:"extent,omitempty"`
 	// Site is the attestation anchor's site component: a hash of the
 	// mutated range's line window in the original source, stamped at
 	// generation. An attestation's equivalence reasoning is
@@ -537,6 +544,10 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // semantics its engine does not implement. The package-process
 // discharge field landed beside it WITHOUT narrowing reuse (an audit
 // acceptance, the vouches' class) and needed no boundary of its own.
+// The survivor extent field (advisory coverage-probe geometry)
+// landed at version 10 likewise without a boundary: no reuse
+// decision reads it, and an absent extent keeps the anchor-point
+// coverage fallback an older record was bucketed under.
 const DocumentVersion = 10
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
