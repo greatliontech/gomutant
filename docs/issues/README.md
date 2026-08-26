@@ -21,3 +21,5 @@ is deleted (git holds history).
 | [library-suite-exceeds-default-test-timeout](library-suite-exceeds-default-test-timeout.md) | root-package suite ~16m on go1.27; plain go test panics verdictless at the 10m default; same scale blocks gomutant-on-gomutant campaign baselines | go-test face folds into train chunk 107 (CI); campaign face on minutes-class baseline |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | train chunk 113 |
 | [refusal-exit-collapse](refusal-exit-collapse.md) | one refuse(symbol, reason) exit — the hand-picked subsets bred two review-caught defects in one round | train chunk 113 |
+| [machine-local-evidence-pins](machine-local-evidence-pins.md) | absolute runtime-input paths and host-RAM in evidence pins — the findings document serves only on the producing checkout (bldc 2026-08-27) | user decision |
+| [generic-shape-reachability-gap](generic-shape-reachability-gap.md) | generic shapes defeat attributed reachability, taking whole packages dark — 567/1164 targets, 14 packages in one consumer (bldc 2026-08-27) | user decision |
