@@ -21,6 +21,6 @@ newer measurement covers the pin). Whichever lands, the repo layer
 must stay the committable record of verdicts (REQ-result-layers) —
 the cut is evidence bulk, never verdict rows.
 
-Lands: with the tool phase's gomutant visit (queued with the
-growth-serve verdict-integrity fix), or the first consumer refusing
-a push on the document's size.
+Lands: cross-tool train chunk 110 (gofresh
+docs/plans/cross-tool-train.md), or the first consumer refusing a
+push on the document's size.

@@ -238,10 +238,23 @@ type Survivor struct {
 	// a mutated file's own on-disk path, so a disk-walking oracle's
 	// verdict derived from the unmutated tree and the survivor reading
 	// is not evidence the oracle noticed nothing; "unstable-oracle" - the finding's runtime evidence is
-	// unverifiable, so execution evidence cannot be trusted. Empty on
+	// unverifiable, so execution evidence cannot be trusted;
+	// "flipped-kill" - the window run scored a kill and the serial
+	// confirmation re-scored the mutant a survivor (the anti-flattering
+	// scoring stands; the flip IS the execution evidence - the position
+	// demonstrably executes and a test demonstrably can fail on it), so
+	// the survivor is oracle nondeterminism to stabilize, never a plain
+	// coverage or assertion gap. Empty on
 	// records measured before bucketing existed; advisory, never a
 	// measurement pin.
 	Execution string `json:"execution,omitempty"`
+	// WithdrawnKiller names the test whose window-run kill the serial
+	// confirmation withdrew - set exactly with the "flipped-kill"
+	// bucket (REQ-exec-survivor-evidence): the flip rides the record,
+	// not only the event stream, so a false-survivor triage starts from
+	// the nondeterministic test by name. Never an equivalence-attestation
+	// candidate: a mutant a test has killed is not equivalent.
+	WithdrawnKiller string `json:"withdrawnKiller,omitempty"`
 }
 
 // SurvivorAdvice maps a survivor's execution bucket to the action it
@@ -258,6 +271,8 @@ func SurvivorAdvice(execution string) string {
 		return "the oracle's observed reads include a mutated file's own on-disk path - its verdict came from the unmutated tree, not the built mutant; restructure the test to judge the linked build (a pure core over in-memory inputs) instead of re-reading the tree"
 	case "unstable-oracle":
 		return "the finding's runtime evidence is unverifiable - stabilize the oracle's runtime inputs before trusting execution evidence"
+	case "flipped-kill":
+		return "the withdrawn killer is nondeterministic on this mutant (map order, unpinned draws, external state); stabilize that test, never attest equivalence on a mutant a test has killed"
 	default:
 		return "execution evidence unavailable - the coverage probe was refused or the record predates bucketing; re-measure to bucket this survivor"
 	}

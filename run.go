@@ -270,8 +270,11 @@ type ExecutionEvent struct {
 	// FlipPosition/FlipKiller are set exactly on a confirmation-flip
 	// event: the serial re-run re-scored a provisional kill (initially
 	// attributed to FlipKiller) as a survivor. A demotion is never
-	// silent — a false-survivor field report is self-diagnosing from
-	// the log (docs/issues/growth-serve-misses-modified-oracle-bodies.md).
+	// silent — the flip also rides the RECORD as the survivor's
+	// flipped-kill bucket and WithdrawnKiller
+	// (REQ-exec-survivor-evidence), so a false-survivor triage is
+	// self-diagnosing from the findings document, the event stream
+	// being corroboration.
 	FlipPosition string `json:"flipPosition,omitempty"`
 	FlipKiller   string `json:"flipKiller,omitempty"`
 }
@@ -875,6 +878,47 @@ func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts 
 	return outcome, killer, state, incompleteReason, nil
 }
 
+// newSurvivor is the ONE survivor-row constructor: every assembly path
+// — fresh, served splice, grown delta, extend suffix, drift re-measure,
+// and the two carry-prior sites — builds its rows here, deciding the
+// flip question at the call (REQ-exec-survivor-evidence). flips is the
+// window's confirmation-flip map for candidates that EXECUTED this run
+// (nil at carry-prior sites, whose candidates did not run and cannot
+// have flipped): a withdrawn window kill marks the row flipped-kill
+// with its killer named. A helper applied post-hoc was tried first and
+// silently missed two of the assembly paths in consecutive review
+// rounds — construction is where omission becomes uncompilable.
+// windowScores is one window's verdict-bearing measurement for one
+// target: outcomes, their killers, and the serial-confirmation flips,
+// indexed by candidate. The three travel as one value because every
+// survivor-assembly path needs all of them — a signature that could
+// accept outcomes and killers while dropping the flips is exactly the
+// shape that produced unmarked flipped survivors
+// (REQ-exec-survivor-evidence).
+type windowScores struct {
+	outcomes []engine.MutantOutcome
+	killers  []string
+	flips    map[int]string
+}
+
+// carrySurvivor is the carry-prior constructor: the candidate did not
+// execute this run, so no new flip can exist — the recorded row's
+// advisory evidence carries verbatim, its WithdrawnKiller included (a
+// recorded flip is evidence exactly like a bucket; rebuilding from the
+// bucket alone silently dropped the killer's name).
+func carrySurvivor(candidate engine.Candidate, prior Survivor) Survivor {
+	return Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution, WithdrawnKiller: prior.WithdrawnKiller}
+}
+
+func newSurvivor(candidate engine.Candidate, execution string, flips map[int]string, mi int) Survivor {
+	row := Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution}
+	if withdrawn, flipped := flips[mi]; flipped {
+		row.Execution = "flipped-kill"
+		row.WithdrawnKiller = withdrawn
+	}
+	return row
+}
+
 // bucketSurvivorExecution classifies why each survivor lived
 // (REQ-exec-survivor-evidence): unverifiable runtime evidence buckets
 // every survivor "unstable-oracle" without probing; otherwise one
@@ -893,6 +937,14 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 	}
 	if unstableForBuckets(f, opts.Exemptions) {
 		for si := from; si < len(f.Survivors); si++ {
+			// A flip is direct execution evidence recorded at
+			// confirmation time - the position demonstrably executed
+			// and a test demonstrably failed on it - so the advisory
+			// unverifiability stamp never overwrites it
+			// (REQ-exec-survivor-evidence).
+			if f.Survivors[si].Execution == "flipped-kill" {
+				continue
+			}
 			f.Survivors[si].Execution = "unstable-oracle"
 		}
 		return nil
@@ -920,6 +972,12 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 	}
 	coverPkg := w.targetView.subject.Package
 	for si := from; si < len(f.Survivors); si++ {
+		if f.Survivors[si].Execution == "flipped-kill" {
+			// The flip outranks the coverage probe: it is per-mutant
+			// execution evidence, not baseline-advisory
+			// (REQ-exec-survivor-evidence).
+			continue
+		}
 		covered, ok := survivorCovered(coverage, coverPkg, f.Survivors[si])
 		if !ok {
 			// An unparseable position leaves the bucket UNSET — the
@@ -978,7 +1036,8 @@ func parseSurvivorExtent(extent string) (startLine, startCol, endLine, endCol in
 
 // coverageUpgradeAllowed reports whether a coverage-probe re-derivation
 // may overwrite a survivor's recorded execution bucket: only empty and
-// never-executed buckets upgrade. overlay-bypassed and unstable-oracle
+// never-executed buckets upgrade. overlay-bypassed, unstable-oracle,
+// and flipped-kill
 // were judged from evidence a coverage probe cannot see - the observed
 // union's disk reads and the runtime-evidence verdict - so a probe
 // never overrides them, and executed-and-passed is already the
@@ -2422,13 +2481,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	dispatchedTargets, mutantsDone := 0, 0
 	type executedWindow struct {
 		window       []work
-		outcomes     [][]engine.MutantOutcome
 		observations [][]runtimeinput.Observation
 		incompletes  [][]string
-		killers      [][]string
+		// scores carries each target's verdict-bearing measurement —
+		// outcomes, killers, and the serial-confirmation flips — as one
+		// value, so no assembly path can receive the verdicts without
+		// the flips (REQ-exec-survivor-evidence).
+		scores []windowScores
 	}
 	executeWindow := func(window []work) (*executedWindow, error) {
 		outcomes := make([][]engine.MutantOutcome, len(window))
+		flips := make([]map[int]string, len(window))
 		observations := make([][]runtimeinput.Observation, len(window))
 		incompletes := make([][]string, len(window))
 		killers := make([][]string, len(window))
@@ -2624,6 +2687,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					incompletes[wi][k.mi] = incomplete
 					classified := classifyConfirmation(outcome, killer)
 					if classified == confirmFlipped {
+						if flips[wi] == nil {
+							flips[wi] = map[int]string{}
+						}
+						flips[wi][k.mi] = initialKiller
 						reportConfirmationFlip(opts.Executing,
 							targets[window[wi].target].Symbol,
 							window[wi].candidates[k.mi].Position,
@@ -2646,7 +2713,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 
 		cancel()
 		dispatchedTargets += len(window)
-		return &executedWindow{window: window, outcomes: outcomes, observations: observations, incompletes: incompletes, killers: killers}, nil
+		scores := make([]windowScores, len(window))
+		for wi := range window {
+			scores[wi] = windowScores{outcomes: outcomes[wi], killers: killers[wi], flips: flips[wi]}
+		}
+		return &executedWindow{window: window, scores: scores, observations: observations, incompletes: incompletes}, nil
 	}
 	// aggregateWindow folds one executed window into findings and commits
 	// each one — always before the next window dispatches
@@ -2658,7 +2729,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// what lets the campaign epilogue fire between the LAST window's
 	// execution and its aggregation, exactly where it always sat.
 	aggregateWindow := func(st *executedWindow) error {
-		window, outcomes, observations, incompletes, killers := st.window, st.outcomes, st.observations, st.incompletes, st.killers
+		window, observations, incompletes, scores := st.window, st.observations, st.incompletes, st.scores
 		for wi := range window {
 			w := window[wi]
 			if err := ctx.Err(); err != nil {
@@ -2669,7 +2740,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			f := &findings[w.target]
 			if w.serve != nil {
-				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
+				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
 				if err != nil {
 					return err
 				}
@@ -2707,7 +2778,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.grow != nil {
-				grown, _, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
+				grown, _, shed, err := t.spliceGrownFinding(ctx, runEnv, *w.grow, w, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
 				if err != nil {
 					return err
 				}
@@ -2769,7 +2840,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					for _, attestation := range shed {
 						killer := ""
 						if mi, ok := byIdentity[survivorKey{attestation.Position, attestation.Operator}]; ok {
-							killer = killers[wi][mi]
+							killer = scores[wi].killers[mi]
 						}
 						opts.Contradiction(AttestationContradiction{
 							Symbol: targets[w.target].Symbol, Position: attestation.Position,
@@ -2783,7 +2854,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.drift != nil {
-				spliced, _, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
+				spliced, _, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions)
 				if err != nil {
 					return err
 				}
@@ -2827,7 +2898,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					for _, attestation := range shed {
 						killer := ""
 						if mi, ok := byIdentity[survivorKey{attestation.Position, attestation.Operator}]; ok {
-							killer = killers[wi][mi]
+							killer = scores[wi].killers[mi]
 						}
 						opts.Contradiction(AttestationContradiction{
 							Symbol: targets[w.target].Symbol, Position: attestation.Position,
@@ -2841,7 +2912,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.extend != nil {
-				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes[wi], killers[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget, opts.Exemptions)
+				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget, opts.Exemptions)
 				if err != nil {
 					return err
 				}
@@ -2881,7 +2952,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			unionCandidates := w.candidates
-			unionOutcomes := outcomes[wi]
+			unionOutcomes := scores[wi].outcomes
 			unionObservations := observations[wi]
 			unionIncompletes := incompletes[wi]
 			if w.shaped {
@@ -2936,7 +3007,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			stampExemptions(f, opts.Exemptions)
-			f.Operators = summarizeOperators(w.candidates, outcomes[wi])
+			f.Operators = summarizeOperators(w.candidates, scores[wi].outcomes)
 			for _, summary := range f.Operators {
 				if err := ctx.Err(); err != nil {
 					return err
@@ -2949,15 +3020,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				switch outcomes[wi][mi] {
+				switch scores[wi].outcomes[mi] {
 				case engine.MutantSurvived:
-					f.Survivors = append(f.Survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent})
+					f.Survivors = append(f.Survivors, newSurvivor(candidate, "", scores[wi].flips, mi))
 				case engine.MutantKilled:
 					// The keystone persisted: every kill names its killer
 					// (REQ-core-attributed-kills), so reuse can key the kill
 					// to its killer's content (REQ-result-stale's
 					// killer-drift carve-out).
-					f.Kills = append(f.Kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[wi][mi]})
+					f.Kills = append(f.Kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: scores[wi].killers[mi]})
 				}
 			}
 			if err := ctx.Err(); err != nil {
@@ -3722,7 +3793,8 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 // read beyond the recorded pins preserves the grown outcome but stamps it
 // explicitly non-reusable. Returns the reconciled union (for provenance)
 // and the shed attestations of newly killed survivors.
-func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding, w work, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, runtimeinput.Observation, []Attestation, error) {
+func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding, w work, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, runtimeinput.Observation, []Attestation, error) {
+	outcomes := scores.outcomes
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.growSurvivors, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes, observations, incompletes, labels, true, false)
 	if err != nil {
 		return Finding{}, runtimeinput.Observation{}, nil, err
@@ -3742,7 +3814,7 @@ func (t *Tree) spliceGrownFinding(ctx context.Context, env []string, rec Finding
 			rec.OracleEvidence[i].RuntimeUnverifiable, rec.OracleEvidence[i].RuntimeReason = true, divergenceReason
 		}
 	}
-	grown, shed, err := growFindingCounts(ctx, rec, w.candidates, w.growSurvivors, outcomes, killers, spliced.fresh, exemptions)
+	grown, shed, err := growFindingCounts(ctx, rec, w.candidates, w.growSurvivors, scores, spliced.fresh, exemptions)
 	return grown, spliced.union, shed, err
 }
 
@@ -3790,7 +3862,8 @@ func carryAnchoredAttestations(prior []Attestation, survivors []Survivor) (kept 
 	return kept, siteSheds, gone
 }
 
-func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, survivors map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, []Attestation, error) {
+func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, survivors map[int]bool, scores windowScores, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, []Attestation, error) {
+	outcomes, killers, flips := scores.outcomes, scores.killers, scores.flips
 	// Kill attribution is maintained only over a record that carries it
 	// completely; a record predating attribution stays without one and
 	// re-measures whole under the killer-drift carve-out
@@ -3829,7 +3902,7 @@ func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Can
 			if stamp {
 				execution = "unstable-oracle"
 			}
-			stillSurviving = append(stillSurviving, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution})
+			stillSurviving = append(stillSurviving, newSurvivor(candidate, execution, flips, mi))
 		case "killed":
 			if killsComplete {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -3895,7 +3968,8 @@ func growFindingCounts(ctx context.Context, rec Finding, candidates []engine.Can
 // drifted outcome but stamps it explicitly non-reusable. Returns the
 // reconciled union (for provenance) and the shed attestations of newly
 // killed survivors.
-func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding, w work, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, runtimeinput.Observation, []Attestation, error) {
+func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding, w work, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, runtimeinput.Observation, []Attestation, error) {
+	outcomes := scores.outcomes
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.driftRemeasure, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes, observations, incompletes, labels, true, false)
 	if err != nil {
 		return Finding{}, runtimeinput.Observation{}, nil, err
@@ -3911,7 +3985,7 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 			rec.OracleEvidence[i].RuntimeUnverifiable, rec.OracleEvidence[i].RuntimeReason = true, divergenceReason
 		}
 	}
-	driftedFinding, shed, err := driftFindingCounts(ctx, rec, w.candidates, w.driftRemeasure, outcomes, killers, spliced.fresh, exemptions)
+	driftedFinding, shed, err := driftFindingCounts(ctx, rec, w.candidates, w.driftRemeasure, scores, spliced.fresh, exemptions)
 	return driftedFinding, spliced.union, shed, err
 }
 
@@ -3928,7 +4002,8 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 // unstable-oracle when the spliced evidence landed non-reusable; a newly
 // killed attested survivor's attestation is shed and returned — evidence
 // beats attestation (REQ-attest-survivor).
-func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, remeasured map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, []Attestation, error) {
+func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, remeasured map[int]bool, scores windowScores, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, []Attestation, error) {
+	outcomes, killers, flips := scores.outcomes, scores.killers, scores.flips
 	operators := append([]OperatorSummary(nil), rec.Operators...)
 	byOperator := make(map[string]int, len(operators))
 	for i := range operators {
@@ -3959,7 +4034,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 				// stands exactly like a standing kill — carries its
 				// recorded advisory bucket verbatim
 				// (REQ-exec-survivor-evidence).
-				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution})
+				survivors = append(survivors, carrySurvivor(candidate, prior))
 			}
 			continue
 		}
@@ -3989,7 +4064,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 			if stamp {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution})
+			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi))
 		case "killed":
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
 		}
@@ -4352,7 +4427,8 @@ func extendedPrefixStands(generation engine.Generation, rec Finding) bool {
 // while a read beyond the record's pins is runtime information it never
 // pinned, so the extended outcome is preserved but explicitly non-reusable
 // (REQ-result-stale's fail-closed bound).
-func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int, exemptions []Exemption) (Finding, error) {
+func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int, exemptions []Exemption) (Finding, error) {
+	outcomes := scores.outcomes
 	suffix := make(map[int]bool, len(candidates)-from)
 	for mi := from; mi < len(candidates); mi++ {
 		suffix[mi] = true
@@ -4363,7 +4439,7 @@ func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Find
 	if err != nil {
 		return Finding{}, err
 	}
-	return extendFindingCounts(ctx, spliced.rec, candidates, from, outcomes, killers, spliced.fresh, budget, exemptions)
+	return extendFindingCounts(ctx, spliced.rec, candidates, from, scores, spliced.fresh, budget, exemptions)
 }
 
 // splicedEvidence is one splice's evidence outcome: the record after
@@ -4452,7 +4528,8 @@ func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding,
 // survivors are appended in candidate order, the suffix run's candidate
 // evidence becomes the record's (an extendable record carries none), and the
 // budget, generated, and candidate counts record the merged truth.
-func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, from int, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, budget int, exemptions []Exemption) (Finding, error) {
+func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, from int, scores windowScores, freshEvidence []CandidateEvidence, budget int, exemptions []Exemption) (Finding, error) {
+	outcomes, killers, flips := scores.outcomes, scores.killers, scores.flips
 	// Prefix kill attributions carry verbatim — their pins did not move —
 	// and suffix kills append theirs; a record predating attribution stays
 	// without one (REQ-core-attributed-kills).
@@ -4490,7 +4567,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 		applyDisposition(&operators[i], disposition, 1)
 		switch disposition {
 		case "survived":
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: suffixExecution})
+			survivors = append(survivors, newSurvivor(candidate, suffixExecution, flips, mi))
 		case "killed":
 			if killsComplete {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -4536,12 +4613,13 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 // process's pinned runtime inputs; fresh observations that diverge are runtime
 // information the record never pinned, so the spliced outcome is preserved but
 // explicitly non-reusable (REQ-exec-observation).
-func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, killers []string, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, error) {
+func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption) (Finding, error) {
+	outcomes := scores.outcomes
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, flagged, baselines, targetView, oracleViews, currentLedger, outcomes, observations, incompletes, labels, false, true)
 	if err != nil {
 		return Finding{}, err
 	}
-	return spliceFindingCounts(ctx, spliced.rec, candidates, flagged, outcomes, killers, spliced.fresh, exemptions)
+	return spliceFindingCounts(ctx, spliced.rec, candidates, flagged, scores, spliced.fresh, exemptions)
 }
 
 // applySplicedUnion reconciles the re-executed processes' completed union with
@@ -4670,7 +4748,8 @@ func splicedUnionDiverged(state runtimeinput.State, prior SubjectEvidence) bool 
 // pins the serve verified — an attestation rides only a survivor that
 // survives again at the same position and operator (REQ-attest-survivor),
 // and the fresh candidate evidence replaces the served record's.
-func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, flagged map[int]bool, outcomes []engine.MutantOutcome, killers []string, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, error) {
+func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, flagged map[int]bool, scores windowScores, freshEvidence []CandidateEvidence, exemptions []Exemption) (Finding, error) {
+	outcomes, killers, flips := scores.outcomes, scores.killers, scores.flips
 	// Covered kills carry their recorded attribution, flagged candidates
 	// that die again record their fresh killer; a record predating
 	// attribution stays without one (REQ-core-attributed-kills).
@@ -4710,7 +4789,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 				// A covered survivor carries its recorded advisory bucket
 				// verbatim, like its disposition and attestation
 				// (REQ-exec-survivor-evidence).
-				survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution})
+				survivors = append(survivors, carrySurvivor(candidate, prior))
 			}
 			if killer, ok := recordedKills[key]; ok {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killer})
@@ -4739,7 +4818,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 			if unstableForBuckets(&rec, exemptions) {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution})
+			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi))
 		}
 		if disposition == "killed" && killsComplete {
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})

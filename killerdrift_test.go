@@ -312,7 +312,7 @@ func TestDriftFindingCountsRescoresRemeasured(t *testing.T) {
 	// Index 4 is a recorded discard re-executing through the
 	// candidate-evidence composition; it discards again, conserving its
 	// recorded disposition through a fresh execution.
-	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, outcomes, killers, nil, nil)
+	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, windowScores{outcomes: outcomes, killers: killers}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1049,5 +1049,185 @@ func TestRunDriftGrownFullyKilledRecordKeepsGrowthWording(t *testing.T) {
 		killNoun(prior[0].Killed), candidateNoun(0))
 	if len(decisions) != 1 || decisions[0].Reason != wantReason || decisions[0].Candidates != 0 {
 		t.Fatalf("fully-killed grown decision = %+v, want %q with nothing re-measured", decisions, wantReason)
+	}
+}
+
+// A confirmation flip during a killer-drift re-measure rides the
+// drifted record end-to-end (REQ-exec-survivor-evidence's flipped-kill
+// bucket through REQ-result-stale's killer-drift carve-out). The flaky
+// oracle lives in a SEPARATE package: its marker plumbing makes its own
+// compartment unverifiable, which classifies it as a moved oracle —
+// drift's normal input — while the target package's compartment stays
+// plainly valid, so the target-only strict-validity gate passes. A
+// same-package flaky oracle cannot reach this path at all: its external
+// effects stain the target's own compartment, and drift serving
+// fail-closes on any non-valid target verdict.
+func TestRunDriftRemeasureRecordsConfirmationFlip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the oracle per mutant")
+	}
+	marker := filepath.Join(t.TempDir(), "marker")
+	t.Setenv("GOMUTANT_FLAKY_MARKER", marker)
+	dir := t.TempDir()
+	const testSource = `package gated
+
+import "testing"
+
+func TestSmall(t *testing.T) {
+	if Gated(5) != 6 {
+		t.Fail()
+	}
+}
+
+func TestAux(t *testing.T) {
+	if Gated(200) != 603 {
+		t.Fail()
+	}
+}
+`
+	files := map[string]string{
+		"go.mod":        "module example.com/driftflip\n\ngo 1.26\n",
+		"gated.go":      "package gated\n\nfunc Gated(x int) int {\n\ty := x + 1\n\tif y > 100 {\n\t\treturn y * 3\n\t}\n\treturn y\n}\n",
+		"gated_test.go": testSource,
+		"flakycheck/flaky_test.go": `package flakycheck
+
+import (
+	"fmt"
+	"os"
+	"testing"
+
+	gated "example.com/driftflip"
+)
+
+// TestFlakyGate guards the small branch nondeterministically once
+// armed: the first look on a mutant kills and leaves that mutant's
+// marker, the second look passes. Unarmed it always passes. The Gated
+// check runs FIRST so a baseline (healthy-tree) execution reads no
+// environment at all: runtime-input pins derive from baseline runs,
+// and an unconditionally read arming variable would ride the target's
+// recorded inputs and stale the whole target when it changes. The
+// marker is keyed by the pair of observations the oracles judge, so
+// distinct mutants never consume each other's first look: a mutant
+// TestAux kills has Gated(200) != 603 while a flip-capable one has
+// == 603, so the doomed and flip-capable classes cannot collide, and
+// two mutants sharing a key are behaviorally identical on every
+// deciding probe — if one can flip, so can the other, and only the
+// first needs to.
+func TestFlakyGate(t *testing.T) {
+	small := gated.Gated(5)
+	if small == 6 {
+		return
+	}
+	if os.Getenv("DRIFTFLIP_ARMED") == "" {
+		return
+	}
+	base := os.Getenv("GOMUTANT_FLAKY_MARKER")
+	if base == "" {
+		t.Fatal("mutated without a marker path")
+	}
+	marker := fmt.Sprintf("%s-%d-%d", base, small, gated.Gated(200))
+	if _, err := os.Stat(marker); err == nil {
+		return // second look: the failure does not reproduce
+	}
+	if err := os.WriteFile(marker, []byte("seen"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		panic("first look interference")
+	}()
+	<-done
+}
+`,
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "example.com/driftflip.Gated", Oracle: []string{
+		"example.com/driftflip.TestSmall",
+		"example.com/driftflip.TestAux",
+		"example.com/driftflip/flakycheck.TestFlakyGate",
+	}}
+	first, err := tr.Run(ctx, []Target{target}, Options{Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if burned, err := filepath.Glob(marker + "-*"); err != nil || len(burned) != 0 {
+		t.Fatalf("the flaky arm fired on the baseline run; the fixture premise is broken (%v, %v)", burned, err)
+	}
+	smallKills := 0
+	for _, kill := range first[0].Kills {
+		if kill.Killer == "example.com/driftflip.TestSmall" {
+			smallKills++
+		}
+	}
+	if smallKills == 0 {
+		t.Fatalf("baseline kills = %+v, want TestSmall attributions to drift", first[0].Kills)
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Weaken TestSmall — its declaration changes (attributable killer
+	// drift in the target's own compartment) and its guard drops — and
+	// arm the flaky oracle, so a re-measured small-branch mutant is
+	// killed in the window and withdrawn on serial confirmation.
+	weakened := strings.Replace(testSource, "\tif Gated(5) != 6 {\n\t\tt.Fail()\n\t}\n", "\t_ = Gated(5)\n", 1)
+	if weakened == testSource {
+		t.Fatal("weakening edit did not apply")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(weakened), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DRIFTFLIP_ARMED", "1")
+	driftTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	drifted, err := driftTree.Run(ctx, []Target{target}, Options{
+		Jobs:     2,
+		Prior:    prior,
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || !strings.Contains(decisions[0].Reason, "stand on unmoved oracles") {
+		t.Fatalf("decision = %+v, want the drift-serving path (kills standing on unmoved oracles)", decisions)
+	}
+	flipped := 0
+	for _, s := range drifted[0].Survivors {
+		if s.Execution == "flipped-kill" {
+			flipped++
+			if s.WithdrawnKiller == "" {
+				t.Fatalf("flipped drifted survivor carries no withdrawn killer: %+v", s)
+			}
+		}
+		if s.WithdrawnKiller != "" && s.Execution != "flipped-kill" {
+			t.Fatalf("withdrawn killer without the flipped-kill bucket: %+v", s)
+		}
+	}
+	if flipped == 0 {
+		t.Fatalf("no drifted survivor records the confirmation flip: %+v", drifted[0].Survivors)
+	}
+	if burned, err := filepath.Glob(marker + "-*"); err != nil || len(burned) == 0 {
+		t.Fatalf("the window kill never happened (no marker written; %v)", err)
 	}
 }

@@ -833,6 +833,19 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding, prebui
 		}
 		sort.Strings(recordedOracle)
 		if reason := derivedOracleDelta(recordedOracle, currentOracle); reason != "" {
+			// The identity delta alone under-describes the edit that
+			// staled the record: an oracle test STRENGTHENED IN PLACE
+			// beside additions is the one that matters most to a caller
+			// who just wrote kill-tests, and stopping at "added: ..."
+			// hides it (the pando field report). Name the surviving
+			// oracle tests whose own evidence moved WHILE THE TARGET'S
+			// STANDS - a moved target moves every oracle's closure with
+			// it, so a list there would point at untouched tests -
+			// stale-only, best-effort: the stale path re-measures
+			// anyway, so one evidence walk is cheap against it.
+			if modified := t.modifiedOracleNames(ctx, f, currentOracle, prebuilt); len(modified) > 0 {
+				reason = strings.TrimSuffix(reason, ")") + "; modified: " + cappedNameList(modified, "tests") + ")"
+			}
 			return FindingInspection{State: FindingStale, Reason: reason}, nil
 		}
 	}
@@ -1078,6 +1091,74 @@ func derivedOracleDelta(recorded, current []string) string {
 		parts = append(parts, "removed: "+cappedNameList(removed, "tests"))
 	}
 	return "derived oracle changed (" + strings.Join(parts, "; ") + ")"
+}
+
+// modifiedOracleNames names the surviving oracle tests whose BODIES
+// changed - the "modified:" arm of the derived-oracle-delta reason
+// (REQ-result-inspection's naming arm). The instrument is the recorded
+// compartment ledger diffed against the current one: per-declaration
+// hashes attribute the edit to the exact test, where any view-level
+// verdict cannot (the test-variant compartment is package-shared, so
+// every sibling test reads compartment-stale on any test edit, and a
+// test's own body lives in that same compartment). Best-effort: a
+// record predating the ledger, or any derivation error, names nothing
+// rather than failing a decision that is already stale. The target
+// view comes from the caller's prebuilt set where present - the same
+// second-construction avoidance the enclosing inspection documents.
+func (t *Tree) modifiedOracleNames(ctx context.Context, f Finding, currentOracle []string, prebuilt *subjectViewSet) []string {
+	if f.CompartmentLedger == nil {
+		return nil
+	}
+	currentSet := make(map[string]bool, len(currentOracle))
+	for _, symbol := range currentOracle {
+		currentSet[symbol] = true
+	}
+	// The intersection's function names, mapped back to their symbols:
+	// oracle validation already refuses a name declared in both
+	// compartment variants, so the name is unambiguous here.
+	byName := map[string]string{}
+	for _, evidence := range f.OracleEvidence {
+		if !currentSet[evidence.Symbol] {
+			continue
+		}
+		if _, fn := splitTestSymbol(evidence.Symbol); fn != "" {
+			byName[fn] = evidence.Symbol
+		}
+	}
+	if len(byName) == 0 {
+		return nil
+	}
+	var target *subjectView
+	if prebuilt != nil {
+		target = prebuilt.bySymbol[f.Symbol]
+	}
+	if target == nil {
+		views, err := t.newSubjectViews(ctx, []string{f.Symbol}, findingPackageProcessAttestable(f))
+		if err != nil {
+			return nil
+		}
+		target = views.bySymbol[f.Symbol]
+		if target == nil {
+			return nil
+		}
+	}
+	currentLedger, err := target.view.TestVariantLedger(target.subject)
+	if err != nil {
+		return nil
+	}
+	delta := gofresh.DiffTestVariantLedgers(f.CompartmentLedger.ledger(), currentLedger)
+	var modified []string
+	seen := map[string]bool{}
+	for _, change := range delta.Changed {
+		symbol, ok := byName[change.After.Name]
+		if !ok || seen[symbol] {
+			continue
+		}
+		seen[symbol] = true
+		modified = append(modified, symbol)
+	}
+	sort.Strings(modified)
+	return modified
 }
 
 // runtimeMemo memoizes current-runtime-state evaluations per (manifest,

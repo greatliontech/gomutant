@@ -212,8 +212,19 @@ survivor reading is not evidence the oracle noticed nothing - and
 `unstable-oracle` when
 the finding's runtime evidence is unverifiable and no reviewed exemption
 accepts it (REQ-result-exemptions), in which case no coverage
-probe runs. Oracle growth's coverage-only upgrade pass applies only to empty
-or `never-executed` buckets: `overlay-bypassed` and `unstable-oracle` were
+probe runs, and `flipped-kill` when a window run scored a kill and the
+serial confirmation re-scored the mutant a survivor: the anti-flattering
+scoring stands — the survivor is the verdict — and the flip rides the
+RECORD, never only the event stream, carrying the withdrawn killer by
+name, because the flip is itself the strongest execution evidence (the
+position demonstrably executes and a named test demonstrably can fail
+on it) and the survivor is oracle nondeterminism to stabilize, never a
+plain coverage or assertion gap; no coverage probe runs on it, the
+advisory unverifiability stamp never overwrites it, and a mutant a test
+has killed is never an equivalence-attestation candidate. Oracle
+growth's coverage-only upgrade pass applies only to empty
+or `never-executed` buckets: `overlay-bypassed`, `unstable-oracle`, and
+`flipped-kill` were
 judged from evidence its coverage probe cannot see, so that pass never
 overrides them. A full re-measure (drift with moved oracles) instead
 re-judges the overlay-bypass from the current union before classifying

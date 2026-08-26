@@ -744,7 +744,17 @@ rendered. The reason leads — it precedes the open survivors in
 every view — and is self-contained: a subject-caused reason names the
 responsible subject (`target:` or `oracle <symbol>:`), record-level causes
 (a detached symbol, a changed operator set or derived oracle set,
-candidate-local evidence) need no subject, and a runtime-input digest drift
+candidate-local evidence) need no subject — a derived-oracle-set change
+naming its added and removed identities AND, best-effort, the surviving
+oracle tests whose declaration content changed in the recorded
+compartment ledger against the current one (`modified: ...`) — an
+oracle test strengthened in place beside additions is exactly the edit
+a caller who just wrote kill-tests needs to see the tool noticing, and
+the per-declaration ledger diff is the one instrument that attributes
+it to the exact test: the test-variant compartment is package-shared,
+so any view-level verdict reads every sibling stale on any test edit.
+A record predating the ledger names nothing, and target movement
+neither forces nor suppresses the list — only changed test bodies name — and a runtime-input digest drift
 names the moved input identities themselves, best-effort, so the developer decides
 between stabilizing the test, narrowing the oracle, and accepting a
 machine-local record without re-deriving which observed object moved.

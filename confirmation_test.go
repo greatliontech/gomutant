@@ -84,10 +84,31 @@ func TestRunSerialConfirmationReplacesNonReproducingKill(t *testing.T) {
 	}
 	f := fs[0]
 	returnZero := false
+	flipped := 0
 	for _, s := range f.Survivors {
 		if s.Operator == "return: zero" {
 			returnZero = true
 		}
+		// The flip rides the RECORD, not only the event stream
+		// (REQ-exec-survivor-evidence's flipped-kill bucket): whichever
+		// candidate's window run scored the marker kill, its survivor
+		// row names the withdrawn killer so triage starts from the
+		// nondeterminism, and the bucket marks it as oracle
+		// nondeterminism — never a plain bucket, and never overwritten
+		// by the unverifiability stamp this fixture's marker read
+		// otherwise forces onto every row.
+		if s.Execution == "flipped-kill" {
+			flipped++
+			if s.WithdrawnKiller == "" {
+				t.Fatalf("flipped survivor carries no withdrawn killer: %+v", s)
+			}
+		}
+		if s.WithdrawnKiller != "" && s.Execution != "flipped-kill" {
+			t.Fatalf("withdrawn killer without the flipped-kill bucket: %+v", s)
+		}
+	}
+	if flipped == 0 {
+		t.Fatalf("no survivor records the confirmation flip: %+v", f.Survivors)
 	}
 	if !returnZero {
 		t.Fatalf("non-reproducing kill was not rescored as a survivor: %+v", f)

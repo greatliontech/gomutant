@@ -2229,7 +2229,7 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 	flagged := map[int]bool{1: true, 2: true, 4: true}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantKilled, 0, engine.MutantDiscarded}
 	fresh := []CandidateEvidence{{Position: "f.go:5:5", Operator: "op-c", Reason: "mutant test process did not start because the mutant failed to build", Disposition: "discarded"}}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, outcomes, nil, fresh, nil)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, windowScores{outcomes: outcomes}, fresh, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2746,7 +2746,7 @@ func TestGrowFindingCountsReplacesSurvivorOutcomes(t *testing.T) {
 	}
 	survivors := map[int]bool{1: true, 2: true}
 	outcomes := []engine.MutantOutcome{0, engine.MutantKilled, engine.MutantSurvived, 0}
-	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, survivors, outcomes, nil, nil, nil)
+	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, survivors, windowScores{outcomes: outcomes}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2775,7 +2775,7 @@ func TestGrowFindingCountsReplacesSurvivorOutcomes(t *testing.T) {
 	// unstable rather than carrying buckets measured under a stable run.
 	stamped := rec
 	stamped.TargetEvidence = SubjectEvidence{RuntimeUnverifiable: true}
-	grownStamped, _, err := growFindingCounts(context.Background(), stamped, candidates, survivors, outcomes, nil, nil, nil)
+	grownStamped, _, err := growFindingCounts(context.Background(), stamped, candidates, survivors, windowScores{outcomes: outcomes}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2853,7 +2853,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 		},
 	}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, outcomes, nil, nil, nil)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, windowScores{outcomes: outcomes}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2866,7 +2866,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op-a", Execution: "never-executed"}},
 	}
-	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, outcomes, nil, nil, 2, nil)
+	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, windowScores{outcomes: outcomes}, nil, 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4129,7 +4129,7 @@ func TestExtendFindingCountsAppendsSuffixOutcomes(t *testing.T) {
 	}
 	outcomes := []engine.MutantOutcome{0, 0, engine.MutantSurvived, engine.MutantKilled, engine.MutantDiscarded}
 	fresh := []CandidateEvidence{{Position: "f.go:3:3", Operator: "op-a", Reason: "test process produced no runtime-input log", Disposition: "survived"}}
-	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, outcomes, nil, fresh, 5, nil)
+	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, windowScores{outcomes: outcomes}, fresh, 5, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5417,4 +5417,134 @@ func TestConfirmWindowKillsNamesConfirmationMode(t *testing.T) {
 			t.Fatalf("volatile confirmation %d mode = %q, want serial-full throughout", i, m)
 		}
 	}
+}
+
+// TestExtendFindingCountsRecordsFlip pins the extend suffix's flip arm
+// (REQ-exec-survivor-evidence): a suffix candidate whose window kill
+// the serial confirmation withdrew lands as a flipped-kill survivor
+// carrying its withdrawn killer — the fourth assembly path records the
+// flip exactly as fresh, splice, and grow do.
+func TestExtendFindingCountsRecordsFlip(t *testing.T) {
+	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
+	candidates := []engine.Candidate{
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable}, // prefix kill
+		{Symbol: "p.F", Operator: "op-b", Position: "f.go:2:2", Replacements: runnable}, // suffix flipped survivor
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:3:3", Replacements: runnable}, // suffix plain survivor
+	}
+	rec := Finding{
+		Symbol: "p.F", Budget: 1, CandidateCount: 3, Generated: 1, Mutants: 1, Killed: 1,
+		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Killed: 1}},
+	}
+	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantSurvived}
+	flips := map[int]string{1: "p.TestFlaky"}
+	extended, err := extendFindingCounts(context.Background(), rec, candidates, 1, windowScores{outcomes: outcomes, flips: flips}, nil, 3, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flipped, plain *Survivor
+	for i := range extended.Survivors {
+		switch extended.Survivors[i].Position {
+		case "f.go:2:2":
+			flipped = &extended.Survivors[i]
+		case "f.go:3:3":
+			plain = &extended.Survivors[i]
+		}
+	}
+	if flipped == nil || flipped.Execution != "flipped-kill" || flipped.WithdrawnKiller != "p.TestFlaky" {
+		t.Fatalf("suffix flip not recorded: %+v", extended.Survivors)
+	}
+	if plain == nil || plain.Execution == "flipped-kill" || plain.WithdrawnKiller != "" {
+		t.Fatalf("flip leaked onto a plain suffix survivor: %+v", extended.Survivors)
+	}
+}
+
+// TestFlipReachesEveryAssemblyMode pins the flip's path coverage as a
+// table over the four pure assembly functions — splice, grow, extend,
+// drift (the fresh path is inline in aggregation and pinned by the
+// flaky-fixture integration test): every mode that re-executes a
+// candidate must record its flip. The windowScores bundle makes a
+// call site that drops the flips uncompilable; this table pins the
+// other half — that each function's survivor construction actually
+// consumes them.
+func TestFlipReachesEveryAssemblyMode(t *testing.T) {
+	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
+	candidates := []engine.Candidate{
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable},
+	}
+	flips := map[int]string{0: "p.TestFlaky"}
+	outcomes := []engine.MutantOutcome{engine.MutantSurvived}
+	assertFlip := func(mode string, survivors []Survivor) {
+		t.Helper()
+		if len(survivors) != 1 || survivors[0].Execution != "flipped-kill" || survivors[0].WithdrawnKiller != "p.TestFlaky" {
+			t.Fatalf("%s: flip did not reach the record: %+v", mode, survivors)
+		}
+	}
+
+	rec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
+		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Killed: 1}},
+		Kills:     []Kill{{Position: "f.go:1:1", Operator: "op-a", Killer: "p.TestOld"}}}
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFlip("splice", spliced.Survivors)
+
+	grec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1,
+		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
+		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op-a"}}}
+	grown, _, err := growFindingCounts(context.Background(), grec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFlip("grow", grown.Survivors)
+
+	erec := Finding{Symbol: "p.F", Budget: 0, CandidateCount: 1, Generated: 0}
+	extended, err := extendFindingCounts(context.Background(), erec, candidates, 0, windowScores{outcomes: outcomes, flips: flips}, nil, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFlip("extend", extended.Survivors)
+
+	drec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
+		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Killed: 1}},
+		Kills:     []Kill{{Position: "f.go:1:1", Operator: "op-a", Killer: "p.TestOld"}}}
+	drifted, _, err := driftFindingCounts(context.Background(), drec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFlip("drift", drifted.Survivors)
+}
+
+// TestCarrySurvivorPreservesFlipEvidence pins the carry-prior arms: a
+// candidate that did not re-execute carries its recorded survivor row
+// verbatim — the flipped-kill bucket AND the withdrawn killer's name.
+// Rebuilding the row from the bucket alone silently dropped the killer,
+// which is exactly the evidence the flip exists to preserve.
+func TestCarrySurvivorPreservesFlipEvidence(t *testing.T) {
+	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
+	candidates := []engine.Candidate{
+		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable},
+	}
+	prior := Survivor{Position: "f.go:1:1", Operator: "op-a", Execution: "flipped-kill", WithdrawnKiller: "p.TestFlaky"}
+	rec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1,
+		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
+		Survivors: []Survivor{prior}}
+	assertCarried := func(mode string, survivors []Survivor) {
+		t.Helper()
+		if len(survivors) != 1 || survivors[0].Execution != "flipped-kill" || survivors[0].WithdrawnKiller != "p.TestFlaky" {
+			t.Fatalf("%s: carried survivor lost flip evidence: %+v", mode, survivors)
+		}
+	}
+
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCarried("splice", spliced.Survivors)
+
+	drifted, _, err := driftFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCarried("drift", drifted.Survivors)
 }

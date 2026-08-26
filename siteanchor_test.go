@@ -301,7 +301,7 @@ func TestGrowCarryAdoptsSitesOntoGrandfatheredDispositions(t *testing.T) {
 		Survivors: []Survivor{{Position: "f.go:3:3", Operator: "op-b", Execution: "executed-and-passed"}},
 		Attested:  []Attestation{{Position: "f.go:3:3", Operator: "op-b", Reason: "pre-site disposition"}},
 	}
-	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, []engine.MutantOutcome{engine.MutantSurvived}, nil, nil, nil)
+	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: []engine.MutantOutcome{engine.MutantSurvived}}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
