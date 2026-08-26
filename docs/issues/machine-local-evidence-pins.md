@@ -17,4 +17,5 @@ odd one out), and host-capacity facts like `oracleMemoryBytes` should
 ride a machine-profile facet outside evidence identity, so a served
 verdict is keyed by what was measured, not where.
 
-Lands: user decision.
+Lands: with cross-tool train chunk 133 (gofresh
+docs/plans/cross-tool-train.md).

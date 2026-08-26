@@ -22,4 +22,5 @@ scattered skips. Ephemeral probes execute fine in these packages
 (they bypass the reachability analysis), which is the consumer's
 stopgap.
 
-Lands: user decision.
+Lands: with cross-tool train chunk 132 (gofresh
+docs/plans/cross-tool-train.md).
