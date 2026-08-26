@@ -2,7 +2,7 @@ version: "3"
 
 tasks:
   test:
-    desc: Full suite; the root package's mutation e2es exceed go test's default 10m package timeout
+    desc: Full suite; the root package's mutation e2es exceed go test's default 10m package timeout (dev-host budget; the runner-class budget lives in .github/workflows/ci.yaml, measured separately)
     cmds:
       - go test -timeout 2700s ./...
   install:
