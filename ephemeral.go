@@ -282,9 +282,17 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// replacement file; a probe failure leaves the advisory label
 		// absent rather than failing a sound measurement
 		// (REQ-exec-ephemeral).
-		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", oracleTimeout, binFlags, t.eng.GoEnv()); err == nil {
+		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", oracleTimeout, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err == nil {
 			for i, replacement := range replacements {
 				pkgPath := t.eng.FileImportPath(replacement.Abs)
+				if pkgPath != "" && coverage.Unsound(pkgPath+"/"+filepath.Base(replacement.Abs)) {
+					// A refused re-keying is not evidence of anything:
+					// claiming "unexercised" for a file whose profile
+					// entry the seam could not soundly attribute would
+					// manufacture the advisory (REQ-exec-ephemeral's
+					// probe-failure posture: the label stays absent).
+					continue
+				}
 				if pkgPath == "" || !coverage.CoversFile(pkgPath+"/"+filepath.Base(replacement.Abs)) {
 					res.UnexercisedFiles = append(res.UnexercisedFiles, files[i])
 				}

@@ -71,7 +71,7 @@ func candidatePositions(pkg *packages.Package, specs []candidateSpec) []string {
 		if !positionPos.IsValid() {
 			positionPos = spec.start
 		}
-		p := pkg.Fset.Position(positionPos)
+		p := pkg.Fset.PositionFor(positionPos, false)
 		position := fmt.Sprintf("%s:%d:%d", filepath.Base(p.Filename), p.Line, p.Column)
 		identity := position + "|" + spec.operator
 		identities[identity]++
@@ -102,8 +102,8 @@ func candidateExtents(pkg *packages.Package, specs []candidateSpec) []string {
 		if !start.IsValid() || !end.IsValid() {
 			continue
 		}
-		s := pkg.Fset.Position(start)
-		e := pkg.Fset.Position(end)
+		s := pkg.Fset.PositionFor(start, false)
+		e := pkg.Fset.PositionFor(end, false)
 		extents[i] = fmt.Sprintf("%d:%d-%d:%d", s.Line, s.Column, e.Line, e.Column)
 	}
 	return extents

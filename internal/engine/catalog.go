@@ -113,7 +113,7 @@ func (c *catalog) enumerate(ctx context.Context) ([]candidateSpec, error) {
 func (t *Tree) fileOf(pkg *packages.Package, pos token.Pos) (*ast.File, string, error) {
 	for _, file := range pkg.Syntax {
 		if file.FileStart <= pos && pos < file.FileEnd {
-			return file, pkg.Fset.Position(file.Pos()).Filename, nil
+			return file, pkg.Fset.PositionFor(file.Pos(), false).Filename, nil
 		}
 	}
 	return nil, "", fmt.Errorf("no syntax file for position")

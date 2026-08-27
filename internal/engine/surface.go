@@ -204,8 +204,8 @@ func refDeclHashes(src []byte) map[string]string {
 			inits++
 		}
 		node := bodyNode(fn)
-		start := fset.Position(node.Pos()).Offset
-		end := fset.Position(node.End()).Offset
+		start := fset.PositionFor(node.Pos(), false).Offset
+		end := fset.PositionFor(node.End(), false).Offset
 		if start < 0 || end > len(src) || start > end {
 			continue
 		}

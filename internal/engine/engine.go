@@ -51,6 +51,11 @@ type Tree struct {
 	dir string
 	// build lazily indexes the loaded build for ephemeral validation.
 	build buildSet
+	// directiveView lazily carries the directive seam's product
+	// (DirectiveCoverage): the profile re-keying map and the
+	// known-unsound files.
+	directiveOnce sync.Once
+	directiveView DirectiveCoverageView
 }
 
 // Load loads the tree rooted at dir, including test packages: the module

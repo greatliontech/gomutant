@@ -322,7 +322,7 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 		t.Skip("runs go test per probe")
 	}
 	restore := coveredPositions
-	coveredPositions = func(context.Context, string, string, string, string, time.Duration, []string, []string) (engine.Coverage, error) {
+	coveredPositions = func(context.Context, string, string, string, string, time.Duration, []string, []string, engine.DirectiveCoverageView) (engine.Coverage, error) {
 		return engine.Coverage{}, errors.New("probe refused")
 	}
 	defer func() { coveredPositions = restore }()

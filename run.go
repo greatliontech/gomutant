@@ -1028,6 +1028,14 @@ func survivorCovered(coverage engine.Coverage, coverPkg string, s Survivor) (cov
 		// growth upgrade leaves the recorded bucket standing).
 		return false, false
 	}
+	if coverage.Unsound(coverPkg + "/" + file) {
+		// The directive seam refused this file's re-keying
+		// (contention or collision): its profile entries are absent
+		// or polluted, so a verdict either way would be manufactured
+		// — the bucket stays empty (REQ-exec-survivor-evidence's
+		// fail-closed posture).
+		return false, false
+	}
 	if sl, sc, el, ec, extOK := parseSurvivorExtent(s.Extent); extOK {
 		return coverage.Intersects(coverPkg+"/"+file, sl, sc, el, ec), true
 	}
@@ -4154,7 +4162,7 @@ func (t *Tree) oracleCoverage(ctx context.Context, w work, opts Options, runEnv 
 		key := g.pkgs[0] + "\x00" + g.runRegex + "\x00" + coverPkg
 		got, ok := cache[key]
 		if !ok {
-			probed, err := engine.CoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.OracleTimeout, g.flags, runEnv)
+			probed, err := engine.CoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.OracleTimeout, g.flags, runEnv, t.eng.DirectiveCoverage())
 			if err != nil {
 				if ctx.Err() != nil {
 					return engine.Coverage{}, false, ctx.Err()

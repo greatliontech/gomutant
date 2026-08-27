@@ -233,7 +233,29 @@ a bypassed target's coverage would bucket confidence the evidence
 cannot support. Coverage is measured once per oracle group on the unmutated tree
 and cached across the run's targets sharing the group and cover package —
 advisory classification, never a measurement pin; an unprobeable oracle
-leaves the bucket empty rather than failing a sound measurement. Served
+leaves the bucket empty rather than failing a sound measurement. Every
+positional surface of this requirement — the survivor anchor, the
+extent, and the coverage join — speaks ON-DISK coordinates: a `//line`
+directive never re-keys an anchor, a file classification, or a
+coverage bucket. The cover tool emits directive-named file keys over
+on-disk line numbers for such files, so profile ingest re-keys those
+entries to the on-disk spelling and nothing downstream carries the
+directive view. The re-keying fails closed: a rename registers only
+when its on-disk side is a compiled source of the base package (the
+union across the package's variants — a cgo intermediate's
+back-references point at real sources and register nothing) and never
+a test file, and when the directive name is neither a compiled
+sibling among the sources cover instruments under that namespace
+(external test variants are instrumented under their own import path,
+and test files are never instrumented at all — a name cover binds
+nothing to cannot be stolen from) nor claimed by more than one
+on-disk file — a
+colliding or contended name shares a real file's profile key and must
+not steal it. The refusals are REPRESENTABLE: every claimant of a
+refused key and both sides of a collision are marked
+coverage-unsound, no query about an unsound file is a coverage
+verdict, and the affected buckets stay empty — the best-effort
+posture above, never a manufactured never-executed for covered code. Served
 records keep their recorded buckets; re-measurement refreshes them. A
 spliced record mixes the two truthfully: survivors carried from the served
 portion keep their recorded buckets verbatim — measured under the record's
@@ -246,7 +268,12 @@ probe-refused survivor; and on either splice, re-measured survivors of a
 non-reusable (unverifiable) spliced record classify unstable-oracle.
 
 REQ-exec-survivor-evidence: enforced by
-`TestCoverageIntersectsHalfOpenBoundaries`, `TestRunEndToEnd`'s
+`TestCoverageIntersectsHalfOpenBoundaries`,
+`TestLineDirectiveTargetsKeepOnDiskIdentity`,
+`TestCoverageNormalizesDirectiveNames`,
+`TestDirectiveCoverageSkipsCgoIntermediates`,
+`TestDirectiveCoverageRequiresCompiledOnDiskSource`,
+`TestSurvivorCoverageRefusesUnsoundFiles`, `TestRunEndToEnd`'s
 pinned extents and buckets, `TestRunBucketsSurvivorExecution`,
 `TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets`,
 `TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence`,

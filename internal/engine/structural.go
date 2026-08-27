@@ -147,7 +147,8 @@ func (t *Tree) methodDeclarationRewrite(typeSymbol, typeName, method string) (st
 				if receiverTypeName(fn) != typeName {
 					continue
 				}
-				file := pkg.Fset.Position(fn.Name.Pos()).Filename
+				namePos := pkg.Fset.PositionFor(fn.Name.Pos(), false)
+				file := namePos.Filename
 				src, err := os.ReadFile(file)
 				if err != nil {
 					if errors.Is(err, fs.ErrNotExist) {
@@ -161,8 +162,8 @@ func (t *Tree) methodDeclarationRewrite(typeSymbol, typeName, method string) (st
 				if want, pinned := t.sourceDigests[file]; pinned && sha256.Sum256(src) != want {
 					return "", nil, false, &SourceDriftError{Path: file}
 				}
-				offset := pkg.Fset.Position(fn.Name.Pos()).Offset
-				end := pkg.Fset.Position(fn.Name.End()).Offset
+				offset := namePos.Offset
+				end := pkg.Fset.PositionFor(fn.Name.End(), false).Offset
 				if offset < 0 || end > len(src) || string(src[offset:end]) != method {
 					return "", nil, false, nil
 				}

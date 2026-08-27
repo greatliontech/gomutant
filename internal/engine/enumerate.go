@@ -35,7 +35,7 @@ func (t *Tree) DeclaredSymbolsContext(ctx context.Context) ([]string, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			name := pkg.Fset.Position(f.Pos()).Filename
+			name := pkg.Fset.PositionFor(f.Pos(), false).Filename
 			if strings.HasSuffix(name, "_test.go") || ast.IsGenerated(f) {
 				continue
 			}
@@ -90,7 +90,7 @@ func (t *Tree) TestsOfContext(ctx context.Context, pkgPath string) ([]string, er
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			name := pkg.Fset.Position(f.Pos()).Filename
+			name := pkg.Fset.PositionFor(f.Pos(), false).Filename
 			if !strings.HasSuffix(name, "_test.go") {
 				continue
 			}
@@ -168,7 +168,7 @@ func (t *Tree) ValidateOracleContext(ctx context.Context, symbols []string) erro
 					if !ok || fn.Recv != nil || fn.Name.Name != name || !runnableTest(pkg, fn) {
 						continue
 					}
-					pos := pkg.Fset.Position(fn.Pos())
+					pos := pkg.Fset.PositionFor(fn.Pos(), false)
 					declarations[fmt.Sprintf("%s:%d", pos.Filename, pos.Offset)] = true
 				}
 			}
