@@ -90,7 +90,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		out = os.Stdout
 	}
 	// The analysis heartbeat is invoked outside the library's callback
-	// serialization (Options.AnalysisProgress is documented safe for
+	// serialization (Options.AnalysisEvent is documented safe for
 	// concurrent invocation), so it can write concurrently with the
 	// callback-rendered decision and progress lines; one serialized
 	// writer keeps every line whole and race-free.
@@ -313,35 +313,33 @@ func runCommand(ctx context.Context, o runOptions) error {
 			}
 			renderPreparation(out, event)
 		},
-		// The analysis keep-alive, time-gated to a heartbeat: the run's
-		// longest silent stretches are in-process gofresh analysis (the
-		// freshness and producer-validation passes - the field reports'
+		// Detail-free events are the analysis keep-alive, time-gated
+		// to a heartbeat: the run's longest silent stretches are
+		// in-process gofresh analysis (the freshness and
+		// producer-validation passes - the field reports'
 		// "post-completion tail" burned hours there with no line
 		// printed), and a ten-second heartbeat names the phase without
-		// flooding a healthy run.
-		AnalysisProgress: func(phase, pkg string) {
+		// flooding a healthy run. Detail-bearing events are never
+		// throttled: each is a distinct fact (the per-subject
+		// analysis-unavailable provenance the field diagnoses from),
+		// and the structured face keeps the package a package with
+		// the payload under its own key.
+		AnalysisEvent: func(phase, pkg, detail string) {
 			analysisMu.Lock()
 			defer analysisMu.Unlock()
-			now := time.Now()
-			if now.Sub(analysisLast) < 10*time.Second {
+			if detail == "" {
+				now := time.Now()
+				if now.Sub(analysisLast) < 10*time.Second {
+					return
+				}
+				analysisLast = now
+				if o.jsonl {
+					rep.emit("analysis", map[string]string{"phase": phase, "package": pkg})
+					return
+				}
+				fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(analysisPhrase(phase)+" "+pkg))
 				return
 			}
-			analysisLast = now
-			if o.jsonl {
-				rep.emit("analysis", map[string]string{"phase": phase, "package": pkg})
-				return
-			}
-			fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(analysisPhrase(phase)+" "+pkg))
-		},
-		// The diagnostic channel is never throttled: each event is a
-		// distinct fact (the per-subject analysis-unavailable
-		// provenance the field diagnoses from), and the structured
-		// face keeps the package a package with the payload under its
-		// own key (REQ-result-skip-radius's sibling concern; the
-		// chunk-132 review's M1).
-		AnalysisDiagnostic: func(phase, pkg, detail string) {
-			analysisMu.Lock()
-			defer analysisMu.Unlock()
 			if o.jsonl {
 				rep.emit("analysis", map[string]string{"phase": phase, "package": pkg, "detail": detail})
 				return

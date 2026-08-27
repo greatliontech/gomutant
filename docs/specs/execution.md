@@ -500,10 +500,18 @@ into one counted line after the summary when more than one target skipped — a
 row that would repeat an already-rendered line is dropped at the source. The
 MCP face's rows are data for the caller's own joins, not rendering: dedup is
 a CLI concern. Advisory freshness-analysis
-keep-alive events may accompany the deterministic sequence; they are
+events may accompany the deterministic sequence; they are
 diagnostic, carry no ordering or completion guarantee, and never enter a
-decision or finding. Advisory execution-phase progress events join the
-same class: at each execution window boundary the run may report the
+decision or finding. The class carries an optional payload: detail-free
+events are keep-alives a consumer may throttle, while a payload-bearing
+event (the per-subject analysis-unavailable provenance, the
+unlisted-toolchain notice) is a distinct fact that no face may throttle,
+fold, or discard at the source — transport-level advisory delivery is
+unchanged — its package kept a package and its payload its own
+field on every structured face. Subscribing to the class delivers both
+kinds — a consumer cannot receive the keep-alives without the
+diagnostics. Advisory execution-phase progress events join the
+same advisory class: at each execution window boundary the run may report the
 window's phase (executing, then one confirming event per serially
 confirmed kill with the window's confirmation progress and the
 gate's confirmation mode — serial-full while every kill confirms,

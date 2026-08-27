@@ -1160,3 +1160,78 @@ func TestToolRunForwardsProgressNotifications(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// TestAnalysisEventMessages pins the advisory rendering: detail-free
+// keep-alives and payload-bearing diagnostics (per-subject
+// analysis-unavailable provenance, the unlisted-toolchain notice)
+// share one channel and one line shape, the payload after an em dash
+// matching the CLI face.
+func TestAnalysisEventMessages(t *testing.T) {
+	if got, want := analysisEventMessage("loading", "example.com/pkg", ""), "analysis loading example.com/pkg"; got != want {
+		t.Errorf("keep-alive message = %q, want %q", got, want)
+	}
+	if got, want := analysisEventMessage("analysis-unavailable", "example.com/pkg", "unsupported analysis shape: chan T"),
+		"analysis analysis-unavailable example.com/pkg — unsupported analysis shape: chan T"; got != want {
+		t.Errorf("diagnostic message = %q, want %q", got, want)
+	}
+}
+
+// TestToolRunForwardsAnalysisEvents pins the run handler's call-site
+// wiring of Options.AnalysisEvent: a measured run's freshness analysis
+// must surface on the progress-notification channel. A correct message
+// renderer is not enough — the assignment itself must be exercised
+// end to end, or dropping it leaves every notification test green.
+func TestToolRunForwardsAnalysisEvents(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	s := serverAt(t)
+	ctx := context.Background()
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	serverSession, err := s.MCP().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	var mu sync.Mutex
+	var messages []string
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, &mcp.ClientOptions{
+		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			mu.Lock()
+			defer mu.Unlock()
+			if req.Params.ProgressToken == "tok" {
+				messages = append(messages, req.Params.Message)
+			}
+		},
+	})
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	params := &mcp.CallToolParams{
+		Name:      "run",
+		Arguments: map[string]any{"targets_json": `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"]}]}`},
+	}
+	params.SetProgressToken("tok")
+	result, err := clientSession.CallTool(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("run tool errored: %+v", result)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		joined := strings.Join(messages, "\n")
+		mu.Unlock()
+		if strings.Contains(joined, "analysis ") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("progress notifications carry no analysis event: %q", joined)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

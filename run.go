@@ -28,7 +28,7 @@ var findingObservationSequence atomic.Uint64
 // lockCallbacks wraps every caller callback in one mutex so pipelined
 // preparation and execution — which invoke callbacks from two goroutines —
 // preserve the synchronous-caller-code contract: no two callbacks ever run
-// concurrently (REQ-exec-run-status). AnalysisProgress is exempt by its own
+// concurrently (REQ-exec-run-status). AnalysisEvent is exempt by its own
 // documented contract (safe for concurrent invocation).
 func lockCallbacks(opts Options) Options {
 	var mu sync.Mutex
@@ -174,20 +174,23 @@ type Options struct {
 	// with their advisory execution events. It must return normally
 	// (REQ-exec-run-status).
 	Progress func(PreparationEvent)
-	// AnalysisProgress must be safe for concurrent invocation and synchronously receives advisory keep-alive events from
-	// the run's freshness analysis — the gofresh phase name and, for
-	// per-package phases, the package. Events are diagnostic, carry no
-	// completion signal, never enter a decision or finding, and their sequence
-	// is not part of the deterministic run-status contract
-	// (REQ-exec-run-status). The callback must return normally.
-	AnalysisProgress func(phase, pkg string)
-	// AnalysisDiagnostic synchronously receives payload-bearing
-	// analysis diagnostics (the per-subject analysis-unavailable
-	// provenance): never throttled - each event is a distinct fact the
-	// operator needs, unlike the keep-alive heartbeat - and the
-	// package stays a package, the payload its own argument. Same
-	// concurrency contract as AnalysisProgress.
-	AnalysisDiagnostic func(phase, pkg, detail string)
+	// AnalysisEvent must be safe for concurrent invocation and
+	// synchronously receives the run's freshness-analysis events: the
+	// gofresh phase name, the package for per-package phases, and a
+	// non-empty detail for payload-bearing diagnostics (the
+	// per-subject analysis-unavailable provenance, the unlisted-
+	// toolchain notice). Detail-free events are advisory keep-alives a
+	// consumer may throttle; detail-bearing events are each a distinct
+	// fact the operator needs — never throttle or fold them, and the
+	// package stays a package. One field by design, mirroring
+	// gofresh's own single Progress channel: a consumer cannot
+	// subscribe to the keep-alives without the diagnostics (a
+	// two-field shape shipped exactly that wiring gap). Events are
+	// diagnostic, carry no completion signal, never enter a decision
+	// or finding, and their sequence is not part of the deterministic
+	// run-status contract (REQ-exec-run-status). The callback must
+	// return normally.
+	AnalysisEvent func(phase, pkg, detail string)
 	// Commit synchronously receives each finished target's final finding —
 	// a cached serve as soon as its pins are proven to hold, a measured or
 	// spliced target after its post-execution producer validation — so the
@@ -1463,7 +1466,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		mv, ok := modes[attested]
 		if !ok {
 			mv = &modeViews{
-				engines:        t.newSubjectEngines(opts.AnalysisProgress, opts.AnalysisDiagnostic, attested),
+				engines:        t.newSubjectEngines(opts.AnalysisEvent, attested),
 				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}},
 				viewFaults:     map[string]error{},
 				producerUnion:  &subjectViewSet{bySymbol: map[string]*subjectView{}},

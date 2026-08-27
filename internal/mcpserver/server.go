@@ -347,6 +347,22 @@ type runStreams struct {
 
 const streamRowCap = 100
 
+// analysisEventMessage renders an analysis event for the advisory
+// notification channel; a non-empty detail (the per-subject
+// analysis-unavailable provenance, the unlisted-toolchain notice)
+// rides the same line after an em dash, matching the CLI face's
+// rendering.
+func analysisEventMessage(phase, pkg, detail string) string {
+	message := "analysis " + phase
+	if pkg != "" {
+		message += " " + pkg
+	}
+	if detail != "" {
+		message += " — " + detail
+	}
+	return message
+}
+
 func newRunStreams(out *runOut, notify func(string)) runStreams {
 	var phase atomic.Value
 	phase.Store("preparing")
@@ -797,12 +813,8 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		},
 	}
 	if notify != nil {
-		options.AnalysisProgress = func(phase, pkg string) {
-			message := "analysis " + phase
-			if pkg != "" {
-				message += " " + pkg
-			}
-			notify(message)
+		options.AnalysisEvent = func(phase, pkg, detail string) {
+			notify(analysisEventMessage(phase, pkg, detail))
 		}
 		// Execution-phase progress joins the same advisory notification
 		// channel (REQ-exec-run-status's advisory classes): phase,

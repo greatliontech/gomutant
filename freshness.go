@@ -91,8 +91,7 @@ type subjectEngines struct {
 	// width install must precede newSubjectEngines.
 	evidenceEnv []string
 	vouches     []string
-	progress    func(phase, pkg string)
-	diagnostic  func(phase, pkg, detail string)
+	event       func(phase, pkg, detail string)
 	// packageProcess carries the package-process attestation
 	// (gofresh WithPackageProcessExecution) for the engines this set
 	// builds, fixed at construction: gomutant runs every oracle as
@@ -106,9 +105,9 @@ type subjectEngines struct {
 	byDir          map[string]*gofresh.Engine
 }
 
-func (t *Tree) newSubjectEngines(progress func(phase, pkg string), diagnostic func(phase, pkg, detail string), packageProcess bool) *subjectEngines {
+func (t *Tree) newSubjectEngines(event func(phase, pkg, detail string), packageProcess bool) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, progress: progress, diagnostic: diagnostic, packageProcess: packageProcess, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, event: event, packageProcess: packageProcess, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
@@ -122,22 +121,13 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	if len(e.vouches) > 0 {
 		opts = append(opts, gofresh.WithDynamicStateVouches(e.vouches...))
 	}
-	if e.progress != nil || e.diagnostic != nil {
-		progress, diagnostic := e.progress, e.diagnostic
+	if event := e.event; event != nil {
+		// One channel end to end, mirroring gofresh's Progress: the
+		// keep-alive/diagnostic split (throttle the former, never the
+		// latter) is the consumer's, keyed on detail emptiness — a
+		// routing layer here would reintroduce a droppable leg.
 		opts = append(opts, gofresh.WithProgress(func(p gofresh.Progress) {
-			if p.Detail != "" {
-				// A payload-bearing diagnostic (the per-subject
-				// analysis-unavailable provenance) takes its own
-				// channel: unthrottled - each event is a distinct
-				// fact - and the package field stays a package.
-				if diagnostic != nil {
-					diagnostic(p.Phase, p.Package, p.Detail)
-				}
-				return
-			}
-			if progress != nil {
-				progress(p.Phase, p.Package)
-			}
+			event(p.Phase, p.Package, p.Detail)
 		}))
 	}
 	engine, err := gofresh.New(opts...)
@@ -215,7 +205,7 @@ func findingPackageProcessAttestable(f Finding) bool {
 }
 
 func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packageProcess bool) (*subjectViewSet, error) {
-	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil, nil, packageProcess))
+	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil, packageProcess))
 }
 
 // newSubjectViewsFaultTolerant builds the decision-evidence view set

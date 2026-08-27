@@ -23,7 +23,9 @@ as the CLI (REQ-exec-run-status), with preparation events and decisions
 riding the response per REQ-mcp-envelope — streamed to notifications or
 inline-capped, their totals always exact. A run request carrying an MCP progress token
 additionally receives progress notifications forwarded from the preparation
-events, target decisions, and advisory freshness-analysis keep-alive events;
+events, target decisions, and advisory freshness-analysis events — the
+keep-alives and the payload-bearing diagnostics alike (the analysis-event
+class in [execution.md](execution.md): subscribing delivers both kinds);
 an ephemeral request's notifications are coarse tool-boundary messages.
 Notification delivery is advisory and never changes tool results or errors.
 Discovery encodes exact effective oracles without repeating them: the result

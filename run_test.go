@@ -2307,7 +2307,7 @@ func TestServeMatchingBatchesEvidenceChecksPerView(t *testing.T) {
 	served, err := warm.Run(context.Background(), targets, Options{
 		Budget: 1, Prior: prior,
 		Decision: func(d RunDecision) { decisions = append(decisions, d) },
-		AnalysisProgress: func(phase, _ string) {
+		AnalysisEvent: func(phase, _, _ string) {
 			if phase == "runtime" {
 				runtimePasses.Add(1)
 			}
@@ -3202,10 +3202,10 @@ func TestMergeFindingsGraftsConcurrentAttestation(t *testing.T) {
 	}
 }
 
-// TestRunReportsAnalysisProgress: the advisory freshness-analysis keep-alive
-// events reach Options.AnalysisProgress, with the view-observation phase
-// present — the wiring an MCP server forwards as progress notifications.
-func TestRunReportsAnalysisProgress(t *testing.T) {
+// TestRunReportsAnalysisEvents: the freshness-analysis events reach
+// Options.AnalysisEvent, with the view-observation phase present — the
+// wiring an MCP server forwards as progress notifications.
+func TestRunReportsAnalysisEvents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
@@ -3213,7 +3213,7 @@ func TestRunReportsAnalysisProgress(t *testing.T) {
 	var mu sync.Mutex
 	phases := map[string]int{}
 	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
-	if _, err := tr.Run(context.Background(), []Target{target}, Options{AnalysisProgress: func(phase, pkg string) {
+	if _, err := tr.Run(context.Background(), []Target{target}, Options{AnalysisEvent: func(phase, pkg, detail string) {
 		mu.Lock()
 		phases[phase]++
 		mu.Unlock()
