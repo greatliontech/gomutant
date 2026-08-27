@@ -92,6 +92,7 @@ type subjectEngines struct {
 	evidenceEnv []string
 	vouches     []string
 	progress    func(phase, pkg string)
+	diagnostic  func(phase, pkg, detail string)
 	// packageProcess carries the package-process attestation
 	// (gofresh WithPackageProcessExecution) for the engines this set
 	// builds, fixed at construction: gomutant runs every oracle as
@@ -105,9 +106,9 @@ type subjectEngines struct {
 	byDir          map[string]*gofresh.Engine
 }
 
-func (t *Tree) newSubjectEngines(progress func(phase, pkg string), packageProcess bool) *subjectEngines {
+func (t *Tree) newSubjectEngines(progress func(phase, pkg string), diagnostic func(phase, pkg, detail string), packageProcess bool) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, progress: progress, packageProcess: packageProcess, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, progress: progress, diagnostic: diagnostic, packageProcess: packageProcess, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
@@ -121,9 +122,23 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	if len(e.vouches) > 0 {
 		opts = append(opts, gofresh.WithDynamicStateVouches(e.vouches...))
 	}
-	if e.progress != nil {
-		progress := e.progress
-		opts = append(opts, gofresh.WithProgress(func(p gofresh.Progress) { progress(p.Phase, p.Package) }))
+	if e.progress != nil || e.diagnostic != nil {
+		progress, diagnostic := e.progress, e.diagnostic
+		opts = append(opts, gofresh.WithProgress(func(p gofresh.Progress) {
+			if p.Detail != "" {
+				// A payload-bearing diagnostic (the per-subject
+				// analysis-unavailable provenance) takes its own
+				// channel: unthrottled - each event is a distinct
+				// fact - and the package field stays a package.
+				if diagnostic != nil {
+					diagnostic(p.Phase, p.Package, p.Detail)
+				}
+				return
+			}
+			if progress != nil {
+				progress(p.Phase, p.Package)
+			}
+		}))
 	}
 	engine, err := gofresh.New(opts...)
 	if err != nil {
@@ -135,14 +150,43 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 
 // symbolPackage cuts a subject symbol's package path: the first dot
 // after the last slash bounds the path — a plain function's name and a
-// method's Type.Method spelling alike follow it.
+// method's Type.Method spelling alike follow it — except a version
+// path element (the gopkg.in pattern, exactly ".vN"), which belongs to
+// the path: without the absorption "gopkg.in/yaml.v3.Marshal" grouped
+// as "gopkg.in/yaml" and a genuinely dark versioned package merged
+// with its sibling (the chunk-132 review's L2). A dotted path element
+// outside the vN pattern stays ambiguous against a Type.Method
+// spelling and keeps the first-dot cut.
 func symbolPackage(symbol string) string {
 	slash := strings.LastIndex(symbol, "/")
-	dot := strings.Index(symbol[slash+1:], ".")
-	if dot < 0 {
-		return symbol
+	rest := symbol[slash+1:]
+	offset := slash + 1
+	for {
+		dot := strings.Index(rest, ".")
+		if dot < 0 {
+			return symbol
+		}
+		segment := rest[dot+1:]
+		end := strings.Index(segment, ".")
+		if end < 0 {
+			end = len(segment)
+		}
+		if v := segment[:end]; len(v) >= 2 && v[0] == 'v' && allDigits(v[1:]) {
+			offset += dot + 1 + end
+			rest = segment[end:]
+			continue
+		}
+		return symbol[:offset+dot]
 	}
-	return symbol[:slash+1+dot]
+}
+
+func allDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 // packageProcessAttestable reports whether a target's measurement
@@ -171,7 +215,7 @@ func findingPackageProcessAttestable(f Finding) bool {
 }
 
 func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packageProcess bool) (*subjectViewSet, error) {
-	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil, packageProcess))
+	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil, nil, packageProcess))
 }
 
 // newSubjectViewsFaultTolerant builds the decision-evidence view set

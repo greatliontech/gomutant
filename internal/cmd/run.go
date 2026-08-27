@@ -333,6 +333,21 @@ func runCommand(ctx context.Context, o runOptions) error {
 			}
 			fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(analysisPhrase(phase)+" "+pkg))
 		},
+		// The diagnostic channel is never throttled: each event is a
+		// distinct fact (the per-subject analysis-unavailable
+		// provenance the field diagnoses from), and the structured
+		// face keeps the package a package with the payload under its
+		// own key (REQ-result-skip-radius's sibling concern; the
+		// chunk-132 review's M1).
+		AnalysisDiagnostic: func(phase, pkg, detail string) {
+			analysisMu.Lock()
+			defer analysisMu.Unlock()
+			if o.jsonl {
+				rep.emit("analysis", map[string]string{"phase": phase, "package": pkg, "detail": detail})
+				return
+			}
+			fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(analysisPhrase(phase)+" "+pkg+" — "+detail))
+		},
 		Guidance: func(g gomutant.OracleGuidance) {
 			rep.line("guidance", g, func(w io.Writer) {
 				fmt.Fprintf(w, "guidance  %s  unstable oracle evidence (%s): %s\n", g.Symbol, g.Reason, g.Suggestion)
@@ -500,7 +515,29 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if classes, skips := skipClasses(findings); skips > 1 {
 		fmt.Fprintf(&terminal, "skipped   %s\n", classes)
 	}
+	// Whole-package blast radius, one line per dark package: the count
+	// line above cannot distinguish scattered skips from a package
+	// whose entire target set carries no campaign evidence.
+	for _, radius := range gomutant.SkippedPackageRadius(rendered) {
+		if radius.Dark() && radius.Targets > 1 {
+			fmt.Fprintf(&terminal, "dark      %s: all %d targets skipped\n", radius.Package, radius.Targets)
+		}
+	}
 	if o.plan {
+		if o.jsonl {
+			// The structured face carries the radius in plan mode too:
+			// the run summary is suppressed there (a zeroed summary
+			// would claim a measurement that never happened), so the
+			// dark packages ride the plan payload
+			// (REQ-result-skip-radius).
+			rep.emit("plan", struct {
+				Measure      int      `json:"measure"`
+				Candidates   int      `json:"candidates"`
+				Cached       int      `json:"cached"`
+				Skipped      int      `json:"skipped"`
+				DarkPackages []string `json:"darkPackages,omitempty"`
+			}{planMeasure, planCandidates, planCached, planSkipped, gomutant.SummarizeRun(rendered).DarkPackages})
+		}
 		fmt.Fprintf(&terminal, "plan      %d measure (%d candidates), %d cached, %d skipped\n", planMeasure, planCandidates, planCached, planSkipped)
 		fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
 	} else {

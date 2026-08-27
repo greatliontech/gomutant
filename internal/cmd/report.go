@@ -298,10 +298,11 @@ func (r *runReporter) flushProse(text string) error {
 // field report's exact complaint. Unknown phases pass through raw so
 // new engine vocabulary stays visible rather than silently renamed.
 var analysisVocabulary = map[string]string{
-	"load":    "loading package graphs (gofresh analysis)",
-	"observe": "observing oracle runtime inputs (freshness evidence)",
-	"runtime": "validating runtime-input evidence (oracle freshness)",
-	"prove":   "proving oracle closure freshness (gofresh hash proof)",
+	"analysis-unavailable": "attributed reachability unavailable for",
+	"load":                 "loading package graphs (gofresh analysis)",
+	"observe":              "observing oracle runtime inputs (freshness evidence)",
+	"runtime":              "validating runtime-input evidence (oracle freshness)",
+	"prove":                "proving oracle closure freshness (gofresh hash proof)",
 }
 
 func analysisPhrase(phase string) string {

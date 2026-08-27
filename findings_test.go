@@ -280,3 +280,32 @@ func TestFingerprintSurfaceIsMappedOrExempt(t *testing.T) {
 		}
 	}
 }
+
+// A package whose whole selected target set skipped is DARK - named in
+// the radius and the summary - while a package with any surviving
+// evidence never is: the blast radius a scattered count hides
+// (REQ-result-run-reporting; the bldc campaign read 567 scattered
+// skips over 14 fully dark packages).
+func TestSkippedPackageRadiusNamesDarkPackages(t *testing.T) {
+	findings := []Finding{
+		{Symbol: "example.com/mod/dark.A", Skipped: "unsupported analysis shape: T"},
+		{Symbol: "example.com/mod/dark.B", Skipped: "unsupported analysis shape: T"},
+		{Symbol: "example.com/mod/mixed.C", Skipped: "oracle baseline probe failed"},
+		{Symbol: "example.com/mod/mixed.D", Generated: 3, Mutants: 3, Killed: 3},
+		{Symbol: "example.com/mod/clean.E", Generated: 2, Mutants: 2, Killed: 2},
+	}
+	radius := SkippedPackageRadius(findings)
+	if len(radius) != 2 {
+		t.Fatalf("radius = %+v, want dark and mixed only", radius)
+	}
+	if radius[0].Package != "example.com/mod/dark" || !radius[0].Dark() || radius[0].Targets != 2 {
+		t.Fatalf("dark package misreported: %+v", radius[0])
+	}
+	if radius[1].Package != "example.com/mod/mixed" || radius[1].Dark() {
+		t.Fatalf("mixed package misreported as dark: %+v", radius[1])
+	}
+	summary := SummarizeRun(findings)
+	if len(summary.DarkPackages) != 1 || summary.DarkPackages[0] != "example.com/mod/dark" {
+		t.Fatalf("summary dark packages = %+v, want exactly the dark one", summary.DarkPackages)
+	}
+}

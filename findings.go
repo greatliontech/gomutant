@@ -1527,3 +1527,44 @@ func UpdateDocumentContext(ctx context.Context, path string, update func(prior [
 	}
 	return nil
 }
+
+// PackageSkip is one package's skip blast radius in a run's findings:
+// Dark reports whether every target the selection carried for the
+// package skipped — "package X: all N targets skipped" reads very
+// differently from the same N scattered through a count, and the dark
+// case is the one that turns a tool gap into a coverage hole
+// (REQ-result-skip-radius).
+type PackageSkip struct {
+	Package string
+	Skipped int
+	Targets int
+}
+
+// Dark reports whether the package's whole target set skipped.
+func (p PackageSkip) Dark() bool { return p.Skipped == p.Targets }
+
+// SkippedPackageRadius groups a run's skips by package, package path
+// ascending, packages with no skips omitted.
+func SkippedPackageRadius(findings []Finding) []PackageSkip {
+	byPkg := map[string]*PackageSkip{}
+	for _, f := range findings {
+		pkg := symbolPackage(f.Symbol)
+		entry := byPkg[pkg]
+		if entry == nil {
+			entry = &PackageSkip{Package: pkg}
+			byPkg[pkg] = entry
+		}
+		entry.Targets++
+		if f.Skipped != "" {
+			entry.Skipped++
+		}
+	}
+	radius := make([]PackageSkip, 0, len(byPkg))
+	for _, entry := range byPkg {
+		if entry.Skipped > 0 {
+			radius = append(radius, *entry)
+		}
+	}
+	sort.Slice(radius, func(i, j int) bool { return radius[i].Package < radius[j].Package })
+	return radius
+}

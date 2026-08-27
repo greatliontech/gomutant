@@ -181,6 +181,13 @@ type Options struct {
 	// is not part of the deterministic run-status contract
 	// (REQ-exec-run-status). The callback must return normally.
 	AnalysisProgress func(phase, pkg string)
+	// AnalysisDiagnostic synchronously receives payload-bearing
+	// analysis diagnostics (the per-subject analysis-unavailable
+	// provenance): never throttled - each event is a distinct fact the
+	// operator needs, unlike the keep-alive heartbeat - and the
+	// package stays a package, the payload its own argument. Same
+	// concurrency contract as AnalysisProgress.
+	AnalysisDiagnostic func(phase, pkg, detail string)
 	// Commit synchronously receives each finished target's final finding —
 	// a cached serve as soon as its pins are proven to hold, a measured or
 	// spliced target after its post-execution producer validation — so the
@@ -341,6 +348,11 @@ type RunSummary struct {
 	Survived  int `json:"survived"`
 	Attested  int `json:"attested"`
 	Open      int `json:"open"`
+	// DarkPackages names packages whose ENTIRE selected target set
+	// skipped - the blast radius a scattered skip count hides: a dark
+	// package carries zero campaign evidence and reads as a coverage
+	// hole, not a tool hiccup (REQ-result-skip-radius).
+	DarkPackages []string `json:"darkPackages,omitempty"`
 }
 
 // SummarizeRun derives deterministic aggregate totals from findings.
@@ -361,6 +373,11 @@ func SummarizeRun(findings []Finding) RunSummary {
 		summary.Survived += finding.Mutants - finding.Killed
 		summary.Attested += len(finding.Attested)
 		summary.Open += len(finding.Open())
+	}
+	for _, radius := range SkippedPackageRadius(findings) {
+		if radius.Dark() && radius.Targets > 1 {
+			summary.DarkPackages = append(summary.DarkPackages, radius.Package)
+		}
 	}
 	return summary
 }
@@ -1446,7 +1463,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		mv, ok := modes[attested]
 		if !ok {
 			mv = &modeViews{
-				engines:        t.newSubjectEngines(opts.AnalysisProgress, attested),
+				engines:        t.newSubjectEngines(opts.AnalysisProgress, opts.AnalysisDiagnostic, attested),
 				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}},
 				viewFaults:     map[string]error{},
 				producerUnion:  &subjectViewSet{bySymbol: map[string]*subjectView{}},

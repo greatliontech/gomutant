@@ -134,6 +134,17 @@ generation produced its empty documents.
 
 REQ-result-version-surface: enforced by `TestVersionSurfaces`.
 
+**REQ-result-skip-radius** (behavior): The run summary MUST name every
+package whose entire selected target set skipped — on the human face as
+a per-package line and on the structured face as a field — whenever the
+package carried more than one target. A dark package is a coverage
+hole, not a tool hiccup, and a scattered per-reason count provably hid
+one: a field campaign read 567 scattered skips over 14 fully dark
+packages. Partially skipped packages stay in the per-reason class line.
+
+REQ-result-skip-radius: enforced by
+`TestSkippedPackageRadiusNamesDarkPackages`.
+
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
 tolerance is safe because its direction is anti-flattering: every open

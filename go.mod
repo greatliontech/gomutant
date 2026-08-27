@@ -1,10 +1,10 @@
 module github.com/greatliontech/gomutant
 
-go 1.26.5
+go 1.27.0
 
 require (
 	github.com/greatliontech/glob v0.1.0
-	github.com/greatliontech/gofresh v0.85.0
+	github.com/greatliontech/gofresh v0.85.3
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9

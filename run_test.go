@@ -242,7 +242,7 @@ func TestSummarizeRun(t *testing.T) {
 		{Symbol: "p.Skipped", Skipped: "no oracle"},
 	}
 	want := RunSummary{Targets: 3, Measured: 1, Cached: 1, Skipped: 1, Generated: 6, Discarded: 1, Killed: 3, Survived: 2, Attested: 1, Open: 1}
-	if got := SummarizeRun(findings); got != want {
+	if got := SummarizeRun(findings); !reflect.DeepEqual(got, want) {
 		t.Fatalf("summary = %+v, want %+v", got, want)
 	}
 }
