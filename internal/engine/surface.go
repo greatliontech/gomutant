@@ -280,17 +280,20 @@ func recvTypeName(fd *ast.FuncDecl) string {
 		return ""
 	}
 	t := fd.Recv.List[0].Type
-	if star, ok := t.(*ast.StarExpr); ok {
-		t = star.X
+	for {
+		switch e := t.(type) {
+		case *ast.ParenExpr: // ((*T)) — the legal parenthesized form
+			t = e.X
+		case *ast.StarExpr:
+			t = e.X
+		case *ast.IndexExpr: // Recv[T]
+			t = e.X
+		case *ast.IndexListExpr: // Recv[T, U]
+			t = e.X
+		case *ast.Ident:
+			return e.Name
+		default:
+			return ""
+		}
 	}
-	if idx, ok := t.(*ast.IndexExpr); ok { // Recv[T]
-		t = idx.X
-	}
-	if idx, ok := t.(*ast.IndexListExpr); ok { // Recv[T, U]
-		t = idx.X
-	}
-	if id, ok := t.(*ast.Ident); ok {
-		return id.Name
-	}
-	return ""
 }

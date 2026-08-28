@@ -232,7 +232,7 @@ func (t *Tree) methodDeclarationRewrite(typeSymbol, typeName, method string) (st
 				if !ok || fn.Recv == nil || fn.Name.Name != method {
 					continue
 				}
-				if receiverTypeName(fn) != typeName {
+				if recvTypeName(fn) != typeName {
 					continue
 				}
 				namePos := pkg.Fset.PositionFor(fn.Name.Pos(), false)
@@ -263,28 +263,4 @@ func (t *Tree) methodDeclarationRewrite(typeSymbol, typeName, method string) (st
 		}
 	}
 	return "", nil, false, nil
-}
-
-// receiverTypeName unwraps a method receiver to its named type.
-func receiverTypeName(fn *ast.FuncDecl) string {
-	if len(fn.Recv.List) == 0 {
-		return ""
-	}
-	expr := fn.Recv.List[0].Type
-	for {
-		switch e := expr.(type) {
-		case *ast.StarExpr:
-			expr = e.X
-		case *ast.ParenExpr:
-			expr = e.X
-		case *ast.IndexExpr:
-			expr = e.X
-		case *ast.IndexListExpr:
-			expr = e.X
-		case *ast.Ident:
-			return e.Name
-		default:
-			return ""
-		}
-	}
 }
