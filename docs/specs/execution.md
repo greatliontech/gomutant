@@ -852,20 +852,35 @@ halved default is the headroom for exactly that). The default derives total RAM 
 at 1 GiB — a ceiling that broke in-oracle link steps would convert every
 measurement into a discard — configurable per run and disablable; an
 unreadable RAM total disables the derived default rather than guessing.
-The derived default moves with the job count, so evidence measured
-under it re-measures when jobs change — the exact-equality discipline
-every attribution-bearing pin carries — while a pinned explicit
-ceiling keeps evidence stable across jobs tuning. A
+The derived default moves with RAM and the job count — machine
+circumstance — so the recorded ceiling serves DIRECTIONALLY
+(REQ-result-stale's oracle-memory clause) rather than by exact bytes,
+except where the ceiling decided a verdict. A
 mutant that dies on its ceiling classifies through the same attribution
 rules as any other oracle death — ordinarily a kill with its
 incompleteness reason; a legitimate oracle whose baseline also dies on
 the cap routes through the noise arm as ever — so a runaway allocation
 becomes a contained per-mutant verdict instead of a host-wide pressure
-event that evicts unrelated processes to swap.
+event that evicts unrelated processes to swap. A kill OR discard whose run output
+— either stream: the go command reports some memory deaths on its own
+stderr — carries a memory-exhaustion signature (the Go runtime's
+out-of-memory fatals, ENOMEM error text) marks the record
+ceiling-decided: the noise-arm discard and the in-oracle build
+rejection are exactly the ceiling-authored dispositions the paragraph
+above routes there. The scored verdict's disposition governs when a
+serial confirmation re-runs a kill. Overcatching is the sound
+direction — a test that merely prints a signature over-pins its
+record — and two residuals are named: a mutant whose allocation
+failure is swallowed without any signature text keeps its disposition
+unattributed to memory, and a GOMEMLIMIT collection death spiral
+manifests as a timeout, which the oracle-timeout pin already covers.
 
 REQ-exec-oracle-memory: enforced by
 `TestOracleMemoryCeilingContainsRunawayMutant`,
-`TestDefaultOracleMemoryLimit`, and `TestOracleMemoryEnv`.
+`TestDefaultOracleMemoryLimit`, `TestOracleMemoryEnv`,
+`TestMemoryDecidedKillSignatures`, `TestMemoryPinStaleIsDirectional`,
+`TestMergeScoredFactsJoinsCeilingFacts`, and the four assembly-arm
+memory-fact assertions in their count tests.
 
 **REQ-exec-oracle-parallelism** (behavior): Every oracle process tree
 MUST run with its inner parallelism capped so the campaign's aggregate

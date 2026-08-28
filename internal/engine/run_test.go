@@ -95,7 +95,7 @@ func TestRunMutantObservedReturnsCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+	_, _, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
 		[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Remove(input) })
 	t.Setenv("GOMUTANT_MOVING_INPUT", input)
-	outcome, killer, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+	outcome, killer, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
 		[]string{"example.com/fixture/lib"}, "^TestMovingInput$", 60*time.Second, nil, moduleDir, packageDir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestNamedTestPanicIsIncompleteEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, killer, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[mutantIndex],
+	outcome, killer, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[mutantIndex],
 		[]string{"example.com/fixture/lib"}, "^TestNamedPanic$", 60*time.Second, nil, moduleDir, packageDir, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 		// suffices — the legitimate run is sub-second — and keeps this
 		// exhaustive loop from paying a long timeout for mutants that are
 		// incidental to the package-kill this test asserts.
-		out, killer, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+		out, killer, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestGuarded$", 5*time.Second, nil, moduleDir, packageDir, nil, nil)
 		if err != nil {
 			t.Fatalf("mutant %s %s aborted as noise: %v", m.Position, m.Operator, err)
@@ -295,7 +295,7 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range ms {
-		out, killer, state, incomplete, diagnostic, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+		out, killer, _, state, incomplete, diagnostic, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir, nil, nil)
 		if err != nil {
 			t.Fatalf("mutant %s %s: %v", m.Position, m.Operator, err)
@@ -342,7 +342,7 @@ func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, killer, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
+	out, killer, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", ms[0],
 		[]string{"example.com/fixture/plain"}, "^TestPlain$", 60*time.Second,
 		[]string{"-no.such.flag"}, moduleDir, packageDir, nil, nil)
 	if err != nil {
@@ -786,7 +786,7 @@ func TestRunMutantForgedBuildFailureOutputStaysAKill(t *testing.T) {
 	}
 	killed := 0
 	for _, m := range ms {
-		out, killer, _, _, diagnostic, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
+		out, killer, _, _, _, diagnostic, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/forgery"}, "^TestGuarded$", 60*time.Second, nil, moduleDir, packageDir, nil, nil)
 		if err != nil {
 			t.Fatalf("mutant %s %s: %v", m.Position, m.Operator, err)
@@ -828,7 +828,7 @@ func TestBaselineProbeTimeoutDiscardsAsUnclassifiable(t *testing.T) {
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_BASELINE_STALL=1")
 	unclassifiable := 0
 	for _, m := range ms {
-		out, killer, _, incomplete, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
+		out, killer, _, _, incomplete, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestBaselineStall$", 4*time.Second, nil, moduleDir, packageDir, nil, nil, env)
 		if err != nil {
 			t.Fatalf("mutant %s %s aborted the campaign: %v", m.Position, m.Operator, err)

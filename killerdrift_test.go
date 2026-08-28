@@ -312,9 +312,12 @@ func TestDriftFindingCountsRescoresRemeasured(t *testing.T) {
 	// Index 4 is a recorded discard re-executing through the
 	// candidate-evidence composition; it discards again, conserving its
 	// recorded disposition through a fresh execution.
-	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, windowScores{outcomes: outcomes, killers: killers}, nil, nil)
+	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, windowScores{outcomes: outcomes, killers: killers, memoryDecided: []bool{true}}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !drifted.OracleCeilingDecided {
+		t.Fatal("drift dropped the window's memory-decided fact")
 	}
 	if drifted.Killed != 2 || drifted.Discarded != 1 || drifted.Mutants != 5 ||
 		drifted.Generated != 6 || drifted.CandidateCount != 6 {

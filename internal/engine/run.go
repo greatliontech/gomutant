@@ -205,13 +205,13 @@ const PackageKillerPrefix = "(package failure: "
 // Ambient-environment convenience: selection-bearing paths use the Env
 // form with the tree's frozen environment.
 func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string) (MutantOutcome, string, string, error) {
-	outcome, killer, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, GoEnv(dir))
+	outcome, killer, _, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, GoEnv(dir))
 	return outcome, killer, diagnostic, err
 }
 
 // RunMutantEnv is RunMutant under an already-frozen complete environment.
 func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (MutantOutcome, string, string, error) {
-	outcome, killer, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env)
+	outcome, killer, _, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env)
 	return outcome, killer, diagnostic, err
 }
 
@@ -224,7 +224,7 @@ func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, 
 // or was discarded.
 func RunMutantEvidenceEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (MutantOutcome, string, string, string, error) {
 	var sink bytes.Buffer
-	outcome, killer, _, _, diagnostic, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, &sink)
+	outcome, killer, _, _, diagnostic, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, &sink, nil)
 	evidence := ""
 	if err == nil && outcome == MutantKilled {
 		evidence = killEvidence(sink.Bytes(), killer, timeout)
@@ -331,13 +331,16 @@ func outputTail(stream []byte, keep func(pkg, test string) bool) string {
 // return carries the compiler's own text exactly when the mutant failed to
 // build — the caller's signal that no test process started, so the run has
 // no runtime exposure at all.
-func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+// The third return reports a memory-decided kill: the oracle memory
+// ceiling decided this verdict, so the record must pin the exact
+// ceiling rather than serve directionally (REQ-exec-oracle-memory).
+func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, GoEnv(dir))
 }
 
 // RunMutantObservedEnv is RunMutantObserved under an already-frozen complete
 // environment.
-func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
 }
 
@@ -346,8 +349,10 @@ func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []
 // discovery-then-score double execution and its evidence-drift
 // comparison are retired - bracket verdicts are the truth
 // (REQ-exec-observation).
-func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
-	return runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, nil)
+func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	var memoryDecided bool
+	outcome, killer, state, incomplete, diagnostic, err := runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, nil, &memoryDecided)
+	return outcome, killer, memoryDecided, state, incomplete, diagnostic, err
 }
 
 // RunMutantBaselineDirEnv is RunMutantEnv with the differential baseline
@@ -356,16 +361,57 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 // the mutant against itself — a probe-caused package crash would read
 // as environmental noise and a flake as a false kill
 // (REQ-exec-attribution's differential, scratch form).
-func RunMutantBaselineDirEnv(ctx context.Context, dir, baselineDir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env, baselineEnv []string) (MutantOutcome, string, string, error) {
-	outcome, killer, _, _, diagnostic, err := runMutantBase(ctx, dir, baselineDir, baselineEnv, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, nil)
-	return outcome, killer, diagnostic, err
+func RunMutantBaselineDirEnv(ctx context.Context, dir, baselineDir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env, baselineEnv []string) (MutantOutcome, string, bool, string, error) {
+	var memoryDecided bool
+	outcome, killer, _, _, diagnostic, err := runMutantBase(ctx, dir, baselineDir, baselineEnv, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, nil, &memoryDecided)
+	return outcome, killer, memoryDecided, diagnostic, err
 }
 
-func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
-	return runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink)
+func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+	return runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink, memoryDecided)
 }
 
-func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+// markMemoryDecided applies the signature scan to both output streams
+// (the go command reports some memory deaths on its own stderr) and
+// sets the out-parameter; kills AND discards mark — a candidate the
+// ceiling discarded would be measurable under a larger one, so its
+// record must pin the exact ceiling too (REQ-exec-oracle-memory).
+func markMemoryDecided(memoryDecided *bool, stdout, stderr []byte) {
+	if memoryDecided == nil {
+		return
+	}
+	if memoryDecidedKill(stdout) || memoryDecidedKill(stderr) {
+		*memoryDecided = true
+	}
+}
+
+// memoryDecidedKill reports whether one output stream carries a
+// memory-exhaustion signature: the oracle memory ceiling (RLIMIT_DATA
+// denying allocations, or ENOMEM surfacing through an error path a
+// test asserts on) decided this disposition, so it must never serve
+// under a different ceiling (REQ-exec-oracle-memory). Overcatching is
+// sound — a test that merely PRINTS a signature over-pins its record —
+// while a disposition whose allocation failure is swallowed without
+// any signature text is the named residual, and a GOMEMLIMIT death
+// spiral manifests as a timeout, which the oracle timeout pin covers.
+func memoryDecidedKill(stream []byte) bool {
+	for _, signature := range [][]byte{
+		[]byte("runtime: out of memory"),
+		[]byte("out of memory allocating"),
+		[]byte("cannot allocate memory"),
+	} {
+		if bytes.Contains(stream, signature) {
+			return true
+		}
+	}
+	return false
+}
+
+// runMutantBase's memoryDecided, when non-nil, is set true when a
+// kill's output carries the memory-exhaustion signature — an
+// out-parameter so the six-way return tuple does not widen for a fact
+// only the observed campaign path consumes.
+func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
 	if err := ctx.Err(); err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
@@ -497,6 +543,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		// function of the mutant source under the toolchain and
 		// build-configuration pins (REQ-result-stale). The diagnostic
 		// carries the compiler's text for interactive surfaces.
+		markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", compileDiagnostics(stdout.Bytes(), stderr.Bytes()), nil
 	case killer != "":
 		reason := ""
@@ -507,6 +554,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 			}
 		}
 		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, reason, env, scratchRoot, capture, oracleFrame, namespaces)
+		markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
 		return MutantKilled, killer, state, incomplete, "", err
 	}
 
@@ -568,6 +616,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 			return MutantDiscarded, "", state, mutantIncomplete, "", parent.Err()
 		}
 		diagnostic := fmt.Sprintf("unclassifiable mutant-run failure: the baseline probe exceeded the oracle timeout (%s), so the failure is not provably mutant-caused: %v: %s", timeout, runErr, tail(stderr.String()+stdout.String(), 400))
+		markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
 		return MutantDiscarded, "", state, diagnostic, "", nil
 	}
 	if baseErr == nil {
@@ -580,6 +629,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		if pkg != "" {
 			killer = PackageKillerPrefix + pkg + ")"
 		}
+		markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
 		return MutantKilled, killer, state, mutantIncomplete, "", err
 	}
 	// The baseline failed alongside the mutant: environmental noise. One
@@ -595,6 +645,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", mergeErr
 	}
 	diagnostic := fmt.Sprintf("unclassifiable mutant-run failure: the baseline probe failed alongside the mutant (environmental noise, not a kill): %v: %s", runErr, tail(stderr.String()+stdout.String(), 400))
+	markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
 	return MutantDiscarded, "", state, diagnostic, "", nil
 }
 

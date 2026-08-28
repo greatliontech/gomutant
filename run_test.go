@@ -2229,9 +2229,12 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 	flagged := map[int]bool{1: true, 2: true, 4: true}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantKilled, 0, engine.MutantDiscarded}
 	fresh := []CandidateEvidence{{Position: "f.go:5:5", Operator: "op-c", Reason: "mutant test process did not start because the mutant failed to build", Disposition: "discarded"}}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, windowScores{outcomes: outcomes}, fresh, nil)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, windowScores{outcomes: outcomes, memoryDecided: []bool{true}}, fresh, nil, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !spliced.OracleCeilingDecided {
+		t.Fatal("splice dropped the window's memory-decided fact")
 	}
 	if spliced.Generated != 5 || spliced.CandidateCount != 5 || spliced.Mutants != 4 || spliced.Killed != 2 || spliced.Discarded != 1 {
 		t.Fatalf("spliced totals = %+v, want conservation across swapped outcomes", spliced)
@@ -2746,9 +2749,12 @@ func TestGrowFindingCountsReplacesSurvivorOutcomes(t *testing.T) {
 	}
 	survivors := map[int]bool{1: true, 2: true}
 	outcomes := []engine.MutantOutcome{0, engine.MutantKilled, engine.MutantSurvived, 0}
-	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, survivors, windowScores{outcomes: outcomes}, nil, nil)
+	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, survivors, windowScores{outcomes: outcomes, memoryDecided: []bool{true}}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !grown.OracleCeilingDecided {
+		t.Fatal("growth dropped the window's memory-decided fact")
 	}
 	if grown.Killed != 2 || grown.Discarded != 1 || grown.Mutants != 3 ||
 		grown.Generated != 4 || grown.CandidateCount != 4 {
@@ -2775,7 +2781,7 @@ func TestGrowFindingCountsReplacesSurvivorOutcomes(t *testing.T) {
 	// unstable rather than carrying buckets measured under a stable run.
 	stamped := rec
 	stamped.TargetEvidence = SubjectEvidence{RuntimeUnverifiable: true}
-	grownStamped, _, err := growFindingCounts(context.Background(), stamped, candidates, survivors, windowScores{outcomes: outcomes}, nil, nil)
+	grownStamped, _, err := growFindingCounts(context.Background(), stamped, candidates, survivors, windowScores{outcomes: outcomes}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2853,7 +2859,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 		},
 	}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, windowScores{outcomes: outcomes}, nil, nil)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, windowScores{outcomes: outcomes}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2866,7 +2872,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op-a", Execution: "never-executed"}},
 	}
-	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, windowScores{outcomes: outcomes}, nil, 2, nil)
+	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, windowScores{outcomes: outcomes}, nil, 2, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2987,7 +2993,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	evidence := SubjectEvidence{Symbol: "example.com/empty.Gone", RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest}
 	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
 
-	_, same, err := tree.applySplicedUnion(ctx, env, rec, recorded)
+	_, same, err := tree.applySplicedUnion(ctx, env, rec, recorded, newPortableUnion(recorded, engine.OracleEvidenceEnv(env)), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3002,7 +3008,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, marked, err := tree.applySplicedUnion(ctx, env, rec, fresh)
+	_, marked, err := tree.applySplicedUnion(ctx, env, rec, fresh, newPortableUnion(fresh, engine.OracleEvidenceEnv(env)), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4129,9 +4135,12 @@ func TestExtendFindingCountsAppendsSuffixOutcomes(t *testing.T) {
 	}
 	outcomes := []engine.MutantOutcome{0, 0, engine.MutantSurvived, engine.MutantKilled, engine.MutantDiscarded}
 	fresh := []CandidateEvidence{{Position: "f.go:3:3", Operator: "op-a", Reason: "test process produced no runtime-input log", Disposition: "survived"}}
-	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, windowScores{outcomes: outcomes}, fresh, 5, nil)
+	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, windowScores{outcomes: outcomes, memoryDecided: []bool{true}}, fresh, 5, nil, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !extended.OracleCeilingDecided {
+		t.Fatal("extension dropped the window's memory-decided fact")
 	}
 	if extended.Budget != 5 || extended.Generated != 5 || extended.CandidateCount != 5 ||
 		extended.Mutants != 4 || extended.Killed != 2 || extended.Discarded != 1 {
@@ -4288,7 +4297,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, same, err := tree.applySplicedUnion(ctx, env, rec, folded)
+	_, same, err := tree.applySplicedUnion(ctx, env, rec, folded, newPortableUnion(folded, engine.OracleEvidenceEnv(env)), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4319,7 +4328,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, marked, err := tree.applySplicedUnion(ctx, env, sparseRec, folded)
+	_, marked, err := tree.applySplicedUnion(ctx, env, sparseRec, folded, newPortableUnion(folded, engine.OracleEvidenceEnv(env)), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4342,7 +4351,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, stamped, err := tree.applySplicedUnion(ctx, env, rec, folded)
+	_, stamped, err := tree.applySplicedUnion(ctx, env, rec, folded, newPortableUnion(folded, engine.OracleEvidenceEnv(env)), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5437,7 +5446,7 @@ func TestExtendFindingCountsRecordsFlip(t *testing.T) {
 	}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantSurvived}
 	flips := map[int]string{1: "p.TestFlaky"}
-	extended, err := extendFindingCounts(context.Background(), rec, candidates, 1, windowScores{outcomes: outcomes, flips: flips}, nil, 3, nil)
+	extended, err := extendFindingCounts(context.Background(), rec, candidates, 1, windowScores{outcomes: outcomes, flips: flips}, nil, 3, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5483,7 +5492,7 @@ func TestFlipReachesEveryAssemblyMode(t *testing.T) {
 	rec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Killed: 1}},
 		Kills:     []Kill{{Position: "f.go:1:1", Operator: "op-a", Killer: "p.TestOld"}}}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5492,14 +5501,14 @@ func TestFlipReachesEveryAssemblyMode(t *testing.T) {
 	grec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1,
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op-a"}}}
-	grown, _, err := growFindingCounts(context.Background(), grec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil)
+	grown, _, err := growFindingCounts(context.Background(), grec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertFlip("grow", grown.Survivors)
 
 	erec := Finding{Symbol: "p.F", Budget: 0, CandidateCount: 1, Generated: 0}
-	extended, err := extendFindingCounts(context.Background(), erec, candidates, 0, windowScores{outcomes: outcomes, flips: flips}, nil, 1, nil)
+	extended, err := extendFindingCounts(context.Background(), erec, candidates, 0, windowScores{outcomes: outcomes, flips: flips}, nil, 1, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5508,7 +5517,7 @@ func TestFlipReachesEveryAssemblyMode(t *testing.T) {
 	drec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Killed: 1}},
 		Kills:     []Kill{{Position: "f.go:1:1", Operator: "op-a", Killer: "p.TestOld"}}}
-	drifted, _, err := driftFindingCounts(context.Background(), drec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil)
+	drifted, _, err := driftFindingCounts(context.Background(), drec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5536,13 +5545,13 @@ func TestCarrySurvivorPreservesFlipEvidence(t *testing.T) {
 		}
 	}
 
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertCarried("splice", spliced.Survivors)
 
-	drifted, _, err := driftFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil)
+	drifted, _, err := driftFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

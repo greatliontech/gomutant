@@ -19,7 +19,6 @@ is deleted (git holds history).
 | [campaign-baseline-needs-scoped-oracles](campaign-baseline-needs-scoped-oracles.md) | root-suite scale (~16m) blocks gomutant-on-gomutant campaign baselines; go-test face resolved by CI's measured -timeout | train chunk 113 |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | train chunk 113 |
 | [refusal-exit-collapse](refusal-exit-collapse.md) | one refuse(symbol, reason) exit — the hand-picked subsets bred two review-caught defects in one round | train chunk 113 |
-| [machine-local-evidence-pins](machine-local-evidence-pins.md) | absolute runtime-input paths and host-RAM in evidence pins — the findings document serves only on the producing checkout (bldc 2026-08-27) | train chunk 133 |
 | [ephemeral-equivalence-attestation](ephemeral-equivalence-attestation.md) | judged-equivalent ephemeral probes live only in commit messages; --attest would give them a findings-document row | train chunk 113 |
 - **[suite-shared-fixture-bracket-flake](suite-shared-fixture-bracket-flake.md)** — one full-suite
   parallel run moved the shared fixturemod/lib observation bracket (honest refusal, unidentified

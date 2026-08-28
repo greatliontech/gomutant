@@ -215,7 +215,7 @@ func TestOracleEnvCarriesInnerParallelismCap(t *testing.T) {
 			env = append(env, kv)
 		}
 	}
-	out, killer, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
+	out, killer, _, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
 		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env)
 	if err != nil {
 		t.Fatalf("sensing mutant aborted the campaign: %v", err)
@@ -279,7 +279,7 @@ func TestBaselineProbeRunsUnderOracleBounds(t *testing.T) {
 	}
 	// Arm the fixture's cap assertion; it skips in every other selection.
 	env = append(env, "FIXTURE_REQUIRE_PARALLELISM_CAP=1")
-	out, killer, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
+	out, killer, _, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
 		[]string{"example.com/fixture/lib"}, "^(TestWeak|TestOracleEnvHasParallelismCap)$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env)
 	if err != nil {
 		t.Fatalf("exiting mutant aborted the campaign: %v", err)
@@ -294,7 +294,7 @@ func TestBaselineProbeRunsUnderOracleBounds(t *testing.T) {
 	// that the positive arm's sentinel kill really discriminated the
 	// baseline's environment.
 	oracleParallelWidth.Store(0)
-	out, killer, _, incomplete, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
+	out, killer, _, _, incomplete, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
 		[]string{"example.com/fixture/lib"}, "^(TestWeak|TestOracleEnvHasParallelismCap)$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env)
 	if err != nil {
 		t.Fatalf("uncapped arm aborted the campaign: %v", err)
@@ -309,7 +309,7 @@ func TestBaselineProbeRunsUnderOracleBounds(t *testing.T) {
 // silently ingesting only the last binary's truncated testlog as a
 // completed observation (REQ-exec-observation).
 func TestObservedRunRefusesMultiplePackages(t *testing.T) {
-	_, _, _, _, _, err := RunMutantObservedEnv(context.Background(), ".", Mutant{},
+	_, _, _, _, _, _, err := RunMutantObservedEnv(context.Background(), ".", Mutant{},
 		[]string{"example.com/a", "example.com/b"}, ".", time.Minute, nil, "/m", "/m/p", nil, nil, []string{"A=1"})
 	if err == nil || !strings.Contains(err.Error(), "one test package per process") {
 		t.Fatalf("multi-package observed run = %v, want the refusal", err)

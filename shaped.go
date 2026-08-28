@@ -201,14 +201,14 @@ func shapeDigest(tg Target, candidates []engine.Candidate) (string, error) {
 // unobserved (runtime manifests would name scratch paths no view
 // describes); the finding's evidence is the oracle rows attached to the
 // baseline observations, which ran observed on the real tree.
-func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, error) {
+func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, error) {
 	scratch, err := os.MkdirTemp("", "gomutant-shaped-*")
 	if err != nil {
-		return engine.MutantSurvived, "", fmt.Errorf("shaped scratch: %w", err)
+		return engine.MutantSurvived, "", false, fmt.Errorf("shaped scratch: %w", err)
 	}
 	defer os.RemoveAll(scratch)
 	if err := copyTreeForShaped(ctx, t.dir, scratch); err != nil {
-		return engine.MutantSurvived, "", fmt.Errorf("shaped scratch copy: %w", err)
+		return engine.MutantSurvived, "", false, fmt.Errorf("shaped scratch copy: %w", err)
 	}
 	// The clean scratch twin is the differential base: the mutated
 	// scratch carries the probe on disk, so a same-dir baseline would
@@ -218,23 +218,23 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 	// itself broke.
 	cleanScratch, err := os.MkdirTemp("", "gomutant-shaped-clean-*")
 	if err != nil {
-		return engine.MutantSurvived, "", fmt.Errorf("shaped scratch: %w", err)
+		return engine.MutantSurvived, "", false, fmt.Errorf("shaped scratch: %w", err)
 	}
 	defer os.RemoveAll(cleanScratch)
 	if err := copyTreeForShaped(ctx, t.dir, cleanScratch); err != nil {
-		return engine.MutantSurvived, "", fmt.Errorf("shaped scratch copy: %w", err)
+		return engine.MutantSurvived, "", false, fmt.Errorf("shaped scratch copy: %w", err)
 	}
 	for _, r := range m.Replacements {
 		rel, err := filepath.Rel(t.dir, r.File)
 		if err != nil || strings.HasPrefix(rel, "..") {
-			return engine.MutantSurvived, "", fmt.Errorf("shaped replacement %s escapes the tree", r.File)
+			return engine.MutantSurvived, "", false, fmt.Errorf("shaped replacement %s escapes the tree", r.File)
 		}
 		dst := filepath.Join(scratch, rel)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return engine.MutantSurvived, "", err
+			return engine.MutantSurvived, "", false, err
 		}
 		if err := os.WriteFile(dst, r.Source, 0o644); err != nil {
-			return engine.MutantSurvived, "", err
+			return engine.MutantSurvived, "", false, err
 		}
 	}
 	env := rebaseScratchEnv(runEnv, t.dir, scratch)
@@ -251,20 +251,21 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 	for _, r := range m.Replacements {
 		rel, err := filepath.Rel(t.dir, r.File)
 		if err != nil {
-			return engine.MutantSurvived, "", err
+			return engine.MutantSurvived, "", false, err
 		}
 		scratchMutant.Replacements = append(scratchMutant.Replacements, engine.Replacement{File: filepath.Join(scratch, rel), Source: r.Source})
 	}
 	outcome := engine.MutantSurvived
 	killer := ""
+	memoryDecided := false
 	for _, g := range w.groups {
 		if err := ctx.Err(); err != nil {
-			return outcome, killer, err
+			return outcome, killer, memoryDecided, err
 		}
 		if outcome != engine.MutantSurvived {
 			break
 		}
-		out, groupKiller, diagnostic, err := engine.RunMutantBaselineDirEnv(ctx, scratch, cleanScratch, scratchMutant, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, env, cleanEnv)
+		out, groupKiller, groupMemoryDecided, diagnostic, err := engine.RunMutantBaselineDirEnv(ctx, scratch, cleanScratch, scratchMutant, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, env, cleanEnv)
 		if diagnostic != "" {
 			if m.Operator == "structural: interface-satisfaction" {
 				// A satisfaction assertion's natural teeth are the
@@ -275,25 +276,26 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 				// kill would be fabricated.
 				ran, passed, cleanErr := engine.TestProbeEnv(ctx, cleanScratch, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, cleanEnv)
 				if cleanErr == nil && ran > 0 && passed {
-					return engine.MutantKilled, "compile: " + firstLine(diagnostic), nil
+					return engine.MutantKilled, "compile: " + firstLine(diagnostic), false, nil
 				}
-				return engine.MutantSurvived, "", fmt.Errorf("shaped candidate %s (%s): the clean scratch twin does not pass its oracle (ran=%d passed=%t err=%v), so the compile refusal is a scratch-infrastructure fault, not the probe's: %s", m.Position, m.Operator, ran, passed, cleanErr, diagnostic)
+				return engine.MutantSurvived, "", false, fmt.Errorf("shaped candidate %s (%s): the clean scratch twin does not pass its oracle (ran=%d passed=%t err=%v), so the compile refusal is a scratch-infrastructure fault, not the probe's: %s", m.Position, m.Operator, ran, passed, cleanErr, diagnostic)
 			}
 			// Any other shaped candidate failing the oracle's build is
 			// a probe fault the caller must see, never a verdict: the
 			// compiler text rides the error.
-			return engine.MutantSurvived, "", fmt.Errorf("shaped candidate %s (%s) does not build in the scratch tree: %s", m.Position, m.Operator, diagnostic)
+			return engine.MutantSurvived, "", false, fmt.Errorf("shaped candidate %s (%s) does not build in the scratch tree: %s", m.Position, m.Operator, diagnostic)
 		}
 		if err == nil && out == engine.MutantKilled {
 			err = attributedKill(groupKiller, w.oracleSet)
 		}
 		if err != nil {
-			return engine.MutantSurvived, "", fmt.Errorf("%s: shaped candidate %s %s: %w", m.Symbol, m.Position, m.Operator, err)
+			return engine.MutantSurvived, "", false, fmt.Errorf("%s: shaped candidate %s %s: %w", m.Symbol, m.Position, m.Operator, err)
 		}
 		outcome = out
 		killer = groupKiller
+		memoryDecided = memoryDecided || groupMemoryDecided
 	}
-	return outcome, killer, ctx.Err()
+	return outcome, killer, memoryDecided, ctx.Err()
 }
 
 // firstLine truncates a compiler diagnostic to its lead line for the

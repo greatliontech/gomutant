@@ -2,7 +2,9 @@ package gomutant
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1055,13 +1057,38 @@ func mutationDomainHeld(prior, current Finding) bool {
 	return prior.BodyHash == current.BodyHash && prior.OperatorSet == current.OperatorSet
 }
 
+// effectiveCeiling maps a recorded or current oracle-memory pin to
+// its comparable bound: a non-positive pin means no ceiling.
+func effectiveCeiling(bytes int64) int64 {
+	if bytes <= 0 {
+		return math.MaxInt64
+	}
+	return bytes
+}
+
+// memoryPinStale reports whether the record's oracle-memory pin
+// refuses reuse under the current effective ceiling. A ceiling-decided
+// record pins its exact bytes — the ceiling authored at least one of
+// its verdicts, so any different ceiling could flip one. Every other
+// record serves directionally: a current ceiling at least as large as
+// the recorded one preserves each verdict (a pass at the recorded
+// ceiling still fits, a non-memory kill still fires), while a smaller
+// one could newly exhaust an execution and must re-measure
+// (REQ-result-stale, REQ-exec-oracle-memory).
+func memoryPinStale(prior Finding, currentPin int64) bool {
+	if prior.OracleCeilingDecided {
+		return prior.OracleMemoryBytes != currentPin
+	}
+	return effectiveCeiling(currentPin) < effectiveCeiling(prior.OracleMemoryBytes)
+}
+
 func sameAttestationPins(prior, current Finding) bool {
 	if prior.PropertyRegime != current.PropertyRegime {
 		return false
 	}
 	if prior.OperatorSet != current.OperatorSet || prior.OracleExplicit != current.OracleExplicit || prior.Budget != current.Budget ||
 		prior.CandidateCount != current.CandidateCount || prior.Generated != current.Generated ||
-		prior.OracleTimeout != current.OracleTimeout || prior.OracleMemoryBytes != current.OracleMemoryBytes || attestationPinView(prior.TargetEvidence) != attestationPinView(current.TargetEvidence) ||
+		prior.OracleTimeout != current.OracleTimeout || memoryPinStale(prior, current.OracleMemoryBytes) || attestationPinView(prior.TargetEvidence) != attestationPinView(current.TargetEvidence) ||
 		len(prior.OracleEvidence) != len(current.OracleEvidence) {
 		return false
 	}
@@ -1288,7 +1315,7 @@ func evidenceSetCoversGrowthContext(ctx context.Context, prior Finding, target *
 	// oracle under a non-explicit record.
 	if oracleExplicit || prior.OracleExplicit || prior.CompartmentLedger == nil ||
 		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
-		prior.OracleMemoryBytes != memoryPin || prior.PropertyRegime != regime ||
+		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime ||
 		len(prior.OracleEvidence) >= len(oracle) || len(prior.CandidateEvidence) != 0 {
 		return nil, false, nil
 	}
@@ -1581,7 +1608,7 @@ func (r *compartmentReach) walk(seeds []int) bool {
 func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string) (moved, added []string, drifts bool, err error) {
 	if prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
 		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
-		prior.OracleMemoryBytes != memoryPin || prior.PropertyRegime != regime ||
+		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime ||
 		len(prior.OracleEvidence) > len(oracle) ||
 		len(prior.Kills) != prior.Killed {
 		return nil, nil, false, nil
@@ -1713,7 +1740,7 @@ func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subje
 
 func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
 	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.OracleTimeout != timeout ||
-		prior.OracleMemoryBytes != memoryPin || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) {
+		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
 	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
@@ -1746,7 +1773,7 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 // (REQ-target-structural, REQ-target-manual-recipes).
 func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*subjectView, operatorSet, timeout string, memoryPin int64, regime string) (bool, error) {
 	if prior.OperatorSet != operatorSet || !prior.OracleExplicit || prior.OracleTimeout != timeout ||
-		prior.OracleMemoryBytes != memoryPin || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) ||
+		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) ||
 		len(prior.CandidateEvidence) != 0 {
 		return false, nil
 	}
@@ -1777,54 +1804,91 @@ func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectVie
 	return evidenceSetMatchesContext(context.Background(), prior, target, oracle, oracleExplicit, operatorSet, timeout, memoryPin, regime)
 }
 
+// ErrEvidenceFinalization marks the evidence-conversion error class:
+// the relative conversion revalidating a union against disk inside
+// the attach and splice seams. Only this class refuses
+// target-locally — input motion between execution and finalization is
+// one target's drift — while every other assembly failure (a merge
+// conflict, corrupted orchestration state) keeps its campaign-fatal
+// signal (REQ-exec-attribution's abort reservation).
+var errEvidenceFinalization = errors.New("runtime evidence could not be finalized")
+
+// portableUnion is the persist-boundary form of one merged
+// completed-observation union: the absolute observation stays the
+// in-memory and merge form (REQ-inputs-absolute-identities), and each
+// subject's evidence persists the module-relative conversion against
+// that subject's own module — never a sibling's — so a persisted
+// record is keyed by what was measured, not by the checkout root that
+// measured it (REQ-inputs-relative-identities). Conversions are
+// memoized per module directory; the env is the oracle-evidence env
+// the union's state was computed under, so revalidation inside the
+// conversion sees the same environment.
+type portableUnion struct {
+	absolute runtimeinput.Observation
+	env      []string
+	byModule map[string]runtimeinput.Observation
+}
+
+func newPortableUnion(observation runtimeinput.Observation, evidenceEnv []string) *portableUnion {
+	return &portableUnion{absolute: observation, env: evidenceEnv, byModule: map[string]runtimeinput.Observation{}}
+}
+
+func (u *portableUnion) at(moduleDir string) (runtimeinput.Observation, error) {
+	if obs, ok := u.byModule[moduleDir]; ok {
+		return obs, nil
+	}
+	obs, err := runtimeinput.RelativeEnv(u.absolute, moduleDir, u.env)
+	if err != nil {
+		return runtimeinput.Observation{}, err
+	}
+	u.byModule[moduleDir] = obs
+	return obs, nil
+}
+
 // attachOracleEvidence attaches the completed-observation union to the
 // oracle views alone: the shaped-finding form, whose target pair does
 // not exist (REQ-target-structural).
-func attachOracleEvidence(oracle []*subjectView, observation runtimeinput.Observation) ([]SubjectEvidence, error) {
-	state, err := runtimeinput.CompletedState(observation)
-	if err != nil {
-		return nil, err
-	}
+func attachOracleEvidence(oracle []*subjectView, union *portableUnion) ([]SubjectEvidence, error) {
 	oracleEvidence := make([]SubjectEvidence, 0, len(oracle))
 	for _, subject := range oracle {
-		fp, err := subject.view.AttachObservation(subject.subject, subject.fp, observation)
+		evidence, err := attachSubjectEvidence(subject, union)
 		if err != nil {
 			return nil, err
 		}
-		evidence := evidenceFromFingerprint(subject.symbol, fp, state)
-		evidence.ModuleBase = subject.moduleBase
 		oracleEvidence = append(oracleEvidence, evidence)
 	}
 	sort.Slice(oracleEvidence, func(i, j int) bool { return oracleEvidence[i].Symbol < oracleEvidence[j].Symbol })
 	return oracleEvidence, nil
 }
 
-func attachEvidence(target *subjectView, oracle []*subjectView, observation runtimeinput.Observation) (SubjectEvidence, []SubjectEvidence, error) {
+// attachSubjectEvidence stamps one subject's evidence from the union's
+// portable form at that subject's module.
+func attachSubjectEvidence(subject *subjectView, union *portableUnion) (SubjectEvidence, error) {
+	observation, err := union.at(subject.moduleDir)
+	if err != nil {
+		return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
+	}
 	state, err := runtimeinput.CompletedState(observation)
 	if err != nil {
-		return SubjectEvidence{}, nil, err
+		return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
-	attach := func(subject *subjectView) (SubjectEvidence, error) {
-		fp, err := subject.view.AttachObservation(subject.subject, subject.fp, observation)
-		if err != nil {
-			return SubjectEvidence{}, err
-		}
-		evidence := evidenceFromFingerprint(subject.symbol, fp, state)
-		evidence.ModuleBase = subject.moduleBase
-		return evidence, nil
+	fp, err := subject.view.AttachObservation(subject.subject, subject.fp, observation)
+	if err != nil {
+		return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
-	targetEvidence, err := attach(target)
+	evidence := evidenceFromFingerprint(subject.symbol, fp, state)
+	evidence.ModuleBase = subject.moduleBase
+	return evidence, nil
+}
+
+func attachEvidence(target *subjectView, oracle []*subjectView, union *portableUnion) (SubjectEvidence, []SubjectEvidence, error) {
+	targetEvidence, err := attachSubjectEvidence(target, union)
 	if err != nil {
 		return SubjectEvidence{}, nil, err
 	}
-	oracleEvidence := make([]SubjectEvidence, 0, len(oracle))
-	for _, subject := range oracle {
-		evidence, err := attach(subject)
-		if err != nil {
-			return SubjectEvidence{}, nil, err
-		}
-		oracleEvidence = append(oracleEvidence, evidence)
+	oracleEvidence, err := attachOracleEvidence(oracle, union)
+	if err != nil {
+		return SubjectEvidence{}, nil, err
 	}
-	sort.Slice(oracleEvidence, func(i, j int) bool { return oracleEvidence[i].Symbol < oracleEvidence[j].Symbol })
 	return targetEvidence, oracleEvidence, nil
 }

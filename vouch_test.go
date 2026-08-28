@@ -250,10 +250,26 @@ func TestOracleMemoryPinGatesReuse(t *testing.T) {
 	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleMemoryBytes: 1 << 30,
 		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
 		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}}
+	// The pin is directional: attestations ride to a record assembled
+	// under a ceiling at least as large — every verdict is preserved —
+	// and refuse under a smaller one (REQ-result-stale's oracle-memory
+	// clause).
 	loosened := base
 	loosened.OracleMemoryBytes = 0
-	if sameAttestationPins(base, loosened) {
-		t.Fatal("a moved memory ceiling read as unchanged attestation pins")
+	if !sameAttestationPins(base, loosened) {
+		t.Fatal("an unlimited current ceiling refused attestations a bounded record's verdicts preserve")
+	}
+	tightened := base
+	tightened.OracleMemoryBytes = 1 << 29
+	if sameAttestationPins(base, tightened) {
+		t.Fatal("a smaller current ceiling read as unchanged attestation pins")
+	}
+	// A ceiling-decided record pins its exact bytes: the ceiling
+	// authored a verdict, so any different ceiling could flip one.
+	decided := base
+	decided.OracleCeilingDecided = true
+	if sameAttestationPins(decided, loosened) {
+		t.Fatal("a ceiling-decided record's attestations rode across a ceiling change")
 	}
 	if DocumentVersion < 4 {
 		t.Fatalf("DocumentVersion = %d: the memory pin narrows reuse and rode the version-4 bump", DocumentVersion)

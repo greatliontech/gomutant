@@ -367,6 +367,16 @@ type Finding struct {
 	// never serves across a moved ceiling. Its addition narrows reuse
 	// and rides the version-4 bump (REQ-result-export's precedent).
 	OracleMemoryBytes int64 `json:"oracleMemoryBytes,omitempty"`
+	// OracleCeilingDecided marks a record with at least one kill whose
+	// verdict the oracle memory ceiling decided (a memory-exhaustion
+	// signature in the killing run). Such a record pins its exact
+	// ceiling; a record without it serves directionally — any current
+	// ceiling at least as large as the recorded one preserves every
+	// verdict (REQ-result-stale, REQ-exec-oracle-memory). Tolerance:
+	// an older reader dropping this field falls back to the exact
+	// ceiling compare — strictly more conservative — so the field
+	// rides the current document version.
+	OracleCeilingDecided bool `json:"oracleCeilingDecided,omitempty"`
 	// PropertyRegime records the property-runtime measurement regime the
 	// finding's oracle ran under ("" = none; engine.PropertyRegimeRapid =
 	// rapid draws pinned): a measurement pin, so a record measured under
@@ -945,7 +955,7 @@ var inlineFindingFields = map[string]bool{
 	"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "propertyRegime": true, "compartmentLedger": true, "commit": true, "dirty": true,
 	"candidateCount": true, "generated": true, "mutants": true, "killed": true,
 	"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true,
-	"candidateEvidence": true,
+	"candidateEvidence": true, "oracleCeilingDecided": true,
 }
 
 // decodeInlineFinding validates and decodes one inline finding record

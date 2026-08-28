@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // The divergence stamp's best-effort naming: the paths present in
@@ -128,7 +129,7 @@ func TestApplySplicedUnionNamesDivergingInputs(t *testing.T) {
 	rec := Finding{Symbol: "example.com/splice.F",
 		TargetEvidence: SubjectEvidence{Symbol: "example.com/splice.F", RuntimeInputs: recorded, RuntimeDigest: "recorded-digest"},
 		OracleEvidence: []SubjectEvidence{{Symbol: "example.com/splice.TestF", RuntimeInputs: recorded, RuntimeDigest: "recorded-digest"}}}
-	_, stamped, err := tree.applySplicedUnion(context.Background(), env, rec, union)
+	_, stamped, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, engine.OracleEvidenceEnv(env)), root)
 	if err != nil {
 		t.Fatal(err)
 	}

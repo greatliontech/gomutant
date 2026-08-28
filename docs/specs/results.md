@@ -175,7 +175,27 @@ target or any target/oracle dependency, a changed runtime input, purity,
 toolchain, or build configuration, an added or removed oracle identity, a new
 oracle selection mode or operator version, or a different effective oracle timeout each invalidates the record; a
 request for more candidates than a capped record generated invalidates only
-the unmeasured remainder, under the budget-extension carve-out below. Every target and
+the unmeasured remainder, under the budget-extension carve-out below. The
+oracle-memory pin alone is DIRECTIONAL: a record none of whose verdicts the
+ceiling decided serves under any current effective ceiling at least as large
+as its recorded one — every verdict is preserved: a pass at the recorded
+ceiling still fits, a non-memory kill still fires — and re-measures under a
+smaller one, which could newly exhaust an execution; a ceiling-decided
+record (one carrying a kill whose run bore a memory-exhaustion signature)
+pins its exact bytes, because the ceiling authored a verdict and any
+different ceiling could flip it — and "decided" covers discards
+exactly as kills: a candidate the ceiling discarded (a link step or
+noisy baseline dying on the cap) would be measurable under a larger
+one, so its record marks ceiling-decided too. The directional serve's
+premise is that the recorded pin bounds every verdict's measurement
+ceiling, so any serve arm that re-executes candidates raises the
+recorded pin to the larger effective ceiling as it merges — the
+ENTRY-RESOLVED current ceiling the serve gate compared, never a live
+re-read of the process setting, so a mid-campaign change cannot
+ratchet the record. This is
+the split the machine-local evidence fault demanded: the ceiling's
+BYTES are machine circumstance (RAM-derived by default), the
+ceiling's DECISIONS are measurement identity. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures.
 Measurement pins are never partially trusted: any moved pin remeasures the
 whole target, with exactly four precisely scoped carve-outs — candidate-local
@@ -390,7 +410,21 @@ first time it serves with those paths clean, its attestations riding the
 promotion. Each subject's manifest resolves against that subject's own
 module directory — the base its validation used; an unreadable manifest,
 or evidence naming a subject the run carries no view for, stamps dirty,
-fail-closed. An explicitly non-reusable rewrite re-stamps like any other
+fail-closed. Persisted evidence is the PORTABLE form: each subject's
+runtime-input manifest converts to module-relative identities against
+that subject's own module before it is stamped (gofresh
+REQ-inputs-relative-identities), the in-memory merge world staying
+absolute (REQ-inputs-absolute-identities) with a recorded manifest
+re-absolutized against its module base whenever it re-enters a merge —
+so a committed document is keyed by what was measured, never by the
+checkout root or the file times that measured it, and a clone of the
+same content serves it. An absolute-era record keeps revalidating on
+its producing checkout and converts as its records re-measure. The
+travel is same-toolchain BY CONSTRUCTION and deliberately so: the
+toolchain pin is measurement identity — provenance refusal, not a
+travel defect — so a document measured under one toolchain (this
+fleet's dst releases) re-measures under another (a CI runner's stock
+Go) rather than serving verdicts whose observation surface differed. An explicitly non-reusable rewrite re-stamps like any other
 but never promotes — its unverifiable subject evidence fails the
 portable line regardless of provenance. Serve and re-measure decisions
 state their reason: a served record names the pins that held ("served: body,

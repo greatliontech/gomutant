@@ -85,7 +85,7 @@ func TestOracleMemoryCeilingContainsRunawayMutant(t *testing.T) {
 		Replacements: []Replacement{{File: seed.Replacements[0].File, Source: []byte(runaway)}},
 	}
 	start := time.Now()
-	out, killer, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
+	out, killer, memoryDecided, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
 		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, GoEnv("testdata/fixturemod"))
 	elapsed := time.Since(start)
 	if err != nil {
@@ -96,6 +96,12 @@ func TestOracleMemoryCeilingContainsRunawayMutant(t *testing.T) {
 	}
 	if elapsed > 90*time.Second {
 		t.Fatalf("containment took %v - the ceiling did not fire", elapsed)
+	}
+	// The verdict was authored by the ceiling: the record must say so,
+	// or it would serve directionally under a larger ceiling where the
+	// runaway might survive (REQ-exec-oracle-memory).
+	if !memoryDecided {
+		t.Fatalf("ceiling-decided kill not attributed to memory (killer %q)", killer)
 	}
 
 	// The soft limit genuinely rides the oracle environment: this mutant
@@ -125,12 +131,36 @@ func TestOracleMemoryCeilingContainsRunawayMutant(t *testing.T) {
 			sensingEnv = append(sensingEnv, kv)
 		}
 	}
-	out, killer, _, _, _, err = RunMutantObservedEnv(context.Background(), "testdata/fixturemod", senseMutant,
+	out, killer, _, _, _, _, err = RunMutantObservedEnv(context.Background(), "testdata/fixturemod", senseMutant,
 		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, sensingEnv)
 	if err != nil {
 		t.Fatalf("env-sensing mutant aborted the campaign: %v", err)
 	}
 	if out != MutantSurvived {
 		t.Fatalf("env-sensing mutant outcome = %v (killer %q): GOMEMLIMIT did not reach the oracle environment", out, killer)
+	}
+}
+
+// The memory-death signature set: Go runtime fatals and ENOMEM error
+// text mark a memory-decided verdict; ordinary failure output does not
+// (REQ-exec-oracle-memory). Overcatching is the sound direction.
+func TestMemoryDecidedKillSignatures(t *testing.T) {
+	for _, decided := range []string{
+		"fatal error: runtime: out of memory",
+		"mmap: out of memory allocating heap arena",
+		"fork/exec /bin/true: cannot allocate memory",
+	} {
+		if !memoryDecidedKill([]byte("prefix\n" + decided + "\nsuffix")) {
+			t.Errorf("signature not recognized: %q", decided)
+		}
+	}
+	for _, clean := range []string{
+		"--- FAIL: TestWeak (0.01s)",
+		"expected 3, got 4",
+		"panic: runtime error: index out of range",
+	} {
+		if memoryDecidedKill([]byte(clean)) {
+			t.Errorf("ordinary failure misattributed to memory: %q", clean)
+		}
 	}
 }

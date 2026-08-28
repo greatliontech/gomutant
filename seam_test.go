@@ -236,7 +236,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetEvidence, oracleEvidence, err := attachEvidence(target, oracle, state)
+	targetEvidence, oracleEvidence, err := attachEvidence(target, oracle, newPortableUnion(state, tree.eng.GoEnv()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspaceTargetEvidence, workspaceOracleEvidence, err := attachEvidence(workspaceTarget, workspaceOracle, workspaceState)
+	workspaceTargetEvidence, workspaceOracleEvidence, err := attachEvidence(workspaceTarget, workspaceOracle, newPortableUnion(workspaceState, workspace.eng.GoEnv()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence, _, err := attachEvidence(target, nil, state)
+	evidence, _, err := attachEvidence(target, nil, newPortableUnion(state, tree.eng.GoEnv()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,7 +614,7 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetEvidence, oracleEvidence, err := attachEvidence(target, []*subjectView{oracle}, state)
+	targetEvidence, oracleEvidence, err := attachEvidence(target, []*subjectView{oracle}, newPortableUnion(state, tr.eng.GoEnv()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -631,7 +631,7 @@ func TestInspectFindingStates(t *testing.T) {
 	multiTarget, multiOracle, err := attachEvidence(batched.bySymbol["example.com/fixture/lib.Add"], []*subjectView{
 		batched.bySymbol["example.com/fixture/lib.TestAdd"],
 		batched.bySymbol["example.com/fixture/lib.TestWeak"],
-	}, state)
+	}, newPortableUnion(state, tr.eng.GoEnv()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +752,7 @@ func TestIncompleteObservationCannotBeFresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence, _, err := attachEvidence(view, nil, state)
+	evidence, _, err := attachEvidence(view, nil, newPortableUnion(state, tr.eng.GoEnv()))
 	if err != nil {
 		t.Fatal(err)
 	}
