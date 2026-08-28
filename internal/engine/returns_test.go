@@ -78,7 +78,7 @@ func TestReturnSubstitutionSourcesRanksAndSiblings(t *testing.T) {
 			if candidate.Operator == test.operator {
 				found = true
 				if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != wantSource {
-					t.Errorf("%s source = %q, want %q", test.operator, candidate.Replacements, wantSource)
+					t.Errorf("%s source = %v, want %q", test.operator, candidate.Replacements, wantSource)
 				}
 				if test.symbol == "ReturnBoolean" && test.operator == "return: false" && candidate.Position != "return_mappings.go:3:46" {
 					t.Errorf("return position = %q, want return_mappings.go:3:46", candidate.Position)
@@ -109,7 +109,7 @@ func TestReturnSubstitutionSourcesRanksAndSiblings(t *testing.T) {
 	}
 	for _, candidate := range generation.Candidates {
 		if candidate.Operator == "return: zero" && (len(candidate.Replacements) != 1 || !strings.Contains(string(candidate.Replacements[0].Source), "return flag, 0, pointer")) {
-			t.Errorf("return sibling expressions changed: %q", candidate.Replacements)
+			t.Errorf("return sibling expressions changed: %v", candidate.Replacements)
 		}
 	}
 
@@ -120,7 +120,7 @@ func TestReturnSubstitutionSourcesRanksAndSiblings(t *testing.T) {
 	for _, candidate := range generation.Candidates {
 		if candidate.Operator == "return: zero" {
 			if len(candidate.Replacements) != 1 || !strings.Contains(string(candidate.Replacements[0].Source), "return 0") {
-				t.Errorf("parenthesized return source = %q", candidate.Replacements)
+				t.Errorf("parenthesized return source = %v", candidate.Replacements)
 			}
 			catalog, err := tr.candidateCatalog(context.Background(), "example.com/fixture/lib.ReturnParenthesized")
 			if err != nil {

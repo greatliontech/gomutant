@@ -17,6 +17,17 @@ func writeShapedFixture(t *testing.T) string {
 		"go.mod":         "module example.com/shaped\n\ngo 1.26\n",
 		"core/core.go":   "package core\n\nfunc Core() int { return 1 }\n",
 		"forbidden/f.go": "package forbidden\n\nfunc F() {}\n",
+		// The link-level boundary quartet: linkforbidden's observable
+		// behavior is its init-time registration into linkreg, so an
+		// import-boundary probe linking it into linkuser's test binary
+		// flips TestUsesCore — teeth with no runtime file reads, the
+		// oracle class whose only channel to the forbidden side is the
+		// linkage the probe itself creates.
+		"linkreg/reg.go":          "package linkreg\n\nvar all []string\n\nfunc Register(s string) { all = append(all, s) }\n\nfunc All() []string { return all }\n",
+		"linkforbidden/f.go":      "package linkforbidden\n\nimport (\n\t_ \"embed\"\n\n\t\"example.com/shaped/linkreg\"\n)\n\n//go:embed table.txt\nvar table string\n\nfunc init() {\n\tif table != \"\" {\n\t\tlinkreg.Register(table)\n\t}\n}\n\nfunc F() {}\n",
+		"linkforbidden/table.txt": "x",
+		"linkcore/core.go":        "package linkcore\n\nfunc Core() int { return 2 }\n",
+		"linkuser/user_test.go":   "package linkuser\n\nimport (\n\t\"testing\"\n\n\t\"example.com/shaped/linkcore\"\n\t\"example.com/shaped/linkreg\"\n)\n\nfunc TestUsesCore(t *testing.T) {\n\tif linkcore.Core() != 2 {\n\t\tt.Fatal()\n\t}\n\tif len(linkreg.All()) != 0 {\n\t\tt.Fatal(\"forbidden linkage registered\")\n\t}\n}\n",
 		// The toothy oracle: parses the core package's source at RUNTIME
 		// and fails on any import of the forbidden path — the
 		// analyzer-shaped oracle class the structural probe exists to
@@ -327,5 +338,150 @@ func TestShapedDispositionShedsOnMovedPins(t *testing.T) {
 	}
 	if len(rerun[0].Survivors) != 1 {
 		t.Fatalf("re-measure lost the shaped survivor: %+v", rerun[0].Survivors)
+	}
+}
+
+// A dirty probed file never stamps clean provenance, for every shaped
+// class whose probes derive from on-disk sources. The
+// interface-satisfaction arm is the discriminating one: its oracle
+// lives in another package, so the declaring file is in no subject
+// view's closure and only the shape's own probed-file provenance can
+// see the uncommitted edit; the manual arm pins the recipe file's
+// coverage across the candidate-derived collapse (REQ-result-layers).
+func TestShapedDirtyProbedFileStampsDirtyProvenance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per shaped candidate")
+	}
+	tmp := writeShapedFixture(t)
+	gitInitCommit(t, tmp)
+	for _, name := range []string{"iface/iface.go", "guard/guard.go"} {
+		path := filepath.Join(tmp, filepath.FromSlash(name))
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(src, []byte("\n// uncommitted drift\n")...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	satisfaction := Target{Symbol: "structural:impl-satisfies-doer-remote",
+		Structural: &StructuralSpec{Class: "interface-satisfaction", Type: "example.com/shaped/iface.Impl", Interface: "example.com/shaped/iface.Doer"},
+		Oracle:     []string{"example.com/shaped/arch.TestVacuous"}, OracleExplicit: true, Labels: []string{"expected-vacuous"}}
+	recipe := Target{Symbol: "recipe:guard-empty-input-dirty",
+		Manual: &ManualSpec{File: "guard/guard.go", Edits: []ManualEdit{{
+			Find:    `if s == "" {`,
+			Replace: `if false {`,
+		}}},
+		Oracle: []string{"example.com/shaped/guard.TestEmptyRefused"}, OracleExplicit: true}
+	// The import-boundary counter-arm: synthesized probe files exist on
+	// no tree and contribute nothing to provenance, so the finding
+	// stamps CLEAN on this same dirty tree — even against a stray
+	// untracked on-disk copy of the probe file (the loud-name
+	// leftover), whose git drift would otherwise force-stamp dirty —
+	// and unrelated dirt never bleeds across findings. Fixture
+	// assumption the arm rests on: arch imports neither core nor the
+	// dirtied packages, so no subject view's own provenance paths name
+	// the stray — only the synthetic skip decides.
+	stray := filepath.Join(tmp, "core", "zz_gomutant_structural_probe.go")
+	if err := os.WriteFile(stray, []byte("// stray leftover probe copy\npackage core\n\nimport _ \"example.com/shaped/forbidden\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	boundary := Target{Symbol: "structural:core-no-forbidden-clean-stamp",
+		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/core"}, Forbidden: "example.com/shaped/forbidden"},
+		Oracle:     []string{"example.com/shaped/arch.TestVacuous"}, OracleExplicit: true, Labels: []string{"expected-vacuous"}}
+	findings, err := tree.Run(context.Background(), []Target{satisfaction, recipe, boundary}, Options{OracleTimeout: 2 * time.Minute, BracketPaths: []string{"core"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 3 {
+		t.Fatalf("findings = %d, want 3", len(findings))
+	}
+	for _, f := range findings[:2] {
+		if f.Skipped != "" {
+			t.Fatalf("shaped target skipped: %+v", f)
+		}
+		if !f.Dirty {
+			t.Fatalf("dirty probed file stamped clean provenance: %+v", f)
+		}
+	}
+	if f := findings[2]; f.Skipped != "" || f.Dirty {
+		t.Fatalf("import-boundary stamp leaked a synthetic probe path or foreign dirt: %+v", f)
+	}
+}
+
+// The forbidden-side linkage is the one verdict input the probe itself
+// creates: a link-level oracle's only channel to the forbidden path is
+// the probe's blank import, so the forbidden closure's content must
+// ride the shape digest — a commit to it re-measures rather than
+// serving the pre-commit verdict, and the re-measure reports the
+// flipped truth (REQ-target-structural, REQ-result-stale; the
+// structural-shaped-probe-provenance-gap reproducer).
+func TestImportBoundaryServeRepinsOnForbiddenLinkageChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per shaped candidate")
+	}
+	tmp := writeShapedFixture(t)
+	gitInitCommit(t, tmp)
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "structural:linkcore-no-linkforbidden",
+		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "example.com/shaped/linkforbidden"},
+		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
+	findings, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := findings[0]; f.Skipped != "" || f.Mutants != 1 || f.Killed != 1 {
+		t.Fatalf("link-level boundary probe not killed: %+v", f)
+	}
+
+	// Unchanged tree: the record serves — the first served
+	// import-boundary arm, witnessing the pin is not merely a
+	// re-measure-everything hash.
+	served, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute, Prior: findings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !served[0].Cached {
+		t.Fatalf("unchanged import-boundary record did not serve: %+v", served[0])
+	}
+
+	// A committed change to the forbidden package — outside the
+	// oracle's clean-tree closure and its runtime evidence — must
+	// re-measure, and the fresh verdict reports the boundary gone
+	// vacuous.
+	if err := os.WriteFile(filepath.Join(tmp, "linkforbidden", "f.go"), []byte("package linkforbidden\n\nfunc F() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCommitAll(t, tmp, "drop the init registration")
+	remeasured, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute, Prior: findings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remeasured[0].Cached {
+		t.Fatal("forbidden-linkage change served the pre-commit verdict")
+	}
+	if f := remeasured[0]; f.Killed != 0 || len(f.Survivors) != 1 {
+		t.Fatalf("re-measure did not report the now-vacuous boundary: %+v", f)
+	}
+}
+
+func gitCommitAll(t *testing.T, dir, message string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", message},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
 	}
 }

@@ -219,3 +219,195 @@ func (Impl) Do() int { return outside.O() }
 		t.Fatalf("fault not attributed to the scratch: %v", err)
 	}
 }
+
+// Shape digests hash tree-relative identities, so the same content at
+// two checkout roots derives the same pin — a shaped record travels
+// exactly as its manifests do (REQ-result-stale, chunk-133 discipline).
+func TestShapeDigestTravelsAcrossCheckoutRoots(t *testing.T) {
+	targets := []Target{
+		{Symbol: "recipe:x",
+			Manual: &ManualSpec{File: "guard/guard.go", Edits: []ManualEdit{{Find: `if s == "" {`, Replace: `if false {`}}},
+			Oracle: []string{"example.com/shaped/guard.TestEmptyRefused"}, OracleExplicit: true},
+		{Symbol: "structural:link",
+			Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "example.com/shaped/linkforbidden"},
+			Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true},
+	}
+	treeA, err := Load(writeShapedFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeB, err := Load(writeShapedFixture(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tg := range targets {
+		_, da, err := treeA.shapedCandidates(context.Background(), tg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, db, err := treeB.shapedCandidates(context.Background(), tg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if da != db {
+			t.Errorf("%s: digest differs across checkout roots: %s vs %s", tg.Symbol, da, db)
+		}
+	}
+}
+
+// An external forbidden path — one the loaded tree does not carry —
+// pins its linkage through the module-selection files, so a selection
+// change re-measures conservatively; an in-tree linkage change moves
+// the digest through the walked content itself
+// (REQ-target-structural).
+func TestShapeDigestPinsForbiddenLinkage(t *testing.T) {
+	tmp := writeShapedFixture(t)
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	external := Target{Symbol: "structural:no-strings",
+		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "strings"},
+		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
+	_, before, err := tree.shapedCandidates(context.Background(), external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendFile := func(name, text string) {
+		t.Helper()
+		path := filepath.Join(tmp, name)
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(src, []byte(text)...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendFile("go.mod", "\n// selection moved\n")
+	_, after, err := tree.shapedCandidates(context.Background(), external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Error("external forbidden linkage ignored a module-selection change")
+	}
+
+	inTree := Target{Symbol: "structural:no-linkforbidden",
+		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "example.com/shaped/linkforbidden"},
+		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
+	_, base, err := tree.shapedCandidates(context.Background(), inTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// linkreg is reached transitively from linkforbidden: its content
+	// rides the fold.
+	appendFile("linkreg/reg.go", "\n// linkage moved\n")
+	_, moved, err := tree.shapedCandidates(context.Background(), inTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base == moved {
+		t.Error("in-tree forbidden linkage ignored a transitive content change")
+	}
+	// The embedded data linkforbidden compiles in is linked exactly as
+	// its Go sources are: an edit to it moves the pin while every
+	// function body stays byte-identical (the closure standard gofresh
+	// sets — embedded files ride the closure).
+	appendFile("linkforbidden/table.txt", "y")
+	_, embedMoved, err := tree.shapedCandidates(context.Background(), inTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved == embedMoved {
+		t.Error("embedded data change ignored by the forbidden linkage fold")
+	}
+	// An untouched, unlinked package never moves the pin: the probed
+	// package's own content stays outside the digest deliberately.
+	appendFile("linkcore/core.go", "\n// probed content moved\n")
+	_, probedMoved, err := tree.shapedCandidates(context.Background(), inTree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embedMoved != probedMoved {
+		t.Error("probed-package content moved the import-boundary digest — the deliberate exclusion regressed")
+	}
+}
+
+// The two reaches no fold can pin refuse the derivation loudly: an
+// in-tree path the load does not carry, and an out-of-tree reach
+// while a local replace directive names source the selection files
+// cannot content-pin (REQ-target-structural).
+func TestShapeDigestRefusesUnpinnableForbiddenLinkage(t *testing.T) {
+	tmp := writeShapedFixture(t)
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vanished := Target{Symbol: "structural:no-ghost",
+		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "example.com/shaped/ghost"},
+		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
+	if _, _, err := tree.shapedCandidates(context.Background(), vanished); err == nil || !strings.Contains(err.Error(), "not pinnable") {
+		t.Errorf("vanished in-tree forbidden accepted: %v", err)
+	}
+
+	gomod := filepath.Join(tmp, "go.mod")
+	src, err := os.ReadFile(gomod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gomod, append(src, []byte("\nreplace example.com/other => ./othermod\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	external := Target{Symbol: "structural:no-strings",
+		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "strings"},
+		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
+	if _, _, err := tree.shapedCandidates(context.Background(), external); err == nil || !strings.Contains(err.Error(), "local replace") {
+		t.Errorf("external forbidden under a local replace accepted: %v", err)
+	}
+
+	// The vendor twin: go.sum vouches for the module cache, never for
+	// vendor/, so an external reach with a vendor manifest present
+	// refuses on the same ground.
+	if err := os.WriteFile(gomod, src, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "vendor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "vendor", "modules.txt"), []byte("# example.com/other v0.0.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tree.shapedCandidates(context.Background(), external); err == nil || !strings.Contains(err.Error(), "vendor mode") {
+		t.Errorf("external forbidden under vendor mode accepted: %v", err)
+	}
+}
+
+// A workspace member above the tree root would hand the linkage fold
+// absolute identities — folding them would silently root-key the
+// digest and break record travel. The state is unreachable: Load
+// itself refuses escaping go.work members, which this test pins (the
+// digest derivation keeps its own escape refusal as fail-closed
+// defense behind that guarantee).
+func TestShapeDigestRefusesOutOfTreeLinkage(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"tree/go.work":         "go 1.26\n\nuse (\n\t.\n\t../sib\n)\n",
+		"tree/go.mod":          "module example.com/tree\n\ngo 1.26\n",
+		"tree/app/app.go":      "package app\n\nfunc App() int { return 1 }\n",
+		"tree/app/app_test.go": "package app\n\nimport \"testing\"\n\nfunc TestApp(t *testing.T) {\n\tif App() != 1 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"sib/go.mod":           "module example.com/sib\n\ngo 1.26\n",
+		"sib/pkg/pkg.go":       "package pkg\n\nfunc P() {}\n",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Load(filepath.Join(root, "tree")); err == nil || !strings.Contains(err.Error(), "escapes the tree") {
+		t.Errorf("out-of-tree workspace member loaded: %v", err)
+	}
+}

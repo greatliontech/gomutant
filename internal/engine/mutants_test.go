@@ -240,7 +240,7 @@ func TestComparisonCatalog(t *testing.T) {
 		}
 		ordered = append(ordered, candidate.Operator)
 		if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != wantSource {
-			t.Errorf("%s source = %q, want %q", candidate.Operator, candidate.Replacements, wantSource)
+			t.Errorf("%s source = %v, want %q", candidate.Operator, candidate.Replacements, wantSource)
 		}
 	}
 	if !slices.Equal(ordered, []string{"relational boundary: < -> <=", "relational negation: < -> >="}) {
@@ -277,7 +277,7 @@ func TestComparisonCatalog(t *testing.T) {
 			found = true
 			wantSource := strings.Replace(mappingSource, mapping.old, mapping.replacement, 1)
 			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != wantSource {
-				t.Errorf("%s source = %q, want %q", mapping.operator, candidate.Replacements, wantSource)
+				t.Errorf("%s source = %v, want %q", mapping.operator, candidate.Replacements, wantSource)
 			}
 		}
 		if !found {
@@ -385,7 +385,7 @@ func TestCandidatesRenderExactSource(t *testing.T) {
 	for _, candidate := range generation.Candidates {
 		if candidate.Operator == "condition: negate" {
 			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
-				t.Fatalf("generated source = %q, want %q", candidate.Replacements, want)
+				t.Fatalf("generated source = %v, want %q", candidate.Replacements, want)
 			}
 			return
 		}

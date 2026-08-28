@@ -976,7 +976,7 @@ func (t *Tree) inspectShapedFindingContext(ctx context.Context, f Finding) (Find
 	if _, err := time.ParseDuration(f.OracleTimeout); err != nil {
 		return FindingInspection{}, fmt.Errorf("finding %s has invalid oracle timeout: %w", f.Symbol, err)
 	}
-	_, digest, err := t.shapedCandidates(ctx, Target{Symbol: f.Symbol, Structural: f.Shape.Structural, Manual: f.Shape.Manual, Oracle: []string{"-"}, OracleExplicit: true})
+	_, digest, err := t.shapedCandidates(ctx, Target{Symbol: f.Symbol, Structural: f.Shape.Structural, Manual: f.Shape.Manual, Oracle: nil, OracleExplicit: true})
 	if err != nil {
 		if ctx.Err() != nil {
 			return FindingInspection{}, ctx.Err()

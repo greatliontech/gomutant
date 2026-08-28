@@ -73,7 +73,7 @@ func TestScalarLiteralMappingSourcesAndRanks(t *testing.T) {
 			}
 			found = true
 			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != wantSource {
-				t.Errorf("%s source = %q, want %q", test.operator, candidate.Replacements, wantSource)
+				t.Errorf("%s source = %v, want %q", test.operator, candidate.Replacements, wantSource)
 			}
 			if test.symbol == "LiteralInteger" && candidate.Position != "literal_mappings.go:3:45" {
 				t.Errorf("integer literal position = %q, want literal_mappings.go:3:45", candidate.Position)

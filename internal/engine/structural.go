@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // ImportProbe is one import-boundary candidate: a synthesized file
@@ -33,6 +35,92 @@ type ImportProbe struct {
 // only inside a mutant's overlay, and a stray on-disk copy is
 // immediately attributable.
 const probeFileName = "zz_gomutant_structural_probe.go"
+
+// ForbiddenLinkage names the compile-time closure an import-boundary
+// probe links into the mutant binary beyond the probed package: the
+// forbidden path's package and everything it transitively imports.
+// That closure is by construction absent from every oracle's
+// clean-tree view — the boundary asserts nothing reaches it — so its
+// content must ride the shape digest, not the evidence surface.
+// InTreeFiles is the file set of every reached package the loaded
+// tree carries — the Go sources, the files they embed, and the
+// non-Go compiled inputs, everything the probe links whose motion
+// changes the linked behavior. External reports any reached package
+// outside the tree's main modules — a standard-library or module
+// dependency; the caller decides whether the toolchain pin and the
+// module selection can vouch for it (a local replace or an active
+// vendor directory means they cannot). Unpinnable names a reached
+// path under a main
+// module's prefix that the load nevertheless does not carry (a
+// vanished or fully build-excluded package): its content cannot be
+// pinned, and the digest derivation refuses rather than folding a
+// hole.
+type ForbiddenLinkage struct {
+	InTreeFiles []string
+	External    bool
+	Unpinnable  string
+}
+
+// ForbiddenLinkageClosure walks the type-checker's import graph from
+// the forbidden path over the loaded tree. The recursion traverses
+// only main-module roots of the ./... loads, so every visited
+// Types.Imports() is source-checked — the load shape this walk's
+// completeness rests on. A reached in-tree package whose types are
+// unavailable degrades to external, fail-closed defense.
+func (t *Tree) ForbiddenLinkageClosure(forbidden string) ForbiddenLinkage {
+	byPath := make(map[string]*packages.Package, len(t.pkgs))
+	modulePrefixes := map[string]bool{}
+	for _, pkg := range t.pkgs {
+		if pkg.Module != nil && pkg.Module.Main && pkg.Module.Path != "" {
+			modulePrefixes[pkg.Module.Path] = true
+		}
+		// The plain compilation only: a blank import in a non-test
+		// file links the plain variant, and the augmented test variant
+		// shares its PkgPath.
+		if pkg.ID == pkg.PkgPath && len(pkg.GoFiles) > 0 {
+			byPath[pkg.PkgPath] = pkg
+		}
+	}
+	underMainModule := func(path string) bool {
+		for prefix := range modulePrefixes {
+			if path == prefix || strings.HasPrefix(path, prefix+"/") {
+				return true
+			}
+		}
+		return false
+	}
+	var linkage ForbiddenLinkage
+	seen := map[string]bool{}
+	var walk func(path string)
+	walk = func(path string) {
+		if seen[path] {
+			return
+		}
+		seen[path] = true
+		pkg, ok := byPath[path]
+		if !ok {
+			if underMainModule(path) && linkage.Unpinnable == "" {
+				linkage.Unpinnable = path
+			} else {
+				linkage.External = true
+			}
+			return
+		}
+		linkage.InTreeFiles = append(linkage.InTreeFiles, pkg.GoFiles...)
+		linkage.InTreeFiles = append(linkage.InTreeFiles, pkg.EmbedFiles...)
+		linkage.InTreeFiles = append(linkage.InTreeFiles, pkg.OtherFiles...)
+		if pkg.Types == nil {
+			linkage.External = true
+			return
+		}
+		for _, imp := range pkg.Types.Imports() {
+			walk(imp.Path())
+		}
+	}
+	walk(forbidden)
+	sort.Strings(linkage.InTreeFiles)
+	return linkage
+}
 
 // ImportProbes synthesizes one probe per scoped package, each
 // blank-importing the forbidden path: the oracle must fail on every

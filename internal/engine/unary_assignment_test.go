@@ -144,7 +144,7 @@ func TestUnaryAssignmentMappingSourcesAndRanks(t *testing.T) {
 					continue
 				}
 				if len(candidate.Replacements) != 1 || !strings.Contains(string(candidate.Replacements[0].Source), test.replacement) || strings.Contains(string(candidate.Replacements[0].Source), test.old) {
-					t.Errorf("%s source = %q", test.operator, candidate.Replacements)
+					t.Errorf("%s source = %v", test.operator, candidate.Replacements)
 				}
 				if test.symbol == "UnaryPlus" && candidate.Position != "unary_assignment_mappings.go:3:41" {
 					t.Errorf("unary position = %q, want operator at unary_assignment_mappings.go:3:41", candidate.Position)

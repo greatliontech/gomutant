@@ -7,10 +7,10 @@ is deleted (git holds history).
 | slug | summary | Lands |
 |------|---------|-------|
 | [mcp-liveness-cancellation-witness](mcp-liveness-cancellation-witness.md) | keepalive config pinned but the ping-failure cancellation propagation has no witness over the SDK transport seam | transport-seam fault injection lands in the mcpserver harness |
-| [structural-shaped-probe-provenance-gap](structural-shaped-probe-provenance-gap.md) | structural shapes' probe content escapes dirty judgment and serve re-observation | train chunk 105 |
 | [planonly-gatherwindow-suite-hang](planonly-gatherwindow-suite-hang.md) | a plan-only Tree.Run hangs the suite at gatherWindow, cause undumped | train chunk 113 (closes unreproducible at triage absent a mechanism-showing dump) |
 | [fold-growth-into-generalized-drift](fold-growth-into-generalized-drift.md) | growth is a strict special case of generalized drift; fold and generalize the survivor-delta narrowing | train chunk 128 |
 | [consolidate-reidentification-and-bucket-policy](consolidate-reidentification-and-bucket-policy.md) | one re-identification helper, one advisory-bucket policy across the serve carve-outs | train chunk 128 |
+| [shaped-derivation-once](shaped-derivation-once.md) | shaped candidates derive at resolve AND per finding at stamp/serve; thread the resolve-time derivation through the assembly arms — one derivation per run, the stamp-time failure arm deleted | train chunk 128 |
 | [symbol-cutter-duality](symbol-cutter-duality.md) | two symbol cutters over one grammar, relationship unstated | train chunk 113 |
 | [campaign-refuses-tree-change-from-rapid-failfiles](campaign-refuses-tree-change-from-rapid-failfiles.md) | rapid failfile persistence poisons campaign analysis views and ephemeral tree cleanliness | train chunk 113 |
 | [staged-campaign-reports-clean-index-as-drift](staged-campaign-reports-clean-index-as-drift.md) | staged campaign refuses an executed target as unstaged drift without a changed path | train chunk 113 |

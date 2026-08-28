@@ -240,6 +240,18 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	if !unknown.Dirty {
 		t.Fatal("evidence naming a subject with no view re-stamped clean, want fail-closed dirty")
 	}
+
+	// A shaped finding whose shape no longer derives against the
+	// stamping tree — here a departed recipe file — cannot name its
+	// probed provenance inputs and stamps dirty terminally, the same
+	// fail-closed arm as unreadable evidence (REQ-result-layers).
+	departed := Finding{Symbol: "recipe:departed", Shape: &TargetShape{Manual: &ManualSpec{File: "gone/recipe.go", Edits: []ManualEdit{{Find: "a", Replace: "b"}}}}}
+	if _, err := tree.stampProvenance(ctx, repository, view, nil, &departed); err != nil {
+		t.Fatal(err)
+	}
+	if !departed.Dirty {
+		t.Fatal("a shape that no longer derives re-stamped clean, want fail-closed dirty")
+	}
 }
 
 // TestStampJudgesAliasFormIdentitiesByPhysicalPath: the runtime-input

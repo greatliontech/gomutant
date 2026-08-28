@@ -45,7 +45,7 @@ func TestControlCatalog(t *testing.T) {
 			continue
 		}
 		if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
-			t.Errorf("%s source = %q, want %q", candidate.Operator, candidate.Replacements, want)
+			t.Errorf("%s source = %v, want %q", candidate.Operator, candidate.Replacements, want)
 		}
 	}
 	forCondition := assertOperators("ForCondition", []string{"condition: negate", "condition: force false"})
@@ -61,7 +61,7 @@ func TestControlCatalog(t *testing.T) {
 			found = true
 			want := strings.Replace(conditionsSource, "for n < 1", replacement, 1)
 			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
-				t.Errorf("%s source = %q, want %q", operator, candidate.Replacements, want)
+				t.Errorf("%s source = %v, want %q", operator, candidate.Replacements, want)
 			}
 		}
 		if !found {
@@ -86,7 +86,7 @@ func TestControlCatalog(t *testing.T) {
 			found = true
 			want := strings.Replace(conditionsSource, test.old, test.replacement, 1)
 			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
-				t.Errorf("%s source = %q, want %q", test.symbol, candidate.Replacements, want)
+				t.Errorf("%s source = %v, want %q", test.symbol, candidate.Replacements, want)
 			}
 			if candidate.Position != test.position {
 				t.Errorf("%s position = %s, want %s", test.symbol, candidate.Position, test.position)
@@ -117,7 +117,7 @@ func TestInlineInterfaceAssertConditionGenerates(t *testing.T) {
 		}
 		negated = true
 		if len(candidate.Replacements) != 1 || !strings.Contains(string(candidate.Replacements[0].Source), "if c, ok := v.(interface{ Close() }); !(ok) {") {
-			t.Fatalf("negate replacement = %q, want the guard negated in place", candidate.Replacements)
+			t.Fatalf("negate replacement = %v, want the guard negated in place", candidate.Replacements)
 		}
 	}
 	if !negated {
@@ -174,7 +174,7 @@ func TestLoopControlLegality(t *testing.T) {
 			if candidate.Operator == test.operator {
 				found = true
 				if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
-					t.Errorf("%s source = %q, want %q", test.operator, candidate.Replacements, want)
+					t.Errorf("%s source = %v, want %q", test.operator, candidate.Replacements, want)
 				}
 			}
 		}
@@ -205,7 +205,7 @@ func TestConditionlessForLexingAndImportClassification(t *testing.T) {
 			found = true
 			want := strings.Replace(source, test.old, test.replacement, 1)
 			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
-				t.Errorf("%s source = %q, want %q", test.symbol, candidate.Replacements, want)
+				t.Errorf("%s source = %v, want %q", test.symbol, candidate.Replacements, want)
 			}
 		}
 		if !found {
@@ -275,7 +275,7 @@ func TestConditionlessForIgnoresNestedSemicolons(t *testing.T) {
 		}
 		found = true
 		if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
-			t.Errorf("nested-semicolon source = %q, want %q", candidate.Replacements, want)
+			t.Errorf("nested-semicolon source = %v, want %q", candidate.Replacements, want)
 		}
 	}
 	if !found {
@@ -346,7 +346,7 @@ func TestBooleanOperandAndRangeSources(t *testing.T) {
 			}
 			want := strings.Replace(rangeSource, old, replacement, 1)
 			if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != want {
-				t.Errorf("%s range source = %q, want %q", symbol, candidate.Replacements, want)
+				t.Errorf("%s range source = %v, want %q", symbol, candidate.Replacements, want)
 			}
 			wantPosition := map[string]string{"RangeOnce": "control_range.go:5:18", "RangeEmpty": "control_range.go:12:6"}[symbol]
 			if candidate.Position != wantPosition {

@@ -62,7 +62,7 @@ func TestBitwiseMappingSourcesAndRanks(t *testing.T) {
 			if candidate.Operator == test.operator {
 				found = true
 				if len(candidate.Replacements) != 1 || string(candidate.Replacements[0].Source) != wantSource {
-					t.Errorf("%s source = %q, want %q", test.operator, candidate.Replacements, wantSource)
+					t.Errorf("%s source = %v, want %q", test.operator, candidate.Replacements, wantSource)
 				}
 			}
 		}

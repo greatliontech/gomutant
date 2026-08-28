@@ -642,11 +642,52 @@ a judgment premised on environment semantics ("equivalent because this
 path cannot execute here") can outlive its premise while the mutant keeps
 surviving tests that never covered it, and the carry report is what keeps
 that acceptance visible for re-review. A shaped target's mutation domain
-is unobservable from its record: the shape digest is content-independent
-for the import-boundary class and covers only the single rewritten file
-for the others — never the wider surface the oracle analyzes, which is
-pinned only by the oracle's runtime evidence — and no shaped candidate
-carries a site anchor. A shaped
+is unobservable from its record: the shape digest covers the single
+rewritten file for the interface-satisfaction and manual classes, and
+for the import-boundary class the forbidden-side linkage closure —
+never the probed packages' own content or the wider surface the oracle
+analyzes — and no shaped candidate carries a site anchor. The serve
+pin decomposes by verdict channel. The oracle's own inputs are pinned
+by its evidence: validation requires an observation-closed oracle (the
+engine's read-only observability proof blocks process execution,
+direct syscalls, and every unadmitted effect), so every runtime read
+rides the manifest and every compiled-in dependence rides the oracle
+view's closure fingerprint; an oracle outside that class never
+validates and re-measures every run. The import-boundary probe
+CREATES one verdict input neither surface can carry: it links the
+forbidden path's closure into the mutant binary, and that closure is
+by construction outside every oracle's clean-tree view — so the shape
+digest folds it: in-tree content by tree-relative path and bytes (the
+Go sources, the files they embed, and the non-Go compiled inputs —
+everything the probe links), any reached package outside the tree's
+main modules by the module-selection files (a selection change
+re-measures), standard-library reach riding the toolchain pin. Two
+reaches no fold can pin refuse the derivation loudly rather than
+folding a hole: an in-tree path the load does not carry (vanished or
+fully build-excluded — mutable, invisible content); an out-of-tree
+reach while a local replace directive or a vendor directory is
+active (the selection files name the replaced path or the vendor
+manifest, but carry no checksum for the source the build actually
+links); and a linkage file outside the tree root (a workspace
+member above it), whose identity cannot be tree-keyed without
+root-keying the digest. The probed packages' own content
+stays outside the digest deliberately: the probe compiles only where
+the oracle links the probed package (then the closure fingerprint
+pins it) and is read only where the oracle reads it (then the
+manifest pins it) — an oracle with neither channel has a verdict
+independent of probed content, and its serve is sound by that
+independence. Digest identities hash tree-relative, so a record's
+shape pin travels across checkout roots. Stamp provenance is the
+digest's dirty-side counterpart: the on-disk files a shaped target's
+candidates derive from — the edited recipe file, the rewritten
+declaring files, the forbidden linkage's in-tree files — are
+provenance inputs of the stamp, so a git-dirty probed file never
+stamps a clean, portable row; synthesized probe files exist on no
+tree and contribute nothing, and a shape that no longer derives
+against the stamping tree cannot name its inputs and stamps dirty
+terminally — except under a staged run, whose drift refusal outranks
+the dirty stamp exactly as for every other staged vouching failure
+(REQ-result-staged). A shaped
 disposition therefore carries only under the full measurement-pin gate,
 never the domain gate. Source drift of the mutated
 body sheds rather than attempting to infer that a change was

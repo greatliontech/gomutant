@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -111,7 +114,7 @@ func (t *Tree) shapedCandidates(ctx context.Context, tg Target) ([]engine.Candid
 				Symbol:       tg.Symbol,
 				Operator:     "structural: import-boundary",
 				Position:     probe.Package,
-				Replacements: []engine.Replacement{{File: probe.File, Source: probe.Source}},
+				Replacements: []engine.Replacement{{File: probe.File, Source: probe.Source, Synthetic: true}},
 			})
 		}
 	case tg.Structural != nil:
@@ -151,21 +154,88 @@ func (t *Tree) shapedCandidates(ctx context.Context, tg Target) ([]engine.Candid
 			Replacements: []engine.Replacement{{File: abs, Source: []byte(edited)}},
 		})
 	}
-	digest, err := shapeDigest(tg, candidates)
+	var linkage engine.ForbiddenLinkage
+	if tg.Structural != nil && tg.Structural.Class == "import-boundary" {
+		linkage = t.eng.ForbiddenLinkageClosure(tg.Structural.Forbidden)
+		// Two reaches no fold can pin refuse loudly rather than
+		// folding a hole: an in-tree path the load does not carry
+		// (vanished or fully build-excluded — its content is mutable
+		// and invisible), and an out-of-tree reach while a local
+		// replace directive is active (go.mod records the replace's
+		// path, but no checksum pins the replaced source).
+		if linkage.Unpinnable != "" {
+			return nil, "", fmt.Errorf("import probe: forbidden linkage reaches in-tree package %s the load does not carry — content not pinnable", linkage.Unpinnable)
+		}
+		if linkage.External {
+			if replaced, err := t.localReplaceActive(); err != nil {
+				return nil, "", err
+			} else if replaced != "" {
+				return nil, "", fmt.Errorf("import probe: forbidden linkage escapes the tree while a local replace directive is active (%s) — module selection cannot pin the replaced source", replaced)
+			}
+			// Vendored source is the replace hole in another coat:
+			// go.sum vouches for the module cache, never for vendor/,
+			// whose files are mutable in-tree content the selection
+			// files cannot pin.
+			if vendored := t.vendorActive(); vendored != "" {
+				return nil, "", fmt.Errorf("import probe: forbidden linkage escapes the tree while vendor mode is active (%s) — module selection cannot pin vendored source", vendored)
+			}
+		}
+		// A linkage file outside the tree root (a go.work member above
+		// it) cannot be tree-keyed: folding its absolute identity would
+		// silently root-key the digest and break record travel.
+		for _, file := range linkage.InTreeFiles {
+			if rel := t.treeRelPath(file); filepath.IsAbs(filepath.FromSlash(rel)) {
+				return nil, "", fmt.Errorf("import probe: forbidden linkage reaches %s outside the tree root — identities cannot be tree-keyed", file)
+			}
+		}
+	}
+	digest, err := t.shapeDigest(tg, candidates, linkage)
 	if err != nil {
 		return nil, "", err
 	}
 	return candidates, digest, nil
 }
 
-// shapeDigest folds the declared shape and every synthesized
-// replacement into the target's body-hash pin. Replacements embed the
-// original content they derive from (a rewritten declaring file, an
-// edited recipe file), so a moved source re-measures without a
-// separate content ledger; the import-boundary probe is
-// content-independent by design — the oracle's own runtime evidence
-// pins what the analyzer read.
-func shapeDigest(tg Target, candidates []engine.Candidate) (string, error) {
+// localReplaceActive reports the first module-selection file carrying
+// a replace directive with a filesystem target — source the selection
+// files name but cannot content-pin.
+func (t *Tree) localReplaceActive() (string, error) {
+	for _, file := range t.moduleSelectionFold() {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return "", err
+		}
+		for _, line := range strings.Split(string(content), "\n") {
+			if idx := strings.Index(line, "=>"); idx >= 0 {
+				target := strings.TrimSpace(line[idx+2:])
+				if strings.HasPrefix(target, "./") || strings.HasPrefix(target, "../") || strings.HasPrefix(target, "/") {
+					return file, nil
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
+// shapeDigest folds the declared shape, every synthesized replacement,
+// and the import-boundary probe's forbidden-side linkage closure into
+// the target's body-hash pin. Replacements embed the original content
+// they derive from (a rewritten declaring file, an edited recipe
+// file), so a moved source re-measures without a separate content
+// ledger. The linkage fold pins the one verdict input no evidence
+// surface can carry: the probe links the forbidden path's closure
+// into the mutant binary, and that closure is by construction outside
+// every oracle's clean-tree view — its in-tree content folds by
+// tree-relative path and bytes, and a reached package outside the
+// tree's main modules folds the module-selection files instead
+// (standard-library reach rides the toolchain pin; the reaches no
+// fold can pin refuse upstream in shapedCandidates). File identities
+// hash tree-relative so a record's digest travels across checkout
+// roots (REQ-result-stale, REQ-target-structural).
+func (t *Tree) shapeDigest(tg Target, candidates []engine.Candidate, linkage engine.ForbiddenLinkage) (string, error) {
 	h := sha256.New()
 	spec := struct {
 		Structural *StructuralSpec `json:"structural,omitempty"`
@@ -183,12 +253,89 @@ func shapeDigest(tg Target, candidates []engine.Candidate) (string, error) {
 		h.Write([]byte(c.Position))
 		for _, r := range c.Replacements {
 			h.Write([]byte{0})
-			h.Write([]byte(r.File))
+			h.Write([]byte(t.treeRelPath(r.File)))
 			h.Write([]byte{0})
 			h.Write(r.Source)
 		}
 	}
+	// Sort on the hashed identity, not the absolute form: the two
+	// orders coincide only while every file shares the tree prefix,
+	// and a divergence would silently root-key the digest.
+	linkageFiles := append([]string(nil), linkage.InTreeFiles...)
+	sort.Slice(linkageFiles, func(i, j int) bool {
+		return t.treeRelPath(linkageFiles[i]) < t.treeRelPath(linkageFiles[j])
+	})
+	for _, file := range linkageFiles {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("forbidden linkage source: %w", err)
+		}
+		h.Write([]byte{1})
+		h.Write([]byte(t.treeRelPath(file)))
+		h.Write([]byte{0})
+		h.Write(content)
+	}
+	if linkage.External {
+		for _, file := range t.moduleSelectionFold() {
+			content, err := os.ReadFile(file)
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return "", fmt.Errorf("forbidden linkage module selection: %w", err)
+			}
+			h.Write([]byte{2})
+			h.Write([]byte(t.treeRelPath(file)))
+			h.Write([]byte{0})
+			h.Write(content)
+		}
+	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// treeRelPath renders an absolute tree path in slash-separated
+// tree-relative form so digests are keyed by what was measured, never
+// by the checkout root that measured it; a path outside the tree
+// keeps its absolute form.
+func (t *Tree) treeRelPath(path string) string {
+	rel, err := filepath.Rel(t.dir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(rel)
+}
+
+// moduleSelectionFold names the version-selection files whose content
+// pins an externally-reached forbidden linkage: the workspace files
+// and every loaded module's go.mod/go.sum/vendor manifest, sorted for
+// determinism.
+func (t *Tree) moduleSelectionFold() []string {
+	seen := map[string]bool{}
+	files := []string{filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum")}
+	for _, dir := range t.eng.ModuleDirs() {
+		for _, name := range []string{"go.mod", "go.sum", filepath.Join("vendor", "modules.txt")} {
+			file := filepath.Join(dir, name)
+			if !seen[file] {
+				seen[file] = true
+				files = append(files, file)
+			}
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+// vendorActive reports the first loaded module carrying a vendor
+// manifest — source the build links under -mod=vendor that no
+// selection file content-pins.
+func (t *Tree) vendorActive() string {
+	for _, dir := range t.eng.ModuleDirs() {
+		manifest := filepath.Join(dir, "vendor", "modules.txt")
+		if _, err := os.Stat(manifest); err == nil {
+			return manifest
+		}
+	}
+	return ""
 }
 
 // executeShapedCandidate runs one shaped candidate in a scratch copy of
@@ -372,19 +519,48 @@ func rebaseScratchEnv(env []string, realRoot, scratch string) []string {
 	return out
 }
 
-// shapedProbedFiles names the on-disk files a shaped finding's probes
-// derive from, tree-relative: provenance inputs the subject views
-// cannot know (REQ-result-layers).
-func shapedProbedFiles(dir string, shape *TargetShape) []string {
-	if shape == nil {
-		return nil
+// shapedProvenanceFiles names the on-disk files a shaped finding's
+// probes derive from — the edited recipe file, the rewritten declaring
+// files — by re-deriving the candidates against the current tree:
+// provenance inputs the subject views cannot know, so a dirty probed
+// file never stamps clean provenance (REQ-result-layers). Deriving
+// from the candidates keeps this list and the shape digest's embedded
+// replacements one mechanism. Synthesized probe files exist on no tree
+// and are skipped; every named path is absolute, matching every other
+// provenance source path — a relative entry would fail the
+// root-relative resolution and force-stamp the finding dirty. A shape
+// that no longer derives cannot name its inputs; the caller stamps
+// dirty, fail-closed.
+func (t *Tree) shapedProvenanceFiles(ctx context.Context, f *Finding) ([]string, error) {
+	if f.Shape == nil {
+		return nil, nil
 	}
+	candidates, _, err := t.shapedCandidates(ctx, Target{Symbol: f.Symbol, Structural: f.Shape.Structural, Manual: f.Shape.Manual, Oracle: nil, OracleExplicit: true})
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
 	var files []string
-	if shape.Manual != nil {
-		// Absolute, matching every other provenance source path: a
-		// relative entry fails the root-relative resolution and would
-		// force-stamp the finding dirty.
-		files = append(files, filepath.Join(dir, filepath.FromSlash(shape.Manual.File)))
+	for _, c := range candidates {
+		for _, r := range c.Replacements {
+			if r.Synthetic || seen[r.File] {
+				continue
+			}
+			seen[r.File] = true
+			files = append(files, r.File)
+		}
 	}
-	return files
+	// The import-boundary probe's forbidden-side linkage is a
+	// measurement input exactly as the digest fold says: its in-tree
+	// files ride the dirty stamp too (module-selection files already
+	// ride via provenancePaths).
+	if f.Shape.Structural != nil && f.Shape.Structural.Class == "import-boundary" {
+		for _, file := range t.eng.ForbiddenLinkageClosure(f.Shape.Structural.Forbidden).InTreeFiles {
+			if !seen[file] {
+				seen[file] = true
+				files = append(files, file)
+			}
+		}
+	}
+	return files, nil
 }

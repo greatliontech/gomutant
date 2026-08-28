@@ -130,7 +130,7 @@ func loadContextWith(ctx context.Context, dir string, sel Selection, executionSu
 			Context: ctx,
 			Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 				packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule |
-				packages.NeedForTest,
+				packages.NeedForTest | packages.NeedEmbedFiles,
 			Dir:       filepath.Join(dir, m),
 			Env:       env,
 			Tests:     true,
@@ -340,6 +340,22 @@ func GoEnv(dir string) []string {
 // GoEnv returns the environment used by this tree's package loads and test
 // processes.
 func (t *Tree) GoEnv() []string { return append([]string(nil), t.env...) }
+
+// ModuleDirs enumerates the distinct root directories of the loaded
+// packages' main modules — the tree's version-selection anchors.
+func (t *Tree) ModuleDirs() []string {
+	seen := map[string]bool{}
+	var dirs []string
+	for _, pkg := range t.pkgs {
+		if pkg.Module == nil || pkg.Module.Dir == "" || !pkg.Module.Main || seen[pkg.Module.Dir] {
+			continue
+		}
+		seen[pkg.Module.Dir] = true
+		dirs = append(dirs, pkg.Module.Dir)
+	}
+	sort.Strings(dirs)
+	return dirs
+}
 
 // sourceDigestCapture pins loaded file content at the parse itself:
 // the loader's ParseFile hook hands over the exact bytes it parses,

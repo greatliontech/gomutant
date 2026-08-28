@@ -3770,10 +3770,24 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		return "", err
 	}
 	// A shaped finding's probed files are provenance inputs the views
-	// cannot name: the recipe file and the declaring files ride the
-	// stamp (the synthesized probe file exists on no tree and is
-	// skipped), so a dirty probed file never stamps clean provenance.
-	sourceFiles = append(sourceFiles, shapedProbedFiles(t.dir, f.Shape)...)
+	// cannot name: the candidates' replacement sources — the edited
+	// recipe file, the rewritten declaring files — ride the stamp
+	// (synthesized probe files exist on no tree and are skipped), so a
+	// dirty probed file never stamps clean provenance. A shape that no
+	// longer derives against this tree cannot name those inputs and
+	// stamps dirty terminally, fail-closed like unreadable evidence.
+	shapedFiles, err := t.shapedProvenanceFiles(ctx, f)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if repository.staged {
+			return "the shaped derivation no longer resolves against the staged snapshot: " + err.Error(), nil
+		}
+		f.Dirty = true
+		return "", nil
+	}
+	sourceFiles = append(sourceFiles, shapedFiles...)
 	moduleDirs := map[string]string{}
 	viewEnvs := map[string][]string{}
 	if targetView != nil {

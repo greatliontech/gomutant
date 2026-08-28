@@ -6,9 +6,14 @@ import (
 )
 
 // Replacement is one original file and its complete overlaid content.
+// Synthetic marks a replacement whose File exists on no tree — a
+// synthesized structural probe — so provenance never consults it; the
+// fact rides the replacement from construction rather than being
+// re-derived from a file-name convention a real tree file could share.
 type Replacement struct {
-	File   string
-	Source []byte
+	File      string
+	Source    []byte
+	Synthetic bool
 }
 
 // Mutant is one mutation represented by every file replacement that must be
