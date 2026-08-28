@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -85,7 +86,10 @@ func TestAttestStampsSiteAndMergeReportsSheds(t *testing.T) {
 // and dispositions are the grandfathered match-by-position form
 // (REQ-result-tolerant).
 func TestParseFindingsAcceptsVersionFour(t *testing.T) {
-	data, err := Export([]Finding{survivorFinding("pkg.F")})
+	// Versions 4-10 are the INLINE shape; Export writes the interned
+	// version-11 form, so the old-version fixture marshals the inline
+	// document directly.
+	data, err := json.MarshalIndent(document{Version: DocumentVersion, Findings: []Finding{survivorFinding("pkg.F")}}, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}

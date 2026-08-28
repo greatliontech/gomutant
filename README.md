@@ -25,9 +25,11 @@ gomutant run --changed HEAD --budget 5
 # Explicit targets (symbol + oracle + labels) from a JSON document.
 gomutant run --targets targets.json
 
-# Inspect current, stale, unverifiable, and detached findings: one
-# summary row per record by default; --detail for survivor and
-# disposition lists; --state/--symbol/--label narrow the roster.
+# Inspect findings: one summary row per record from recorded facts by
+# default (cheap at any document size); --judge re-derives each
+# record's freshness state - current, stale, unverifiable, detached -
+# against the current tree (a --state filter implies it); --detail for
+# survivor and disposition lists; --symbol/--label narrow the roster.
 gomutant findings
 gomutant findings --detail --state stale
 

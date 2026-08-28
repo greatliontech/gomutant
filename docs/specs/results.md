@@ -476,7 +476,22 @@ STRATEGY is the opposite disposition: it is what stales a record across
 a derivation move, so an older consumer's tolerance would drop the pin
 and serve verdicts computed under semantics its engine does not
 implement — it rides the version bump that introduced it (version 10),
-the candidate-evidence precedent. This is the inverse of the targeting seam: gomutant
+the candidate-evidence precedent. Version 11 re-shapes the document structurally: per-oracle
+subject evidence, the runtime-inputs manifests inside it, and
+compartment ledgers are interned into document-level tables that
+records reference by index — the components measured dominating field
+stores (93% of a 66 MB document at 8.8x duplication; eight unique
+manifests behind 53 MB of copies) — so the document scales with
+UNIQUE evidence, a divergent second copy of one fact is
+unrepresentable, and a 70 MB field store re-encodes at 3.2 MB with
+every record byte-identical on round-trip. An older reader cannot
+re-inline the tables, so the shape rides the bump (the
+candidate-evidence precedent); versions 4-10 keep reading through the
+inline path, and an expanded version-11 document re-validates through
+that same path record by record, so every inline-era semantic check
+applies verbatim while the reader's footprint and churn track the
+document on disk, never the duplicated inline form it stands for.
+This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 a spec-driven producer recovering findings by label — consumes gomutant's contract, never
@@ -739,13 +754,23 @@ record as `current` when all recorded mutation-domain and subject evidence
 still proves reusable, `stale` when a comparable input moved, `unverifiable`
 when current evidence cannot prove reuse, or `detached` when the mutated symbol
 no longer resolves - a terminal state the reason says so loudly in every
-view, naming the prune and retarget moves, because nothing short of the
+judged view, naming the prune and retarget moves, because nothing short of the
 symbol returning can revive the record. A record whose candidate evidence flags any candidate is
 not reusable as it stands, so it classifies `unverifiable` even when its
 subject evidence is current, with the candidate evidence carried in every view
 so the candidate-local scope is visible. The classification is advisory and
-runs no tests. Every view carries the reason and the open and attested counts
-independently of that state, including fully attested records; the detail
+runs no tests — and it is OPT-IN: the default inspection surface
+reports each record's RECORDED facts under the presentation state
+`recorded`, loading no tree and deriving no freshness, so inspection
+cost scales with the document's unique evidence and record count,
+never with derivation (a field document's five-minute "inspection"
+was the derivation, not the parse); a judged question — the state
+filter, a selection or vouch input, an explicit judge request —
+derives the classification above, announced as the expensive stretch
+it is, and the recorded default names the judged opt-in at its point
+of use. Every judged view carries the reason, and every view the open
+and attested counts, independently of that state, including fully
+attested records; the detail
 view carries the survivor and disposition lists themselves, and the CLI's
 machine-readable JSON export - like the document on disk - stays complete
 regardless of the human default (bounded protocol envelopes cap per their

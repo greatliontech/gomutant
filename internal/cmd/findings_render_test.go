@@ -45,7 +45,7 @@ func TestRenderFindingSummariesIsOneRowPerRecord(t *testing.T) {
 		},
 		{Symbol: "p.G", State: gomutant.FindingCurrent, Layer: "repo",
 			Attested: []gomutant.Attestation{{Position: "g.go:1:1", Operator: "op", Reason: "equivalent"}}},
-	})
+	}, true)
 	text := out.String()
 	if !strings.Contains(text, "stale  p.F  [machine-local]  1 open, 0 attested  (oracle p.TestF: subject identity changed)") {
 		t.Fatalf("summary row missing state, layer, counts, or cause:\n%s", text)

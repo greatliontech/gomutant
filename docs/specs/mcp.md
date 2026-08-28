@@ -11,7 +11,9 @@ minimal output, maximal usefulness governs every response shape.
 **REQ-mcp-tools** (behavior): The MCP server MUST expose the library's
 operations as tools — measuring a target set (every producer form: discovery,
 changed scope, a targets document in gomutant's or a parsed producer's
-format), discovering targets without running, inspecting findings with
+format), discovering targets without running, inspecting findings (recorded
+facts by default — the judged freshness classification is opt-in per
+REQ-result-inspection) with
 optional opaque-label filtering, explaining a record or the document's
 promotion state, dispositioning a survivor, and running an ephemeral mutant — each
 a thin shell over the same library. The server is the primary face: the CLI

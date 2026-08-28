@@ -563,7 +563,16 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // landed at version 10 likewise without a boundary: no reuse
 // decision reads it, and an absent extent keeps the anchor-point
 // coverage fallback an older record was bucketed under.
-const DocumentVersion = 10
+// Version 11 is a structural re-shape, not a field: the document
+// interns its three measured-dominant components (per-oracle subject
+// evidence — 93% of a 66 MB field store at 8.8x duplication; the
+// runtime-inputs manifests inside it — eight unique strings behind
+// 53 MB; the compartment ledgers) into document-level tables that
+// records reference by index, so the document scales with UNIQUE
+// evidence and a divergent second copy of one fact is
+// unrepresentable. An older reader cannot re-inline the tables, so
+// the shape rides the bump (the candidate-evidence precedent).
+const DocumentVersion = 11
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale
@@ -575,10 +584,184 @@ var ErrVersionAhead = errors.New("a newer gomutant likely wrote it - if this rea
 // parser upgrades on read (REQ-result-tolerant).
 const OldestReadableDocumentVersion = 4
 
-// document is the portable finding set (REQ-result-export).
+// document is the inline finding set shape of versions 4-10; version
+// 11 writes documentV11 and the parser expands it back through this
+// path so every inline-era semantic check applies verbatim
+// (REQ-result-export).
 type document struct {
 	Version  int       `json:"version"`
 	Findings []Finding `json:"findings"`
+}
+
+// documentV11 is the interned document (REQ-result-export, version
+// 11): subject evidence, runtime-inputs manifests, and compartment
+// ledgers live once each in document-level tables; records reference
+// them by index.
+type documentV11 struct {
+	Version       int                 `json:"version"`
+	RuntimeInputs []string            `json:"runtimeInputsTable"`
+	Evidence      []evidenceEntryV11  `json:"evidenceTable"`
+	Ledgers       []CompartmentLedger `json:"ledgerTable"`
+	Findings      []findingV11        `json:"findings"`
+}
+
+// evidenceEntryV11 carries one unique SubjectEvidence with its
+// runtime-inputs manifest replaced by a table index. The evidence
+// embeds the ordinary struct with RuntimeInputs empty — no mirrored
+// field list to drift: a field added to SubjectEvidence rides v11
+// automatically.
+type evidenceEntryV11 struct {
+	Evidence      SubjectEvidence `json:"evidence"`
+	RuntimeInputs int             `json:"runtimeInputs"`
+}
+
+// findingV11 carries one Finding with its heavy components cleared
+// and referenced by index instead: targetEvidence is a pointer
+// because a shaped finding carries none. The embedded Finding keeps
+// its own encoding — the vestigial zeroed inline fields cost bytes,
+// never drift.
+type findingV11 struct {
+	Finding           Finding `json:"finding"`
+	TargetEvidence    *int    `json:"targetEvidence,omitempty"`
+	OracleEvidence    []int   `json:"oracleEvidence"`
+	CompartmentLedger *int    `json:"compartmentLedger,omitempty"`
+}
+
+// internDocument builds the v11 interned form: identical evidence
+// rows, manifests, and ledgers collapse to one table entry each.
+func internDocument(kept []Finding) (documentV11, error) {
+	doc := documentV11{Version: DocumentVersion, RuntimeInputs: []string{}, Evidence: []evidenceEntryV11{}, Ledgers: []CompartmentLedger{}}
+	riIdx := map[string]int{}
+	evIdx := map[string]int{}
+	ldIdx := map[string]int{}
+	internRI := func(s string) int {
+		if i, ok := riIdx[s]; ok {
+			return i
+		}
+		riIdx[s] = len(doc.RuntimeInputs)
+		doc.RuntimeInputs = append(doc.RuntimeInputs, s)
+		return riIdx[s]
+	}
+	internEv := func(e SubjectEvidence) (int, error) {
+		ri := internRI(e.RuntimeInputs)
+		e.RuntimeInputs = ""
+		key, err := json.Marshal(e)
+		if err != nil {
+			return 0, err
+		}
+		k := fmt.Sprintf("%d|%s", ri, key)
+		if i, ok := evIdx[k]; ok {
+			return i, nil
+		}
+		evIdx[k] = len(doc.Evidence)
+		doc.Evidence = append(doc.Evidence, evidenceEntryV11{Evidence: e, RuntimeInputs: ri})
+		return evIdx[k], nil
+	}
+	internLedger := func(l CompartmentLedger) (int, error) {
+		key, err := json.Marshal(l)
+		if err != nil {
+			return 0, err
+		}
+		if i, ok := ldIdx[string(key)]; ok {
+			return i, nil
+		}
+		ldIdx[string(key)] = len(doc.Ledgers)
+		doc.Ledgers = append(doc.Ledgers, l)
+		return ldIdx[string(key)], nil
+	}
+	doc.Findings = make([]findingV11, len(kept))
+	for i, f := range kept {
+		row := findingV11{}
+		// A shaped finding's target row is the zero value by contract
+		// (REQ-target-structural); interning would silently drop a
+		// stray one, so refuse it here where the caller still sees it.
+		if f.Shape != nil && f.TargetEvidence != (SubjectEvidence{}) {
+			return doc, fmt.Errorf("gomutant: finding %d (%s) is shaped but carries target evidence", i, f.Symbol)
+		}
+		if f.Shape == nil {
+			te, err := internEv(f.TargetEvidence)
+			if err != nil {
+				return doc, err
+			}
+			row.TargetEvidence = &te
+		}
+		row.OracleEvidence = make([]int, len(f.OracleEvidence))
+		for j, e := range f.OracleEvidence {
+			oe, err := internEv(e)
+			if err != nil {
+				return doc, err
+			}
+			row.OracleEvidence[j] = oe
+		}
+		if f.CompartmentLedger != nil {
+			cl, err := internLedger(*f.CompartmentLedger)
+			if err != nil {
+				return doc, err
+			}
+			row.CompartmentLedger = &cl
+		}
+		f.TargetEvidence = SubjectEvidence{}
+		f.OracleEvidence = nil
+		f.CompartmentLedger = nil
+		row.Finding = f
+		doc.Findings[i] = row
+	}
+	return doc, nil
+}
+
+// expandV11 rebuilds the inline finding set from an interned
+// document, validating every reference: a dangling index, a non-empty
+// inline manifest in a table entry, or inline heavy fields on a
+// record are malformed — the tables are the one home
+// (REQ-result-export).
+func expandV11(doc documentV11) ([]Finding, error) {
+	for i, e := range doc.Evidence {
+		if e.RuntimeInputs < 0 || e.RuntimeInputs >= len(doc.RuntimeInputs) {
+			return nil, fmt.Errorf("gomutant: evidence entry %d references runtime-inputs %d outside the table", i, e.RuntimeInputs)
+		}
+		if e.Evidence.RuntimeInputs != "" {
+			return nil, fmt.Errorf("gomutant: evidence entry %d carries an inline runtime-inputs manifest beside its table reference", i)
+		}
+	}
+	evAt := func(i int) (SubjectEvidence, error) {
+		if i < 0 || i >= len(doc.Evidence) {
+			return SubjectEvidence{}, fmt.Errorf("gomutant: evidence index %d outside the table", i)
+		}
+		e := doc.Evidence[i].Evidence
+		e.RuntimeInputs = doc.RuntimeInputs[doc.Evidence[i].RuntimeInputs]
+		return e, nil
+	}
+	findings := make([]Finding, len(doc.Findings))
+	for i, row := range doc.Findings {
+		f := row.Finding
+		if len(f.OracleEvidence) != 0 || f.CompartmentLedger != nil || f.TargetEvidence != (SubjectEvidence{}) {
+			return nil, fmt.Errorf("gomutant: finding %d carries inline heavy fields beside its table references", i)
+		}
+		if row.TargetEvidence != nil {
+			te, err := evAt(*row.TargetEvidence)
+			if err != nil {
+				return nil, fmt.Errorf("gomutant: finding %d target evidence: %w", i, err)
+			}
+			f.TargetEvidence = te
+		}
+		f.OracleEvidence = make([]SubjectEvidence, len(row.OracleEvidence))
+		for j, idx := range row.OracleEvidence {
+			oe, err := evAt(idx)
+			if err != nil {
+				return nil, fmt.Errorf("gomutant: finding %d oracle evidence %d: %w", i, j, err)
+			}
+			f.OracleEvidence[j] = oe
+		}
+		if row.CompartmentLedger != nil {
+			if *row.CompartmentLedger < 0 || *row.CompartmentLedger >= len(doc.Ledgers) {
+				return nil, fmt.Errorf("gomutant: finding %d ledger index %d outside the table", i, *row.CompartmentLedger)
+			}
+			l := doc.Ledgers[*row.CompartmentLedger]
+			f.CompartmentLedger = &l
+		}
+		findings[i] = f
+	}
+	return findings, nil
 }
 
 // Export serializes findings to the versioned document gomutant owns
@@ -599,7 +782,11 @@ func Export(findings []Finding) ([]byte, error) {
 		kept = append(kept, f)
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Symbol < kept[j].Symbol })
-	data, err := json.MarshalIndent(document{Version: DocumentVersion, Findings: kept}, "", "  ")
+	interned, err := internDocument(kept)
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.MarshalIndent(interned, "", "  ")
 	if err != nil {
 		return nil, err
 	}
@@ -633,6 +820,99 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	if version < OldestReadableDocumentVersion {
 		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d-%d)", version, OldestReadableDocumentVersion, DocumentVersion)
 	}
+	if version >= 11 {
+		return parseInternedFindings(data)
+	}
+	return parseInlineFindings(top)
+}
+
+// parseInternedFindings reads a version-11 interned document, expands
+// its tables, and re-validates the expanded set through the inline
+// path — every inline-era semantic check applies verbatim, and the
+// interned shape adds its own structural checks in expandV11.
+func parseInternedFindings(data []byte) ([]Finding, error) {
+	top, err := decodeKnownObject(data, map[string]bool{
+		"version": true, "runtimeInputsTable": true, "evidenceTable": true, "ledgerTable": true, "findings": true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gomutant: parse findings document: %w", err)
+	}
+	for _, name := range []string{"runtimeInputsTable", "evidenceTable", "ledgerTable", "findings"} {
+		value, ok := top[name]
+		if !ok || isJSONNull(value) {
+			return nil, fmt.Errorf("gomutant: findings document field %s is missing or null", name)
+		}
+	}
+	var doc documentV11
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("gomutant: parse interned findings: %w", err)
+	}
+	expanded, err := expandV11(doc)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateInternedRecords(doc); err != nil {
+		return nil, err
+	}
+	return expanded, nil
+}
+
+// validateInternedRecords re-runs every inline-era check over the
+// interned document, one record at a time and with each
+// runtime-inputs manifest replaced by an equality-preserving
+// placeholder. Both substitutions keep the reader bounded by the
+// document on disk, not the duplicated inline form it stands for:
+// per-record streaming caps the transient at one record, and the
+// placeholder caps the churn a large manifest would otherwise pay per
+// reference. The substitution is sound because manifest CONTENT is
+// validation-inert — the checks read only its non-emptiness (the
+// required-pin rule) and its cross-row equality (the finding-wide
+// runtime anchor), and the placeholder preserves both exactly:
+// empty stays empty, and two entries map to the same placeholder iff
+// their manifests are equal (equal content collapses to one canonical
+// table index, so equality never depends on the index a row happens
+// to cite).
+func validateInternedRecords(doc documentV11) error {
+	canonical := map[string]int{}
+	placeholders := make([]string, len(doc.RuntimeInputs))
+	for i, manifest := range doc.RuntimeInputs {
+		if manifest == "" {
+			continue
+		}
+		j, ok := canonical[manifest]
+		if !ok {
+			canonical[manifest] = i
+			j = i
+		}
+		placeholders[i] = fmt.Sprintf("\x00gomutant-runtime-inputs:%d", j)
+	}
+	small := doc
+	small.RuntimeInputs = placeholders
+	expanded, err := expandV11(small)
+	if err != nil {
+		return err
+	}
+	symbols := map[string]bool{}
+	for i, finding := range expanded {
+		inline, err := json.Marshal(finding)
+		if err != nil {
+			return fmt.Errorf("gomutant: re-validate interned findings: %w", err)
+		}
+		if _, err := decodeInlineFinding(inline, i); err != nil {
+			return err
+		}
+		if symbols[finding.Symbol] {
+			return fmt.Errorf("gomutant: duplicate finding symbol %s", finding.Symbol)
+		}
+		symbols[finding.Symbol] = true
+	}
+	return nil
+}
+
+// parseInlineFindings validates and decodes the inline finding array —
+// the shape of versions 4-10 and the re-validation path for expanded
+// version-11 documents.
+func parseInlineFindings(top map[string]json.RawMessage) ([]Finding, error) {
 	if isJSONNull(top["findings"]) {
 		return nil, fmt.Errorf("gomutant: findings must be an array")
 	}
@@ -640,59 +920,77 @@ func ParseFindings(data []byte) ([]Finding, error) {
 	if err := json.Unmarshal(top["findings"], &rawFindings); err != nil {
 		return nil, fmt.Errorf("gomutant: parse findings: %w", err)
 	}
-	known := map[string]bool{
-		"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
-		"budget": true, "targetEvidence": true, "oracleEvidence": true,
-		"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "propertyRegime": true, "compartmentLedger": true, "commit": true, "dirty": true,
-		"candidateCount": true, "generated": true, "mutants": true, "killed": true,
-		"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true,
-		"candidateEvidence": true,
-	}
-	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "oracleTimeout", "dirty", "candidateCount", "generated", "mutants", "killed", "discarded", "operators"}
 	findings := make([]Finding, len(rawFindings))
 	symbols := map[string]bool{}
 	for i, raw := range rawFindings {
-		fields, err := decodeKnownObject(raw, known)
+		finding, err := decodeInlineFinding(raw, i)
 		if err != nil {
-			return nil, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+			return nil, err
 		}
-		complete := true
-		for _, name := range required {
-			value, ok := fields[name]
-			if !ok {
-				complete = false
-			} else if isJSONNull(value) {
-				return nil, fmt.Errorf("gomutant: finding %d field %s is null", i, name)
-			}
+		if symbols[finding.Symbol] {
+			return nil, fmt.Errorf("gomutant: duplicate finding symbol %s", finding.Symbol)
 		}
-		if value, ok := fields["dirty"]; ok && isJSONNull(value) {
-			return nil, fmt.Errorf("gomutant: finding %d field dirty is null", i)
-		}
-		if err := json.Unmarshal(raw, &findings[i]); err != nil {
-			return nil, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
-		}
-		if findings[i].Symbol == "" || findings[i].BodyHash == "" || findings[i].OperatorSet == "" || findings[i].OracleTimeout == "" {
-			complete = false
-		} else if duration, err := time.ParseDuration(findings[i].OracleTimeout); err != nil || duration <= 0 || duration.String() != findings[i].OracleTimeout {
-			complete = false
-		}
-		if symbols[findings[i].Symbol] {
-			return nil, fmt.Errorf("gomutant: duplicate finding symbol %s", findings[i].Symbol)
-		}
-		symbols[findings[i].Symbol] = true
-		nestedComplete, err := validateFindingEncoding(fields, &findings[i])
-		if err != nil {
-			return nil, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
-		}
-		complete = complete && nestedComplete
-		if findings[i].Commit == "" && !findings[i].Dirty {
-			complete = false
-		}
-		if !complete {
-			return nil, fmt.Errorf("gomutant: finding %d is missing or has invalid required evidence", i)
-		}
+		symbols[finding.Symbol] = true
+		findings[i] = finding
 	}
 	return findings, nil
+}
+
+// inlineFindingFields is the known field set of one inline finding
+// record (REQ-result-tolerant: unknown fields within a known version
+// are dropped, never refused).
+var inlineFindingFields = map[string]bool{
+	"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
+	"budget": true, "targetEvidence": true, "oracleEvidence": true,
+	"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "propertyRegime": true, "compartmentLedger": true, "commit": true, "dirty": true,
+	"candidateCount": true, "generated": true, "mutants": true, "killed": true,
+	"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true,
+	"candidateEvidence": true,
+}
+
+// decodeInlineFinding validates and decodes one inline finding record
+// with every inline-era JSON-level and value-level check. The
+// duplicate-symbol check is cross-record state and stays with the
+// callers.
+func decodeInlineFinding(raw json.RawMessage, i int) (Finding, error) {
+	var finding Finding
+	fields, err := decodeKnownObject(raw, inlineFindingFields)
+	if err != nil {
+		return finding, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+	}
+	complete := true
+	required := []string{"symbol", "bodyHash", "operatorSet", "budget", "targetEvidence", "oracleEvidence", "oracleExplicit", "oracleTimeout", "dirty", "candidateCount", "generated", "mutants", "killed", "discarded", "operators"}
+	for _, name := range required {
+		value, ok := fields[name]
+		if !ok {
+			complete = false
+		} else if isJSONNull(value) {
+			return finding, fmt.Errorf("gomutant: finding %d field %s is null", i, name)
+		}
+	}
+	if value, ok := fields["dirty"]; ok && isJSONNull(value) {
+		return finding, fmt.Errorf("gomutant: finding %d field dirty is null", i)
+	}
+	if err := json.Unmarshal(raw, &finding); err != nil {
+		return finding, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+	}
+	if finding.Symbol == "" || finding.BodyHash == "" || finding.OperatorSet == "" || finding.OracleTimeout == "" {
+		complete = false
+	} else if duration, err := time.ParseDuration(finding.OracleTimeout); err != nil || duration <= 0 || duration.String() != finding.OracleTimeout {
+		complete = false
+	}
+	nestedComplete, err := validateFindingEncoding(fields, &finding)
+	if err != nil {
+		return finding, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+	}
+	complete = complete && nestedComplete
+	if finding.Commit == "" && !finding.Dirty {
+		complete = false
+	}
+	if !complete {
+		return finding, fmt.Errorf("gomutant: finding %d is missing or has invalid required evidence", i)
+	}
+	return finding, nil
 }
 
 func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding) (bool, error) {

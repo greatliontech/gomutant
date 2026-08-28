@@ -14,12 +14,21 @@ import (
 )
 
 type findingsOptions struct {
+	judge                    bool
 	dir, findingsFile, label string
 	state, symbol            string
 	detail, json             bool
 	vouches                  []string
 	tags                     []string
 	toolchain                string
+}
+
+// judged reports whether any judged-question input was given: the
+// state filter, a selection (tags/toolchain), or a vouch exist only
+// to shape the freshness derivation, so any of them silently
+// no-oping on the recorded path would be an inert flag.
+func (o findingsOptions) judged() bool {
+	return o.judge || o.state != "" || len(o.tags) > 0 || o.toolchain != "" || len(o.vouches) > 0
 }
 
 type findingView struct {
@@ -50,10 +59,11 @@ func newFindingsCommand() *cobra.Command {
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read")
 	f.StringVar(&o.label, "label", "", "show only findings carrying this label")
 	selectionFlags(f, &o.tags, &o.toolchain)
-	f.StringVar(&o.state, "state", "", "show only findings in this state: current, stale, unverifiable, or detached")
+	f.StringVar(&o.state, "state", "", "show only findings in this judged state: current, stale, unverifiable, or detached (implies --judge)")
+	f.BoolVar(&o.judge, "judge", false, "re-derive each record's freshness state against the current tree - minutes-class on large documents; the default reports recorded facts with state 'recorded'")
 	f.StringVar(&o.symbol, "symbol", "", "show only the finding for this mutated symbol")
 	f.BoolVar(&o.detail, "detail", false, "full rows - operator tables, survivors, dispositions, candidate evidence; the default is one summary row per record")
-	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); inspection judges under the same acceptances the run used")
+	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); inspection judges under the same acceptances the run used (implies --judge)")
 	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable findings")
 	return cmd
 }
@@ -82,16 +92,23 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		fmt.Fprintln(out, "no findings")
 		return nil
 	}
-	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
-	if err != nil {
-		return err
-	}
-	if len(o.vouches) > 0 {
-		identities, err := gomutant.ParseDynamicStateVouches(o.vouches)
+	judge := o.judged()
+	var tree *gomutant.Tree
+	if judge {
+		// Judging derives freshness against the current tree — the
+		// expensive truth. The default path loads no tree at all: the
+		// document's recorded facts answer without one.
+		tree, err = gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 		if err != nil {
 			return err
 		}
-		tree.SetDynamicStateVouches(identities...)
+		if len(o.vouches) > 0 {
+			identities, err := gomutant.ParseDynamicStateVouches(o.vouches)
+			if err != nil {
+				return err
+			}
+			tree.SetDynamicStateVouches(identities...)
+		}
 	}
 	views, err := inspectFindings(ctx, tree, store, all, o.label, o.state, o.symbol)
 	if err != nil {
@@ -105,7 +122,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		return nil
 	}
 	if !o.detail {
-		renderFindingSummaries(out, views)
+		renderFindingSummaries(out, views, judge)
 		return nil
 	}
 	renderFindingViews(out, views)
@@ -116,7 +133,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 // state, symbol, layer, open and attested counts, the cause when the
 // record cannot serve - with the full lists behind --detail
 // (REQ-result-inspection).
-func renderFindingSummaries(w io.Writer, views []findingView) {
+func renderFindingSummaries(w io.Writer, views []findingView, judged bool) {
 	repoCount, localOnly := 0, 0
 	for _, view := range views {
 		if view.Layer == "repo" {
@@ -134,7 +151,14 @@ func renderFindingSummaries(w io.Writer, views []findingView) {
 		}
 		fmt.Fprintln(w)
 	}
-	fmt.Fprintf(w, "%d repo-committable, %d machine-local; --detail for survivors and dispositions\n", repoCount, localOnly)
+	fmt.Fprintf(w, "%d repo-committable, %d machine-local; --detail for survivors and dispositions", repoCount, localOnly)
+	if !judged {
+		// The recorded default must name the judged opt-in at the
+		// point of use, or the freshness states are undiscoverable
+		// (REQ-result-inspection).
+		fmt.Fprint(w, "; --judge for freshness states")
+	}
+	fmt.Fprintln(w)
 }
 
 func renderFindingViews(w io.Writer, views []findingView) {
@@ -200,9 +224,15 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 		if symbol != "" && finding.Symbol != symbol {
 			continue
 		}
-		inspection, err := tree.InspectFindingContext(ctx, finding)
-		if err != nil {
-			return nil, err
+		// A nil tree is the recorded path: no freshness derivation,
+		// the record's own facts, state "recorded".
+		inspection := gomutant.RecordedInspection(finding)
+		if tree != nil {
+			judged, err := tree.InspectFindingContext(ctx, finding)
+			if err != nil {
+				return nil, err
+			}
+			inspection = judged
 		}
 		if state != "" && string(inspection.State) != state {
 			continue

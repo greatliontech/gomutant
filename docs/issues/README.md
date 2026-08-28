@@ -16,8 +16,6 @@ is deleted (git holds history).
 | [semantic-closure-in-the-carry-gate](semantic-closure-in-the-carry-gate.md) | a comment-insensitive closure identity would dominate both poles of the carry gate | train chunk 130 (after 129 ships the gofresh identity) |
 | [coverage-guided-oracle-ordering](coverage-guided-oracle-ordering.md) | run symbol-reaching tests first with failfast; schedule, never narrowing | train chunk 113 |
 | [actionable-unverifiable-refusals](actionable-unverifiable-refusals.md) | each unverifiable reason names its discharge channel (vouch/directive/restructure) | folds into train chunk 112 (MCP doctrine audit) |
-| [findings-doc-unbounded-growth](findings-doc-unbounded-growth.md) | repo-layer findings.json at 70 MB after one campaign; nothing bounds or compacts it | train chunk 110 |
-| [findings-inspection-cost](findings-inspection-cost.md) | inspection without re-judging freshness; summary reads O(targets); 28MB/85-target audit | train chunk 110 |
 | [campaign-baseline-needs-scoped-oracles](campaign-baseline-needs-scoped-oracles.md) | root-suite scale (~16m) blocks gomutant-on-gomutant campaign baselines; go-test face resolved by CI's measured -timeout | train chunk 113 |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | train chunk 113 |
 | [refusal-exit-collapse](refusal-exit-collapse.md) | one refuse(symbol, reason) exit — the hand-picked subsets bred two review-caught defects in one round | train chunk 113 |

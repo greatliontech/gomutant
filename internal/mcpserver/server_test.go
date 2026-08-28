@@ -482,12 +482,41 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sOut.Summary) != 1 || len(sOut.Findings) != 0 || sOut.Summary[0].State != gomutant.FindingCurrent ||
+	if len(sOut.Summary) != 1 || len(sOut.Findings) != 0 || sOut.Summary[0].State != gomutant.FindingRecorded ||
 		sOut.Summary[0].Open != len(out.Findings[0].Open) || sOut.Summary[0].Layer != "local" {
 		t.Fatalf("summary default = %+v", sOut)
 	}
+	// judge=true re-derives freshness against the tree
+	// (REQ-result-inspection).
+	_, jOut, err := s.toolFindings(ctx, nil, findingsIn{Judge: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jOut.Summary) != 1 || jOut.Summary[0].State != gomutant.FindingCurrent {
+		t.Fatalf("judged summary = %+v", jOut)
+	}
 	if _, byState, err := s.toolFindings(ctx, nil, findingsIn{State: "stale"}); err != nil || len(byState.Summary) != 0 {
 		t.Fatalf("state filter = %+v, %v", byState, err)
+	}
+	// Every judged-question input implies judging - each term
+	// individually (REQ-result-inspection).
+	for name, in := range map[string]findingsIn{
+		"judge":     {Judge: true},
+		"state":     {State: "current"},
+		"tags":      {selectionIn: selectionIn{Tags: []string{"integration"}}},
+		"toolchain": {selectionIn: selectionIn{Toolchain: "go1.26.4"}},
+	} {
+		if !in.judged() {
+			t.Errorf("%s input did not imply judging", name)
+		}
+	}
+	if (findingsIn{Symbol: "p.A", Label: "l", Detail: true}).judged() {
+		t.Error("filter-only input implied judging")
+	}
+	// A MATCHING state filter returns the judged row - the filter
+	// implies judge=true rather than comparing against "recorded".
+	if _, byCurrent, err := s.toolFindings(ctx, nil, findingsIn{State: "current"}); err != nil || len(byCurrent.Summary) != 1 || byCurrent.Summary[0].State != gomutant.FindingCurrent {
+		t.Fatalf("matching state filter = %+v, %v", byCurrent, err)
 	}
 	if _, _, err := s.toolFindings(ctx, nil, findingsIn{State: "bogus"}); err == nil {
 		t.Fatal("unknown state accepted")
@@ -496,7 +525,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 		t.Fatalf("symbol filter = %+v, %v", bySym, err)
 	}
 
-	_, fOut, err := s.toolFindings(ctx, nil, findingsIn{Detail: true})
+	_, fOut, err := s.toolFindings(ctx, nil, findingsIn{Detail: true, Judge: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +695,7 @@ func TestToolFindingsAnnouncesInspection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clientSession.Close()
-	params := &mcp.CallToolParams{Name: "findings", Arguments: map[string]any{}}
+	params := &mcp.CallToolParams{Name: "findings", Arguments: map[string]any{"judge": true}}
 	params.SetProgressToken("tok")
 	result, err := clientSession.CallTool(ctx, params)
 	if err != nil {

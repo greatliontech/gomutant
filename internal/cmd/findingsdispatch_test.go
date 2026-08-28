@@ -44,16 +44,38 @@ func TestFindingsCommandDefaultsToSummaryRows(t *testing.T) {
 	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings}, &summary); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(summary.String(), "detached  example.com/empty.Gone") || !strings.Contains(summary.String(), "1 open, 0 attested") {
-		t.Fatalf("summary default missing the row: %q", summary.String())
+	// The default reads recorded facts only - state "recorded", no
+	// tree loaded, no freshness derived (REQ-result-inspection).
+	if !strings.Contains(summary.String(), "recorded  example.com/empty.Gone") || !strings.Contains(summary.String(), "1 open, 0 attested") {
+		t.Fatalf("summary default missing the recorded row: %q", summary.String())
 	}
-	// A detached record says it is terminal and names the moves in
-	// every view (REQ-result-inspection).
-	if !strings.Contains(summary.String(), "terminal") || !strings.Contains(summary.String(), "prune") || !strings.Contains(summary.String(), "retarget") {
-		t.Fatalf("detached row missing the terminal label: %q", summary.String())
+	if strings.Contains(summary.String(), "detached") {
+		t.Fatalf("summary default judged without being asked: %q", summary.String())
 	}
 	if strings.Contains(summary.String(), "survivor old.go:1:1") {
 		t.Fatalf("summary default leaked detail lists: %q", summary.String())
+	}
+	// The recorded default names the judged opt-in at the point of
+	// use (REQ-result-inspection); the judged view does not repeat it.
+	if !strings.Contains(summary.String(), "--judge for freshness states") {
+		t.Fatalf("recorded default missing the judged opt-in hint: %q", summary.String())
+	}
+
+	// --judge derives the freshness classification.
+	var judged bytes.Buffer
+	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, judge: true}, &judged); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(judged.String(), "detached  example.com/empty.Gone") {
+		t.Fatalf("--judge missing the judged row: %q", judged.String())
+	}
+	// A detached record says it is terminal and names the moves in
+	// every judged view (REQ-result-inspection).
+	if !strings.Contains(judged.String(), "terminal") || !strings.Contains(judged.String(), "prune") || !strings.Contains(judged.String(), "retarget") {
+		t.Fatalf("detached row missing the terminal label: %q", judged.String())
+	}
+	if strings.Contains(judged.String(), "--judge for freshness states") {
+		t.Fatalf("judged view repeats the opt-in hint: %q", judged.String())
 	}
 
 	var detail bytes.Buffer
@@ -72,6 +94,16 @@ func TestFindingsCommandDefaultsToSummaryRows(t *testing.T) {
 	}
 	if !strings.Contains(filtered.String(), "no findings") {
 		t.Fatalf("state filter kept a detached record: %q", filtered.String())
+	}
+	// A MATCHING state filter returns the judged row: the filter
+	// implies judging rather than comparing against the recorded
+	// state, which would silently empty every roster.
+	var byState bytes.Buffer
+	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, state: "detached"}, &byState); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(byState.String(), "detached  example.com/empty.Gone") {
+		t.Fatalf("matching state filter dropped the row: %q", byState.String())
 	}
 	var bySymbol bytes.Buffer
 	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, symbol: "example.com/empty.Other"}, &bySymbol); err != nil {

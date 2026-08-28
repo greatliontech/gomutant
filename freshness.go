@@ -22,6 +22,11 @@ const (
 	FindingStale        FindingState = "stale"
 	FindingUnverifiable FindingState = "unverifiable"
 	FindingDetached     FindingState = "detached"
+	// FindingRecorded is the inspection-without-judgment presentation
+	// state: the record's facts as persisted, with no freshness
+	// derivation against the current tree. Never a judgment class —
+	// a caller filtering by judged state must opt into judging.
+	FindingRecorded FindingState = "recorded"
 )
 
 // FindingInspection is one finding's current applicability and reason.
@@ -33,6 +38,14 @@ type FindingInspection struct {
 	State             FindingState        `json:"state"`
 	Reason            string              `json:"reason,omitempty"`
 	CandidateEvidence []CandidateEvidence `json:"candidateEvidence,omitempty"`
+}
+
+// RecordedInspection is the tree-free inspection view: the record's
+// own facts under the presentation state FindingRecorded, no
+// freshness derived. Every inspection surface builds its recorded
+// default from this one constructor so the surfaces cannot drift.
+func RecordedInspection(finding Finding) FindingInspection {
+	return FindingInspection{State: FindingRecorded, CandidateEvidence: append([]CandidateEvidence(nil), finding.CandidateEvidence...)}
 }
 
 type subjectView struct {

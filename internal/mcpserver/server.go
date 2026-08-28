@@ -163,7 +163,7 @@ func serverOptions() *mcp.ServerOptions {
 		// its connection lives owes a cancellation notification per the
 		// protocol; the ping cannot see intent.
 		KeepAlive:    clientKeepAliveInterval,
-		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (state, cause, survivors with execution buckets, candidate evidence, repo/local layer) without running anything; attest_survivor dispositions an equivalent mutant with the reasoning on record; prune removes resolved-dead records after a refactor and retarget follows a rename (both with check=true previews); ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
+		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (survivors with execution buckets, candidate evidence, repo/local layer) without running anything - recorded facts by default, cheap at any size; judge=true re-derives freshness states (current, stale, unverifiable, detached) against the tree, minutes-class on large documents, and a state filter or a tags/toolchain selection implies it; attest_survivor dispositions an equivalent mutant with the reasoning on record; prune removes resolved-dead records after a refactor and retarget follows a rename (both with check=true previews); ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
 	}
 }
 
@@ -212,7 +212,7 @@ func (s *Server) MCP() *mcp.Server {
 	}, s.toolDiscover)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "findings",
-		Description: "Inspect the findings document without running tests. Default: one summary row per record - symbol, state (current, stale, unverifiable, detached), reason, layer, open and attested counts - capped at 50 with the remainder counted. detail=true returns full rows: open survivors, attested dispositions, operator tables, and per-candidate unverifiable runtime evidence (candidateEvidence). Layer is repo (portable, in the committed findings document) or local (machine-local overlay, with the reason it is not committable). Filter by opaque label, state, or symbol.",
+		Description: "Inspect the findings document without running tests. Default: one summary row per record from RECORDED facts - state reads 'recorded', no tree is loaded, and the call is cheap at any document size; judge=true re-derives each record's freshness against the current tree (current, stale, unverifiable, detached - minutes-class on large documents), and a state filter or a tags/toolchain selection implies it. Rows cap at 50 with the remainder counted. detail=true returns full rows: open survivors, attested dispositions, operator tables, and per-candidate unverifiable runtime evidence (candidateEvidence). Layer is repo (portable, in the committed findings document) or local (machine-local overlay, with the reason it is not committable). Filter by opaque label, state, or symbol.",
 	}, s.toolFindings)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "explain",
@@ -486,6 +486,14 @@ func (s *Server) loadFindingsContext(ctx context.Context, override string) ([]go
 type selectionIn struct {
 	Tags      []string `json:"tags,omitempty" jsonschema:"build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one"`
 	Toolchain string   `json:"toolchain,omitempty" jsonschema:"GOTOOLCHAIN directive for this call's selection (e.g. go1.26.5); rides the toolchain measurement pin, so a different selection re-measures rather than serving across"`
+}
+
+// judged reports whether any judged-question input was given: the
+// state filter and the selection (tags/toolchain) exist only to shape
+// the freshness derivation, so either implies judge (vouches are
+// server options, not per-call inputs, on this surface).
+func (in findingsIn) judged() bool {
+	return in.Judge || in.State != "" || len(in.Tags) > 0 || in.Toolchain != ""
 }
 
 func (s selectionIn) selection() gomutant.Selection {
@@ -1146,7 +1154,8 @@ func compactTargetDescriptions(descriptions []gomutant.TargetDescription) ([]dis
 type findingsIn struct {
 	selectionIn
 	Label    string `json:"label,omitempty" jsonschema:"show only findings carrying this label"`
-	State    string `json:"state,omitempty" jsonschema:"show only findings in this state: current, stale, unverifiable, or detached"`
+	State    string `json:"state,omitempty" jsonschema:"show only findings in this judged state: current, stale, unverifiable, or detached (implies judge=true)"`
+	Judge    bool   `json:"judge,omitempty" jsonschema:"re-derive each record's freshness state against the current tree - minutes-class on large documents; a state filter or a tags/toolchain selection implies it; the default reports recorded facts with state 'recorded' and loads no tree"`
 	Symbol   string `json:"symbol,omitempty" jsonschema:"show only the finding for this mutated symbol"`
 	Detail   bool   `json:"detail,omitempty" jsonschema:"full rows - operator tables, open survivors, attested dispositions, candidate evidence; the default is the bounded summary (one row per record: symbol, state, layer, open and attested counts)"`
 	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
@@ -1227,9 +1236,16 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		matched = append(matched, finding)
 	}
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
-	if err != nil {
-		return nil, out, err
+	// The default path loads no tree at all: the document's recorded
+	// facts answer without one, and the five-minute field inspections
+	// were freshness re-derivation, never parsing.
+	judge := in.judged()
+	var tree *gomutant.Tree
+	if judge {
+		tree, err = withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+		if err != nil {
+			return nil, out, err
+		}
 	}
 	// The inspection stretch announces itself once and rides the
 	// heartbeat: freshness judging over a large document is
@@ -1237,18 +1253,26 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	// (REQ-mcp-envelope). Rows build one inspection at a time so
 	// summary reads never retain per-candidate evidence for the whole
 	// document.
-	if notify != nil {
+	if notify != nil && judge {
 		notify(fmt.Sprintf("inspecting %d record(s)", len(matched)))
 	}
-	rows, err := withHeartbeat(ctx, notify, fmt.Sprintf("inspecting %d record(s)", len(matched)), func(ctx context.Context) (findingsOut, error) {
+	stretch := fmt.Sprintf("reading %d record(s)", len(matched))
+	if judge {
+		stretch = fmt.Sprintf("inspecting %d record(s)", len(matched))
+	}
+	rows, err := withHeartbeat(ctx, notify, stretch, func(ctx context.Context) (findingsOut, error) {
 		var res findingsOut
 		for _, finding := range matched {
 			if err := ctx.Err(); err != nil {
 				return res, err
 			}
-			inspection, err := tree.InspectFindingContext(ctx, finding)
-			if err != nil {
-				return res, err
+			inspection := gomutant.RecordedInspection(finding)
+			if tree != nil {
+				judged, err := tree.InspectFindingContext(ctx, finding)
+				if err != nil {
+					return res, err
+				}
+				inspection = judged
 			}
 			if in.State != "" && string(inspection.State) != in.State {
 				continue
