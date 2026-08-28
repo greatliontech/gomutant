@@ -137,8 +137,7 @@ finalize completed logs against that process's package working directory. An
 observed mutant run covers exactly one test package per process - sequential
 test binaries each truncate the single per-process testlog, so a multi-package
 observed request is refused with the cause rather than ingesting a capture that
-silently covers only the last binary (enforced by
-`TestObservedRunRefusesMultiplePackages`). A
+silently covers only the last binary. A
 completed observation binds its values through an observation bracket
 fingerprinted over the oracle package's directory before the process spawns
 (tool-owned bookkeeping directories excluded), plus any caller-declared bracket
@@ -181,8 +180,7 @@ repeat contributes only its own scored
 observation: the historical discovery-then-score double execution and its
 cross-run evidence-drift comparison are retired — the pre-spawn observation
 bracket binds the values each run read, which is the evidence the comparison
-existed to approximate (exactly-once enforced by
-`TestRunMutantExecutesExactlyOnce`). A stale or unverifiable subject
+existed to approximate. A stale or unverifiable subject
 remeasures the finding; incomplete or incoherent observation is never silently
 represented as reusable evidence.
 
@@ -267,20 +265,6 @@ the serve verified, a flip into survival staying unbucketed like a
 probe-refused survivor; and on either splice, re-measured survivors of a
 non-reusable (unverifiable) spliced record classify unstable-oracle.
 
-REQ-exec-survivor-evidence: enforced by
-`TestCoverageIntersectsHalfOpenBoundaries`,
-`TestLineDirectiveTargetsKeepOnDiskIdentity`,
-`TestCoverageNormalizesDirectiveNames`,
-`TestDirectiveCoverageSkipsCgoIntermediates`,
-`TestDirectiveCoverageRequiresCompiledOnDiskSource`,
-`TestSurvivorCoverageRefusesUnsoundFiles`, `TestRunEndToEnd`'s
-pinned extents and buckets, `TestRunBucketsSurvivorExecution`,
-`TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets`,
-`TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence`,
-`TestRunExtendsCappedFindingMeasuringOnlyTheSuffix`,
-`TestDiskReadingOracleSurvivorsBucketOverlayBypassed`, and
-`TestCoverageUpgradeIsUpgradeOnly`.
-
 **REQ-exec-oracle-guidance** (behavior): When a fresh measurement's merged
 runtime evidence lands unverifiable under a package-derived oracle — a
 budget extension whose spliced record lands unverifiable included; a partial
@@ -300,10 +284,6 @@ Attribution is advisory run output, never persisted to the finding, and its
 probes are best-effort: a probe that errors, matches nothing, or fails skips
 its test instead of aborting a run whose finding already committed. Explicit
 oracles receive no attribution — the caller already chose the tests.
-
-REQ-exec-oracle-guidance: enforced by `TestRunAttributesOracleInstability`,
-`TestBuildOracleGuidanceArms`, `TestEmitOracleGuidanceGuards`, and
-`TestRunExtensionDivergenceStampsAndAttributes`.
 
 **REQ-exec-quiescence** (behavior): The caller MUST exclude source and build-input
 mutation from target loading through run completion. gomutant validates captured
@@ -374,11 +354,6 @@ taking sibling targets down. A campaign-wide abort remains reserved for the one
 condition that invalidates every measurement — cancellation of the run
 itself.
 
-REQ-exec-quiescence's evidence-construction locality: enforced by
-`TestRunSkipsBrokenTargetLocally` and
-`TestRunSkipsFailingBaselineTargetLocally` (the baseline arm, with the
-per-package-group memo).
-
 **REQ-exec-property-oracles** (behavior): gomutant MUST detect recognized
 property runtimes in an oracle package's imports (test variants included)
 before execution and settle each detected runtime's determinism
@@ -448,8 +423,7 @@ the survivor-evidence buckets); the classification comes from one baseline
 coverage probe run only when the verdict is not a kill (plain survival and
 the mixed killed-some-runs outcome alike - both leave the false-survivor
 reading open), is advisory, and is absent when
-the probe fails - a probe failure never fails a sound measurement (enforced by
-`TestEphemeralLabelsUnexercisedReplacement`). A kill
+the probe fails - a probe failure never fails a sound measurement. A kill
 additionally carries its interactive evidence in the result — a bounded
 excerpt of the killing test's own output anchored at its end, where Go
 emits the failure block, with the dropped earlier remainder counted (a
@@ -657,11 +631,6 @@ success, and then fails. The refusal names both toolchains, and on an
 identified skew their language series and the rebuild direction; the
 unidentifiable refusal names the versions it could not identify.
 
-REQ-exec-provenance: enforced by
-`TestLoadRefusesToolchainSkewUnderSelectionEnv`,
-`TestCheckToolchainProvenanceSharesTheGuard`, and
-`TestAttestRefusesToolchainSkewBeforeWriting`.
-
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
 caller-context cancellation, including expiry of an operator-supplied command
 timeout, MUST stop package loading and every subsequent
@@ -714,11 +683,6 @@ run cancelled before measurement began stays silent — there is no banked
 state to report — and the drift exit renders its full result rows and
 summary instead, which are its banked state.
 
-REQ-exec-banked-summary: enforced by
-`TestBankedStateNamesOnlyCommittedFindings`,
-`TestRunCommandInterruptRendersBankedState`, and
-`TestBankedStateExcludesFailedCommits`.
-
 **REQ-exec-completion** (behavior): A run that returns success MUST have
 dispositioned every announced target: measured and committed, served,
 skipped with a recorded reason, or named in a drift error. There is no
@@ -730,9 +694,6 @@ error MUST fail loudly naming the unfinished targets rather than
 report a truncated campaign as complete, because a truncated success
 is indistinguishable from a real one unless the operator diffs the
 findings document against the announced roster.
-
-REQ-exec-completion, REQ-exec-truncation: enforced by
-`TestTruncatedPipelineFailsLoudlyNamingUnfinishedTargets`.
 
 **REQ-exec-exclusivity** (behavior): A findings-producing run MUST hold an
 advisory campaign lock on its findings document for its whole duration —
@@ -764,15 +725,6 @@ whichever lock first persists there, a document write with no campaign
 ever run included — while a document placed in a user-owned
 directory keeps that directory untouched and relies on this
 documented lifecycle.
-
-REQ-exec-exclusivity: enforced by
-`TestCampaignLockExcludesSecondCampaign`,
-`TestRunRefusesWhileCampaignLockHeld`,
-`TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed`,
-`TestCampaignLockIgnoreMinted`,
-`TestDocumentLockAbsorbsCrashedHolderResidue`,
-`TestDocumentLockRefusalNamesLiveHolder`, and
-`TestUpdateDocument` (the bounded wait and its cancellation).
 
 **REQ-exec-oracle-scratch** (behavior): Every oracle process tree MUST
 run with its own scratch temp directory (its `TMPDIR`), removed as soon
@@ -815,11 +767,6 @@ never an inherited `TMPDIR` — a fail-safe direction: a missing mint
 declares nothing and evidence degrades to unverifiable, rather than a
 foreign temp root reading as ephemeral.
 
-REQ-exec-oracle-scratch, REQ-exec-oracle-scratch-order: enforced by
-`TestOracleScratchContainsAndSweepsTempDirs`.
-REQ-exec-oracle-scratch-declared: enforced by
-`TestTempTouchingOracleFinalizesVerifiable`.
-
 **REQ-exec-scratch-namespace** (behavior): gomutant MUST accept caller
 scratch-namespace declarations - a module-relative directory and a
 single-component `os.MkdirTemp`-style name pattern - and declare each
@@ -834,11 +781,6 @@ mints and removes inside a declared namespace stops recording per-run
 missing-arm identities, restoring union-equality across runs for the
 serve carve-outs' persisted-union comparisons; scratch outside every
 declared namespace keeps its records unchanged.
-
-REQ-exec-scratch-namespace: enforced by
-`TestScratchNamespaceOracleScratchRecordless`,
-`TestRunRefusesMalformedScratchNamespace`, and
-`TestParseScratchNamespaces`.
 
 **REQ-exec-oracle-memory** (behavior): Every oracle process tree — mutant
 runs, baseline probes, and ephemeral probes alike — MUST run under a
@@ -875,13 +817,6 @@ failure is swallowed without any signature text keeps its disposition
 unattributed to memory, and a GOMEMLIMIT collection death spiral
 manifests as a timeout, which the oracle-timeout pin already covers.
 
-REQ-exec-oracle-memory: enforced by
-`TestOracleMemoryCeilingContainsRunawayMutant`,
-`TestDefaultOracleMemoryLimit`, `TestOracleMemoryEnv`,
-`TestMemoryDecidedKillSignatures`, `TestMemoryPinStaleIsDirectional`,
-`TestMergeScoredFactsJoinsCeilingFacts`, and the four assembly-arm
-memory-fact assertions in their count tests.
-
 **REQ-exec-oracle-parallelism** (behavior): Every oracle process tree
 MUST run with its inner parallelism capped so the campaign's aggregate
 stays within the host: at J concurrent jobs, each tree's width — the Go
@@ -917,17 +852,10 @@ already deliberately does not pin (a finding measured on a slower or
 busier host serves unchanged), with the attribution noise arm owning a
 baseline that dies beside its mutant under contention.
 
-REQ-exec-oracle-parallelism: enforced by
-`TestOracleParallelismWidth`, `TestOracleCPUEnv`,
-`TestOracleEnvCarriesInnerParallelismCap`,
-`TestOracleIngestEnvCarriesInnerParallelismCap`,
-`TestRunInstallsOracleParallelism`,
-`TestMergePreservesWidthReadingEvidence`,
-`TestWidthReadingOracleEvidenceServes`, and
-`TestOracleRunsAtLowPriority`. (The go tool's package-build
-parallelism follows the delivered GOMAXPROCS — `-p` defaults to it —
-so the environment single-sources both dimensions; an explicit flag
-would override an operator's narrower ambient bound.)
+(The go tool's package-build parallelism follows the delivered
+GOMAXPROCS — `-p` defaults to it — so the environment single-sources
+both dimensions; an explicit flag would override an operator's
+narrower ambient bound.)
 
 **REQ-exec-attribution-symmetry** (behavior): A mutant run and the
 baseline probe that attributes its failure MUST execute under identical
@@ -937,9 +865,6 @@ in the overlay alone: a mutant that exhausts a bound its baseline never
 faced reads as a kill when the failure is the bound's, and a baseline
 squeezed under a bound its mutant escaped converts a real kill into a
 noise discard.
-
-REQ-exec-attribution-symmetry: enforced by
-`TestBaselineProbeRunsUnderOracleBounds`.
 
 Mutation execution is supported on Unix and Windows hosts, where gomutant can
 own and terminate a process group or Job Object. Other host operating systems

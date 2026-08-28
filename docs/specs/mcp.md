@@ -55,10 +55,6 @@ elapsed time on a fixed cadence, so no compile or execution stretch stays
 silent past a client's deadline. The server's instructions and each tool's
 description teach when to use what and what the caps mean.
 
-REQ-mcp-envelope: enforced by `TestRunStreamsLeaveThePayloadWhenStreamed`,
-`TestDiscoverCountsLeadAndRowsCap`, and
-`TestRunResponseCarriesNoCandidateEvidenceField`.
-
 **REQ-mcp-findings-doc** (behavior): The server MUST maintain the same
 findings document the CLI maintains — a measuring tool merges fresh findings
 over the prior document by symbol and an attesting tool rewrites it — so an
@@ -86,8 +82,7 @@ oracle-parallelism width is process state every in-flight campaign shares
 in-flight campaign's job count owns the width, and a concurrent run
 requesting a different count is refused with the owner's count named —
 never installed over the owner, which would split its oracles' recorded
-environments from the campaign's evidence environment (enforced by
-`TestRunWidthClaimRefusesDifferingJobs`).
+environments from the campaign's evidence environment.
 
 **REQ-mcp-liveness** (behavior): The server MUST detect a dead client
 transport while a campaign is in
@@ -102,9 +97,6 @@ campaign from interleaving with a retry. A live client that merely
 misses the ping's response budget loses its session while the campaign
 completes and commits: the document, not the response, is the result
 of record.
-
-REQ-mcp-lifecycle: enforced by `TestToolPruneAndRetarget`,
-`TestToolLifecycleEchoBounds`, and `TestServerOptionsCarryKeepalive`.
 
 **REQ-mcp-explain** (behavior): The server MUST expose an explain tool
 answering causally, from the findings document and current-tree
@@ -130,13 +122,6 @@ by an earlier one, and a counted omission is not silent. Candidate evidence stay
 (REQ-mcp-envelope); the record-level reason names candidate-local
 evidence when it is the cause. An unknown symbol refuses, naming the
 findings tool as the roster.
-
-REQ-mcp-explain: enforced by `TestToolExplainAnswersSymbolAndTriage`,
-`TestToolExplainCapsEveryRowSet`,
-`TestToolExplainRollsUpSameRootInputs`,
-`TestRollUpMachineLocalInputs`,
-`TestCommittableReasonsListEveryFailingClause`, and
-`TestSurvivorAdviceVocabulary`.
 
 **REQ-mcp-ephemeral-edits** (behavior): The ephemeral tool MUST accept the
 mutant as a whole replacement source, sequential exact-match edits applied

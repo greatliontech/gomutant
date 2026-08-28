@@ -159,7 +159,7 @@ func serverOptions() *mcp.ServerOptions {
 		// the connection cancels every in-flight handler context - so a
 		// client that died mid-run aborts the campaign within the
 		// interval instead of measuring detached for its full duration
-		// (REQ-mcp-lifecycle). A client that abandons a request while
+		// (REQ-mcp-liveness). A client that abandons a request while
 		// its connection lives owes a cancellation notification per the
 		// protocol; the ping cannot see intent.
 		KeepAlive:    clientKeepAliveInterval,

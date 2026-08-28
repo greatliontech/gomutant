@@ -1,0 +1,74 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "bf372e4b41028f2b27dff0a41ea6d1634d2858d41e34b2148f6cb180ad2b086e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestContradictKilledDispositions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1e4150e9c563f4cb79a94988d3efcb0ce3b4f338c3d86a853117ee7431b65692"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "bf372e4b41028f2b27dff0a41ea6d1634d2858d41e34b2148f6cb180ad2b086e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestMutationDomainHeld"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7050d73ce524d116a28b1c94e98c8521acbcfcc96ee2668ecf3ae085a310c11d"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "bf372e4b41028f2b27dff0a41ea6d1634d2858d41e34b2148f6cb180ad2b086e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCarriesAcrossPinsAndShedsOnDomainMove"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e611c3a4004cac18b0c7ad6831ffed3cf947f475616243337ef7227eeb34145d"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "bf372e4b41028f2b27dff0a41ea6d1634d2858d41e34b2148f6cb180ad2b086e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCommandAbortAfterCommitReportsSheds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3d4705b3dcb0f97d8aefc2f6f8d4a4bccf22095ffc702799cbd66c5e8d0154b9"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "bf372e4b41028f2b27dff0a41ea6d1634d2858d41e34b2148f6cb180ad2b086e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCommandContradictionIsTheSingleReport"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9bd9ecc5bf5aec1ba941e78843180c149feda78cad8b2da30caacdf772198191"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "bf372e4b41028f2b27dff0a41ea6d1634d2858d41e34b2148f6cb180ad2b086e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunFullRemeasureContradictionNamesKiller"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "833f3bd2fbcb9c5a15c2cca17349e886343e96a2bb6813414106cd0e85b20156"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "bf372e4b41028f2b27dff0a41ea6d1634d2858d41e34b2148f6cb180ad2b086e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestShapedDispositionShedsOnMovedPins"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "39b9a36a248606e1efdd70fd20e61cfd92a380f478edcd911f4c8442a927bbd0"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "bf372e4b41028f2b27dff0a41ea6d1634d2858d41e34b2148f6cb180ad2b086e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestShedsRidingAbortAttachesToTheError"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7991d31cf2d146d3b4bc8f2f6249e255ef6eceeaadd0984bb8601e4f938d5a43"
+}

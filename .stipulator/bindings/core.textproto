@@ -1,0 +1,20 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-core-attributed-kills"
+  content_hash: "90842a6c5a7ccbf67b9a3dfdc80023df5058de543dab8bb9af59ed89538196d0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestParseFindingsKillAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "24c0b49a0696297dfc3d8398392b792dbc1fcd34908c9242aa97c10c1aef6bb1"
+}
+
+bindings {
+  requirement_id: "REQ-core-attributed-kills"
+  content_hash: "90842a6c5a7ccbf67b9a3dfdc80023df5058de543dab8bb9af59ed89538196d0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunServesDriftedKillsKeyedToUnmovedOracles"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2684f344344a822c17ba69f9220921bc7c24ebd492a94d52dfe8eab8f4213b77"
+}

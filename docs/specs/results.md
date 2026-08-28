@@ -119,11 +119,6 @@ states its cause on the run face instead of reading as a silent write
 failure (the field shape: healthy counts, an empty committed
 document, and a consumer diagnosing corruption).
 
-REQ-result-local-signpost: enforced by
-`TestRunCommandStatesMachineLocalRouting` and
-`TestToolRunReportsPromotedRecords` (the structured face's aggregate
-count, which survives the capped findings list).
-
 **REQ-result-version-surface** (behavior): The command surface MUST
 report the binary's identity and the findings document versions it
 writes and reads (`--version` and `version`), because document-version
@@ -132,8 +127,6 @@ refusal, and a field report without the version line cannot attribute
 it — the reporting consumer could not even establish which binary
 generation produced its empty documents.
 
-REQ-result-version-surface: enforced by `TestVersionSurfaces`.
-
 **REQ-result-skip-radius** (behavior): The run summary MUST name every
 package whose entire selected target set skipped — on the human face as
 a per-package line and on the structured face as a field — whenever the
@@ -141,9 +134,6 @@ package carried more than one target. A dark package is a coverage
 hole, not a tool hiccup, and a scattered per-reason count provably hid
 one: a field campaign read 567 scattered skips over 14 fully dark
 packages. Partially skipped packages stay in the per-reason class line.
-
-REQ-result-skip-radius: enforced by
-`TestSkippedPackageRadiusNamesDarkPackages`.
 
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
@@ -163,7 +153,7 @@ signal (a newer gomutant likely wrote the document; a long-lived reader
 such as an MCP server needs a restart on the upgraded binary), since the
 recurring field shape is a server outliving a binary upgrade with its
 surface dead until someone suspects the process rather than the document
-(enforced by `TestParseFindingsVersionAheadNamesProbableCause`) —
+—
 while a known older version reads with its absent fields in their stated
 grandfathered form (a version-4 document's siteless survivors and
 dispositions are the match-by-position form that adopts sites on first
@@ -413,8 +403,8 @@ or evidence naming a subject the run carries no view for, stamps dirty,
 fail-closed. Persisted evidence is the PORTABLE form: each subject's
 runtime-input manifest converts to module-relative identities against
 that subject's own module before it is stamped (gofresh
-REQ-inputs-relative-identities), the in-memory merge world staying
-absolute (REQ-inputs-absolute-identities) with a recorded manifest
+`REQ-inputs-relative-identities`), the in-memory merge world staying
+absolute (gofresh `REQ-inputs-absolute-identities`) with a recorded manifest
 re-absolutized against its module base whenever it re-enters a merge —
 so a committed document is keyed by what was measured, never by the
 checkout root or the file times that measured it, and a clone of the
@@ -479,7 +469,7 @@ operator opt-out of git's own change tracking, so `git status` omits the
 path's divergence and a clean judgment over it is unsupported - the
 provenance probe reads the flags directly and stamps dirty (worktree) or
 refuses the target (staged) rather than vouching for bytes git was told not
-to watch (enforced by `TestPathsDirtyDetectsTrackingOptOutFlags`).
+to watch.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
 portable versioned document that gomutant owns — carrying, per mutated
@@ -613,17 +603,6 @@ so whether the artifact is safe to stage is answered by the tool, not by
 inspecting JSON: CLI faces render only the machine-local marker, absence
 meaning repo, while MCP rows carry the layer explicitly.
 
-REQ-result-layers: enforced by `TestCommittableDrawsThePortableLine`,
-`TestStoreSplitsUpdatesAcrossLayers`,
-`TestStoreUpdateDecidesMembershipUnderTheDocumentLock`,
-`TestRunCommandStatesMachineLocalRouting`,
-`TestOverlayEvictsEntriesOverTheEvidenceCeiling`,
-`TestOverlayCeilingFollowsSymlinkedEntries`,
-`TestOverlayServesUnchangedEntriesWithoutReparsing`,
-`TestOverlayInstallWarmsTheParseCache`,
-`TestOverlayReloadTracksRewrittenAndDeletedEntries`, and
-`TestOverlayMergedViewIsIsolatedFromCallerMutation`.
-
 A survivor carries optional execution evidence — `never-executed`,
 `executed-and-passed`, `overlay-bypassed`, or `unstable-oracle` per REQ-exec-survivor-evidence in
 [execution.md](execution.md) — advisory and empty on records measured before
@@ -703,19 +682,6 @@ permissiveness (a wrong-site adoption, the field bug replayed once per
 grandfathered disposition) remains possible; the alternative, shedding
 every pre-site disposition wholesale, would destroy user-authored
 equivalence reasoning with no audit trail.
-
-REQ-attest-survivor's carry and reporting clauses: enforced by
-`TestRunCarriesAcrossPinsAndShedsOnDomainMove` (the domain-keyed carry
-with its distinct report, and the domain-move shed),
-`TestMutationDomainHeld` (the gate's components),
-`TestShapedDispositionShedsOnMovedPins` (the shaped clause's pin gate),
-`TestRunFullRemeasureContradictionNamesKiller`,
-`TestContradictKilledDispositions`, and
-`TestRunCommandContradictionIsTheSingleReport` (killer-naming
-contradictions ahead of the vaguer merge shed, on the full re-measure
-and serve paths), and `TestRunCommandAbortAfterCommitReportsSheds`
-with `TestShedsRidingAbortAttachesToTheError` (sheds loud on the abort
-modes, terminal and error channel).
 
 **REQ-result-findings** (behavior): gomutant MUST present survivors as
 findings awaiting disposition, never as a pass/fail verdict — strengthen a

@@ -1,0 +1,74 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-mut-budget"
+  content_hash: "77ac09d6daa8e5b987665087aabfc3b3c2bee6b2cd6150ed5d4bd12722c00ac0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestBudgetCovers"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4fc98ff0e2b06360b97f6df0c1df53ceff8c940522cb0c2e8b7a64a499d4cec3"
+}
+
+bindings {
+  requirement_id: "REQ-mut-budget"
+  content_hash: "77ac09d6daa8e5b987665087aabfc3b3c2bee6b2cd6150ed5d4bd12722c00ac0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunEndToEnd"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f6f20c055804ecce6eb5410a1c9265069bda09e5db360c117d360460dae4a890"
+}
+
+bindings {
+  requirement_id: "REQ-mut-budget"
+  content_hash: "77ac09d6daa8e5b987665087aabfc3b3c2bee6b2cd6150ed5d4bd12722c00ac0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunExtendsCappedFindingMeasuringOnlyTheSuffix"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "10c6408573f768a1fdefcb1c83083ea5d6507cf4cfd2dc3570c352e365bfd1dc"
+}
+
+bindings {
+  requirement_id: "REQ-mut-budget"
+  content_hash: "77ac09d6daa8e5b987665087aabfc3b3c2bee6b2cd6150ed5d4bd12722c00ac0"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestMutants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fb68759775215550eb646adbca2c18268aec94c2353c1b44bff4e9a092df74b4"
+}
+
+bindings {
+  requirement_id: "REQ-mut-operators"
+  content_hash: "815ee5bb31238d20fa0ccd2fce1d4926b6307820e3f589095b4110414261fb61"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestMutants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fb68759775215550eb646adbca2c18268aec94c2353c1b44bff4e9a092df74b4"
+}
+
+bindings {
+  requirement_id: "REQ-mut-operators"
+  content_hash: "815ee5bb31238d20fa0ccd2fce1d4926b6307820e3f589095b4110414261fb61"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantBuildFailureIsDiscarded"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "afe4dc7d62b9a922baa9477ae0fcf93d45728cbf5ad0f1b60cef903445b61160"
+}
+
+bindings {
+  requirement_id: "REQ-mut-overlay"
+  content_hash: "31d280c4a3d5d958df16e74cca0c8d07e75bd87cb0943f2949f3f90856098864"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantOutcomes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6e3821f8113265d8e1d28f98044d7bcea633c3d15ab07e17bfe3a7b5f36d950f"
+}
+
+bindings {
+  requirement_id: "REQ-mut-overlay"
+  content_hash: "31d280c4a3d5d958df16e74cca0c8d07e75bd87cb0943f2949f3f90856098864"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestSplitRapidPkgs"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "48d22cdcd69d296f281de840a45982a7cb70de9bf744098860f1f492ecaefb52"
+}

@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [mcp-liveness-cancellation-witness](mcp-liveness-cancellation-witness.md) | keepalive config pinned but the ping-failure cancellation propagation has no witness over the SDK transport seam | transport-seam fault injection lands in the mcpserver harness |
 | [structural-shaped-probe-provenance-gap](structural-shaped-probe-provenance-gap.md) | structural shapes' probe content escapes dirty judgment and serve re-observation | train chunk 105 |
 | [planonly-gatherwindow-suite-hang](planonly-gatherwindow-suite-hang.md) | a plan-only Tree.Run hangs the suite at gatherWindow, cause undumped | train chunk 113 (closes unreproducible at triage absent a mechanism-showing dump) |
 | [fold-growth-into-generalized-drift](fold-growth-into-generalized-drift.md) | growth is a strict special case of generalized drift; fold and generalize the survivor-delta narrowing | train chunk 128 |
