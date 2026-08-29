@@ -62,7 +62,7 @@ resource bound whose configured value decides attribution is a measurement
 pin, where scheduling bounds reach verdicts through wall-clock or the
 recorded environment evidence instead
 (REQ-exec-oracle-parallelism) — carrying the target package's test-variant
-compartment ledger (the declaration-level record the growth carve-out diffs
+compartment ledger (the declaration-level record the killer-drift carve-out diffs
 at serve time), the capture commit and dirty provenance,
 the mutant count, the kill count, each kill's candidate identity and killer
 (the killing oracle test's symbol, the timeout marker, or the package-failure
@@ -188,12 +188,13 @@ BYTES are machine circumstance (RAM-derived by default), the
 ceiling's DECISIONS are measurement identity. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures.
 Measurement pins are never partially trusted: any moved pin remeasures the
-whole target, with exactly four precisely scoped carve-outs — candidate-local
-evidence, the budget when it is the only pin that fails to cover, derived
-oracle growth under an inert test-variant delta, and killer-scoped oracle
-drift under an attributable test-variant delta — the drift carve-out
-composing a grown derived set and flagged candidate evidence, so the
-strengthen loop's add-and-change rounds serve their standing kills.
+whole target, with exactly three precisely scoped carve-outs — candidate-local
+evidence, the budget when it is the only pin that fails to cover, and
+killer-scoped oracle drift under an attributable test-variant delta — the
+drift carve-out composing a purely grown derived set (an attributable delta
+of additions with nothing moved), moved oracles, and flagged candidate
+evidence, so the strengthen loop's add-and-change rounds serve their
+standing kills.
 Candidate evidence is the first narrower axis: a record whose only
 unverifiable runtime evidence is candidate-local serves its covered candidates
 and re-executes exactly the unverifiable ones under a passing current baseline
@@ -236,53 +237,11 @@ pinned preserves the extended outcome but stamps it explicitly non-reusable. A
 forced run re-measures whole regardless. The extension's decision reports the
 served prefix and the measured suffix ("served: prefix of N candidates stands;
 measuring M more", the candidate noun count-aware: a one-candidate prefix
-reads "1 candidate"). Derived oracle growth is the third carve-out, resting
-on the keystone: every recorded kill names its killer among the recorded
-oracles (REQ-core-attributed-kills), and timeout and package-scope kills rest
-on the same recorded set's behavior, so a grown oracle cannot un-kill
-anything — it can only kill more. When the finding and the request are both
-non-explicit — growth is a derived-oracle claim on both sides; an explicit
-request that happens to superset the recorded derived set is the caller's
-selection, never derived growth — the
-current derived set is a strict superset of the recorded one, and every other
-pin covers — scalar pins equal; no candidate evidence; the target's and every
-retained oracle's evidence checking plainly valid, target-package subjects
-with their recorded compartment pin refreshed to the current one: the
-refresh is licensed exactly by an inert declaration delta — the finding's
-recorded compartment ledger diffed against the current one classifies
-inert, so the compartment moved by additions no unchanged declaration can
-observe, and anything changed, removed, or initialization-bearing
-re-measures whole — and the check stays plain because gofresh orders the
-compartment comparison before the environment tiers, so accepting the stale
-"test variants" verdict instead would let a moved pin hide behind it — then
-recorded outcomes stand for
-every candidate except the survivors, which the run re-measures against only
-the added test names: a killed candidate stays killed, a discard stays
-discarded, a survivor an added test kills moves to killed with the kill
-attributed like any other, and a still-surviving candidate keeps its survival
-with its execution bucket re-derived honestly — a never-executed survivor an
-added test executes becomes executed-and-passed. The delta run captures
-evidence for the added oracles; the grown record carries the current tree's
-evidence for every subject — the gate itself proved the retained subjects'
-only movement is the inert compartment delta — and the current compartment
-ledger. Attestations carry for still-surviving attested candidates; a newly
-killed attested candidate loses its attestation — evidence beats
-attestation — with each contradiction reported through the run's
-attestation-contradiction report, naming the survivor, its shed reasoning,
-and the killer. The carve-out is
-bounded fail-closed like its siblings: it never composes with candidate
-evidence or a budget shortfall; deterministic regeneration must re-identify
-the record's candidates and survivors or the target re-measures whole; the
-delta processes' completed union, merged over the record's persisted union,
-must equal that persisted union or the grown finding is preserved but
-explicitly non-reusable; a failing added test on the clean tree refuses at
-the per-group baseline exactly as any baseline failure; a record persisted
-without a compartment ledger re-measures whole; and a forced run re-measures
-whole. The growth decision reports "served: derived oracle grew by N tests;
-re-measuring M survivors against them" (count-aware nouns) with `candidates`
-counting the re-measured survivors. Killer-scoped oracle drift is the fourth
-carve-out, resting on the keystone made durable: every recorded kill names
-its killer beside the kill, so when the target package's compartment moves
+reads "1 candidate"). Killer-scoped oracle drift is the third
+carve-out, resting on two keystones made durable: every recorded kill
+names its killer beside the kill (REQ-core-attributed-kills), and a purely
+grown oracle cannot un-kill anything — added tests only extend the
+recorded set's behavior, so growth only kills more. When the target package's compartment moves
 in a way the declaration ledger can attribute — or holds still while some
 oracle's own evidence moves; the partition is by what each kill rests on,
 and an empty delta partitions by the evidence signal alone — an edit a
@@ -307,7 +266,10 @@ changed code around every test without any oracle naming it, so a reaching
 root re-measures the whole target. Under an attributable delta each oracle classifies
 moved or unmoved by two independent signals: its own evidence checking
 plainly valid — target-package subjects with their compartment pin refreshed
-to the current one, the refresh licensed by the attributable delta; any
+to the current one, the refresh licensed by the attributable delta, and the
+check staying plain because gofresh orders the compartment comparison before
+the environment tiers (accepting the stale "test variants" verdict instead
+would let a moved pin hide behind it); any
 other subject's evidence as recorded, its own package's compartment being
 untouched by this delta — and, for target-package oracles, a reference walk
 over the current ledger's referenced-name lists (the current ledger's lists
@@ -339,8 +301,9 @@ oracle has no recorded evidence and joins every re-measure's oracle; by the
 growth keystone it cannot un-kill anything — a grown set only extends the
 recorded set's behavior — so it never moves a standing kill, set-wide kills
 included. A grown set serves only when the finding and the request are both
-non-explicit, exactly growth's rule: an explicit request that supersets the
-recorded set is the caller's selection, never derived growth. Candidate
+non-explicit — a grown set is a derived-oracle claim on both sides: an
+explicit request that supersets the recorded set is the caller's
+selection, never derived growth. Candidate
 evidence composes rather than disqualifying: every flagged candidate joins
 the re-measure set and re-executes against the full current oracle — the
 candidate-local splice's own discipline, under this carve-out's baselines —
@@ -358,12 +321,30 @@ oracle timeout bounds the whole group process's wall clock and a grown
 -run selection only lengthens the same process's run, a ground that would
 fail under a per-test timeout model — under
 growth alone they stand), and, whenever any oracle moved or the set grew,
-every survivor (a moved or added test may now kill it; with nothing moved
-and nothing added, survivals stand exactly like kills) — with re-measured
-survivors' advisory buckets re-derived from the current probe, a newly
-killed attested survivor shedding its attestation through the same
-contradiction report as growth, and a fresh kill — the added test's
-included — attributed like any other. The drifted record carries the
+every survivor — re-measured against only the added and moved tests: each
+unmoved oracle's recorded pass on the survivor stands exactly as a
+standing kill does, so only added and moved oracles can change any
+per-oracle verdict. The narrowed grounds are asymmetric on the set-wide
+wall-clock axis and the contract says so: a narrowed run forgoes the
+whole-current-set single-process timeout — a full-scope process could
+cross the bound where the recorded process and the narrow process each
+fit it — and the forgone channel is deliberate: the recorded process
+already ran the mutant against every unmoved oracle within the timeout
+and the narrow process measures its behavior on every added and moved
+oracle under the same bound, so a full-scope crossing could only be the
+aggregate of individually-bounded, individually-measured runs exceeding
+a threshold their sum was never judged against — a set-packing artifact,
+not a new fact about the mutant's behavior on any oracle. The narrow
+scope's own timeout channel stays sound because its baseline and its
+mutant run are judged under the same scope, and a narrow-scope timeout
+records as a kill by wall-clock monotonicity (the full process only
+runs longer). A flagged survivor re-executes against the full current
+oracle through its evidence instead (with nothing moved and nothing
+added, survivals stand exactly like kills) — with re-measured survivors'
+advisory buckets re-derived from the current probe, a newly killed
+attested survivor shedding its attestation through the contradiction
+report, and a fresh kill — the added test's included — attributed like
+any other. The drifted record carries the
 current tree's evidence for every subject, the added oracles' included, and
 the current compartment ledger. The carve-out is
 bounded fail-closed like its siblings: it never composes with a budget
@@ -380,9 +361,12 @@ run re-measures whole. A delta reaching no recorded oracle, with nothing
 added and nothing flagged, serves the whole
 record with nothing re-measured. The drift decision reports "served: N kills
 stand on unmoved oracles; re-measuring M candidates against the current
-oracle" (count-aware nouns), appending " (derived oracle grew by K tests)"
-when the set grew and "; F candidates re-execute flagged evidence" when
-evidence is flagged (count-aware nouns and verb) (a delta reaching no oracle with nothing added or
+oracle" (count-aware nouns), appending " (S survivors narrowed to the added
+and moved tests)" when any survivor narrows — S counts the narrowed
+survivors; a re-measure whose survivors are all flagged (each keeping the
+full oracle) appends nothing — " (derived oracle grew by K
+tests)" when the set grew, and "; F candidates re-execute flagged evidence"
+when evidence is flagged (count-aware nouns and verb) (a delta reaching no oracle with nothing added or
 flagged reports "served:
 compartment delta reaches no recorded oracle; nothing re-measures") with
 `candidates` counting the re-measured candidates. When
@@ -391,7 +375,7 @@ INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
 serve a weaker request without remeasurement. Every serve rewrite — the
 cached serve, the candidate re-execution splice, the budget extension,
-derived-oracle growth, and killer-scoped drift — records commit and dirty
+and killer-scoped drift — records commit and dirty
 provenance recomputed from the current tree, exactly as a fresh measure
 stamps them: the proof that licensed the serve validated every subject's
 evidence and runtime manifest against the current tree, so a record

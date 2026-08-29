@@ -8,10 +8,6 @@ is deleted (git holds history).
 |------|---------|-------|
 | [mcp-liveness-cancellation-witness](mcp-liveness-cancellation-witness.md) | keepalive config pinned but the ping-failure cancellation propagation has no witness over the SDK transport seam | transport-seam fault injection lands in the mcpserver harness |
 | [planonly-gatherwindow-suite-hang](planonly-gatherwindow-suite-hang.md) | a plan-only Tree.Run hangs the suite at gatherWindow, cause undumped | train chunk 113 (closes unreproducible at triage absent a mechanism-showing dump) |
-| [fold-growth-into-generalized-drift](fold-growth-into-generalized-drift.md) | growth is a strict special case of generalized drift; fold and generalize the survivor-delta narrowing | train chunk 128 |
-| [unify-run-discover-selection-preamble](unify-run-discover-selection-preamble.md) | one selectTargets helper replaces the duplicated ~45-line MCP selection preamble | with train chunk 128 (serve carve-out consolidation) |
-| [consolidate-reidentification-and-bucket-policy](consolidate-reidentification-and-bucket-policy.md) | one re-identification helper, one advisory-bucket policy across the serve carve-outs | train chunk 128 |
-| [shaped-derivation-once](shaped-derivation-once.md) | shaped candidates derive at resolve AND per finding at stamp/serve; thread the resolve-time derivation through the assembly arms — one derivation per run, the stamp-time failure arm deleted | train chunk 128 |
 | [derive-probe-oracle-timeout](derive-probe-oracle-timeout.md) | derive the mutant-run budget from the measured baseline instead of a fixed timeout knob | train chunk 113 |
 | [symbol-cutter-duality](symbol-cutter-duality.md) | two symbol cutters over one grammar, relationship unstated | train chunk 113 |
 | [campaign-refuses-tree-change-from-rapid-failfiles](campaign-refuses-tree-change-from-rapid-failfiles.md) | rapid failfile persistence poisons campaign analysis views and ephemeral tree cleanliness | train chunk 113 |

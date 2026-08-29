@@ -326,8 +326,8 @@ type guidanceOut struct {
 // per-group symbol cap is the precedent.
 const guidanceListCap = 10
 
-// contradictionOut is one shed attestation report (a growth serve's added
-// tests killed an attested survivor).
+// contradictionOut is one shed attestation report (a drift serve's added
+// or moved tests killed an attested survivor).
 type contradictionOut struct {
 	Symbol   string `json:"symbol"`
 	Position string `json:"position"`
@@ -558,7 +558,7 @@ type runOut struct {
 	OmittedFindings           int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
 	Guidance                  []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
 	OmittedGuidance           int                         `json:"omittedOracleGuidance,omitempty" jsonschema:"guidance rows beyond the response cap - counted, never silent"`
-	Contradictions            []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
+	Contradictions            []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a drift serve's added or moved tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
 	OmittedContradictions     int                         `json:"omittedAttestationContradictions,omitempty" jsonschema:"contradiction rows beyond the response cap; the findings tool serves every open survivor"`
 	PropertyOracles           []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
 	OmittedPropertyOracles    int                         `json:"omittedPropertyOracles,omitempty" jsonschema:"property-oracle rows beyond the response cap"`
@@ -630,6 +630,80 @@ func droppedSymbols(current, merged []gomutant.Finding) int {
 		}
 	}
 	return dropped
+}
+
+// targetSelection is one resolved target-selection request.
+type targetSelection struct {
+	targets   []gomutant.Target
+	residue   []gomutant.Residue
+	wholeTree bool
+}
+
+// selectTargets resolves a selection request through the one preamble
+// run and discover share: the exclusive-forms refusal, the source
+// dispatch (targets document, inline document, changed ref, or whole
+// tree), and the filter walk — whose empty-selection discrimination
+// lives in the library, so the callers' zero-target notes name the
+// true emptier (REQ-target-filtering, REQ-mcp-envelope).
+func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, targetsPath, targetsJSON, changed string, packages, symbols []string) (targetSelection, error) {
+	var sel targetSelection
+	forms := 0
+	if targetsPath != "" {
+		forms++
+	}
+	if targetsJSON != "" {
+		forms++
+	}
+	if changed != "" {
+		forms++
+	}
+	if forms > 1 {
+		return sel, fmt.Errorf("give targets_path, targets_json, or changed, at most one")
+	}
+	var err error
+	switch {
+	case targetsPath != "":
+		if err := localPath("targets_path", targetsPath); err != nil {
+			return sel, err
+		}
+		data, err := contextio.ReadFile(ctx, filepath.Join(s.dir, filepath.FromSlash(targetsPath)))
+		if err != nil {
+			return sel, err
+		}
+		if err := ctx.Err(); err != nil {
+			return sel, err
+		}
+		if sel.targets, err = gomutant.LoadTargetsContext(ctx, data); err != nil {
+			return sel, err
+		}
+	case targetsJSON != "":
+		if sel.targets, err = gomutant.LoadTargetsContext(ctx, []byte(targetsJSON)); err != nil {
+			return sel, err
+		}
+	case changed != "":
+		paths, err := gitref.ChangedPathsContext(ctx, s.dir, changed)
+		if err != nil {
+			return sel, err
+		}
+		sel.targets, sel.residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
+			return gitref.ShowContext(ctx, s.dir, changed, p)
+		})
+		if err != nil {
+			return sel, err
+		}
+	default:
+		if sel.targets, err = tree.DiscoverContext(ctx); err != nil {
+			return sel, err
+		}
+		sel.wholeTree = true
+	}
+	if sel.targets, err = tree.FilterTargetsContext(ctx, sel.targets, packages, symbols); err != nil {
+		return sel, err
+	}
+	if len(packages) != 0 || len(symbols) != 0 {
+		sel.wholeTree = false
+	}
+	return sel, nil
 }
 
 // capAdvisories bounds the run response's five advisory lists and each
@@ -711,66 +785,12 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	var targets []gomutant.Target
 	wholeTree := false
-	forms := 0
-	if in.TargetsPath != "" {
-		forms++
-	}
-	if in.TargetsJSON != "" {
-		forms++
-	}
-	if in.Changed != "" {
-		forms++
-	}
-	if forms > 1 {
-		return nil, out, fmt.Errorf("give targets_path, targets_json, or changed, at most one")
-	}
-	switch {
-	case in.TargetsPath != "":
-		if err := localPath("targets_path", in.TargetsPath); err != nil {
-			return nil, out, err
-		}
-		data, err := contextio.ReadFile(ctx, filepath.Join(s.dir, filepath.FromSlash(in.TargetsPath)))
-		if err != nil {
-			return nil, out, err
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, out, err
-		}
-		if targets, err = gomutant.LoadTargetsContext(ctx, data); err != nil {
-			return nil, out, err
-		}
-	case in.TargetsJSON != "":
-		if targets, err = gomutant.LoadTargetsContext(ctx, []byte(in.TargetsJSON)); err != nil {
-			return nil, out, err
-		}
-	case in.Changed != "":
-		paths, err := gitref.ChangedPathsContext(ctx, s.dir, in.Changed)
-		if err != nil {
-			return nil, out, err
-		}
-		targets, out.Residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
-			return gitref.ShowContext(ctx, s.dir, in.Changed, p)
-		})
-		if err != nil {
-			return nil, out, err
-		}
-	default:
-		targets, err = tree.DiscoverContext(ctx)
-		if err != nil {
-			return nil, out, err
-		}
-		wholeTree = true
-	}
-	// The empty-selection discrimination lives in the library: filters
-	// over an emptied selection validate and return empty, so the note
-	// below can name the true emptier (REQ-target-filtering).
-	targets, err = tree.FilterTargetsContext(ctx, targets, in.Packages, in.Symbols)
+	sel, err := s.selectTargets(ctx, tree, in.TargetsPath, in.TargetsJSON, in.Changed, in.Packages, in.Symbols)
 	if err != nil {
 		return nil, out, err
 	}
-	if len(in.Packages) != 0 || len(in.Symbols) != 0 {
-		wholeTree = false
-	}
+	targets, wholeTree = sel.targets, sel.wholeTree
+	out.Residue = sel.residue
 	prior, err := s.loadFindingsContext(ctx, in.Findings)
 	if err != nil {
 		return nil, out, err
@@ -1171,62 +1191,12 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
-	forms := 0
-	if in.TargetsPath != "" {
-		forms++
-	}
-	if in.TargetsJSON != "" {
-		forms++
-	}
-	if in.Changed != "" {
-		forms++
-	}
-	if forms > 1 {
-		return nil, out, fmt.Errorf("give targets_path, targets_json, or changed, at most one")
-	}
-	var targets []gomutant.Target
-	switch {
-	case in.TargetsPath != "":
-		if err := localPath("targets_path", in.TargetsPath); err != nil {
-			return nil, out, err
-		}
-		data, err := contextio.ReadFile(ctx, filepath.Join(s.dir, filepath.FromSlash(in.TargetsPath)))
-		if err != nil {
-			return nil, out, err
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, out, err
-		}
-		targets, err = gomutant.LoadTargetsContext(ctx, data)
-		if err != nil {
-			return nil, out, err
-		}
-	case in.TargetsJSON != "":
-		targets, err = gomutant.LoadTargetsContext(ctx, []byte(in.TargetsJSON))
-		if err != nil {
-			return nil, out, err
-		}
-	case in.Changed != "":
-		paths, err := gitref.ChangedPathsContext(ctx, s.dir, in.Changed)
-		if err != nil {
-			return nil, out, err
-		}
-		targets, out.Residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
-			return gitref.ShowContext(ctx, s.dir, in.Changed, p)
-		})
-		if err != nil {
-			return nil, out, err
-		}
-	default:
-		targets, err = tree.DiscoverContext(ctx)
-		if err != nil {
-			return nil, out, err
-		}
-	}
-	targets, err = tree.FilterTargetsContext(ctx, targets, in.Packages, in.Symbols)
+	sel, err := s.selectTargets(ctx, tree, in.TargetsPath, in.TargetsJSON, in.Changed, in.Packages, in.Symbols)
 	if err != nil {
 		return nil, out, err
 	}
+	targets := sel.targets
+	out.Residue = sel.residue
 	descriptions, err := tree.DescribeTargetsContext(ctx, targets)
 	if err != nil {
 		return nil, out, err

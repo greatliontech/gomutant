@@ -2332,15 +2332,15 @@ func TestServeMatchingBatchesEvidenceChecksPerView(t *testing.T) {
 // hide behind the stale "test variants" verdict — the gate must refuse a
 // record whose toolchain pin moved even though the compartment delta is
 // inert, and accept the same record with its pins intact.
-func TestGrowthGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
+func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test")
 	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
-		"go.mod":  "module example.com/growthgate\n\ngo 1.26.5\n",
-		"gate.go": "package growthgate\nfunc Value(x int) int {\n\tif x > 100 {\n\t\treturn x * 3\n\t}\n\treturn x + 1\n}\n",
-		"gate_test.go": "package growthgate\n\nimport \"testing\"\n\n" +
+		"go.mod":  "module example.com/driftgate\n\ngo 1.26.5\n",
+		"gate.go": "package driftgate\nfunc Value(x int) int {\n\tif x > 100 {\n\t\treturn x * 3\n\t}\n\treturn x + 1\n}\n",
+		"gate_test.go": "package driftgate\n\nimport \"testing\"\n\n" +
 			"func TestSmall(t *testing.T) {\n\tif Value(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -2351,13 +2351,13 @@ func TestGrowthGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	targets := []Target{{Symbol: "example.com/growthgate.Value"}}
+	targets := []Target{{Symbol: "example.com/driftgate.Value"}}
 	prior, err := tr.Run(context.Background(), targets, Options{Budget: 1})
 	if err != nil || len(prior) != 1 || prior[0].CompartmentLedger == nil {
 		t.Fatalf("seed measurement = %+v, %v", prior, err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "more_test.go"),
-		[]byte("package growthgate\n\nimport \"testing\"\n\nfunc TestMore(t *testing.T) {\n\tif Value(200) != 600 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
+		[]byte("package driftgate\n\nimport \"testing\"\n\nfunc TestMore(t *testing.T) {\n\tif Value(200) != 600 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	grown, err := Load(dir)
@@ -2365,43 +2365,47 @@ func TestGrowthGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	views, err := grown.newSubjectViews(context.Background(), []string{
-		"example.com/growthgate.Value", "example.com/growthgate.TestSmall", "example.com/growthgate.TestMore",
+		"example.com/driftgate.Value", "example.com/driftgate.TestSmall", "example.com/driftgate.TestMore",
 	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := views.bySymbol["example.com/growthgate.Value"]
+	target := views.bySymbol["example.com/driftgate.Value"]
 	oracle := []*subjectView{
-		views.bySymbol["example.com/growthgate.TestSmall"],
-		views.bySymbol["example.com/growthgate.TestMore"],
+		views.bySymbol["example.com/driftgate.TestSmall"],
+		views.bySymbol["example.com/driftgate.TestMore"],
 	}
-	added, ok, err := evidenceSetCoversGrowthContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes, "")
-	if err != nil || !ok || len(added) != 1 || added[0] != "example.com/growthgate.TestMore" {
-		t.Fatalf("intact pins refused the growth gate: added=%v ok=%v err=%v", added, ok, err)
+	moved, added, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes, "")
+	if err != nil || !ok || len(moved) != 0 || len(added) != 1 || added[0] != "example.com/driftgate.TestMore" {
+		t.Fatalf("intact pins refused the drift gate: moved=%v added=%v ok=%v err=%v", moved, added, ok, err)
 	}
+	// The compartment comparison never hides a moved pin: the evidence
+	// tiers judge the refreshed evidence, so a tampered toolchain
+	// refuses even though the compartment delta classifies attributable.
 	tampered := prior[0]
 	tampered.TargetEvidence.Toolchain = "go0.0-never"
-	if _, ok, err := evidenceSetCoversGrowthContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleMemoryBytes, ""); err != nil || ok {
+	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleMemoryBytes, ""); err != nil || ok {
 		t.Fatalf("a moved toolchain hid behind the compartment verdict: ok=%v err=%v", ok, err)
 	}
-	// Growth is a derived-oracle claim on both sides: an explicit request
-	// supersetting the recorded derived set is the caller's selection,
-	// never derived growth.
-	if _, ok, err := evidenceSetCoversGrowthContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes, ""); err != nil || ok {
-		t.Fatalf("an explicit request rode the derived-growth carve-out: ok=%v err=%v", ok, err)
+	// A grown set is a derived-oracle claim on both sides: an explicit
+	// request supersetting the recorded derived set is the caller's
+	// selection, never derived growth.
+	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes, ""); err != nil || ok {
+		t.Fatalf("an explicit request rode the derived-growth composition: ok=%v err=%v", ok, err)
 	}
 }
 
-// TestRunServesGrownOracleMeasuringOnlySurvivors pins the oracle-growth
-// carve-out end to end (REQ-result-stale): a sibling test added beside the
-// oracle grows the derived set under an inert compartment delta, so the
-// prior record serves — kills and discards stand — while only the recorded
-// survivors re-execute against the added test alone. Newly killed survivors
-// move to killed (shedding their attestations with the contradiction
-// reported), still-surviving ones keep their survival and recorded buckets,
-// the grown record carries the current tree's evidence and ledger — proven
-// by a follow-up run serving it cached — and a non-inert compartment delta
-// refuses the arm outright.
+// TestRunServesGrownOracleMeasuringOnlySurvivors pins the killer-drift
+// carve-out's grown-set shape end to end (REQ-result-stale): a sibling test
+// added beside the oracle grows the derived set under an attributable
+// compartment delta with nothing moved, so the prior record serves — kills
+// and discards stand — while only the recorded survivors re-execute,
+// narrowed to the added test alone. Newly killed survivors move to killed
+// (shedding their attestations with the contradiction reported), the
+// drifted record carries the current tree's evidence and ledger — proven
+// by a follow-up run serving it cached — and a delta that also edits an
+// existing oracle re-measures that oracle's kills too, survivors still
+// narrowed.
 func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -2472,12 +2476,15 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	}
 	var decisions []RunDecision
 	var dispatched []int
+	var executedScopes, confirmScopes [][]string
 	var contradictions []AttestationContradiction
 	grownFindings, err := grownTree.Run(ctx, []Target{target}, Options{
 		Prior:         prior,
 		Decision:      func(d RunDecision) { decisions = append(decisions, d) },
 		Contradiction: func(c AttestationContradiction) { contradictions = append(contradictions, c) },
 		dispatched:    func(_ string, mi int) { dispatched = append(dispatched, mi) },
+		executedScope: func(_, _ string, scope []string) { executedScopes = append(executedScopes, scope) },
+		confirmScoped: func(_, _ string, scope []string) { confirmScopes = append(confirmScopes, scope) },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2486,12 +2493,34 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if survivorCount < 2 {
 		t.Fatalf("fixture yielded %d survivors, want several so the plural literal below has teeth", survivorCount)
 	}
-	wantReason := fmt.Sprintf("served: derived oracle grew by 1 test; re-measuring %d survivors against them", survivorCount)
+	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test)",
+		killNoun(prior[0].Killed), candidateNoun(survivorCount), survivorNoun(survivorCount))
 	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != survivorCount {
-		t.Fatalf("growth decision = %+v, want %q over %d survivors", decisions, wantReason, survivorCount)
+		t.Fatalf("grown-set drift decision = %+v, want %q over %d survivors", decisions, wantReason, survivorCount)
 	}
 	if len(dispatched) != survivorCount {
 		t.Fatalf("dispatched %d candidates, want exactly the %d recorded survivors", len(dispatched), survivorCount)
+	}
+	// The narrowing is executed, not just worded: the executor reports
+	// the scope off the very work value it runs, and every re-measured
+	// survivor's execution is the added test alone, the fresh kill's
+	// serial confirmation staying inside that narrow ground.
+	narrowScope := []string{"^(TestBig)$"}
+	if len(executedScopes) < survivorCount {
+		t.Fatalf("observed %d executions, want at least the %d re-measured survivors", len(executedScopes), survivorCount)
+	}
+	for _, scope := range executedScopes {
+		if !slices.Equal(scope, narrowScope) {
+			t.Fatalf("execution ran scope %v, want survivors narrowed to %v", scope, narrowScope)
+		}
+	}
+	if len(confirmScopes) == 0 {
+		t.Fatal("no serial confirmation observed; the doomed survivor's fresh kill must confirm")
+	}
+	for _, scope := range confirmScopes {
+		if !slices.Equal(scope, narrowScope) {
+			t.Fatalf("confirmation ran scope %v, want the narrowed %v", scope, narrowScope)
+		}
 	}
 	grown := grownFindings[0]
 	if grown.Cached || grown.TargetEvidence.RuntimeUnverifiable {
@@ -2533,7 +2562,7 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(cappedDecisions) != 1 || cappedDecisions[0].Reason != wantReason {
-		t.Fatalf("covering-but-smaller budget decision = %+v, want the growth serve %q", cappedDecisions, wantReason)
+		t.Fatalf("covering-but-smaller budget decision = %+v, want the grown-set drift serve %q", cappedDecisions, wantReason)
 	}
 	if cappedGrown[0].Budget != prior[0].Budget || cappedGrown[0].Generated != prior[0].Generated {
 		t.Fatalf("capped growth rewrote the record's selection: budget %d, generated %d", cappedGrown[0].Budget, cappedGrown[0].Generated)
@@ -2558,13 +2587,12 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 		t.Fatalf("grown record did not serve cached on its own tree: %+v, %+v", followed[0].Cached, followDecisions)
 	}
 
-	// A non-inert compartment delta — the added test plus an edited existing
-	// one — refuses GROWTH and composes under the generalized killer-drift
-	// carve-out instead: the sole recorded oracle moved, so every one of
-	// its kills, every set-wide kill, and every survivor re-measures
-	// against the current oracle with the growth disclosed — no kill
-	// stands, but the serve is a drift serve, never a stale whole
-	// re-measure.
+	// A delta that also edits the existing oracle: the sole recorded
+	// oracle moved, so every one of its kills and every set-wide kill
+	// re-measures against the full current oracle while the survivors
+	// stay narrowed to the added and moved tests, with the growth
+	// disclosed — no kill stands, but the serve is a drift serve, never
+	// a stale whole re-measure.
 	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(strings.Replace(files["gated_test.go"], "t.Fail()", "t.Fail() // edited", 1)+"\nfunc TestBig(t *testing.T) {\n\tif Gated(200) != 603 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2584,8 +2612,8 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	}
 	remeasured := prior[0].Killed + len(prior[0].Survivors)
 	wantEdited := fmt.Sprintf(
-		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test)",
-		killNoun(0), candidateNoun(remeasured))
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test)",
+		killNoun(0), candidateNoun(remeasured), survivorNoun(len(prior[0].Survivors)))
 	if edited[0].Cached || len(editedDecisions) != 1 || editedDecisions[0].Reason != wantEdited ||
 		len(editedDispatched) != remeasured {
 		t.Fatalf("non-inert delta = %+v dispatching %d, want the composed drift serve %q over %d", editedDecisions, len(editedDispatched), wantEdited, remeasured)
@@ -2682,161 +2710,8 @@ func TestRunExtensionDivergenceStampsAndAttributes(t *testing.T) {
 	}
 }
 
-// TestEvidenceSetCoversGrowthRefusesIneligibleRecords pins the growth
-// gate's pre-checks (REQ-result-stale's growth carve-out): an explicit
-// oracle, a missing compartment ledger, a moved scalar pin, a non-grown
-// set, or candidate evidence each refuse before any evidence is consulted.
-func TestEvidenceSetCoversGrowthRefusesIneligibleRecords(t *testing.T) {
-	ledger := &CompartmentLedger{}
-	base := Finding{
-		OperatorSet: "go/12", OracleTimeout: "1m0s", CompartmentLedger: ledger,
-		OracleEvidence: []SubjectEvidence{{Symbol: "p.TestA"}},
-	}
-	oracle := make([]*subjectView, 2)
-	ctx := context.Background()
-	for name, prior := range map[string]Finding{
-		"explicit oracle": func() Finding { f := base; f.OracleExplicit = true; return f }(),
-		"missing ledger":  func() Finding { f := base; f.CompartmentLedger = nil; return f }(),
-		"operator set":    func() Finding { f := base; f.OperatorSet = "go/1"; return f }(),
-		"oracle timeout":  func() Finding { f := base; f.OracleTimeout = "2m0s"; return f }(),
-		"candidate evidence": func() Finding {
-			f := base
-			f.CandidateEvidence = []CandidateEvidence{{Position: "f.go:1:1", Operator: "op", Reason: "r", Disposition: "survived"}}
-			return f
-		}(),
-	} {
-		added, ok, err := evidenceSetCoversGrowthContext(ctx, prior, nil, oracle, false, "go/12", "1m0s", 0, "")
-		if err != nil || ok || added != nil {
-			t.Fatalf("%s: growth gate = %v %v %v, want a refusal before any evidence check", name, added, ok, err)
-		}
-	}
-	// Not strictly grown: recorded set size equals the current one.
-	equal := base
-	if added, ok, err := evidenceSetCoversGrowthContext(ctx, equal, nil, oracle[:1], false, "go/12", "1m0s", 0, ""); err != nil || ok || added != nil {
-		t.Fatalf("non-grown set = %v %v %v, want a refusal", added, ok, err)
-	}
-}
 
-// TestGrowFindingCountsReplacesSurvivorOutcomes pins the growth splice
-// accounting under INV-RESULT-CANDIDATE-CONSERVATION: every non-survivor
-// keeps its recorded disposition, each re-executed survivor's fresh outcome
-// replaces its survival per operator and in the totals, still-surviving
-// candidates carry their recorded buckets (unstable-oracle under a
-// divergence stamp), and a newly killed attested survivor's attestation is
-// shed and returned while a still-surviving one's carries.
-func TestGrowFindingCountsReplacesSurvivorOutcomes(t *testing.T) {
-	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
-	candidates := []engine.Candidate{
-		{Symbol: "p.F", Operator: "op-a", Position: "f.go:1:1", Replacements: runnable}, // recorded kill, stands
-		{Symbol: "p.F", Operator: "op-a", Position: "f.go:2:2", Replacements: runnable}, // survivor -> killed by added test
-		{Symbol: "p.F", Operator: "op-b", Position: "f.go:3:3", Replacements: runnable}, // survivor -> still surviving
-		{Symbol: "p.F", Operator: "op-b", Position: "f.go:4:4", Replacements: runnable}, // recorded discard, stands
-	}
-	rec := Finding{
-		Symbol: "p.F", CandidateCount: 4, Generated: 4, Mutants: 3, Killed: 1, Discarded: 1,
-		Operators: []OperatorSummary{
-			{Operator: "op-a", Generated: 2, Killed: 1, Survived: 1},
-			{Operator: "op-b", Generated: 2, Discarded: 1, Survived: 1},
-		},
-		Survivors: []Survivor{
-			{Position: "f.go:2:2", Operator: "op-a", Execution: "never-executed"},
-			{Position: "f.go:3:3", Operator: "op-b", Execution: "executed-and-passed"},
-		},
-		Attested: []Attestation{
-			{Position: "f.go:2:2", Operator: "op-a", Reason: "wrongly judged"},
-			{Position: "f.go:3:3", Operator: "op-b", Reason: "still equivalent"},
-		},
-	}
-	survivors := map[int]bool{1: true, 2: true}
-	outcomes := []engine.MutantOutcome{0, engine.MutantKilled, engine.MutantSurvived, 0}
-	grown, shed, err := growFindingCounts(context.Background(), rec, candidates, survivors, windowScores{outcomes: outcomes, memoryDecided: []bool{true}}, nil, nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !grown.OracleCeilingDecided {
-		t.Fatal("growth dropped the window's memory-decided fact")
-	}
-	if grown.Killed != 2 || grown.Discarded != 1 || grown.Mutants != 3 ||
-		grown.Generated != 4 || grown.CandidateCount != 4 {
-		t.Fatalf("grown totals = %+v, want the killed survivor rescored", grown)
-	}
-	wantOperators := []OperatorSummary{
-		{Operator: "op-a", Generated: 2, Killed: 2},
-		{Operator: "op-b", Generated: 2, Discarded: 1, Survived: 1},
-	}
-	if !slices.Equal(grown.Operators, wantOperators) {
-		t.Fatalf("grown operators = %+v, want %+v", grown.Operators, wantOperators)
-	}
-	if len(grown.Survivors) != 1 || grown.Survivors[0].Position != "f.go:3:3" || grown.Survivors[0].Execution != "executed-and-passed" {
-		t.Fatalf("grown survivors = %+v, want the still-surviving candidate with its recorded bucket", grown.Survivors)
-	}
-	if len(grown.Attested) != 1 || grown.Attested[0].Position != "f.go:3:3" {
-		t.Fatalf("grown attestations = %+v, want only the still-surviving disposition", grown.Attested)
-	}
-	if len(shed) != 1 || shed[0].Position != "f.go:2:2" || shed[0].Reason != "wrongly judged" {
-		t.Fatalf("shed attestations = %+v, want the newly killed disposition", shed)
-	}
 
-	// A divergence-stamped record classifies its re-executed survivors
-	// unstable rather than carrying buckets measured under a stable run.
-	stamped := rec
-	stamped.TargetEvidence = SubjectEvidence{RuntimeUnverifiable: true}
-	grownStamped, _, err := growFindingCounts(context.Background(), stamped, candidates, survivors, windowScores{outcomes: outcomes}, nil, nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if grownStamped.Survivors[0].Execution != "unstable-oracle" {
-		t.Fatalf("stamped grown survivor = %+v, want unstable-oracle", grownStamped.Survivors)
-	}
-}
-
-// TestGrownSurvivorIndexesFallsBackOnMismatch pins the growth serve's
-// regeneration bound (REQ-result-stale): the complete count and selection
-// length unchanged, identities unique, every recorded survivor re-identified
-// and runnable — any mismatch refuses so the whole target re-measures.
-func TestGrownSurvivorIndexesFallsBackOnMismatch(t *testing.T) {
-	runnable := []engine.Replacement{{File: "a.go", Source: []byte("x")}}
-	generation := engine.Generation{
-		CandidateCount: 2,
-		Candidates: []engine.Candidate{
-			{Position: "a.go:1:1", Operator: "op-a", Replacements: runnable},
-			{Position: "a.go:2:1", Operator: "op-b", Replacements: runnable},
-		},
-	}
-	rec := Finding{
-		CandidateCount: 2, Generated: 2,
-		Survivors: []Survivor{{Position: "a.go:2:1", Operator: "op-b"}},
-	}
-	survivors, ok := grownSurvivorIndexes(generation, rec)
-	if !ok || len(survivors) != 1 || !survivors[1] {
-		t.Fatalf("matching regeneration = %v %v, want survivor index 1", survivors, ok)
-	}
-	drifted := generation
-	drifted.CandidateCount = 3
-	if _, ok := grownSurvivorIndexes(drifted, rec); ok {
-		t.Fatal("candidate-count drift accepted")
-	}
-	shrunk := generation
-	shrunk.Candidates = shrunk.Candidates[:1]
-	if _, ok := grownSurvivorIndexes(shrunk, rec); ok {
-		t.Fatal("selection-length drift accepted")
-	}
-	duplicated := generation
-	duplicated.Candidates = []engine.Candidate{generation.Candidates[1], generation.Candidates[1]}
-	if _, ok := grownSurvivorIndexes(duplicated, rec); ok {
-		t.Fatal("duplicate identity accepted")
-	}
-	missing := rec
-	missing.Survivors = []Survivor{{Position: "a.go:9:9", Operator: "op-b"}}
-	if _, ok := grownSurvivorIndexes(generation, missing); ok {
-		t.Fatal("unidentifiable survivor accepted")
-	}
-	unrunnable := generation
-	unrunnable.Candidates = []engine.Candidate{generation.Candidates[0], {Position: "a.go:2:1", Operator: "op-b"}}
-	if _, ok := grownSurvivorIndexes(unrunnable, rec); ok {
-		t.Fatal("unrunnable survivor accepted")
-	}
-}
 
 // TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence pins the
 // divergence-stamp boundary of both splices at the counts layer
@@ -5162,26 +5037,6 @@ func TestCandidateSpliceDirtyRecordPromotesOnCleanTree(t *testing.T) {
 	}
 }
 
-// A coverage-probe re-derivation (oracle growth, drift, extension) may
-// only upgrade empty or never-executed buckets: overlay-bypassed and
-// unstable-oracle were judged from evidence a coverage probe cannot
-// see, so a probe overriding them would silently downgrade the
-// labeled-never-silent direction (REQ-exec-survivor-evidence).
-func TestCoverageUpgradeIsUpgradeOnly(t *testing.T) {
-	want := map[string]bool{
-		"":                    true,
-		"never-executed":      true,
-		"executed-and-passed": false,
-		"overlay-bypassed":    false,
-		"unstable-oracle":     false,
-	}
-	for bucket, allowed := range want {
-		if got := coverageUpgradeAllowed(bucket); got != allowed {
-			t.Fatalf("coverageUpgradeAllowed(%q) = %v, want %v", bucket, got, allowed)
-		}
-	}
-}
-
 // An init body measures end to end under its positional identity: the
 // classic silent-fault carrier (registry wiring) generates candidates,
 // runs against the package suite - the ground-truth oracle: every test
@@ -5468,7 +5323,7 @@ func TestExtendFindingCountsRecordsFlip(t *testing.T) {
 }
 
 // TestFlipReachesEveryAssemblyMode pins the flip's path coverage as a
-// table over the four pure assembly functions — splice, grow, extend,
+// table over the three pure assembly functions — splice, extend,
 // drift (the fresh path is inline in aggregation and pinned by the
 // flaky-fixture integration test): every mode that re-executes a
 // candidate must record its flip. The windowScores bundle makes a
@@ -5497,15 +5352,6 @@ func TestFlipReachesEveryAssemblyMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFlip("splice", spliced.Survivors)
-
-	grec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1,
-		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
-		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op-a"}}}
-	grown, _, err := growFindingCounts(context.Background(), grec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertFlip("grow", grown.Survivors)
 
 	erec := Finding{Symbol: "p.F", Budget: 0, CandidateCount: 1, Generated: 0}
 	extended, err := extendFindingCounts(context.Background(), erec, candidates, 0, windowScores{outcomes: outcomes, flips: flips}, nil, 1, nil, 0)

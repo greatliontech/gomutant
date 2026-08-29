@@ -53,11 +53,15 @@ scoped baseline memoizes per distinct killer for the campaign, and
 any non-pass — failure, timeout, error — refuses the scope.
 Anything weaker than an attributed test kill over a passing scoped
 baseline — the killer passing, a timeout on either side, a
-discard — scores nothing by itself: the full serial oracle runs and
+discard — scores nothing by itself: the serial run of the candidate's
+whole oracle scope executes and
 ITS verdict is the scored measurement, so a survivor verdict always
-rests on the whole oracle (the anti-flattering direction is
-untouched) and a flip remains "a serial run scoring the mutant a
-survivor" over the full oracle alone; a scoped run that times out
+rests on every group the candidate executes against — the full
+derived set, or the added and moved tests for a survivor narrowed
+under REQ-result-stale's killer-drift carve-out, whose recorded
+passes on the unmoved oracles stand (the anti-flattering direction is
+untouched) — and a flip remains "a serial run scoring the mutant a
+survivor" over that same scope alone; a scoped run that times out
 therefore costs its oracle budget twice before the fallback
 resolves, the accepted price of never scoring from a timeout. The
 fallback's scoring run is the mutant's third look, one more than
@@ -200,8 +204,8 @@ carry execution evidence bucketing why each lived: `never-executed` when no
 executed block of the oracle's baseline coverage intersects the mutated
 node's half-open source extent (a coverage gap), `executed-and-passed` when
 the extent intersects executed coverage and the oracle still passes (a weak
-assertion or an equivalent mutant) — one range-shaped probe shared by fresh
-classification and the growth-upgrade pass, with a survivor row that
+assertion or an equivalent mutant) — one range-shaped probe shared by every
+classification pass, with a survivor row that
 carries no extent answered by its anchor point alone — `overlay-bypassed` when
 the finding's observed union recorded a read of a mutated file's own
 on-disk path - the mutant executes through the build overlay, so a
@@ -219,14 +223,13 @@ position demonstrably executes and a named test demonstrably can fail
 on it) and the survivor is oracle nondeterminism to stabilize, never a
 plain coverage or assertion gap; no coverage probe runs on it, the
 advisory unverifiability stamp never overwrites it, and a mutant a test
-has killed is never an equivalence-attestation candidate. Oracle
-growth's coverage-only upgrade pass applies only to empty
-or `never-executed` buckets: `overlay-bypassed`, `unstable-oracle`, and
-`flipped-kill` were
-judged from evidence its coverage probe cannot see, so that pass never
-overrides them. A full re-measure (drift with moved oracles) instead
-re-judges the overlay-bypass from the current union before classifying
-fresh, and an extension's carried prefix is never touched. The overlay-bypass judgment precedes the coverage probe:
+has killed is never an equivalence-attestation candidate. A drift
+re-measure re-derives its re-measured survivors' buckets from the
+current probe — re-judging the overlay-bypass from the current union
+before classifying fresh — while standing survivors and an extension's
+carried prefix are never touched; `overlay-bypassed`, `unstable-oracle`,
+and `flipped-kill` are judged from evidence a coverage probe cannot see,
+so no probe-derived classification ever overrides them. The overlay-bypass judgment precedes the coverage probe:
 a bypassed target's coverage would bucket confidence the evidence
 cannot support. Coverage is measured once per oracle group on the unmutated tree
 and cached across the run's targets sharing the group and cover package —
@@ -599,16 +602,17 @@ A budget extension (REQ-result-stale's budget-extension carve-out) reports
 `measure` with `candidates` counting only the measured suffix and a reason
 naming the served prefix (`served: prefix of N candidates stands; measuring M
 more`, the candidate noun count-aware: a one-candidate prefix reads
-`1 candidate`). An oracle-growth serve (REQ-result-stale's third carve-out)
-reports `measure` with `candidates` counting the re-measured survivors and
-the reason `served: derived oracle grew by N tests; re-measuring M survivors
-against them` (count-aware nouns); its delta run builds per-package oracle
-groups over only the added test names — each group earning its own baseline
-probe under the ordinary per-group discipline, so a failing added test
-refuses the run before any mutant executes — dispatches only the recorded
-survivors, confirms kills serially like any measured run, and attributes
-kills against the full current oracle set (the run pattern already bounds
-execution to the added tests).
+`1 candidate`). A killer-drift serve (REQ-result-stale's third carve-out)
+reports `measure` with `candidates` counting the re-measured candidates and
+the drift reason of [results.md](results.md); its survivor-scoped
+re-measure builds per-package oracle groups over only the added and moved
+test names — each group earning its own baseline probe under the ordinary
+per-group discipline, so a failing added test refuses the run before any
+mutant executes — dispatches survivor-scoped candidates against that
+narrowed set and every other re-measured candidate against the full
+current groups, confirms kills serially within each candidate's own
+scope, and attributes kills against the full current oracle set (the run
+pattern already bounds execution to each scope's tests).
 
 **REQ-exec-provenance** (behavior): Every tree load MUST refuse
 outright — at the shared load path, so every entry on every face

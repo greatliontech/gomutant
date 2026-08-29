@@ -541,7 +541,7 @@ func TestFresh(t *testing.T) {
 	// re-measured record carries only current-tree evidence
 	// (REQ-result-stale's killer-drift carve-out).
 	if len(remeasured) != 1 || remeasured[0].Cached || len(oldProofDecisions) != 1 ||
-		oldProofDecisions[0].Reason != "served: 0 kills stand on unmoved oracles; re-measuring 1 candidate against the current oracle" ||
+		oldProofDecisions[0].Reason != "served: 0 kills stand on unmoved oracles; re-measuring 1 candidate against the current oracle (1 survivor narrowed to the added and moved tests)" ||
 		oldProofDecisions[0].Candidates != 1 {
 		t.Fatalf("superseded observation proof run = %+v, decisions %+v", remeasured, oldProofDecisions)
 	}

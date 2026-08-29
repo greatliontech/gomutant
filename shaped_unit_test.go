@@ -46,13 +46,13 @@ func TestShapeDigestMovesWithInputs(t *testing.T) {
 	base := Target{Symbol: "recipe:x",
 		Manual: &ManualSpec{File: "guard/guard.go", Edits: []ManualEdit{{Find: `if s == "" {`, Replace: `if false {`}}},
 		Oracle: []string{"example.com/shaped/guard.TestEmptyRefused"}, OracleExplicit: true}
-	_, d1, err := tree.shapedCandidates(context.Background(), base)
+	_, d1, _, err := tree.shapedCandidates(context.Background(), base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	moved := base
 	moved.Manual = &ManualSpec{File: "guard/guard.go", Edits: []ManualEdit{{Find: `if s == "" {`, Replace: `if len(s) < 0 {`}}}
-	_, d2, err := tree.shapedCandidates(context.Background(), moved)
+	_, d2, _, err := tree.shapedCandidates(context.Background(), moved)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestShapeDigestMovesWithInputs(t *testing.T) {
 	// A duplicated find refuses: position-stability is the contract.
 	dup := base
 	dup.Manual = &ManualSpec{File: "guard/guard.go", Edits: []ManualEdit{{Find: "return", Replace: "goto out; return"}}}
-	if _, _, err := tree.shapedCandidates(context.Background(), dup); err == nil || !strings.Contains(err.Error(), "exactly once") {
+	if _, _, _, err := tree.shapedCandidates(context.Background(), dup); err == nil || !strings.Contains(err.Error(), "exactly once") {
 		t.Fatalf("ambiguous find accepted: %v", err)
 	}
 }
@@ -75,7 +75,7 @@ func TestImportProbesSynthesis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	probes, digest, err := tree.shapedCandidates(context.Background(), Target{Symbol: "s",
+	probes, digest, _, err := tree.shapedCandidates(context.Background(), Target{Symbol: "s",
 		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/core"}, Forbidden: "example.com/shaped/forbidden"},
 		Oracle:     []string{"example.com/shaped/arch.TestNoForbidden"}, OracleExplicit: true})
 	if err != nil || len(probes) != 1 || digest == "" {
@@ -89,7 +89,7 @@ func TestImportProbesSynthesis(t *testing.T) {
 		t.Fatalf("probe file: %s", probes[0].Replacements[0].File)
 	}
 	// The forbidden path being the scoped package itself refuses.
-	if _, _, err := tree.shapedCandidates(context.Background(), Target{Symbol: "s",
+	if _, _, _, err := tree.shapedCandidates(context.Background(), Target{Symbol: "s",
 		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/core"}, Forbidden: "example.com/shaped/core"},
 		Oracle:     []string{"example.com/shaped/arch.TestNoForbidden"}, OracleExplicit: true}); err == nil {
 		t.Fatal("self-forbidding scope accepted")
@@ -105,7 +105,7 @@ func TestMethodProbesRewriteDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	probes, _, err := tree.shapedCandidates(context.Background(), Target{Symbol: "s",
+	probes, _, _, err := tree.shapedCandidates(context.Background(), Target{Symbol: "s",
 		Structural: &StructuralSpec{Class: "interface-satisfaction", Type: "example.com/shaped/iface.Impl", Interface: "example.com/shaped/iface.Doer"},
 		Oracle:     []string{"example.com/shaped/iface.TestSatisfies"}, OracleExplicit: true})
 	if err != nil || len(probes) != 1 {
@@ -247,11 +247,11 @@ func TestShapeDigestTravelsAcrossCheckoutRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tg := range targets {
-		_, da, err := treeA.shapedCandidates(context.Background(), tg)
+		_, da, _, err := treeA.shapedCandidates(context.Background(), tg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, db, err := treeB.shapedCandidates(context.Background(), tg)
+		_, db, _, err := treeB.shapedCandidates(context.Background(), tg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -275,7 +275,7 @@ func TestShapeDigestPinsForbiddenLinkage(t *testing.T) {
 	external := Target{Symbol: "structural:no-strings",
 		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "strings"},
 		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
-	_, before, err := tree.shapedCandidates(context.Background(), external)
+	_, before, _, err := tree.shapedCandidates(context.Background(), external)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestShapeDigestPinsForbiddenLinkage(t *testing.T) {
 		}
 	}
 	appendFile("go.mod", "\n// selection moved\n")
-	_, after, err := tree.shapedCandidates(context.Background(), external)
+	_, after, _, err := tree.shapedCandidates(context.Background(), external)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,14 +302,14 @@ func TestShapeDigestPinsForbiddenLinkage(t *testing.T) {
 	inTree := Target{Symbol: "structural:no-linkforbidden",
 		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "example.com/shaped/linkforbidden"},
 		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
-	_, base, err := tree.shapedCandidates(context.Background(), inTree)
+	_, base, _, err := tree.shapedCandidates(context.Background(), inTree)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// linkreg is reached transitively from linkforbidden: its content
 	// rides the fold.
 	appendFile("linkreg/reg.go", "\n// linkage moved\n")
-	_, moved, err := tree.shapedCandidates(context.Background(), inTree)
+	_, moved, _, err := tree.shapedCandidates(context.Background(), inTree)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestShapeDigestPinsForbiddenLinkage(t *testing.T) {
 	// function body stays byte-identical (the closure standard gofresh
 	// sets — embedded files ride the closure).
 	appendFile("linkforbidden/table.txt", "y")
-	_, embedMoved, err := tree.shapedCandidates(context.Background(), inTree)
+	_, embedMoved, _, err := tree.shapedCandidates(context.Background(), inTree)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestShapeDigestPinsForbiddenLinkage(t *testing.T) {
 	// An untouched, unlinked package never moves the pin: the probed
 	// package's own content stays outside the digest deliberately.
 	appendFile("linkcore/core.go", "\n// probed content moved\n")
-	_, probedMoved, err := tree.shapedCandidates(context.Background(), inTree)
+	_, probedMoved, _, err := tree.shapedCandidates(context.Background(), inTree)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestShapeDigestRefusesUnpinnableForbiddenLinkage(t *testing.T) {
 	vanished := Target{Symbol: "structural:no-ghost",
 		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "example.com/shaped/ghost"},
 		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
-	if _, _, err := tree.shapedCandidates(context.Background(), vanished); err == nil || !strings.Contains(err.Error(), "not pinnable") {
+	if _, _, _, err := tree.shapedCandidates(context.Background(), vanished); err == nil || !strings.Contains(err.Error(), "not pinnable") {
 		t.Errorf("vanished in-tree forbidden accepted: %v", err)
 	}
 
@@ -368,7 +368,7 @@ func TestShapeDigestRefusesUnpinnableForbiddenLinkage(t *testing.T) {
 	external := Target{Symbol: "structural:no-strings",
 		Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/linkcore"}, Forbidden: "strings"},
 		Oracle:     []string{"example.com/shaped/linkuser.TestUsesCore"}, OracleExplicit: true}
-	if _, _, err := tree.shapedCandidates(context.Background(), external); err == nil || !strings.Contains(err.Error(), "local replace") {
+	if _, _, _, err := tree.shapedCandidates(context.Background(), external); err == nil || !strings.Contains(err.Error(), "local replace") {
 		t.Errorf("external forbidden under a local replace accepted: %v", err)
 	}
 
@@ -384,7 +384,7 @@ func TestShapeDigestRefusesUnpinnableForbiddenLinkage(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, "vendor", "modules.txt"), []byte("# example.com/other v0.0.1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := tree.shapedCandidates(context.Background(), external); err == nil || !strings.Contains(err.Error(), "vendor mode") {
+	if _, _, _, err := tree.shapedCandidates(context.Background(), external); err == nil || !strings.Contains(err.Error(), "vendor mode") {
 		t.Errorf("external forbidden under vendor mode accepted: %v", err)
 	}
 }

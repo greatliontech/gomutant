@@ -209,7 +209,7 @@ func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 		},
 		Survivors: []Survivor{{Position: "f.go:5:5", Operator: "op-a"}},
 	}
-	remeasure, stand, flagged, ok := driftRemeasureIndexes(generation, rec, []string{"p.TestMoved"}, nil)
+	remeasure, survivorScoped, stand, flagged, ok := driftRemeasureIndexes(generation, rec, []string{"p.TestMoved"}, nil)
 	if !ok || stand != 1 || flagged != 0 {
 		t.Fatalf("remeasure=%v stand=%d flagged=%d ok=%v, want ok with 1 standing kill", remeasure, stand, flagged, ok)
 	}
@@ -222,11 +222,17 @@ func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 			t.Fatalf("remeasure = %v, want %v", remeasure, wantIndexes)
 		}
 	}
+	// The survivor's re-measure narrows to the added and moved tests —
+	// its recorded passes on unmoved oracles stand like standing kills —
+	// while moved-killer and set-wide kills keep the full oracle.
+	if len(survivorScoped) != 1 || !survivorScoped[4] {
+		t.Fatalf("survivorScoped = %v, want only the survivor narrowed", survivorScoped)
+	}
 
 	// Nothing moved: no oracle's behavior changed, so survivals stand
 	// exactly like kills and nothing re-measures.
-	remeasure, stand, flagged, ok = driftRemeasureIndexes(generation, rec, nil, nil)
-	if !ok || stand != 4 || flagged != 0 || len(remeasure) != 0 {
+	remeasure, survivorScoped, stand, flagged, ok = driftRemeasureIndexes(generation, rec, nil, nil)
+	if !ok || stand != 4 || flagged != 0 || len(remeasure) != 0 || len(survivorScoped) != 0 {
 		t.Fatalf("no-movement remeasure=%v stand=%d ok=%v, want nothing re-measured", remeasure, stand, ok)
 	}
 
@@ -234,9 +240,12 @@ func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 	// kills too, a purely grown oracle only extends the recorded set's
 	// behavior — and every survivor re-measures (an added test may kill
 	// it).
-	remeasure, stand, flagged, ok = driftRemeasureIndexes(generation, rec, nil, []string{"p.TestNew"})
+	remeasure, survivorScoped, stand, flagged, ok = driftRemeasureIndexes(generation, rec, nil, []string{"p.TestNew"})
 	if !ok || stand != 4 || flagged != 0 || len(remeasure) != 1 || !remeasure[4] {
 		t.Fatalf("grown-set remeasure=%v stand=%d ok=%v, want only the survivor re-measured", remeasure, stand, ok)
+	}
+	if len(survivorScoped) != 1 || !survivorScoped[4] {
+		t.Fatalf("grown-set survivorScoped = %v, want the survivor narrowed to the added test", survivorScoped)
 	}
 
 	// Candidate evidence composes: the flagged kill re-executes even with
@@ -248,16 +257,35 @@ func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 		{Position: "f.go:1:1", Operator: "op-a", Reason: "runtime inputs unverifiable", Disposition: "killed"},
 		{Position: "f.go:6:6", Operator: "op-a", Reason: "mutant test process timed out", Disposition: "discarded"},
 	}
-	remeasure, stand, flagged, ok = driftRemeasureIndexes(generation, evidenced, nil, nil)
+	remeasure, survivorScoped, stand, flagged, ok = driftRemeasureIndexes(generation, evidenced, nil, nil)
 	if !ok || stand != 3 || flagged != 2 || len(remeasure) != 2 || !remeasure[0] || !remeasure[5] {
 		t.Fatalf("flagged remeasure=%v stand=%d flagged=%d ok=%v, want the flagged kill and discard re-executed", remeasure, stand, flagged, ok)
+	}
+	if len(survivorScoped) != 0 {
+		t.Fatalf("flagged-only survivorScoped = %v, want none: flagged candidates keep the full oracle", survivorScoped)
+	}
+
+	// A flagged survivor under a grown set re-measures through its
+	// evidence, never through the narrowing: its recorded passes are the
+	// unverifiable evidence being re-established, so it keeps the full
+	// current oracle while an unflagged survivor beside it narrows.
+	flaggedSurvivor := rec
+	flaggedSurvivor.CandidateEvidence = []CandidateEvidence{
+		{Position: "f.go:5:5", Operator: "op-a", Reason: "runtime inputs unverifiable", Disposition: "survived"},
+	}
+	remeasure, survivorScoped, stand, flagged, ok = driftRemeasureIndexes(generation, flaggedSurvivor, nil, []string{"p.TestNew"})
+	if !ok || stand != 4 || flagged != 1 || len(remeasure) != 1 || !remeasure[4] {
+		t.Fatalf("flagged-survivor remeasure=%v stand=%d flagged=%d ok=%v, want the survivor re-measured through its evidence", remeasure, stand, flagged, ok)
+	}
+	if len(survivorScoped) != 0 {
+		t.Fatalf("flagged-survivor survivorScoped = %v, want none: the flagged survivor keeps the full oracle", survivorScoped)
 	}
 
 	// A kill regeneration cannot re-identify refuses the serve.
 	misplaced := rec
 	misplaced.Kills = append([]Kill(nil), rec.Kills...)
 	misplaced.Kills[0].Position = "f.go:9:9"
-	if _, _, _, ok := driftRemeasureIndexes(generation, misplaced, nil, nil); ok {
+	if _, _, _, _, ok := driftRemeasureIndexes(generation, misplaced, nil, nil); ok {
 		t.Fatalf("unidentifiable kill served under drift")
 	}
 
@@ -266,7 +294,7 @@ func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 	strayEvidence.CandidateEvidence = []CandidateEvidence{
 		{Position: "f.go:9:9", Operator: "op-a", Reason: "runtime inputs unverifiable", Disposition: "killed"},
 	}
-	if _, _, _, ok := driftRemeasureIndexes(generation, strayEvidence, nil, nil); ok {
+	if _, _, _, _, ok := driftRemeasureIndexes(generation, strayEvidence, nil, nil); ok {
 		t.Fatalf("unidentifiable flagged candidate served under drift")
 	}
 }
@@ -461,10 +489,15 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 	}
 	var decisions []RunDecision
 	var dispatched []int
+	scopesByCandidate := map[survivorKey][][]string{}
 	driftedFindings, err := driftTree.Run(ctx, []Target{target}, Options{
 		Prior:      prior,
 		Decision:   func(d RunDecision) { decisions = append(decisions, d) },
 		dispatched: func(_ string, mi int) { dispatched = append(dispatched, mi) },
+		executedScope: func(position, operator string, scope []string) {
+			key := survivorKey{position, operator}
+			scopesByCandidate[key] = append(scopesByCandidate[key], scope)
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -477,12 +510,37 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 	}
 	remeasured := len(prior[0].Survivors) + auxKills + setWide
 	stand := prior[0].Killed - auxKills - setWide
-	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle", killNoun(stand), candidateNoun(remeasured))
+	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests)",
+		killNoun(stand), candidateNoun(remeasured), survivorNoun(len(prior[0].Survivors)))
 	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != remeasured {
 		t.Fatalf("drift decision = %+v, want %q over %d candidates", decisions, wantReason, remeasured)
 	}
 	if len(dispatched) != remeasured {
 		t.Fatalf("dispatched %d candidates, want exactly the %d re-measured", len(dispatched), remeasured)
+	}
+	// The dual scope is executed per candidate — the executor reports the
+	// scope off the very work value it runs: every survivor's executions
+	// are the moved test alone, every re-measured kill's are the full
+	// current oracle, and exactly the re-measured candidates execute.
+	narrowScope := []string{"^(TestAux)$"}
+	fullScope := []string{"^(TestAux|TestSmall)$"}
+	if len(scopesByCandidate) != remeasured {
+		t.Fatalf("executions observed for %d candidates, want the %d re-measured", len(scopesByCandidate), remeasured)
+	}
+	survivorIdentities := map[survivorKey]bool{}
+	for _, survivor := range prior[0].Survivors {
+		survivorIdentities[survivorKey{survivor.Position, survivor.Operator}] = true
+	}
+	for key, scopes := range scopesByCandidate {
+		want := fullScope
+		if survivorIdentities[key] {
+			want = narrowScope
+		}
+		for _, scope := range scopes {
+			if !slices.Equal(scope, want) {
+				t.Fatalf("candidate %v ran scope %v, want %v (survivor=%v)", key, scope, want, survivorIdentities[key])
+			}
+		}
 	}
 	driftedF := driftedFindings[0]
 	if driftedF.Cached || driftedF.TargetEvidence.RuntimeUnverifiable {
@@ -782,8 +840,8 @@ func TestRunServesGrownAndDriftedComposition(t *testing.T) {
 	remeasured := len(prior[0].Survivors) + auxKills + setWide + 1 // + the flagged unmoved-killer kill
 	stand := smallKills - 1
 	wantReason := fmt.Sprintf(
-		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test); 1 candidate re-executes flagged evidence",
-		killNoun(stand), candidateNoun(remeasured))
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test); 1 candidate re-executes flagged evidence",
+		killNoun(stand), candidateNoun(remeasured), survivorNoun(len(prior[0].Survivors)))
 	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != remeasured {
 		t.Fatalf("composed decision = %+v, want %q over %d candidates", decisions, wantReason, remeasured)
 	}
@@ -963,8 +1021,8 @@ func TestRunDriftAddedOnlyServesKillsAndBucketsSurvivors(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantReason := fmt.Sprintf(
-		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test)",
-		killNoun(prior[0].Killed), candidateNoun(len(prior[0].Survivors)))
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test)",
+		killNoun(prior[0].Killed), candidateNoun(len(prior[0].Survivors)), survivorNoun(len(prior[0].Survivors)))
 	if len(decisions) != 1 || decisions[0].Reason != wantReason {
 		t.Fatalf("added-only decision = %+v, want %q", decisions, wantReason)
 	}
@@ -988,13 +1046,13 @@ func TestRunDriftAddedOnlyServesKillsAndBucketsSurvivors(t *testing.T) {
 	}
 }
 
-// TestRunDriftGrownFullyKilledRecordKeepsGrowthWording pins the decision
+// TestRunDriftGrownFullyKilledRecordSaysSetGrew pins the decision
 // wording on the empty re-measure set that is NOT a no-reach serve: a
 // fully-killed record, a helper delta no oracle reaches, and an added test
 // leave nothing to re-measure — yet the set grew, and the decision must say
 // so rather than claim "reaches no recorded oracle"
 // (REQ-result-stale's killer-drift carve-out).
-func TestRunDriftGrownFullyKilledRecordKeepsGrowthWording(t *testing.T) {
+func TestRunDriftGrownFullyKilledRecordSaysSetGrew(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the oracle per mutant")
 	}
@@ -1232,5 +1290,116 @@ func TestFlakyGate(t *testing.T) {
 	}
 	if burned, err := filepath.Glob(marker + "-*"); err != nil || len(burned) == 0 {
 		t.Fatalf("the window kill never happened (no marker written; %v)", err)
+	}
+}
+
+// The per-candidate oracle scope binds at one seam: a drift-re-measured
+// survivor executes (and confirms) under the narrowed added-and-moved
+// groups, while flagged candidates and re-measured kills keep the full
+// set — the swap covers the whole execution machinery because it all
+// reads the item's groups (REQ-result-stale's survivor narrowing).
+func TestScopedWorkSwapsGroupsForNarrowedSurvivors(t *testing.T) {
+	full := []group{{pkgs: []string{"p"}, runRegex: "^TestA$|^TestB$"}}
+	narrow := []group{{pkgs: []string{"p"}, runRegex: "^TestB$"}}
+	w := work{groups: full, narrowGroups: narrow, driftSurvivors: map[int]bool{2: true}}
+	if got := scopedWork(w, 2); len(got.groups) != 1 || got.groups[0].runRegex != "^TestB$" {
+		t.Fatalf("survivor-scoped candidate kept the full groups: %+v", got.groups)
+	}
+	if got := scopedWork(w, 1); got.groups[0].runRegex != "^TestA$|^TestB$" {
+		t.Fatalf("full-scope candidate lost the full groups: %+v", got.groups)
+	}
+	// No narrow groups (a non-drift item): the swap never fires even
+	// for a marked index.
+	bare := work{groups: full, driftSurvivors: map[int]bool{0: true}}
+	if got := scopedWork(bare, 0); got.groups[0].runRegex != "^TestA$|^TestB$" {
+		t.Fatalf("swap fired without narrow groups: %+v", got.groups)
+	}
+}
+
+// TestRunDriftNarrowBaselineRefusesAddedTestFailingAlone pins the narrow
+// scope's own baseline probe (REQ-exec-quiescence's baseline locality,
+// REQ-result-stale's killer-drift carve-out): the survivor narrowing's
+// timeout ground requires the narrow baseline and the narrow mutant run
+// judged under one scope, so a grown set's added test that passes in the
+// full suite's order but fails alone must refuse the target at the narrow
+// baseline — with the failing test named — never proceed to mutants under
+// an unprobed scope.
+func TestRunDriftNarrowBaselineRefusesAddedTestFailingAlone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the oracle baseline")
+	}
+	dir := t.TempDir()
+	const testSource = "package gated\n\nimport \"testing\"\n\nvar primed bool\n\nfunc TestSmall(t *testing.T) {\n\tprimed = true\n\tif Gated(5) != 6 {\n\t\tt.Fail()\n\t}\n}\n"
+	files := map[string]string{
+		"go.mod":        "module example.com/narrowbase\n\ngo 1.26\n",
+		"gated.go":      "package gated\n\nfunc Gated(x int) int {\n\ty := x + 1\n\tif y > 100 {\n\t\treturn y * 3\n\t}\n\treturn y\n}\n",
+		"gated_test.go": testSource,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "example.com/narrowbase.Gated"}
+	first, err := tr.Run(ctx, []Target{target}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first[0].Survivors) == 0 {
+		t.Fatalf("baseline fixture = %+v, want survivors so the narrowing arms", first[0])
+	}
+	doc, err := Export(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The added test passes after TestSmall primes the package but fails
+	// alone: only the narrow scope's own baseline can observe the failure.
+	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(testSource+"\nfunc TestBig(t *testing.T) {\n\tif !primed {\n\t\tt.Fatal(\"requires TestSmall first\")\n\t}\n\tif Gated(200) != 603 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grownTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dispatched []int
+	grownFindings, err := grownTree.Run(ctx, []Target{target}, Options{
+		Prior:      prior,
+		dispatched: func(_ string, mi int) { dispatched = append(dispatched, mi) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(grownFindings[0].Skipped, "oracle baseline does not pass") || !strings.Contains(grownFindings[0].Skipped, "TestBig") {
+		t.Fatalf("finding = %+v, want the narrow baseline skip naming TestBig", grownFindings[0])
+	}
+	if len(dispatched) != 0 {
+		t.Fatalf("dispatched %d mutants under an unprobed narrow scope", len(dispatched))
+	}
+
+	// The control round: a forced whole re-measure on the same tree
+	// builds no narrow groups, so its full-scope baseline (TestSmall
+	// priming TestBig in declaration order) passes and mutants dispatch —
+	// witnessing that the narrow probe was the sole refuser above.
+	var forcedDispatched []int
+	forcedFindings, err := grownTree.Run(ctx, []Target{target}, Options{
+		Prior:      prior,
+		Force:      true,
+		dispatched: func(_ string, mi int) { forcedDispatched = append(forcedDispatched, mi) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forcedFindings[0].Skipped != "" || len(forcedDispatched) == 0 {
+		t.Fatalf("forced whole re-measure = %q dispatching %d, want the full scope passing with mutants dispatched", forcedFindings[0].Skipped, len(forcedDispatched))
 	}
 }

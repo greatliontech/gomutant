@@ -31,7 +31,7 @@ type SubjectEvidence struct {
 	MaximalClosure string `json:"maximalClosure"`
 	// TestVariantClosure is the subject package's test-variant compartment
 	// hash: the gofresh pin that distinguishes "a sibling test moved" from
-	// every other drift. The oracle-growth gate refreshes a target-package
+	// every other drift. The killer-drift gate refreshes a target-package
 	// subject's recorded pin to the current one — the refresh its inert
 	// ledger diff licenses — and requires the refreshed evidence plainly
 	// valid; inspection and attribution surface gofresh's stable "test
@@ -159,7 +159,7 @@ type CompartmentFileHeader struct {
 // CompartmentLedger is the target package's persisted test-variant
 // declaration ledger (REQ-result-record): recorded at measure time from the
 // same view snapshot the compartment hash pinned, and diffed at serve time
-// against the current view's ledger so the oracle-growth carve-out can
+// against the current view's ledger so the killer-drift carve-out can
 // classify how the compartment moved (REQ-result-stale).
 type CompartmentLedger struct {
 	Declarations []CompartmentDeclaration `json:"declarations,omitempty"`
@@ -384,9 +384,9 @@ type Finding struct {
 	// (REQ-exec-property-oracles).
 	PropertyRegime string `json:"propertyRegime,omitempty"`
 	// CompartmentLedger is the target package's test-variant declaration
-	// ledger at measure time; the oracle-growth carve-out diffs it against
+	// ledger at measure time; the killer-drift carve-out diffs it against
 	// the current tree, and a record persisted without one (an older
-	// document) re-measures whole rather than growing (REQ-result-stale).
+	// document) re-measures whole rather than drift-serving (REQ-result-stale).
 	CompartmentLedger *CompartmentLedger `json:"compartmentLedger,omitempty"`
 	Commit            string             `json:"commit,omitempty"`
 	Dirty             bool               `json:"dirty"`
