@@ -12,6 +12,7 @@ is deleted (git holds history).
 | [unify-run-discover-selection-preamble](unify-run-discover-selection-preamble.md) | one selectTargets helper replaces the duplicated ~45-line MCP selection preamble | with train chunk 128 (serve carve-out consolidation) |
 | [consolidate-reidentification-and-bucket-policy](consolidate-reidentification-and-bucket-policy.md) | one re-identification helper, one advisory-bucket policy across the serve carve-outs | train chunk 128 |
 | [shaped-derivation-once](shaped-derivation-once.md) | shaped candidates derive at resolve AND per finding at stamp/serve; thread the resolve-time derivation through the assembly arms — one derivation per run, the stamp-time failure arm deleted | train chunk 128 |
+| [derive-probe-oracle-timeout](derive-probe-oracle-timeout.md) | derive the mutant-run budget from the measured baseline instead of a fixed timeout knob | train chunk 113 |
 | [symbol-cutter-duality](symbol-cutter-duality.md) | two symbol cutters over one grammar, relationship unstated | train chunk 113 |
 | [campaign-refuses-tree-change-from-rapid-failfiles](campaign-refuses-tree-change-from-rapid-failfiles.md) | rapid failfile persistence poisons campaign analysis views and ephemeral tree cleanliness | train chunk 113 |
 | [staged-campaign-reports-clean-index-as-drift](staged-campaign-reports-clean-index-as-drift.md) | staged campaign refuses an executed target as unstaged drift without a changed path | train chunk 113 |
