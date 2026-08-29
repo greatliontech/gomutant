@@ -20,7 +20,7 @@ func TestRepositoryContextCancellation(t *testing.T) {
 		t.Fatalf("cancelled capture = %+v, %v", state, err)
 	}
 	repository := repositoryState{root: t.TempDir(), available: true}
-	if _, err := repository.pathsDirtyContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
+	if _, _, err := repository.pathsDirtyContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled dirty check = %v", err)
 	}
 	if _, err := repository.historicalPackageFilesContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
@@ -122,12 +122,23 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	if err := os.WriteFile(source, []byte("package provenance\n\nvar changed = true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !repository.pathsDirty([]string{goMod, source}) {
-		t.Fatal("modified selected source reported clean")
+	if dirty, causes, err := repository.pathsDirtyContext(context.Background(), []string{goMod, source}); err != nil || !dirty ||
+		len(causes) != 1 || !strings.Contains(causes[0], "worktree differs from the index") || !strings.Contains(causes[0], "source.go") {
+		t.Fatalf("modified selected source: dirty=%v causes=%v err=%v, want the divergence named", dirty, causes, err)
+	}
+	// Staged-but-uncommitted is still git-visible drift for a WORKTREE
+	// run: the measured bytes are in no commit, so the judgment stays
+	// dirty with the index-only class named — only a STAGED run's
+	// snapshot vouches for the index.
+	runGit("add", "source.go")
+	if dirty, causes, err := repository.pathsDirtyContext(context.Background(), []string{goMod, source}); err != nil || !dirty ||
+		len(causes) != 1 || !strings.Contains(causes[0], "index differs from HEAD") || !strings.Contains(causes[0], "source.go") {
+		t.Fatalf("staged-but-uncommitted source: dirty=%v causes=%v err=%v, want the index-only class named", dirty, causes, err)
 	}
 	if err := os.WriteFile(source, []byte("package provenance\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	runGit("add", "source.go")
 	input := filepath.Join(root, "input.txt")
 	if err := os.WriteFile(input, []byte("runtime"), 0o644); err != nil {
 		t.Fatal(err)
@@ -135,8 +146,14 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	// Runtime-input paths arrive already materialized against their own
 	// subject's module - the provenance stamp resolves manifests, this
 	// walk only judges paths.
-	if !repository.pathsDirty([]string{goMod, source, input}) {
-		t.Fatal("untracked selected runtime input reported clean")
+	if dirty, causes, err := repository.pathsDirtyContext(context.Background(), []string{goMod, source, input}); err != nil || !dirty ||
+		len(causes) != 1 || !strings.Contains(causes[0], "untracked") || !strings.Contains(causes[0], "input.txt") {
+		t.Fatalf("untracked selected runtime input: dirty=%v causes=%v err=%v, want the untracked class named", dirty, causes, err)
+	}
+	// A measured input outside the repository names itself.
+	if dirty, causes, _ := repository.pathsDirtyContext(context.Background(), []string{filepath.Join(os.TempDir(), "elsewhere.txt")}); !dirty ||
+		len(causes) != 1 || !strings.Contains(causes[0], "outside the repository") {
+		t.Fatalf("external input: dirty=%v causes=%v, want the outside-the-repository cause", dirty, causes)
 	}
 }
 
@@ -231,6 +248,16 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	}
 	if !unreadable.Dirty {
 		t.Fatal("an unreadable evidence manifest re-stamped clean, want fail-closed dirty")
+	}
+	// A STAGED run reaching the same terminal arm refuses instead of
+	// persisting a dirty record — staged records never persist dirty
+	// (REQ-result-staged) — with the evidence fault named.
+	stagedRepo := repository
+	stagedRepo.staged = true
+	unreadableStaged := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: "not-a-manifest"}}
+	if reason, err := tree.stampProvenance(ctx, stagedRepo, view, nil, nil, &unreadableStaged); err != nil ||
+		!strings.Contains(reason, "unreadable") || !strings.Contains(reason, symbol) {
+		t.Fatalf("staged unreadable manifest: reason=%q err=%v, want the staged refusal naming the fault", reason, err)
 	}
 
 	unknown := Finding{TargetEvidence: SubjectEvidence{Symbol: "example.com/provenance.Ghost", RuntimeInputs: observed.State.Manifest}}
@@ -445,18 +472,23 @@ func TestMeasurementResidueNamesFreshUntrackedFiles(t *testing.T) {
 		t.Fatalf("repository state = %+v", repository)
 	}
 	since := time.Now().Add(-time.Minute)
-	if residue := measurementResidue(context.Background(), repository, since); residue != "" {
+	if residue := measurementResidue(context.Background(), repository, since, nil); residue != "" {
 		t.Fatalf("pre-existing untracked file named as residue: %q", residue)
 	}
 	if err := os.WriteFile(filepath.Join(root, "written-under-measurement.db"), []byte("residue"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	residue := measurementResidue(context.Background(), repository, since)
+	residue := measurementResidue(context.Background(), repository, since, nil)
 	if !strings.Contains(residue, "written-under-measurement.db") || !strings.Contains(residue, "can write into the tree") {
 		t.Fatalf("residue = %q, want the fresh untracked file named with its provenance", residue)
 	}
+	// The caller's declared own writes are the harness's, never residue:
+	// with the fresh file declared, nothing remains to attribute.
+	if residue := measurementResidue(context.Background(), repository, since, []string{filepath.Join(root, "written-under-measurement.db")}); residue != "" {
+		t.Fatalf("declared own write attributed as residue: %q", residue)
+	}
 	// Unavailable repository state degrades to the bare reason.
-	if residue := measurementResidue(context.Background(), repositoryState{}, since); residue != "" {
+	if residue := measurementResidue(context.Background(), repositoryState{}, since, nil); residue != "" {
 		t.Fatalf("unavailable repository produced residue: %q", residue)
 	}
 }
@@ -510,5 +542,22 @@ func TestPathsDirtyDetectsTrackingOptOutFlags(t *testing.T) {
 	}
 	if dirty := stagedState.pathsDirty([]string{path}); !dirty {
 		t.Fatal("staged mode judged a tracking-opt-out flag clean")
+	}
+}
+
+// pathsDirty is the tests' verdict-only view of pathsDirtyContext.
+func (s repositoryState) pathsDirty(selectedPaths []string) bool {
+	dirty, _, err := s.pathsDirtyContext(context.Background(), selectedPaths)
+	return err != nil || dirty
+}
+
+// cappedJoin caps long cause lists counted, never silently truncated.
+func TestCappedJoinCountsRemainder(t *testing.T) {
+	items := []string{"a", "b", "c", "d"}
+	if got := cappedJoin(items, 8); got != "a; b; c; d" {
+		t.Fatalf("under-cap join = %q", got)
+	}
+	if got := cappedJoin(items, 2); got != "a; b; and 2 more" {
+		t.Fatalf("capped join = %q, want the remainder counted", got)
 	}
 }

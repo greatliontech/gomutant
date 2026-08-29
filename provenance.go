@@ -103,28 +103,26 @@ func captureRepositoryStateContext(ctx context.Context, dir string, staged bool)
 	return state, nil
 }
 
-func (s repositoryState) pathsDirty(selectedPaths []string) bool {
-	dirty, err := s.pathsDirtyContext(context.Background(), selectedPaths)
-	return err != nil || dirty
-}
-
 // pathsDirtyContext judges the caller's already-materialized paths:
 // runtime-input paths arrive resolved against their own subject's
 // module directory by the provenance stamp - there is no correct
-// single base to resolve a manifest against here.
-func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []string) (bool, error) {
+// single base to resolve a manifest against here. A dirty judgment
+// names its evidence: every arm that answers true reports the paths
+// (and their divergence class) that decided it, so a refusal built on
+// the judgment can name what differs instead of asserting bare drift.
+func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []string) (bool, []string, error) {
 	if !s.available {
-		return true, nil
+		return true, []string{"no repository state available for the dirty judgment"}, nil
 	}
 	seen := map[string]bool{}
 	var pathspec []string
 	for _, path := range selectedPaths {
 		if err := ctx.Err(); err != nil {
-			return false, err
+			return false, nil, err
 		}
 		rel, err := filepath.Rel(s.root, path)
 		if err != nil || !filepath.IsLocal(rel) {
-			return true, nil
+			return true, []string{"measured input outside the repository: " + path}, nil
 		}
 		if !seen[rel] {
 			seen[rel] = true
@@ -132,14 +130,14 @@ func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []
 		}
 	}
 	if len(pathspec) == 0 {
-		return false, nil
+		return false, nil, nil
 	}
-	status, err := gitOutputContext(ctx, s.root, append([]string{"status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--"}, pathspec...)...)
+	status, err := gitOutputContext(ctx, s.root, append([]string{"-c", "core.quotepath=off", "status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--"}, pathspec...)...)
 	if ctx.Err() != nil {
-		return false, ctx.Err()
+		return false, nil, ctx.Err()
 	}
 	if err != nil {
-		return true, nil
+		return true, []string{"git status unavailable over the measured inputs"}, nil
 	}
 	// The porcelain omits index entries flagged skip-worktree or
 	// assume-unchanged - an operator opt-out of git's own change
@@ -151,36 +149,60 @@ func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []
 	// any lowercase tag is assume-unchanged.
 	flagged, err := gitOutputContext(ctx, s.root, append([]string{"ls-files", "-v", "--"}, pathspec...)...)
 	if ctx.Err() != nil {
-		return false, ctx.Err()
+		return false, nil, ctx.Err()
 	}
 	if err != nil {
-		return true, nil
+		return true, []string{"git ls-files unavailable over the measured inputs"}, nil
 	}
+	var causes []string
 	for _, line := range bytes.Split(flagged, []byte("\n")) {
 		if len(line) == 0 {
 			continue
 		}
 		if tag := line[0]; tag == 'S' || (tag >= 'a' && tag <= 'z') {
-			return true, nil
+			causes = append(causes, "change tracking opted out (skip-worktree or assume-unchanged): "+string(bytes.TrimSpace(line[1:])))
 		}
 	}
-	if !s.staged {
-		return len(bytes.TrimSpace(status)) > 0, nil
+	if len(causes) != 0 {
+		return true, causes, nil
+	}
+	// statusCause classifies one porcelain line; the second return is
+	// false exactly for index-only lines (the X column alone), the one
+	// class the staged snapshot itself vouches for — both arms below
+	// share this single classification. A rename pair names the
+	// worktree-side file (the drifting one), not the arrow pair.
+	statusCause := func(line []byte) (string, bool) {
+		x, y := line[0], line[1]
+		name := string(bytes.TrimSpace(line[2:]))
+		if _, dest, renamed := strings.Cut(name, " -> "); renamed {
+			name = dest
+		}
+		switch {
+		case x == '?':
+			return "untracked: " + name, true
+		case x == '!':
+			return "ignored: " + name, true
+		case y != ' ':
+			return "worktree differs from the index: " + name, true
+		default:
+			return "index differs from HEAD: " + name, false
+		}
 	}
 	// The snapshot vouches for staged content: only worktree-vs-index
 	// divergence (the Y column), untracked files, and ignored files are
 	// drift the index cannot cover; an index-vs-HEAD change (the X
-	// column alone) IS the measured snapshot (REQ-result-staged).
+	// column alone) IS the measured snapshot (REQ-result-staged). A
+	// non-staged judgment counts every line, index-only included.
 	for _, line := range bytes.Split(status, []byte("\n")) {
-		if len(line) < 2 {
+		if len(line) < 3 {
 			continue
 		}
-		x, y := line[0], line[1]
-		if x == '?' || x == '!' || y != ' ' {
-			return true, nil
+		cause, beyondIndex := statusCause(line)
+		if beyondIndex || !s.staged {
+			causes = append(causes, cause)
 		}
 	}
-	return false, nil
+	return len(causes) != 0, causes, nil
 }
 
 // snapshotMovedContext reports whether the index snapshot a staged run
@@ -290,7 +312,7 @@ func gitOutputContext(ctx context.Context, dir string, args ...string) ([]byte, 
 // Empty when nothing fresh is untracked, when the repository is
 // unavailable, or when the listing fails - the generic drift reason
 // then stands alone, never blocked by this diagnostic.
-func measurementResidue(ctx context.Context, s repositoryState, since time.Time) string {
+func measurementResidue(ctx context.Context, s repositoryState, since time.Time, ownWrites []string) string {
 	if !s.available {
 		return ""
 	}
@@ -298,9 +320,35 @@ func measurementResidue(ctx context.Context, s repositoryState, since time.Time)
 	if err != nil {
 		return ""
 	}
+	// The caller's declared run artifacts (its findings document, the
+	// locks) are the run's own writes, never a mutant's or oracle's —
+	// attributing them as measurement residue would make every
+	// default-layout run read as self-inflicted drift. Both the literal
+	// absolute form and the physical form are keyed: s.root is git's
+	// physical path while a caller's path may ride a symlinked worktree
+	// alias, and an alias-blind match would re-attribute the findings
+	// document (the store's own Abs+EvalSymlinks discipline).
+	own := make(map[string]bool, 2*len(ownWrites))
+	for _, w := range ownWrites {
+		abs, aerr := filepath.Abs(w)
+		if aerr != nil {
+			continue
+		}
+		own[filepath.Clean(abs)] = true
+		if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+			own[filepath.Clean(resolved)] = true
+		}
+		if dir, derr := filepath.EvalSymlinks(filepath.Dir(abs)); derr == nil {
+			// Unconditional: covers a not-yet-written first-run doc, a
+			// broken link, and a findings doc that is itself a symlink
+			// (git lists the physical link path, which full resolution
+			// would step through).
+			own[filepath.Join(dir, filepath.Base(abs))] = true
+		}
+	}
 	var fresh []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
+		if line == "" || own[filepath.Clean(filepath.Join(s.root, line))] {
 			continue
 		}
 		info, statErr := os.Lstat(filepath.Join(s.root, line))

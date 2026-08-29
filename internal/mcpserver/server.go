@@ -895,6 +895,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		ScratchNamespaces: scratchNamespaces,
 		Exemptions:        exemptions,
 		Staged:            in.Staged,
+		OwnWrites:         gomutant.RunOwnWrites(s.findingsPath(in.Findings)),
 		OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB),
 		Guidance:          func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
 		Contradiction: func(c gomutant.AttestationContradiction) {

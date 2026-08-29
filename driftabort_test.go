@@ -114,13 +114,15 @@ func TestRunDriftRefusesSplicedServeTargetLocally(t *testing.T) {
 		t.Fatal(err)
 	}
 	var committed []string
+	var decisions []RunDecision
 	fresh, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	findings, err := fresh.Run(context.Background(), []Target{target}, Options{
-		Prior:  prior,
-		Commit: func(f Finding) error { committed = append(committed, f.Symbol); return nil },
+		Prior:    prior,
+		Commit:   func(f Finding) error { committed = append(committed, f.Symbol); return nil },
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
 		afterExecution: func() {
 			if err := os.WriteFile(srcPath, append([]byte(src), []byte("\n// drifted\nfunc Drifted() int { return 9 }\n")...), 0o644); err != nil {
 				t.Error(err)
@@ -136,6 +138,12 @@ func TestRunDriftRefusesSplicedServeTargetLocally(t *testing.T) {
 	}
 	if len(findings) != 0 || len(committed) != 0 {
 		t.Fatalf("drift-refused splice retained findings %+v, committed %v", findings, committed)
+	}
+	// An execution-phase refusal streams no second decision row: the
+	// candidate re-execution's cached decision already streamed, and
+	// the once-per-target discipline holds (REQ-exec-run-status).
+	if len(decisions) != 1 || decisions[0].Action != "cached" {
+		t.Fatalf("decision stream = %+v, want the single cached row", decisions)
 	}
 }
 
@@ -267,12 +275,14 @@ func TestRunServeRefusesContentMovePastViewCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	var committed []string
+	var decisions []RunDecision
 	movedOnce := false
 	findings, err := fresh.Run(context.Background(), targets, Options{
 		Budget: 1,
 		Prior:  prior,
 		Commit: func(f Finding) error { committed = append(committed, f.Symbol); return nil },
 		Decision: func(d RunDecision) {
+			decisions = append(decisions, d)
 			// The first target's serve is done (commit precedes the
 			// decision); move the SECOND target's content and the ref
 			// before its serve begins.
@@ -303,6 +313,22 @@ func TestRunServeRefusesContentMovePastViewCapture(t *testing.T) {
 		if symbol == "example.com/fixture/plain.Ok" {
 			t.Fatal("a capture-stale serve was committed")
 		}
+	}
+	// The refusal's decision row: exactly one for the refused target,
+	// action "skipped" — the decision stream's only no-measurement
+	// vocabulary (REQ-exec-run-status) — carrying the refusal reason.
+	var refusedRows []RunDecision
+	for _, d := range decisions {
+		if d.Action == "refused" {
+			t.Fatalf("decision stream used the outlawed action: %+v", d)
+		}
+		if d.Symbol == "example.com/fixture/plain.Ok" {
+			refusedRows = append(refusedRows, d)
+		}
+	}
+	if len(refusedRows) != 1 || refusedRows[0].Action != "skipped" ||
+		!strings.Contains(refusedRows[0].Reason, "moved past the run-start view capture") {
+		t.Fatalf("refused target's decision rows = %+v, want one skipped row naming the refusal", refusedRows)
 	}
 }
 
@@ -349,16 +375,22 @@ func TestRunDriftNamesMeasurementResidue(t *testing.T) {
 		t.Fatal("fixture body not found")
 	}
 	residue := filepath.Join(dir, "lib", "residue.db")
+	ownDoc := filepath.Join(dir, "own-findings.json")
 	_, err = tr.Run(context.Background(), targets, Options{
-		Budget: 1,
+		Budget:    1,
+		OwnWrites: RunOwnWrites(ownDoc),
 		afterExecution: func() {
 			// The tracked edit is the proven drift trigger; the
 			// untracked file is the residue the decision line must
-			// name alongside it.
+			// name alongside it — while the caller's own declared
+			// write (its findings document) must not be.
 			if err := os.WriteFile(libPath, []byte(moved), 0o644); err != nil {
 				t.Error(err)
 			}
 			if err := os.WriteFile(residue, []byte("mutant wrote this"), 0o644); err != nil {
+				t.Error(err)
+			}
+			if err := os.WriteFile(ownDoc, []byte("{}"), 0o644); err != nil {
 				t.Error(err)
 			}
 		},
@@ -373,5 +405,8 @@ func TestRunDriftNamesMeasurementResidue(t *testing.T) {
 	reason := drift.Drifted[0].Reason
 	if !strings.Contains(reason, "residue.db") || !strings.Contains(reason, "can write into the tree") {
 		t.Fatalf("drift reason lacks the measurement-residue provenance: %q", reason)
+	}
+	if strings.Contains(reason, "own-findings.json") {
+		t.Fatalf("the run's own declared write attributed as residue: %q", reason)
 	}
 }

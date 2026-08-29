@@ -122,6 +122,13 @@ type Options struct {
 	// stamping dirty machine-local evidence, and the finding records
 	// the index tree identity the eventual commit will carry.
 	Staged bool
+	// OwnWrites lists tree paths the caller itself writes during the
+	// run — its findings document, the campaign lock, their siblings —
+	// excluded from measurement-residue attribution: the residue
+	// provenance names the measured code's tree writes
+	// (REQ-exec-quiescence), and a harness artifact attributed there
+	// makes every default-layout run read as self-inflicted drift.
+	OwnWrites []string
 	// Exemptions is the committed exemption record
 	// (REQ-result-exemptions): reviewed acceptances of exactly-named
 	// unverifiable reasons per subject, consumed by survivor bucketing
@@ -1328,7 +1335,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// run: a wide drift refuses many targets against the same tree
 	// state, and the naming needs the residue set, not a per-target
 	// re-listing.
-	residue := sync.OnceValue(func() string { return measurementResidue(ctx, repository, runStart) })
+	residue := sync.OnceValue(func() string { return measurementResidue(ctx, repository, runStart, opts.OwnWrites) })
 	// driftedMu guards drifted: the preparation goroutine's cached-serve
 	// refusal and the aggregation loop's refusals append concurrently
 	// (the pipeline runs preparation ahead of execution).
@@ -1426,6 +1433,43 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	coverageCache := map[string]engine.Coverage{}
 	guidanceCache := map[string]oracleAttribution{}
 	decisions := make([]RunDecision, len(targets))
+	// skipTarget is the one no-measurement exit: the finding's mark and
+	// the decision row (vocabulary "skipped" — the decision stream's
+	// only no-measurement action, REQ-exec-run-status). emit=true for
+	// exits past deliverPrepared's ordered walk, which must stream their
+	// own row; resolve-phase exits leave emission to the walk. The
+	// hand-picked per-site subsets this replaces bred out-of-order and
+	// missing-row defects; every new exit goes through here.
+	skipTarget := func(i int, reason string, emit bool) {
+		findings[i].Skipped = reason
+		decisions[i] = RunDecision{Symbol: targets[i].Symbol, Action: "skipped", Reason: reason}
+		if emit && opts.Decision != nil {
+			opts.Decision(decisions[i])
+		}
+	}
+	// refuseSkipped is a preparation-phase drift refusal: the refused
+	// registry entry (the run fails operationally with the refused set,
+	// REQ-exec-quiescence) plus the same skipped decision every
+	// no-measurement target reports, both carrying the run's residue
+	// provenance — the decision line names it per REQ-exec-quiescence.
+	// Execution-phase refusals call refuseTarget alone: their measure
+	// decision already streamed, and a second row per target would break
+	// the once-per-target decision discipline.
+	refuseSkipped := func(i int, reason string, emit bool) {
+		full := reason + residue()
+		refuseTarget(targets[i].Symbol, full)
+		skipTarget(i, full, emit)
+	}
+	// cacheTarget records a wholesale cached serve's decision, always
+	// emitted inline: every serve runs past deliverPrepared's walk. (A
+	// cached serve that re-executes flagged candidates flows through
+	// the shared measure-decision path instead, carrying its count.)
+	cacheTarget := func(i int, reason string) {
+		decisions[i] = RunDecision{Symbol: targets[i].Symbol, Action: "cached", Reason: reason}
+		if opts.Decision != nil {
+			opts.Decision(decisions[i])
+		}
+	}
 	for i, tg := range targets {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -1442,8 +1486,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// would be a run fault where the contract wants a
 			// target-local refusal (an explicit oracle is required).
 			if err := validateShapedTarget(tg); err != nil {
-				f.Skipped = "shaped target refused: " + err.Error()
-				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+				skipTarget(i, "shaped target refused: "+err.Error(), false)
 				continue
 			}
 		}
@@ -1454,8 +1497,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if len(oracle) == 0 {
 			// Nothing can kill: the caller sees it and decides
 			// (REQ-target-default).
-			f.Skipped = "no oracle"
-			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			skipTarget(i, "no oracle", false)
 			continue
 		}
 		if err := preparation.validateOracle(ctx, oracle); err != nil {
@@ -1466,8 +1508,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// sibling targets down (REQ-exec-quiescence's locality,
 			// which governs resolution and decision evidence exactly as
 			// it governs freshness-proof construction).
-			f.Skipped = "oracle validation failed: " + err.Error()
-			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			skipTarget(i, "oracle validation failed: "+err.Error(), false)
 			continue
 		}
 		if tg.Shaped() {
@@ -1487,13 +1528,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// included (REQ-exec-quiescence).
 				var sourceDrift *engine.SourceDriftError
 				if errors.As(err, &sourceDrift) || errors.Is(err, iofs.ErrNotExist) {
-					reason := "shaped source drifted since load: " + err.Error() + " - re-run when the tree settles" + residue()
-					refuseTarget(tg.Symbol, reason)
-					decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason}
+					refuseSkipped(i, "shaped source drifted since load: "+err.Error()+" - re-run when the tree settles", false)
 					continue
 				}
-				f.Skipped = "shaped resolution failed: " + err.Error()
-				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+				skipTarget(i, "shaped resolution failed: "+err.Error(), false)
 				continue
 			}
 			f.BodyHash = digest
@@ -1506,8 +1544,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if errors.Is(err, engine.ErrNotFunction) {
 			// A type or variable target is a legitimate reference with no
 			// body to mutate: reported, never fatal, never silently dropped.
-			f.Skipped = "not a function - for mutation adequacy, target its methods or the bound function-level subjects"
-			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			skipTarget(i, "not a function - for mutation adequacy, target its methods or the bound function-level subjects", false)
 			continue
 		}
 		if err != nil {
@@ -1521,13 +1558,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// breakage stays this target's own skip with the cause
 			// (REQ-exec-quiescence).
 			if errors.Is(err, iofs.ErrNotExist) {
-				reason := "source vanished since load: " + err.Error() + " - re-run when the tree settles" + residue()
-				refuseTarget(tg.Symbol, reason)
-				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason}
+				refuseSkipped(i, "source vanished since load: "+err.Error()+" - re-run when the tree settles", false)
 				continue
 			}
-			f.Skipped = "target resolution failed: " + err.Error()
-			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
+			skipTarget(i, "target resolution failed: "+err.Error(), false)
 			continue
 		}
 		f.BodyHash = bodyHash
@@ -1627,9 +1661,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				kept = append(kept, rt)
 				continue
 			}
-			f := &findings[rt.index]
-			f.Skipped = "decision evidence unavailable: " + cause.Error()
-			decisions[rt.index] = RunDecision{Symbol: targets[rt.index].Symbol, Action: "skipped", Reason: f.Skipped}
+			skipTarget(rt.index, "decision evidence unavailable: "+cause.Error(), false)
 		}
 		resolvedTargets = kept
 	}
@@ -1793,13 +1825,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
-				reason := serveCheckRefusal(err)
-				refuseTarget(tg.Symbol, reason+residue())
-				f.Skipped = reason
-				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
-				if opts.Decision != nil {
-					opts.Decision(decisions[i])
-				}
+				refuseSkipped(i, serveCheckRefusal(err), true)
 				return nil, nil
 			}
 			if matches && rec.BodyHash == resolved.shapedDigest && shapeEqual(rec.Shape, &TargetShape{Structural: tg.Structural, Manual: tg.Manual}) {
@@ -1815,19 +1841,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if stagedDrift, err := t.stampProvenance(ctx, repository, nil, oracleViews, resolved.shapedFiles, &served); err != nil {
 					return nil, err
 				} else if stagedDrift != "" {
-					refuseTarget(tg.Symbol, stagedDrift+residue())
-					f.Skipped = "staged drift: " + stagedDrift
-					decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
-					if opts.Decision != nil {
-						opts.Decision(decisions[i])
-					}
+					refuseSkipped(i, "staged drift: "+stagedDrift, true)
 					return nil, nil
 				}
 				*f = served
-				decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: "served: shape and oracle pins unchanged"}
-				if opts.Decision != nil {
-					opts.Decision(decisions[i])
-				}
+				cacheTarget(i, "served: shape and oracle pins unchanged")
 				return nil, nil
 			}
 			reason = "stale"
@@ -1854,11 +1872,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
-			f.Skipped = "producer evidence unavailable: " + err.Error()
-			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped}
-			if opts.Decision != nil {
-				opts.Decision(decisions[i])
-			}
+			skipTarget(i, "producer evidence unavailable: "+err.Error(), true)
 			return nil, nil
 		}
 		// Producer enrollment mirrors the symbol path's: the global
@@ -1918,10 +1932,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if reason, err := probeGroupBaselines(ctx, tg, w); err != nil {
 			return nil, err
 		} else if reason != "" {
-			f.Skipped = reason
-			if opts.Decision != nil {
-				opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason})
-			}
+			skipTarget(i, reason, true)
 			return nil, nil
 		}
 		if opts.Decision != nil {
@@ -1958,12 +1969,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if !errors.As(err, &sourceDrift) {
 				return false
 			}
-			reason := "source changed since load: " + sourceDrift.Path + " - re-run when the tree settles" + residue()
-			refuseTarget(tg.Symbol, reason)
-			decisions[i] = RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason}
-			if opts.Decision != nil {
-				opts.Decision(decisions[i])
-			}
+			refuseSkipped(i, "source changed since load: "+sourceDrift.Path+" - re-run when the tree settles", true)
 			return true
 		}
 		rec, hasPrior := prior[tg.Symbol]
@@ -2002,10 +2008,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// failed evidence check (serveCheckRefusal, any non-ctx error):
 		// the condition is this target's own, the campaign proceeds.
 		refuseServeCheck := func(reason string) {
-			refuseTarget(tg.Symbol, reason+residue())
-			if opts.Decision != nil {
-				opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "refused", Reason: reason})
-			}
+			refuseSkipped(i, reason, true)
 		}
 		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
 			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
@@ -2077,10 +2080,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if stagedDrift, err := t.stampProvenance(ctx, repository, targetView, oracleViews, nil, &cached); err != nil {
 					return nil, err
 				} else if stagedDrift != "" {
-					refuseTarget(tg.Symbol, stagedDrift+residue())
-					if opts.Decision != nil {
-						opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "refused", Reason: stagedDrift})
-					}
+					refuseSkipped(i, "staged drift: "+stagedDrift, true)
 					return nil, nil
 				}
 				findings[i] = cached
@@ -2090,9 +2090,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if err := commitFinding(ctx, opts.Commit, cached); err != nil {
 					return nil, err
 				}
-				if opts.Decision != nil {
-					opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: "served: body, oracle closure, and runtime inputs unchanged"})
-				}
+				cacheTarget(i, "served: body, oracle closure, and runtime inputs unchanged")
 				return nil, nil
 			}
 			if matches {
@@ -2170,10 +2168,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			// rule as drift refusal (REQ-exec-quiescence): this target
 			// skips with the cause on its decision line — a skip never
 			// overwrites a prior record — and the campaign proceeds.
-			f.Skipped = fmt.Sprintf("freshness proof unavailable (oracle %s): %v", strings.Join(oracle, ", "), err)
-			if opts.Decision != nil {
-				opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: f.Skipped})
-			}
+			skipTarget(i, fmt.Sprintf("freshness proof unavailable (oracle %s): %v", strings.Join(oracle, ", "), err), true)
 			return nil, nil
 		}
 		// Producer enrollment happens only for targets whose proof
@@ -2398,10 +2393,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if reason, err := probeGroupBaselines(ctx, tg, w); err != nil {
 			return nil, err
 		} else if reason != "" {
-			f.Skipped = reason
-			if opts.Decision != nil {
-				opts.Decision(RunDecision{Symbol: tg.Symbol, Action: "skipped", Reason: reason})
-			}
+			skipTarget(i, reason, true)
 			return nil, nil
 		}
 		// The target's own preparation events — mutants and baselines —
@@ -3741,6 +3733,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		moduleDirs[oracleView.symbol] = oracleView.moduleDir
 		viewEnvs[oracleView.symbol] = oracleView.env
 	}
+	var evidenceFaults []string
 	for _, evidence := range append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...) {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -3750,12 +3743,21 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		}
 		base := moduleDirs[evidence.Symbol]
 		if base == "" {
+			// Terminal: later evidence goes unexamined, fail-closed. A
+			// staged run refuses here — its records never persist dirty
+			// (REQ-result-staged) — with the evidence fault named.
 			f.Dirty = true
+			if repository.staged {
+				return "an evidence manifest names a subject with no view (" + evidence.Symbol + "); the staged snapshot cannot vouch for it", nil
+			}
 			return "", nil
 		}
 		paths, perr := runtimeinput.Paths(evidence.RuntimeInputs, base)
 		if perr != nil {
 			f.Dirty = true
+			if repository.staged {
+				return "an evidence manifest is unreadable (" + evidence.Symbol + "); the staged snapshot cannot vouch for it", nil
+			}
 			return "", nil
 		}
 		// An identity outside the repository is not git's to vouch for:
@@ -3813,19 +3815,26 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 			// oracle-scratch path recorded missing is missing still),
 			// and an unchanged external identity is not git-visible
 			// drift. Anything less keeps the fail-closed arm
-			// (REQ-result-layers, REQ-exec-oracle-scratch).
+			// (REQ-result-layers, REQ-exec-oracle-scratch) — dirty
+			// forced with the evidence mismatch as its own named cause,
+			// never laundered through the git judgment as a
+			// path-shaped fact.
 			state, serr := runtimeinput.CurrentEnvContext(ctx, evidence.RuntimeInputs, base, viewEnvs[evidence.Symbol])
 			if serr != nil || !state.OK ||
 				state.Unverifiable != evidence.RuntimeUnverifiable || state.Reason != evidence.RuntimeReason ||
 				state.Digest != evidence.RuntimeDigest {
-				sourceFiles = append(sourceFiles, unresolvable...)
+				evidenceFaults = append(evidenceFaults, fmt.Sprintf(
+					"recorded runtime-input evidence for %s no longer reproduces over externally rooted identities (%s)",
+					evidence.Symbol, strings.Join(unresolvable, ", ")))
 			}
 		}
 	}
-	f.Dirty, err = repository.pathsDirtyContext(ctx, sourceFiles)
+	dirty, dirtyCauses, err := repository.pathsDirtyContext(ctx, sourceFiles)
 	if err != nil {
 		return "", err
 	}
+	f.Dirty = dirty || len(evidenceFaults) != 0
+	dirtyCauses = append(evidenceFaults, dirtyCauses...)
 	// The capture commit is read at stamp time, not served from the
 	// run-start snapshot — the record names the repository state the
 	// finding's just-validated evidence is true of, so ref motion
@@ -3859,10 +3868,28 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 			return "the index snapshot was re-staged mid-run; the recorded tree no longer names the measured content", nil
 		}
 		if f.Dirty {
-			return "unstaged drift over the measured package's inputs; stage or stash it to pin the snapshot", nil
+			// The refusal names every differing input (capped, counted):
+			// an unnamed refusal on a visually clean tree is
+			// indistinguishable from a tool fault — the drift may be an
+			// ignored or untracked runtime input plain `git status`
+			// never shows.
+			return "unstaged drift over the measured package's inputs (" + cappedJoin(dirtyCauses, 8) + "); stage or stash it to pin the snapshot", nil
 		}
 	}
 	return "", nil
+}
+
+// cappedJoin renders up to limit items with the remainder counted —
+// the refusal-evidence list form (long lists cap counted, never
+// silently truncate).
+func cappedJoin(items []string, limit int) string {
+	if len(items) == 0 {
+		return "no differing input identified"
+	}
+	if len(items) <= limit {
+		return strings.Join(items, "; ")
+	}
+	return strings.Join(items[:limit], "; ") + fmt.Sprintf("; and %d more", len(items)-limit)
 }
 
 // carryAnchoredAttestations partitions prior dispositions over the

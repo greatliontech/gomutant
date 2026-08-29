@@ -154,22 +154,31 @@ func TestStagedRunRefusesUnstagedDrift(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
-	for name, dirty := range map[string]func(t *testing.T, root string){
-		"unstaged edit": func(t *testing.T, root string) {
-			edited := "package staged\n\nfunc F(x int) int {\n\tif x > 98 {\n\t\treturn x - 1\n\t}\n\treturn x\n}\n"
-			if err := os.WriteFile(filepath.Join(root, "p.go"), []byte(edited), 0o644); err != nil {
-				t.Fatal(err)
-			}
+	for name, tc := range map[string]struct {
+		dirty func(t *testing.T, root string)
+		cause string
+	}{
+		"unstaged edit": {
+			dirty: func(t *testing.T, root string) {
+				edited := "package staged\n\nfunc F(x int) int {\n\tif x > 98 {\n\t\treturn x - 1\n\t}\n\treturn x\n}\n"
+				if err := os.WriteFile(filepath.Join(root, "p.go"), []byte(edited), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cause: "worktree differs from the index: p.go",
 		},
-		"untracked file": func(t *testing.T, root string) {
-			if err := os.WriteFile(filepath.Join(root, "extra.go"), []byte("package staged\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
+		"untracked file": {
+			dirty: func(t *testing.T, root string) {
+				if err := os.WriteFile(filepath.Join(root, "extra.go"), []byte("package staged\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			cause: "untracked: extra.go",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root, _ := stagedFixture(t)
-			dirty(t, root)
+			tc.dirty(t, root)
 			tree, err := Load(root)
 			if err != nil {
 				t.Fatal(err)
@@ -181,6 +190,13 @@ func TestStagedRunRefusesUnstagedDrift(t *testing.T) {
 			}
 			if !strings.Contains(drift.Drifted[0].Reason, "stage or stash") {
 				t.Fatalf("drift reason = %q, want the unstaged-drift refusal", drift.Drifted[0].Reason)
+			}
+			// The refusal names the differing input and its class: an
+			// unnamed refusal on a visually clean tree reads as a tool
+			// fault (the drift may be an input plain `git status` never
+			// shows).
+			if !strings.Contains(drift.Drifted[0].Reason, tc.cause) {
+				t.Fatalf("drift reason = %q, want the differing input named as %q", drift.Drifted[0].Reason, tc.cause)
 			}
 		})
 	}

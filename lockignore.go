@@ -6,6 +6,26 @@ import (
 	"strings"
 )
 
+// RunOwnWrites lists the tree paths a campaign writes for its own
+// bookkeeping around a findings document — the document itself, its
+// campaign and document locks, and (inside the tool-owned directory,
+// the only place the tool mints one) the lock-ignore file — for
+// Options.OwnWrites: residue attribution names the measured code's
+// tree writes, never the harness's own.
+func RunOwnWrites(findingsPath string) []string {
+	own := []string{findingsPath, findingsPath + ".campaign", findingsPath + ".lock"}
+	if dir := filepath.Dir(findingsPath); toolOwnedDir(dir) {
+		own = append(own, filepath.Join(dir, ".gitignore"))
+	}
+	return own
+}
+
+// toolOwnedDir reports whether dir is the tool-owned .gomutant
+// directory — the one place lock-hygiene files are minted.
+func toolOwnedDir(dir string) bool {
+	return filepath.Base(dir) == ".gomutant"
+}
+
 // ensureLockIgnore keeps the by-design persistent lock files out of
 // consumers' commits: inside the tool-owned .gomutant directory a
 // minted .gitignore covers *.campaign and *.lock, so an add-everything
@@ -18,7 +38,7 @@ import (
 // campaign, and a concurrent double-append costs at most a duplicate
 // ignore line.
 func ensureLockIgnore(dir string) {
-	if filepath.Base(dir) != ".gomutant" {
+	if !toolOwnedDir(dir) {
 		return
 	}
 	path := filepath.Join(dir, ".gitignore")
