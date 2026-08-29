@@ -33,8 +33,11 @@ Notification delivery is advisory and never changes tool results or errors.
 Discovery encodes exact effective oracles without repeating them: the result
 contains canonical top-level `oracleSets` with zero-based integer `id` values,
 and each target carries the `oracleSet` id whose `oracle` array it uses. Oracle
-sets are assigned in first-target order, so expanding each reference yields the
-same ordered target descriptions as library and CLI inspection.
+sets are assigned in first-target order, so every RETAINED target row's
+reference resolves within the equally-capped set list, and expanding the
+retained references yields the same ordered target descriptions as library
+and CLI inspection of those targets; sets beyond the cap are referenced only
+by omitted target rows.
 
 **REQ-mcp-envelope** (behavior): Tool responses MUST be bounded for their
 actual consumer — an agent paying per token. Counts lead: discovery reports
@@ -50,6 +53,20 @@ decisions are progress data, not result data: a request carrying a progress
 token receives them as notifications and the response keeps only their
 totals; a request without one keeps them inline, capped, with honest totals.
 Candidate evidence is drill-down via the findings tool, never run payload.
+Advisory lists — oracle guidance, attestation sheds and carries,
+attestation contradictions, property-oracle statements, discovery's oracle
+sets — cap at the same row bound with their remainders counted (the
+error-riding shed fold keeps its own exemplar bound over the full set).
+And an empty answer is an answer, never a bare zero-row success: a run or
+discovery selecting zero targets, a findings query matching no record (the
+state filter's judged drop included), an explain triage over an empty
+document or a label matching nothing, and a retarget prefix matching
+nothing each carry a note naming the input that emptied the result and the
+caller's next step; and every whole-tree reconcile that dropped records
+states the drop count — the document write is the response's to own
+whether or not anything was measured — so the caller's next move is a
+decision, not a diagnosis. A selection mode that emptied the target set
+before filters applied is never blamed on the filters.
 While a token listens, a heartbeat notification names the current phase and
 elapsed time on a fixed cadence, so no compile or execution stretch stays
 silent past a client's deadline. The server's instructions and each tool's

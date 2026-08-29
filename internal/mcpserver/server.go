@@ -279,9 +279,9 @@ func commandTimeout(name string, seconds *int) (time.Duration, error) {
 // second findings call after a run that rendered healthy counts while
 // the store routed the record to the machine-local overlay.
 func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (string, string)) (rows []findingOut, omitted int) {
-	const findingRowCap, openCap = 50, 20
+	const openCap = 20
 	for _, f := range findings {
-		if len(rows) == findingRowCap {
+		if len(rows) == envelopeRowCap {
 			omitted++
 			continue
 		}
@@ -312,11 +312,19 @@ func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (s
 // attribution per set, so the response aggregates instead of repeating
 // a near-identical suggestion per target (REQ-mcp-envelope).
 type guidanceOut struct {
-	Targets       []string `json:"targets" jsonschema:"targets whose unverifiable evidence this attribution covers"`
-	UnstableTests []string `json:"unstableTests,omitempty"`
-	Reason        string   `json:"reason,omitempty" jsonschema:"the first covered finding's unverifiable reason"`
-	Suggestion    string   `json:"suggestion"`
+	Targets        []string `json:"targets" jsonschema:"targets whose unverifiable evidence this attribution covers; capped with the remainder counted"`
+	OmittedTargets int      `json:"omittedTargets,omitempty" jsonschema:"covered targets beyond the per-row cap"`
+	UnstableTests  []string `json:"unstableTests,omitempty" jsonschema:"capped with the remainder counted"`
+	OmittedTests   int      `json:"omittedUnstableTests,omitempty" jsonschema:"unstable tests beyond the per-row cap"`
+	Reason         string   `json:"reason,omitempty" jsonschema:"the first covered finding's unverifiable reason"`
+	Suggestion     string   `json:"suggestion"`
 }
+
+// guidanceListCap bounds a guidance row's nested lists - one row
+// aggregates every target an unstable oracle set covers, the exact
+// unauthored blow-up REQ-mcp-envelope refuses; the explain tool's
+// per-group symbol cap is the precedent.
+const guidanceListCap = 10
 
 // contradictionOut is one shed attestation report (a growth serve's added
 // tests killed an attested survivor).
@@ -544,23 +552,109 @@ type findingOut struct {
 }
 
 type runOut struct {
-	Summary            gomutant.RunSummary         `json:"summary"`
-	Document           string                      `json:"document"`
-	Findings           []findingOut                `json:"findings"`
-	OmittedFindings    int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
-	Guidance           []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
-	Contradictions     []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
-	PropertyOracles    []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
-	AttestationSheds   []string                    `json:"attestationSheds,omitempty" jsonschema:"dispositions shed with the cause named - the mutation domain moved, the site content under the position changed, or the attested survivor is no longer reported - re-review and re-attest if genuinely equivalent"`
-	AttestationCarries []string                    `json:"attestationCarries,omitempty" jsonschema:"dispositions carried across moved measurement pins: the mutated source is unchanged and the mutant survived re-execution, so the equivalence reasoning rides - auditable acceptances, no action needed"`
-	Promoted           int                         `json:"promoted,omitempty" jsonschema:"records this run carried from the machine-local overlay into the committed findings document - the document changed, commit it"`
-	MachineLocalOnly   int                         `json:"machineLocalOnly,omitempty" jsonschema:"records this run routed to the machine-local overlay - the repo findings document gains nothing from them until their per-record disqualifiers clear; the capped findings list may omit some, this count never does"`
-	Residue            []gomutant.Residue          `json:"residue,omitempty"`
-	OmittedResidue     int                         `json:"omittedResidue,omitempty"`
-	Preparation        []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
-	PreparationCount   int                         `json:"preparationCount"`
-	Decisions          []gomutant.RunDecision      `json:"decisions,omitempty" jsonschema:"absent when a progress token streamed the decisions; decisionsCount still totals them"`
-	DecisionsCount     int                         `json:"decisionsCount"`
+	Summary                   gomutant.RunSummary         `json:"summary"`
+	Document                  string                      `json:"document"`
+	Findings                  []findingOut                `json:"findings"`
+	OmittedFindings           int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
+	Guidance                  []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
+	OmittedGuidance           int                         `json:"omittedOracleGuidance,omitempty" jsonschema:"guidance rows beyond the response cap - counted, never silent"`
+	Contradictions            []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a growth serve's added tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
+	OmittedContradictions     int                         `json:"omittedAttestationContradictions,omitempty" jsonschema:"contradiction rows beyond the response cap; the findings tool serves every open survivor"`
+	PropertyOracles           []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
+	OmittedPropertyOracles    int                         `json:"omittedPropertyOracles,omitempty" jsonschema:"property-oracle rows beyond the response cap"`
+	AttestationSheds          []string                    `json:"attestationSheds,omitempty" jsonschema:"dispositions shed with the cause named - the mutation domain moved, the site content under the position changed, or the attested survivor is no longer reported - re-review and re-attest if genuinely equivalent"`
+	OmittedAttestationSheds   int                         `json:"omittedAttestationSheds,omitempty" jsonschema:"shed rows beyond the response cap; every shed mutant is one of the document's open survivors"`
+	AttestationCarries        []string                    `json:"attestationCarries,omitempty" jsonschema:"dispositions carried across moved measurement pins: the mutated source is unchanged and the mutant survived re-execution, so the equivalence reasoning rides - auditable acceptances, no action needed"`
+	OmittedAttestationCarries int                         `json:"omittedAttestationCarries,omitempty" jsonschema:"carry rows beyond the response cap; the document's attestations carry the reasoning"`
+	Promoted                  int                         `json:"promoted,omitempty" jsonschema:"records this run carried from the machine-local overlay into the committed findings document - the document changed, commit it"`
+	MachineLocalOnly          int                         `json:"machineLocalOnly,omitempty" jsonschema:"records this run routed to the machine-local overlay - the repo findings document gains nothing from them until their per-record disqualifiers clear; the capped findings list may omit some, this count never does"`
+	Residue                   []gomutant.Residue          `json:"residue,omitempty"`
+	OmittedResidue            int                         `json:"omittedResidue,omitempty"`
+	Preparation               []gomutant.PreparationEvent `json:"preparation,omitempty" jsonschema:"absent when a progress token streamed the events; preparationCount still totals them"`
+	PreparationCount          int                         `json:"preparationCount"`
+	Decisions                 []gomutant.RunDecision      `json:"decisions,omitempty" jsonschema:"absent when a progress token streamed the decisions; decisionsCount still totals them"`
+	DecisionsCount            int                         `json:"decisionsCount"`
+	Note                      string                      `json:"note,omitempty" jsonschema:"set when the run measured nothing (names the input that selected zero targets and the next step) or when a whole-tree reconcile dropped records whose targets left the code"`
+}
+
+// envelopeRowCap is the one row bound every capped response list
+// shares (REQ-mcp-envelope); per-row nested lists carry their own
+// tighter bounds.
+const envelopeRowCap = 50
+
+// capRows bounds a response list at the envelope cap with the remainder
+// counted (REQ-mcp-envelope); the findings document carries every full
+// set a capped row points at. The returned slice is capacity-clipped so
+// a later append can never scribble over the caller's retained full
+// list.
+func capRows[T any](rows []T) ([]T, int) {
+	if len(rows) <= envelopeRowCap {
+		return rows, 0
+	}
+	return rows[:envelopeRowCap:envelopeRowCap], len(rows) - envelopeRowCap
+}
+
+// selectionEmptiedNote names the input that emptied a target selection
+// so the caller's next step is a decision, not a diagnosis
+// (REQ-mcp-envelope). Shared by run and discover: one discrimination,
+// one wording. Filters never appear here — filtering an already-empty
+// selection is skipped (nothing exists for filters to drop, so blaming
+// them would teach the wrong next step), and filters that empty a
+// non-empty selection refuse inside FilterTargetsContext with their
+// own teaching error.
+func selectionEmptiedNote(targetsDoc bool, changed string) string {
+	switch {
+	case targetsDoc:
+		return "the targets document selected zero effective targets; discover previews a document's effective targets"
+	case changed != "":
+		return fmt.Sprintf("no targets changed vs %s; omit changed to select the whole tree", changed)
+	default:
+		return "the tree has no mutation targets"
+	}
+}
+
+// droppedSymbols counts the symbols a reconcile removed — a symbol-set
+// difference, so a document hand-edited into duplicate records for one
+// symbol cannot overcount the drop.
+func droppedSymbols(current, merged []gomutant.Finding) int {
+	kept := make(map[string]bool, len(merged))
+	for _, m := range merged {
+		kept[m.Symbol] = true
+	}
+	seen := map[string]bool{}
+	dropped := 0
+	for _, c := range current {
+		if !kept[c.Symbol] && !seen[c.Symbol] {
+			seen[c.Symbol] = true
+			dropped++
+		}
+	}
+	return dropped
+}
+
+// capAdvisories bounds the run response's five advisory lists and each
+// guidance row's nested lists at the envelope caps with counted
+// remainders (REQ-mcp-envelope), returning the FULL shed list so the
+// drift error's own exemplar-bounded fold never shrinks with the
+// response.
+func (out *runOut) capAdvisories() (fullSheds []string) {
+	fullSheds = out.AttestationSheds
+	for i := range out.Guidance {
+		if n := len(out.Guidance[i].Targets); n > guidanceListCap {
+			out.Guidance[i].OmittedTargets = n - guidanceListCap
+			out.Guidance[i].Targets = out.Guidance[i].Targets[:guidanceListCap:guidanceListCap]
+		}
+		if n := len(out.Guidance[i].UnstableTests); n > guidanceListCap {
+			out.Guidance[i].OmittedTests = n - guidanceListCap
+			out.Guidance[i].UnstableTests = out.Guidance[i].UnstableTests[:guidanceListCap:guidanceListCap]
+		}
+	}
+	out.Guidance, out.OmittedGuidance = capRows(out.Guidance)
+	out.Contradictions, out.OmittedContradictions = capRows(out.Contradictions)
+	out.PropertyOracles, out.OmittedPropertyOracles = capRows(out.PropertyOracles)
+	out.AttestationSheds, out.OmittedAttestationSheds = capRows(out.AttestationSheds)
+	out.AttestationCarries, out.OmittedAttestationCarries = capRows(out.AttestationCarries)
+	return fullSheds
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
@@ -667,6 +761,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 		wholeTree = true
 	}
+	// The empty-selection discrimination lives in the library: filters
+	// over an emptied selection validate and return empty, so the note
+	// below can name the true emptier (REQ-target-filtering).
 	targets, err = tree.FilterTargetsContext(ctx, targets, in.Packages, in.Symbols)
 	if err != nil {
 		return nil, out, err
@@ -685,17 +782,27 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		if err := ctx.Err(); err != nil {
 			return nil, out, err
 		}
-		out.Residue, out.OmittedResidue = capResidue(out.Residue)
+		out.Residue, out.OmittedResidue = capRows(out.Residue)
 		out.Document = s.findingsPath(in.Findings)
+		out.Note = selectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed)
 		if wholeTree {
+			dropped := 0
 			err := s.update(ctx, out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				return gomutant.MergeWholeFindings(current, nil, nil), nil
+				merged := gomutant.MergeWholeFindings(current, nil, nil)
+				dropped = droppedSymbols(current, merged)
+				return merged, nil
 			})
 			if err != nil {
 				return nil, out, err
+			}
+			// A whole-tree reconcile against zero targets drops every
+			// record whose target left the code - a document write the
+			// response must own, never bury in an empty success.
+			if dropped > 0 {
+				out.Note += fmt.Sprintf("; the whole-tree reconcile dropped %d record(s) whose targets left the code", dropped)
 			}
 		}
 		return nil, out, nil
@@ -888,6 +995,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// concurrently between a symbol's incremental commit and the end of
 	// the run is in both or in neither (REQ-mcp-findings-doc).
 	var attestationSheds []gomutant.AttestationShed
+	reconcileDropped := 0
 	err = s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -895,6 +1003,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		var merged []gomutant.Finding
 		if wholeTree {
 			merged, attestationSheds = gomutant.MergeWholeFindingsShedAgainst(current, findings, targets, attestSnapshot)
+			reconcileDropped = droppedSymbols(current, merged)
 		} else {
 			merged, attestationSheds = gomutant.MergeFindingsShedAgainst(current, findings, attestSnapshot)
 		}
@@ -905,20 +1014,29 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 		return merged, nil
 	})
+	// From here every error exit owns the reconcile's PERSISTED drop:
+	// the SDK discards the response object on error, so the count folds
+	// into the error text exactly as sheds do (REQ-mcp-envelope).
+	withDrop := func(err error) error {
+		if reconcileDropped == 0 {
+			return err
+		}
+		return fmt.Errorf("%w — additionally, the whole-tree reconcile had already dropped %d record(s) whose targets left the code (persisted)", err, reconcileDropped)
+	}
 	if err != nil {
-		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
+		return nil, out, withDrop(shedsRidingAbort(err, out.AttestationSheds))
 	}
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	out.Summary = gomutant.SummarizeRun(rendered)
 	runStore, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
 	if err != nil {
-		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
+		return nil, out, withDrop(shedsRidingAbort(err, out.AttestationSheds))
 	}
 	for _, f := range prior {
 		priorLayer[f.Symbol], _ = runStore.Layer(f)
 	}
 	out.Findings, out.OmittedFindings = capRunFindings(rendered, runStore.Layer)
-	out.Residue, out.OmittedResidue = capResidue(out.Residue)
+	out.Residue, out.OmittedResidue = capRows(out.Residue)
 	// A shed disposition is surfaced once, never silently dropped
 	// (REQ-attest-survivor): the first report wins - a shed the
 	// incremental commit already recorded, or a mutant whose fate the
@@ -952,6 +1070,17 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 	}
 	out.Document = s.findingsPath(in.Findings)
+	// The advisory lists cap like every row surface; the drift error
+	// still folds over the FULL shed list, capped by its own exemplar
+	// bound - a capped response list must not shrink what the error
+	// names (REQ-mcp-envelope).
+	// Every whole-tree reconcile's document write is owned by the
+	// response, not only the zero-target one: dropped records are a
+	// state change git does not show until committed (REQ-mcp-envelope).
+	if reconcileDropped > 0 {
+		out.Note = fmt.Sprintf("the whole-tree reconcile dropped %d record(s) whose targets left the code", reconcileDropped)
+	}
+	fullSheds := out.capAdvisories()
 	// A drift-refused campaign persists its completed findings and still
 	// errors: the client never reads a partial campaign as success
 	// (REQ-exec-quiescence). The SDK renders only the error text on
@@ -959,7 +1088,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// attestation sheds - fold into it via driftError: surfaced once,
 	// never silently dropped (REQ-attest-survivor).
 	if drift != nil {
-		return nil, out, driftError(drift, out.AttestationSheds)
+		return nil, out, withDrop(driftError(drift, fullSheds))
 	}
 	return nil, out, nil
 }
@@ -999,16 +1128,6 @@ func driftError(drift error, sheds []string) error {
 	return fmt.Errorf("%w; attestation sheds riding this refusal (re-review and re-attest if genuinely equivalent): %s", drift, cappedSheds(sheds))
 }
 
-// capResidue bounds a run response's residue rows with the remainder
-// counted, on every exit path (REQ-mcp-envelope).
-func capResidue(residue []gomutant.Residue) ([]gomutant.Residue, int) {
-	const residueCap = 50
-	if len(residue) > residueCap {
-		return residue[:residueCap], len(residue) - residueCap
-	}
-	return residue, 0
-}
-
 type discoverIn struct {
 	selectionIn
 	TargetsPath string   `json:"targets_path,omitempty" jsonschema:"path to a targets document; overrides discovery"`
@@ -1016,7 +1135,7 @@ type discoverIn struct {
 	Changed     string   `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
 	Packages    []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
 	Symbols     []string `json:"symbols,omitempty" jsonschema:"complete fully qualified symbol glob filters; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*; alternatives"`
-	Detail      bool     `json:"detail,omitempty" jsonschema:"return every target and residue row; default caps rows at 50 with the remainder counted"`
+	Detail      bool     `json:"detail,omitempty" jsonschema:"return every target, oracle-set, and residue row; default caps each list at 50 with the remainder counted"`
 }
 
 type discoverTarget struct {
@@ -1033,14 +1152,16 @@ type discoverOracleSet struct {
 }
 
 type discoverOut struct {
-	TargetCount    int                 `json:"targetCount" jsonschema:"effective targets after filtering; leads the response so a campaign's scale reads before any row"`
-	SkippedCount   int                 `json:"skippedCount,omitempty" jsonschema:"targets carrying a skip reason"`
-	ResidueCount   int                 `json:"residueCount,omitempty" jsonschema:"changed-but-untargeted paths"`
-	OracleSets     []discoverOracleSet `json:"oracleSets" jsonschema:"canonical exact oracle sets assigned in first-target order"`
-	Targets        []discoverTarget    `json:"targets" jsonschema:"ordered effective targets whose oracleSet references oracleSets[].id; capped at 50 unless detail=true"`
-	OmittedTargets int                 `json:"omittedTargets,omitempty" jsonschema:"target rows beyond the cap; set detail=true for the full set"`
-	Residue        []gomutant.Residue  `json:"residue,omitempty"`
-	OmittedResidue int                 `json:"omittedResidue,omitempty"`
+	TargetCount       int                 `json:"targetCount" jsonschema:"effective targets after filtering; leads the response so a campaign's scale reads before any row"`
+	SkippedCount      int                 `json:"skippedCount,omitempty" jsonschema:"targets carrying a skip reason"`
+	ResidueCount      int                 `json:"residueCount,omitempty" jsonschema:"changed-but-untargeted paths"`
+	OracleSets        []discoverOracleSet `json:"oracleSets" jsonschema:"canonical exact oracle sets assigned in first-target order; capped beside the target rows - sets beyond the cap are referenced only by omitted targets"`
+	Targets           []discoverTarget    `json:"targets" jsonschema:"ordered effective targets whose oracleSet references oracleSets[].id; capped at 50 unless detail=true"`
+	OmittedTargets    int                 `json:"omittedTargets,omitempty" jsonschema:"target rows beyond the cap; set detail=true for the full set"`
+	OmittedOracleSets int                 `json:"omittedOracleSets,omitempty" jsonschema:"oracle sets beyond the cap; set detail=true for the full set"`
+	Residue           []gomutant.Residue  `json:"residue,omitempty"`
+	OmittedResidue    int                 `json:"omittedResidue,omitempty"`
+	Note              string              `json:"note,omitempty" jsonschema:"set when discovery selected zero targets: names the input that emptied the selection and the next step"`
 }
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
@@ -1118,20 +1239,28 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 		}
 	}
 	out.ResidueCount = len(out.Residue)
-	// Counts lead; rows cap unless the caller asks for detail
+	// An empty selection is an answer, not silence: the note names the
+	// input that emptied it, one discrimination shared with run
 	// (REQ-mcp-envelope).
-	const discoverRowCap = 50
-	if !in.Detail {
-		if len(out.Targets) > discoverRowCap {
-			out.OmittedTargets = len(out.Targets) - discoverRowCap
-			out.Targets = out.Targets[:discoverRowCap]
-		}
-		if len(out.Residue) > discoverRowCap {
-			out.OmittedResidue = len(out.Residue) - discoverRowCap
-			out.Residue = out.Residue[:discoverRowCap]
-		}
+	if out.TargetCount == 0 {
+		out.Note = selectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed)
 	}
+	out.capUnlessDetail(in.Detail)
 	return nil, out, nil
+}
+
+// capUnlessDetail bounds the discovery row lists at the envelope cap
+// with counted remainders unless the caller opted into the full set
+// (REQ-mcp-envelope). Oracle sets are assigned in first-target order,
+// so every retained target's set id stays within the same cap that
+// bounds the target rows.
+func (out *discoverOut) capUnlessDetail(detail bool) {
+	if detail {
+		return
+	}
+	out.Targets, out.OmittedTargets = capRows(out.Targets)
+	out.OracleSets, out.OmittedOracleSets = capRows(out.OracleSets)
+	out.Residue, out.OmittedResidue = capRows(out.Residue)
 }
 
 func compactTargetDescriptions(descriptions []gomutant.TargetDescription) ([]discoverOracleSet, []discoverTarget) {
@@ -1205,11 +1334,8 @@ type findingsOut struct {
 	RepoCommittable int                `json:"repoCommittable" jsonschema:"records portable enough for the committed findings document"`
 	LocalOnly       int                `json:"localOnly" jsonschema:"records held in the machine-local overlay a reviewer would not inherit"`
 	Document        string             `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	Note            string             `json:"note,omitempty" jsonschema:"set when there are no rows: says whether the document is empty or the filters matched nothing, and the next step"`
 }
-
-// findingsRowCap bounds the findings response's row list; the omitted
-// remainder is counted, never silent (REQ-mcp-envelope).
-const findingsRowCap = 50
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
 	out := findingsOut{Document: s.findingsPath(in.Findings)}
@@ -1229,7 +1355,11 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
+	// Zero rows is an answer with two different next steps - measure
+	// first, or widen the filters - so the response says which
+	// (REQ-mcp-envelope).
 	if len(all) == 0 {
+		out.Note = "no findings recorded at " + out.Document + " - run measures the tree first"
 		return nil, out, nil
 	}
 	matched := make([]gomutant.Finding, 0, len(all))
@@ -1241,6 +1371,10 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 			continue
 		}
 		matched = append(matched, finding)
+	}
+	if len(matched) == 0 {
+		out.Note = fmt.Sprintf("the label/symbol filters matched none of %d recorded finding(s); drop them to list the document", len(all))
+		return nil, out, nil
 	}
 	notify := progressNotifier(ctx, req)
 	// The default path loads no tree at all: the document's recorded
@@ -1318,14 +1452,15 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	out.Summary, out.Findings = rows.Summary, rows.Findings
 	sort.Slice(out.Summary, func(i, j int) bool { return out.Summary[i].Symbol < out.Summary[j].Symbol })
 	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].Symbol < out.Findings[j].Symbol })
-	if len(out.Summary) > findingsRowCap {
-		out.Omitted = len(out.Summary) - findingsRowCap
-		out.Summary = out.Summary[:findingsRowCap]
+	// The state filter drops rows during judging, after the earlier
+	// zero-match returns - its empty answer names itself the same way.
+	if in.State != "" && len(out.Summary) == 0 && len(out.Findings) == 0 {
+		out.Note = fmt.Sprintf("state=%s matched none of the %d finding(s) the other filters kept; drop it to list them", in.State, len(matched))
 	}
-	if len(out.Findings) > findingsRowCap {
-		out.Omitted = len(out.Findings) - findingsRowCap
-		out.Findings = out.Findings[:findingsRowCap]
-	}
+	var omittedSummary, omittedFindings int
+	out.Summary, omittedSummary = capRows(out.Summary)
+	out.Findings, omittedFindings = capRows(out.Findings)
+	out.Omitted = omittedSummary + omittedFindings
 	return nil, out, nil
 }
 
@@ -1364,6 +1499,7 @@ type explainOut struct {
 	Document            string                `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
 	LocalOnly           *int                  `json:"localOnly,omitempty" jsonschema:"document arm: records held in the machine-local overlay"`
 	Promotion           []promotionGroup      `json:"promotion,omitempty" jsonschema:"document arm: machine-local records grouped by failing portable-line clause"`
+	Note                string                `json:"note,omitempty" jsonschema:"set when the document arm has nothing to group: says whether the document is empty or the label matched nothing, and the next step"`
 	OmittedGroups       int                   `json:"omittedGroups,omitempty"`
 }
 
@@ -1455,6 +1591,15 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 		}
 	}
 	out := explainOut{RepoCommittable: &repo, LocalOnly: &local, Document: s.findingsPath(in.Findings)}
+	// An empty triage is an answer with two different next steps -
+	// measure first, or widen the label - so the response says which
+	// (REQ-mcp-explain, REQ-mcp-envelope).
+	switch {
+	case len(all) == 0:
+		out.Note = "no findings recorded at " + out.Document + " - run measures the tree first"
+	case in.Label != "" && repo+local == 0:
+		out.Note = fmt.Sprintf("label %q matched none of %d recorded finding(s); drop it to triage the document", in.Label, len(all))
+	}
 	reasons := make([]string, 0, len(groups))
 	for reason := range groups {
 		reasons = append(reasons, reason)
@@ -1502,11 +1647,20 @@ type attestIn struct {
 	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
 }
 
+// attestedEcho restates a recorded disposition in structured fields —
+// operators contain spaces, so a joined string would be unparseable.
+type attestedEcho struct {
+	Symbol   string `json:"symbol"`
+	Position string `json:"position"`
+	Operator string `json:"operator"`
+}
+
 type attestOut struct {
-	Open        int    `json:"open" jsonschema:"the symbol's open findings after the disposition"`
-	Layer       string `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
-	LayerReason string `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
-	Warning     string `json:"warning,omitempty" jsonschema:"set when the record cannot serve as it stands - the next measure judges the equivalence afresh and sheds the disposition if its mutation domain moved"`
+	Recorded    *attestedEcho `json:"recorded,omitempty" jsonschema:"the disposition as recorded, echoed so the write is confirmed, not inferred"`
+	Open        int           `json:"open" jsonschema:"the symbol's open findings after the disposition"`
+	Layer       string        `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
+	LayerReason string        `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Warning     string        `json:"warning,omitempty" jsonschema:"set when the record cannot serve as it stands - the next measure judges the equivalence afresh and sheds the disposition if its mutation domain moved"`
 }
 
 func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in attestIn) (*mcp.CallToolResult, attestOut, error) {
@@ -1533,6 +1687,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	if err != nil {
 		return nil, out, err
 	}
+	out.Recorded = &attestedEcho{Symbol: in.Symbol, Position: in.Position, Operator: in.Operator}
 	// The echo states where the record lives and whether it can serve
 	// as it stands: a disposition on a record whose pins moved is
 	// judged afresh - and shed if rejected - by the next measure
@@ -1622,6 +1777,7 @@ type retargetOut struct {
 	OmittedTouched   int                         `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
 	Check            bool                        `json:"check,omitempty"`
 	Document         string                      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	Note             string                      `json:"note,omitempty" jsonschema:"set when the prefix matched nothing: the rename touched no record, and the findings tool lists the recorded symbols"`
 }
 
 func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
@@ -1643,15 +1799,14 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 	out.Touched = result.Touched
 	out.Rewritten = append(out.Rewritten, result.Rewritten...)
 	out.TouchedRewrites = append(out.TouchedRewrites, result.TouchedRewrites...)
-	const retargetRowCap = 50
-	if len(out.Rewritten) > retargetRowCap {
-		out.OmittedRewritten = len(out.Rewritten) - retargetRowCap
-		out.Rewritten = out.Rewritten[:retargetRowCap]
+	// A rename that moved nothing is an answer with a next step, not an
+	// empty success: the prefix either mismatches the recorded spelling
+	// or the rewrite already landed (REQ-mcp-envelope).
+	if len(out.Rewritten) == 0 && out.Touched == 0 {
+		out.Note = fmt.Sprintf("prefix %q matched no records; the findings tool lists the recorded symbols", in.From)
 	}
-	if len(out.TouchedRewrites) > retargetRowCap {
-		out.OmittedTouched = len(out.TouchedRewrites) - retargetRowCap
-		out.TouchedRewrites = out.TouchedRewrites[:retargetRowCap]
-	}
+	out.Rewritten, out.OmittedRewritten = capRows(out.Rewritten)
+	out.TouchedRewrites, out.OmittedTouched = capRows(out.TouchedRewrites)
 	return nil, out, nil
 }
 
@@ -1725,6 +1880,9 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	}
 	if in.TestPkg == "" || in.Run == "" {
 		return nil, nil, fmt.Errorf("ephemeral needs test_pkg and run")
+	}
+	if in.Runs < 0 || in.Runs > gomutant.MaxEphemeralRuns {
+		return nil, nil, fmt.Errorf("runs %d is outside 1-%d (omitted means 1)", in.Runs, gomutant.MaxEphemeralRuns)
 	}
 	forms := 0
 	if in.Replacement != "" {

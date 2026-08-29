@@ -9,6 +9,7 @@ is deleted (git holds history).
 | [mcp-liveness-cancellation-witness](mcp-liveness-cancellation-witness.md) | keepalive config pinned but the ping-failure cancellation propagation has no witness over the SDK transport seam | transport-seam fault injection lands in the mcpserver harness |
 | [planonly-gatherwindow-suite-hang](planonly-gatherwindow-suite-hang.md) | a plan-only Tree.Run hangs the suite at gatherWindow, cause undumped | train chunk 113 (closes unreproducible at triage absent a mechanism-showing dump) |
 | [fold-growth-into-generalized-drift](fold-growth-into-generalized-drift.md) | growth is a strict special case of generalized drift; fold and generalize the survivor-delta narrowing | train chunk 128 |
+| [unify-run-discover-selection-preamble](unify-run-discover-selection-preamble.md) | one selectTargets helper replaces the duplicated ~45-line MCP selection preamble | with train chunk 128 (serve carve-out consolidation) |
 | [consolidate-reidentification-and-bucket-policy](consolidate-reidentification-and-bucket-policy.md) | one re-identification helper, one advisory-bucket policy across the serve carve-outs | train chunk 128 |
 | [shaped-derivation-once](shaped-derivation-once.md) | shaped candidates derive at resolve AND per finding at stamp/serve; thread the resolve-time derivation through the assembly arms — one derivation per run, the stamp-time failure arm deleted | train chunk 128 |
 | [symbol-cutter-duality](symbol-cutter-duality.md) | two symbol cutters over one grammar, relationship unstated | train chunk 113 |
@@ -16,7 +17,6 @@ is deleted (git holds history).
 | [staged-campaign-reports-clean-index-as-drift](staged-campaign-reports-clean-index-as-drift.md) | staged campaign refuses an executed target as unstaged drift without a changed path | train chunk 113 |
 | [semantic-closure-in-the-carry-gate](semantic-closure-in-the-carry-gate.md) | a comment-insensitive closure identity would dominate both poles of the carry gate | train chunk 130 (after 129 ships the gofresh identity) |
 | [coverage-guided-oracle-ordering](coverage-guided-oracle-ordering.md) | run symbol-reaching tests first with failfast; schedule, never narrowing | train chunk 113 |
-| [actionable-unverifiable-refusals](actionable-unverifiable-refusals.md) | each unverifiable reason names its discharge channel (vouch/directive/restructure) | folds into train chunk 112 (MCP doctrine audit) |
 | [campaign-baseline-needs-scoped-oracles](campaign-baseline-needs-scoped-oracles.md) | root-suite scale blocks campaign baselines in gomutant (~16m) AND gofresh (~6.5m x 303 candidates, measured 2h21m/0 committed); chunk gates stand on ephemeral probes; go-test face resolved by CI's measured -timeout | train chunk 113 |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | train chunk 113 |
 | [refusal-exit-collapse](refusal-exit-collapse.md) | one refuse(symbol, reason) exit — the hand-picked subsets bred two review-caught defects in one round | train chunk 113 |

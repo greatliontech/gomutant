@@ -357,7 +357,13 @@ func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	}
 	path := filepath.Join(dir, defaultFindings)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
-		return []gomutant.Finding{seededFinding("example.com/empty.Old")}, nil
+		// The shaped record survives a whole-tree reconcile, so the
+		// reported drop count (1 of these 2) discriminates a real
+		// symbol-set difference from a bare len(current).
+		shaped := seededFinding("example.com/empty.Boundary")
+		shaped.Shape = &gomutant.TargetShape{Structural: &gomutant.StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}}
+		shaped.TargetEvidence = gomutant.SubjectEvidence{}
+		return []gomutant.Finding{seededFinding("example.com/empty.Old"), shaped}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -366,9 +372,30 @@ func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 		t.Fatal(err)
 	} else if want := []gomutant.PreparationEvent{{Stage: gomutant.PreparationLoading}}; len(out.Preparation) != len(want) || out.Preparation[0] != want[0] {
 		t.Fatalf("empty run preparation = %+v, want %+v", out.Preparation, want)
+	} else if !strings.Contains(out.Note, "targets document selected zero effective targets") {
+		t.Fatalf("zero-target scoped run said nothing: %q", out.Note)
+	}
+
+	// The wrong-emptier trap: a targets document that selected nothing
+	// combined with filters must blame the document, never the filters
+	// (nothing existed for them to drop).
+	if _, out, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{"targets":[]}`, Packages: []string{"nonexistent/**"}}); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(out.Note, "targets document selected zero effective targets") || strings.Contains(out.Note, "filters") {
+		t.Fatalf("empty-document run blamed the wrong input: %q", out.Note)
+	}
+
+	// The walk skip never skips validation: an uncompilable pattern
+	// refuses even when the selection is already empty — a syntax error
+	// must not be taught as an empty document, on either verb.
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{"targets":[]}`, Packages: []string{"["}}); err == nil || !strings.Contains(err.Error(), "invalid package filter") {
+		t.Fatalf("run accepted an uncompilable filter over an empty selection: %v", err)
+	}
+	if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"targets":[]}`, Symbols: []string{"["}}); err == nil || !strings.Contains(err.Error(), "invalid symbol filter") {
+		t.Fatalf("discover accepted an uncompilable filter over an empty selection: %v", err)
 	}
 	retained, err := s.loadFindings("")
-	if err != nil || len(retained) != 1 {
+	if err != nil || len(retained) != 2 {
 		t.Fatalf("scoped zero-target run pruned findings: %+v, %v", retained, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -377,15 +404,101 @@ func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 		t.Fatalf("cancelled empty whole-tree run = %v", err)
 	}
 	retained, err = s.loadFindings("")
-	if err != nil || len(retained) != 1 {
+	if err != nil || len(retained) != 2 {
 		t.Fatalf("cancelled empty whole-tree run changed findings: %+v, %v", retained, err)
 	}
-	if _, _, err := s.toolRun(context.Background(), nil, runIn{}); err != nil {
+	_, out, err := s.toolRun(context.Background(), nil, runIn{})
+	if err != nil {
 		t.Fatal(err)
 	}
+	// The reconcile's document write is owned by the response: the note
+	// names the empty selection AND the records it dropped — exactly 1
+	// of the 2 seeded (the shaped record survives), so the count is a
+	// real symbol-set difference, never a bare len(current).
+	if !strings.Contains(out.Note, "no mutation targets") || !strings.Contains(out.Note, "dropped 1 record") {
+		t.Fatalf("whole-tree reconcile note = %q", out.Note)
+	}
 	got, err := s.loadFindings("")
-	if err != nil || len(got) != 0 {
-		t.Fatalf("whole-tree empty discovery retained findings: %+v, %v", got, err)
+	if err != nil || len(got) != 1 || got[0].Symbol != "example.com/empty.Boundary" {
+		t.Fatalf("whole-tree empty discovery kept wrong records: %+v, %v", got, err)
+	}
+}
+
+// Zero-row answers say what happened and what to do next, and writes
+// echo what they recorded - a bare empty success forces the caller to
+// diagnose instead of decide (REQ-mcp-envelope).
+func TestResponsesNameEmptyAnswers(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+
+	if _, out, err := s.toolFindings(context.Background(), nil, findingsIn{}); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(out.Note, "no findings recorded") || !strings.Contains(out.Note, "run measures the tree first") {
+		t.Fatalf("empty-document findings note = %q", out.Note)
+	}
+	if _, out, err := s.toolExplain(context.Background(), nil, explainIn{}); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(out.Note, "no findings recorded") {
+		t.Fatalf("empty-document explain note = %q", out.Note)
+	}
+
+	path := filepath.Join(dir, defaultFindings)
+	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		seeded := seededFinding("example.com/empty.Old")
+		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
+		seeded.CandidateCount, seeded.Generated, seeded.Mutants = 1, 1, 1
+		seeded.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}}
+		return []gomutant.Finding{seeded}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, out, err := s.toolFindings(context.Background(), nil, findingsIn{Symbol: "example.com/empty.Vanished"}); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(out.Note, "matched none of 1 recorded finding") {
+		t.Fatalf("filtered-to-nothing findings note = %q", out.Note)
+	}
+
+	// The state filter drops rows during judging, after the label and
+	// symbol matches — its empty answer names itself the same way.
+	if _, out, err := s.toolFindings(context.Background(), nil, findingsIn{State: "stale"}); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(out.Note, "state=stale matched none of the 1 finding(s) the other filters kept") {
+		t.Fatalf("state-filtered-to-nothing findings note = %q", out.Note)
+	}
+
+	// explain's document arm answers its two empty shapes the same way.
+	if _, out, err := s.toolExplain(context.Background(), nil, explainIn{Label: "no-such-label"}); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(out.Note, `label "no-such-label" matched none of 1 recorded finding`) {
+		t.Fatalf("label-filtered explain note = %q", out.Note)
+	}
+
+	if _, out, err := s.toolDiscover(context.Background(), nil, discoverIn{}); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(out.Note, "the tree has no mutation targets") {
+		t.Fatalf("zero-target discover note = %q", out.Note)
+	}
+
+	if _, out, err := s.toolRetarget(context.Background(), nil, retargetIn{From: "example.com/vanished.", To: "example.com/renamed."}); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(out.Note, `prefix "example.com/vanished." matched no records`) {
+		t.Fatalf("no-match retarget note = %q", out.Note)
+	}
+
+	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{TestPkg: "./...", Run: "TestX", Runs: 11, Replacement: "x", File: "empty.go"}); err == nil || !strings.Contains(err.Error(), "outside 1-10") {
+		t.Fatalf("runs=11 refusal = %v", err)
+	}
+
+	if _, out, err := s.toolAttest(context.Background(), nil, attestIn{Symbol: "example.com/empty.Old", Position: "p.go:1:1", Operator: "zero return", Reason: "r"}); err != nil {
+		t.Fatalf("attest: %v", err)
+	} else if out.Recorded == nil || *out.Recorded != (attestedEcho{Symbol: "example.com/empty.Old", Position: "p.go:1:1", Operator: "zero return"}) {
+		t.Fatalf("attest echo = %+v", out.Recorded)
 	}
 }
 
@@ -410,8 +523,14 @@ func TestToolRunWholeTreePrunesAlongsideCurrentMeasurement(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.toolRun(context.Background(), nil, runIn{Budget: 1}); err != nil {
+	_, out, err := s.toolRun(context.Background(), nil, runIn{Budget: 1})
+	if err != nil {
 		t.Fatal(err)
+	}
+	// The measuring run's reconcile drop is owned by the response too —
+	// the note is not a zero-target-only courtesy.
+	if !strings.Contains(out.Note, "dropped 1 record") {
+		t.Fatalf("measuring whole-tree reconcile note = %q", out.Note)
 	}
 	got, err := s.loadFindings("")
 	if err != nil || len(got) != 1 || got[0].Symbol != "example.com/current.Value" {
@@ -637,7 +756,7 @@ func TestToolFindingsCapsSummaryRows(t *testing.T) {
 	s := New(dir)
 	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		var all []gomutant.Finding
-		for i := 0; i < findingsRowCap+3; i++ {
+		for i := 0; i < envelopeRowCap+3; i++ {
 			all = append(all, seededFinding(fmt.Sprintf("example.com/empty.Gone%02d", i)))
 		}
 		return all, nil
@@ -648,8 +767,8 @@ func TestToolFindingsCapsSummaryRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Summary) != findingsRowCap || out.Omitted != 3 {
-		t.Fatalf("cap = %d rows, %d omitted; want %d and 3", len(out.Summary), out.Omitted, findingsRowCap)
+	if len(out.Summary) != envelopeRowCap || out.Omitted != 3 {
+		t.Fatalf("cap = %d rows, %d omitted; want %d and 3", len(out.Summary), out.Omitted, envelopeRowCap)
 	}
 }
 
@@ -740,11 +859,11 @@ func TestToolFindingsAnnouncesInspection(t *testing.T) {
 // exit path (REQ-mcp-envelope).
 func TestCapResidueCountsTheRemainder(t *testing.T) {
 	rows := make([]gomutant.Residue, 53)
-	capped, omitted := capResidue(rows)
+	capped, omitted := capRows(rows)
 	if len(capped) != 50 || omitted != 3 {
-		t.Fatalf("capResidue = %d rows, %d omitted", len(capped), omitted)
+		t.Fatalf("capRows(residue) = %d rows, %d omitted", len(capped), omitted)
 	}
-	if capped, omitted := capResidue(rows[:7]); len(capped) != 7 || omitted != 0 {
+	if capped, omitted := capRows(rows[:7]); len(capped) != 7 || omitted != 0 {
 		t.Fatalf("under-cap residue disturbed: %d rows, %d omitted", len(capped), omitted)
 	}
 }
@@ -879,8 +998,8 @@ func TestToolDiscover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.OracleSets) >= len(out.Targets) || len(encoded) >= 100_000 {
-		t.Fatalf("discovery was not compact: %d oracle sets, %d targets, %d bytes", len(out.OracleSets), len(out.Targets), len(encoded))
+	if len(out.OracleSets)+out.OmittedOracleSets >= out.TargetCount || len(encoded) >= 100_000 {
+		t.Fatalf("discovery was not compact: %d oracle sets, %d targets, %d bytes", len(out.OracleSets)+out.OmittedOracleSets, out.TargetCount, len(encoded))
 	}
 	if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsJSON: `{"targets":[]}`, Changed: "HEAD"}); err == nil {
 		t.Fatal("multiple discovery forms accepted")
@@ -1262,5 +1381,81 @@ func TestToolRunForwardsAnalysisEvents(t *testing.T) {
 			t.Fatalf("progress notifications carry no analysis event: %q", joined)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// The run response's advisory caps are wired, not just available: all
+// five lists and the guidance rows' nested lists bound with counted
+// remainders, and the returned full shed list is the drift error's
+// uncapped fold (REQ-mcp-envelope).
+func TestRunAdvisoryCapsAreWired(t *testing.T) {
+	many := func(prefix string, n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = fmt.Sprintf("%s-%d", prefix, i)
+		}
+		return out
+	}
+	rows := make([]guidanceOut, 60)
+	rows[0] = guidanceOut{Targets: many("t", 25), UnstableTests: many("u", 25)}
+	out := runOut{
+		Guidance:           rows,
+		Contradictions:     make([]contradictionOut, 60),
+		PropertyOracles:    many("p", 60),
+		AttestationSheds:   many("s", 60),
+		AttestationCarries: many("c", 60),
+	}
+	fullSheds := out.capAdvisories()
+	if len(fullSheds) != 60 {
+		t.Fatalf("the drift fold's shed list shrank with the response: %d", len(fullSheds))
+	}
+	if len(out.Guidance[0].Targets) != guidanceListCap || out.Guidance[0].OmittedTargets != 15 ||
+		len(out.Guidance[0].UnstableTests) != guidanceListCap || out.Guidance[0].OmittedTests != 15 {
+		t.Fatalf("guidance nested caps unwired: %+v", out.Guidance[0])
+	}
+	if len(out.Guidance) != envelopeRowCap || out.OmittedGuidance != 10 {
+		t.Fatalf("guidance row cap unwired: %d rows, %d omitted", len(out.Guidance), out.OmittedGuidance)
+	}
+	if len(out.Contradictions) != envelopeRowCap || out.OmittedContradictions != 10 ||
+		len(out.PropertyOracles) != envelopeRowCap || out.OmittedPropertyOracles != 10 ||
+		len(out.AttestationSheds) != envelopeRowCap || out.OmittedAttestationSheds != 10 ||
+		len(out.AttestationCarries) != envelopeRowCap || out.OmittedAttestationCarries != 10 {
+		t.Fatalf("advisory caps unwired: %+v", out)
+	}
+}
+
+// Discovery's three row lists cap together behind the detail opt-out,
+// remainders counted (REQ-mcp-envelope) — pinned at the seam because
+// no checked-in fixture reaches 50 oracle sets.
+func TestDiscoverCapsAreWired(t *testing.T) {
+	out := discoverOut{
+		Targets:    make([]discoverTarget, 60),
+		OracleSets: make([]discoverOracleSet, 55),
+		Residue:    make([]gomutant.Residue, 52),
+	}
+	full := out
+	full.capUnlessDetail(true)
+	if len(full.Targets) != 60 || len(full.OracleSets) != 55 || len(full.Residue) != 52 {
+		t.Fatalf("detail=true truncated: %d/%d/%d", len(full.Targets), len(full.OracleSets), len(full.Residue))
+	}
+	out.capUnlessDetail(false)
+	if len(out.Targets) != envelopeRowCap || out.OmittedTargets != 10 ||
+		len(out.OracleSets) != envelopeRowCap || out.OmittedOracleSets != 5 ||
+		len(out.Residue) != envelopeRowCap || out.OmittedResidue != 2 {
+		t.Fatalf("caps unwired: %+v", out)
+	}
+}
+
+// The shared advisory-list cap bounds rows at 50 with the remainder
+// counted, never silently (REQ-mcp-envelope).
+func TestCapRowsCountsTheRemainder(t *testing.T) {
+	rows := make([]int, 60)
+	capped, omitted := capRows(rows)
+	if len(capped) != 50 || omitted != 10 {
+		t.Fatalf("capRows(60) = %d rows, %d omitted", len(capped), omitted)
+	}
+	capped, omitted = capRows(rows[:50])
+	if len(capped) != 50 || omitted != 0 {
+		t.Fatalf("capRows(50) = %d rows, %d omitted", len(capped), omitted)
 	}
 }

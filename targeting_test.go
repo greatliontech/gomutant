@@ -163,6 +163,14 @@ func TestFilterTargets(t *testing.T) {
 	if _, err := tr.FilterTargets(targets, []string{"["}, nil); err == nil || !strings.Contains(err.Error(), "invalid package filter") {
 		t.Fatalf("invalid filter = %v", err)
 	}
+	// Filters over an emptied selection are vacuous, never refused —
+	// but their patterns still validate (REQ-target-filtering).
+	if vacuous, err := tr.FilterTargets(nil, []string{"example.com/**"}, nil); err != nil || len(vacuous) != 0 {
+		t.Fatalf("filters over an empty selection = %v, %v; want a vacuous empty pass", vacuous, err)
+	}
+	if _, err := tr.FilterTargets(nil, []string{"["}, nil); err == nil || !strings.Contains(err.Error(), "invalid package filter") {
+		t.Fatalf("invalid filter over an empty selection = %v, want the compile refusal", err)
+	}
 	if _, err := tr.FilterTargets(targets, nil, []string{"["}); err == nil || !strings.Contains(err.Error(), "invalid symbol filter") {
 		t.Fatalf("invalid symbol filter = %v", err)
 	}

@@ -214,8 +214,13 @@ the complete-input pattern language of `github.com/greatliontech/glob`:
 package patterns match the target's Go import path and symbol patterns match
 its fully qualified symbol. A target matches when it matches at least one
 pattern of each supplied kind; omitting a kind imposes no constraint. An
-invalid pattern or a supplied filter set selecting no targets is refused
-rather than treated as a successful empty run. A package filter never
+invalid pattern is always refused, and a supplied filter set selecting no
+targets from a NON-EMPTY selection is refused rather than treated as a
+successful empty run — that refusal teaches "fix your patterns". Filters
+over a selection some other input already emptied are vacuous: the
+patterns still validate, nothing is selected, and the empty answer names
+the input that emptied the selection — blaming the filters there would
+teach a false next step, since no pattern could have matched anything. A package filter never
 selects a shaped target — its identity names no package — so symbol
 patterns are the shaped filter surface. Filtering is scoped: it says
 which existing targets to inspect or measure, never that unselected symbols

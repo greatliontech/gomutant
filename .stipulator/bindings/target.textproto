@@ -192,7 +192,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-target-filtering"
-  content_hash: "bae8a47ce334c18321bf24d865c5fdbbab87b53486d12a1afbfe2f2ef15a6144"
+  content_hash: "9136ef6a26d5796607a1bcc34cf781ead93d7f68e8d9e18c74d2690137f64144"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestFilterTargets"
   role: BINDING_ROLE_TESTS
@@ -201,7 +201,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-target-filtering"
-  content_hash: "bae8a47ce334c18321bf24d865c5fdbbab87b53486d12a1afbfe2f2ef15a6144"
+  content_hash: "9136ef6a26d5796607a1bcc34cf781ead93d7f68e8d9e18c74d2690137f64144"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestDiscoverTargetsFiltersEveryProducer"
   role: BINDING_ROLE_TESTS

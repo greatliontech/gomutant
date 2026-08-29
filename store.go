@@ -123,8 +123,17 @@ func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopA
 	_, exempted := coveredExemptions(&f, exemptions)
 	subjects := append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...)
 	for _, ev := range subjects {
-		if ev.RuntimeUnverifiable && !exempted && add("runtime-unverifiable evidence for "+ev.Symbol) {
-			return reasons
+		if ev.RuntimeUnverifiable && !exempted {
+			// The recorded gofresh reason names its discharge channel;
+			// serving the clause without it would leave the layer
+			// disqualifier the one unverifiable answer that dead-ends.
+			clause := "runtime-unverifiable evidence for " + ev.Symbol
+			if ev.RuntimeReason != "" {
+				clause += ": " + ev.RuntimeReason
+			}
+			if add(clause) {
+				return reasons
+			}
 		}
 		if ev.RuntimeInputs == "" {
 			continue

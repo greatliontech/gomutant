@@ -157,9 +157,9 @@ func discardError(files []string, diagnostic string) error {
 	return fmt.Errorf("mutant did not compile: nothing was measured — check the replacements for %s", strings.Join(files, ", "))
 }
 
-// maxEphemeralRuns bounds runs:N - each run is a full oracle process,
+// MaxEphemeralRuns bounds runs:N - each run is a full oracle process,
 // and an unbounded N would let one probe request scale like a campaign.
-const maxEphemeralRuns = 10
+const MaxEphemeralRuns = 10
 
 func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	engine.EnsureOracleMemoryDefault(1)
@@ -188,8 +188,8 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	if runs == 0 {
 		runs = 1
 	}
-	if runs < 1 || runs > maxEphemeralRuns {
-		return nil, fmt.Errorf("runs must be between 1 and %d - each run is a full oracle process", maxEphemeralRuns)
+	if runs < 1 || runs > MaxEphemeralRuns {
+		return nil, fmt.Errorf("runs must be between 1 and %d - each run is a full oracle process", MaxEphemeralRuns)
 	}
 	// The build ignores what it does not compile: an overlay of a
 	// build-excluded or non-Go file measures a mutant that was never

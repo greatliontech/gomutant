@@ -60,3 +60,21 @@ func TestRunCommandNamesTheTargetsPathMistake(t *testing.T) {
 		t.Fatalf("inline-JSON --targets = %v, want the named mistake", err)
 	}
 }
+
+// A targets document that selects nothing combined with filters reaches
+// the zero-target answer — the filters are never blamed for a selection
+// the document emptied (REQ-target-filtering's vacuity clause, the CLI
+// face).
+func TestRunCommandEmptyDocumentWithFiltersIsNotAFilterError(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "empty.json")
+	if err := os.WriteFile(empty, []byte(`{"targets":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runCommand(context.Background(), runOptions{
+		dir: fixtureDir, targetsFile: empty, packages: []string{"example.com/**"},
+		findingsFile: filepath.Join(t.TempDir(), "findings.json"),
+	})
+	if err != nil {
+		t.Fatalf("empty document + filters = %v, want the zero-target success, never the filter blame", err)
+	}
+}

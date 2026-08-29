@@ -89,19 +89,10 @@ type ManualSpec struct {
 	Edits []ManualEdit `json:"edits"`
 }
 
-// FilterTargets selects targets by package import path and fully qualified
-// symbol using complete-input glob patterns (REQ-target-filtering). Patterns
-// within one kind are alternatives; package and symbol filters both constrain
-// the result when supplied.
-func (t *Tree) FilterTargets(targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
-	return t.FilterTargetsContext(context.Background(), targets, packagePatterns, symbolPatterns)
-}
-
-// FilterTargetsContext is FilterTargets with cooperative cancellation.
-func (t *Tree) FilterTargetsContext(ctx context.Context, targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
+// compileTargetFilters compiles both filter sets with the shared
+// teaching error; cancellation keeps per-pattern precedence over a
+// compile refusal.
+func compileTargetFilters(ctx context.Context, packagePatterns, symbolPatterns []string) (packages, symbols []*glob.Pattern, err error) {
 	compile := func(kind string, sources []string) ([]*glob.Pattern, error) {
 		patterns := make([]*glob.Pattern, 0, len(sources))
 		for _, source := range sources {
@@ -116,13 +107,39 @@ func (t *Tree) FilterTargetsContext(ctx context.Context, targets []Target, packa
 		}
 		return patterns, nil
 	}
-	packages, err := compile("package", packagePatterns)
+	if packages, err = compile("package", packagePatterns); err != nil {
+		return nil, nil, err
+	}
+	if symbols, err = compile("symbol", symbolPatterns); err != nil {
+		return nil, nil, err
+	}
+	return packages, symbols, nil
+}
+
+// FilterTargets selects targets by package import path and fully qualified
+// symbol using complete-input glob patterns (REQ-target-filtering). Patterns
+// within one kind are alternatives; package and symbol filters both constrain
+// the result when supplied.
+func (t *Tree) FilterTargets(targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
+	return t.FilterTargetsContext(context.Background(), targets, packagePatterns, symbolPatterns)
+}
+
+// FilterTargetsContext is FilterTargets with cooperative cancellation.
+func (t *Tree) FilterTargetsContext(ctx context.Context, targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	packages, symbols, err := compileTargetFilters(ctx, packagePatterns, symbolPatterns)
 	if err != nil {
 		return nil, err
 	}
-	symbols, err := compile("symbol", symbolPatterns)
-	if err != nil {
-		return nil, err
+	// Filters over an already-empty selection are vacuous, never refused:
+	// the no-match refusal teaches "fix your patterns", which is false
+	// when no pattern could have matched anything — the caller's empty
+	// answer names the input that emptied the selection instead
+	// (REQ-target-filtering).
+	if len(targets) == 0 {
+		return nil, nil
 	}
 	if len(packages) == 0 && len(symbols) == 0 {
 		return append([]Target(nil), targets...), nil

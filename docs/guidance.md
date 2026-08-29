@@ -48,7 +48,7 @@ first when the target decision set is in doubt.
 - `changed` (mcp, cli) — changed-scope vs this git ref; empty means the whole tree.
 - `packages` (mcp, cli as `package`) — complete package import-path glob filters; alternatives.
 - `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters; alternatives.
-- `detail` (mcp) — return every target and residue row; the default caps rows at 50 with the remainder counted.
+- `detail` (mcp) — return every target, oracle-set, and residue row; the default caps each list at 50 with the remainder counted.
 - `json` (cli) — render deterministic machine-readable targets.
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.

@@ -87,13 +87,19 @@ func TestCommittableReasonsListEveryFailingClause(t *testing.T) {
 		f.Commit = ""
 		f.TargetEvidence.RuntimeInputs = shared
 		f.OracleEvidence[0].RuntimeUnverifiable = true
+		// Parsed records always pair the flag with the recorded reason
+		// (the import validator refuses the mismatch), and the clause
+		// serves the reason — it carries the discharge channel, so the
+		// layer disqualifier must not be the one unverifiable answer
+		// that dead-ends.
+		f.OracleEvidence[0].RuntimeReason = "shared dynamic state (dischargeable by a caller vouch for x:y)"
 		f.OracleEvidence[0].RuntimeInputs = shared
 	})
 	want := []string{
 		"dirty worktree provenance",
 		"no commit provenance",
 		"machine-local runtime input /etc/hosts",
-		"runtime-unverifiable evidence for p.ATest",
+		"runtime-unverifiable evidence for p.ATest: shared dynamic state (dischargeable by a caller vouch for x:y)",
 	}
 	reasons := CommittableReasons(f, dir, nil)
 	if len(reasons) != len(want) {
