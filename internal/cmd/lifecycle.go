@@ -19,7 +19,7 @@ type pruneOptions struct {
 
 func newPruneCommand() *cobra.Command {
 	o := pruneOptions{}
-	cmd := &cobra.Command{Use: "prune", Short: "Remove records whose mutated symbol no longer resolves", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "prune", Short: guidanceShort("prune"), Long: guidanceHelp("prune"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return pruneCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()
@@ -73,7 +73,7 @@ type retargetOptions struct {
 
 func newRetargetCommand() *cobra.Command {
 	o := retargetOptions{}
-	cmd := &cobra.Command{Use: "retarget", Short: "Rewrite symbol identity across a rename; dispositions follow their mutants", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "retarget", Short: guidanceShort("retarget"), Long: guidanceHelp("retarget"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return retargetCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()

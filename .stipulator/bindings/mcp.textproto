@@ -198,3 +198,48 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "d8322a9e4f2e6c02c3cc23a1cedab31e4f41ea6b2bf41a07525ca146bbcd1ffa"
 }
+
+bindings {
+  requirement_id: "REQ-mcp-guidance"
+  content_hash: "eda0b1def26054c1175069bd6405d7d715203bff69028adb6f1264941143c37e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestGuidanceCoversTheWireSurface"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "353030e246f548ead21af1875b6fa4fb77c24e029c323aa19fc254cfd9ffe23f"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-guidance"
+  content_hash: "eda0b1def26054c1175069bd6405d7d715203bff69028adb6f1264941143c37e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestGuidanceToolServesTheDocument"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6b90361fe656994283417c28a9f2c362e87ab4d1b5fa516b54cde989bfcdf8b9"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-guidance"
+  content_hash: "eda0b1def26054c1175069bd6405d7d715203bff69028adb6f1264941143c37e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestGuidanceDocumentParses"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fa312fb8e770640d0e3942d55eae017d47b01425ac421412b0e56d6487c6445d"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-guidance"
+  content_hash: "eda0b1def26054c1175069bd6405d7d715203bff69028adb6f1264941143c37e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestGuidanceCoversTheCLISurface"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f7516f03b7d7649f132c54219857247c545af351829453a79096864caececbfe"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-guidance"
+  content_hash: "eda0b1def26054c1175069bd6405d7d715203bff69028adb6f1264941143c37e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestGuidanceCommandServesTheDocument"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "99a808ad8a229106b6b2a8f3a061fe6d03bc3189279c3f75495f944f6c6941c1"
+}

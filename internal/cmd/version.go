@@ -47,8 +47,8 @@ func versionString() string {
 func newVersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the binary identity and findings document versions",
-		Args:  cobra.NoArgs,
+		Short: guidanceShort("version"), Long: guidanceHelp("version"),
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintln(cmd.OutOrStdout(), versionString())
 			return nil

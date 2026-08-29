@@ -24,7 +24,7 @@ type ephemeralOptions struct {
 
 func newEphemeralCommand() *cobra.Command {
 	o := ephemeralOptions{}
-	cmd := &cobra.Command{Use: "ephemeral", Short: "Run one manual mutant", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "ephemeral", Short: guidanceShort("ephemeral"), Long: guidanceHelp("ephemeral"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return ephemeralCommand(cmd.Context(), o)
 	}}
 	f := cmd.Flags()

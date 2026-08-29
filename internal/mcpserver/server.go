@@ -5,6 +5,8 @@
 package mcpserver
 
 import (
+	guidancepkg "github.com/greatliontech/gofresh/guidance"
+
 	"context"
 	"errors"
 	"fmt"
@@ -163,7 +165,7 @@ func serverOptions() *mcp.ServerOptions {
 		// its connection lives owes a cancellation notification per the
 		// protocol; the ping cannot see intent.
 		KeepAlive:    clientKeepAliveInterval,
-		Instructions: "gomutant measures whether tests notice mutations. The loop: run measures targets (whole tree, changed vs a git ref, or a targets document) and maintains the findings document incrementally - prior findings with matching pins are served, and each decision line says why; findings inspects the document (survivors with execution buckets, candidate evidence, repo/local layer) without running anything - recorded facts by default, cheap at any size; judge=true re-derives freshness states (current, stale, unverifiable, detached) against the tree, minutes-class on large documents, and a state filter or a tags/toolchain selection implies it; attest_survivor dispositions an equivalent mutant with the reasoning on record; prune removes resolved-dead records after a refactor and retarget follows a rename (both with check=true previews); ephemeral probes one hand-written mutant without persisting; discover lists effective targets without measuring; explain answers why - a symbol's full machine-local clause list and per-survivor prescriptions, or the whole document's promotion triage. Survivors are findings awaiting disposition - strengthen a test or attest an equivalence - never verdicts. A survivor bucketed never-executed wants coverage; executed-and-passed wants a sharper assertion or an attestation. Send a progress token on run/ephemeral for phase notifications and a heartbeat; long campaigns exceed MCP client timeouts - raise timeout_sec or use the CLI. Responses cap long lists and count the remainder; the findings document on disk is always complete.",
+		Instructions: guidanceOrientation(),
 	}
 }
 
@@ -204,36 +206,41 @@ func (s *Server) MCP() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, serverOptions())
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
-		Description: "Mutate the targets and run each one's oracle tests per mutant. Targets come from a targets document, changed-scope discovery vs a git ref, or whole-tree discovery. Maintains the findings document: prior findings with matching pins are served, the rest re-measure, and each finished target commits incrementally so an interrupted run keeps completed targets. Survivors are findings awaiting disposition, never verdicts. Each mutant's oracle executes once, bracketing runtime-input observation. With a progress token: phase notifications plus a heartbeat. Preparation and decision streams leave the response when streamed; long lists cap with the remainder counted. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited); use the CLI for work that may exceed the MCP client's request timeout.",
+		Description: guidanceDescription("run"),
 	}, s.toolRun)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "discover",
-		Description: "List effective target symbols, sorted opaque labels, explicit or package-derived oracle mode, skip reasons, and changed-scope residue. Counts lead the response; target rows cap at 50 unless detail=true. Exact oracles are deduplicated in top-level oracleSets; each target's oracleSet integer references oracleSets[].id.",
+		Description: guidanceDescription("discover"),
 	}, s.toolDiscover)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "findings",
-		Description: "Inspect the findings document without running tests. Default: one summary row per record from RECORDED facts - state reads 'recorded', no tree is loaded, and the call is cheap at any document size; judge=true re-derives each record's freshness against the current tree (current, stale, unverifiable, detached - minutes-class on large documents), and a state filter or a tags/toolchain selection implies it. Rows cap at 50 with the remainder counted. detail=true returns full rows: open survivors, attested dispositions, operator tables, and per-candidate unverifiable runtime evidence (candidateEvidence). Layer is repo (portable, in the committed findings document) or local (machine-local overlay, with the reason it is not committable). Filter by opaque label, state, or symbol.",
+		Description: guidanceDescription("findings"),
 	}, s.toolFindings)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "explain",
-		Description: "Why a record stands as it does. With a symbol: its inspection state and cause, every portable-line clause keeping it machine-local (not only the first), and each open survivor's execution bucket with the action it prescribes. Without a symbol: the promotion triage - counts first, machine-local records grouped by failing clause - so an empty committed findings document explains itself in one call. Reads the findings document and the current tree; runs no tests.",
+		Description: guidanceDescription("explain"),
 	}, s.toolExplain)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "attest_survivor",
-		Description: "Disposition a surviving mutant as equivalent, with the reasoning on record. Refused unless the mutant is among the finding's current survivors. The disposition rides re-measures while the mutated source is unchanged and the mutant keeps surviving; it sheds when the mutation domain moves (body or operator set) or when evidence contradicts it (a test kills the mutant), so every body version is re-judged.",
+		Description: guidanceDescription("attest_survivor"),
 	}, s.toolAttest)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "prune",
-		Description: "Remove findings records whose mutated symbol no longer resolves in the current tree - the terminal records no re-measure can revive after a refactor. Refuses when any package did not load cleanly. Each removed record's attested dispositions are echoed in the response, never truncated - the reasoning survives the removal. check=true previews without touching the document.",
+		Description: guidanceDescription("prune"),
 	}, s.toolPrune)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "retarget",
-		Description: "Rewrite symbol identity across a rename: records whose symbol-bearing fields carry the from prefix rewrite to the to prefix, and surviving attestations follow their mutants by position, operator, and site - never symbol text. Each rewritten target symbol must resolve in the current tree. check=true previews. Rows cap at 50 with the remainder counted.",
+		Description: guidanceDescription("retarget"),
 	}, s.toolRetarget)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "ephemeral",
-		Description: "Run one manual mutant the operator set cannot generate: replace one file whole, apply sequential edits to one file, or apply an atomic exact-match edit batch across files, then check whether the named test kills it. The tree is never touched; the result is evidence, never persisted - a kill carries the killing test's bounded output head, and runs:N reports per-run verdicts (killed means every run killed). An observed probe executes the named test once, bracketing runtime-input observation. timeout_sec defaults to 300 seconds when omitted (an explicit 0 means unlimited).",
+		Description: guidanceDescription("ephemeral"),
 	}, s.toolEphemeral)
+	// guidance serves embedded content and touches no tree state.
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "guidance",
+		Description: guidanceDescription("guidance"),
+	}, s.toolGuidance)
 	return srv
 }
 
@@ -1790,4 +1797,47 @@ func mcpOracleMemoryBytes(mib *int64) int64 {
 		return -1
 	}
 	return *mib << 20
+}
+
+// guidanceDoc is the embedded guidance document; a malformed document
+// is a build defect the parse-pinning test surfaces, so consumers
+// fail loudly rather than serving nothing.
+func guidanceDoc() *guidancepkg.Document {
+	doc, err := gomutant.GuidanceDocument()
+	if err != nil {
+		panic("mcpserver: embedded guidance document malformed: " + err.Error())
+	}
+	return doc
+}
+
+func guidanceOrientation() string { return guidanceDoc().Orientation() }
+
+// guidanceDescription is a tool's one-line purpose, served from the
+// guidance document under the tool's mcp spelling
+// (REQ-mcp-guidance).
+func guidanceDescription(verb string) string {
+	d, err := guidanceDoc().Description("mcp", verb)
+	if err != nil {
+		panic("mcpserver: " + err.Error())
+	}
+	return d
+}
+
+// guidanceIn asks for one verb's section or, empty, the decision map.
+type guidanceIn struct {
+	Verb string `json:"verb,omitempty" jsonschema:"the verb to describe; empty serves the decision map"`
+}
+
+// toolGuidance serves the embedded guidance document
+// (REQ-mcp-guidance): a verb's full section under its mcp spelling,
+// or the decision map for orientation. It touches no tree state.
+func (s *Server) toolGuidance(ctx context.Context, req *mcp.CallToolRequest, in guidanceIn) (*mcp.CallToolResult, any, error) {
+	if in.Verb == "" {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: guidanceDoc().Orientation()}}}, nil, nil
+	}
+	long, err := guidanceDoc().Long("mcp", in.Verb)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w; empty verb serves the decision map, which names every verb", err)
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: long}}}, nil, nil
 }

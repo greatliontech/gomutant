@@ -18,7 +18,7 @@ type attestOptions struct {
 
 func newAttestCommand() *cobra.Command {
 	o := attestOptions{}
-	cmd := &cobra.Command{Use: "attest", Short: "Attest an equivalent surviving mutant", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "attest", Short: guidanceShort("attest"), Long: guidanceHelp("attest"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return attestCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()

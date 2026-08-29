@@ -55,6 +55,23 @@ elapsed time on a fixed cadence, so no compile or execution stretch stays
 silent past a client's deadline. The server's instructions and each tool's
 description teach when to use what and what the caps mean.
 
+**REQ-mcp-guidance** (behavior): Tool-level served prose MUST be the
+embedded guidance document's projections (`docs/guidance.md`, in the
+fleet format gofresh's guidance spec defines): every tool description
+and CLI Short/Long is the document's rendering for that surface and
+spelling, the server instructions are the decision map verbatim, and
+a `guidance` tool (and CLI command, its verb positional) serves a
+verb's full section or, verbless, the decision map — refusing an
+unknown verb with the decision map named as the way to enumerate.
+Both surfaces bind the per-surface coverage judgment: every listed
+tool and schema property, and every visible leaf command and local
+flag, documented exactly, both directions — cobra's help and
+completion plumbing is surface plumbing outside the judgment. The
+document's knob prose is the authoritative superset; per-parameter
+schema and flag usage strings stay terse wire detail, and a schema
+or usage string contradicting the document is a defect of whichever
+is wrong.
+
 **REQ-mcp-findings-doc** (behavior): The server MUST maintain the same
 findings document the CLI maintains — a measuring tool merges fresh findings
 over the prior document by symbol and an attesting tool rewrites it — so an

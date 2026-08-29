@@ -35,6 +35,6 @@ func newRootCommand() *cobra.Command {
 		},
 	}
 	cmd.SetVersionTemplate("{{.Version}}\n")
-	cmd.AddCommand(newRunCommand(), newDiscoverCommand(), newFindingsCommand(), newAttestCommand(), newPruneCommand(), newRetargetCommand(), newEphemeralCommand(), newMCPCommand(), newVersionCommand())
+	cmd.AddCommand(newRunCommand(), newDiscoverCommand(), newFindingsCommand(), newAttestCommand(), newPruneCommand(), newRetargetCommand(), newEphemeralCommand(), newMCPCommand(), newVersionCommand(), newGuidanceCommand())
 	return cmd
 }

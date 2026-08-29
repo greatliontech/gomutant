@@ -9,7 +9,7 @@ import (
 func newMCPCommand() *cobra.Command {
 	dir := "."
 	var vouches []string
-	cmd := &cobra.Command{Use: "mcp", Short: "Serve gomutant over MCP", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "mcp", Short: guidanceShort("mcp"), Long: guidanceHelp("mcp"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		var opts []mcpserver.Option
 		if len(vouches) > 0 {
 			identities, err := gomutant.ParseDynamicStateVouches(vouches)
