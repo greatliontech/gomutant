@@ -21,6 +21,7 @@ is deleted (git holds history).
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | train chunk 113 |
 | [refusal-exit-collapse](refusal-exit-collapse.md) | one refuse(symbol, reason) exit — the hand-picked subsets bred two review-caught defects in one round | train chunk 113 |
 | [ephemeral-equivalence-attestation](ephemeral-equivalence-attestation.md) | judged-equivalent ephemeral probes live only in commit messages; --attest would give them a findings-document row | train chunk 113 |
+| [ephemeral-unexercised-survived](ephemeral-unexercised-survived.md) | ephemeral renders SURVIVED for an edit the oracle never links (unexercised bucket) — vacuous evidence that reads as a survivor | train chunk 113 |
 | [method-rewrite-unit-oracle](method-rewrite-unit-oracle.md) | engine-scoped campaign oracle misses methodDeclarationRewrite's root-package teeth — 86 machine-local survivors at 0 kills; line-235 sample measured 3-3 artifact/gap, decoy fixture landed; scoping fix + drift-pin/offset-bounds arms + stable-oracle re-run | train chunk 113 |
 - **[suite-shared-fixture-bracket-flake](suite-shared-fixture-bracket-flake.md)** — one full-suite
   parallel run moved the shared fixturemod/lib observation bracket (honest refusal, unidentified
