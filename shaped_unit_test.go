@@ -115,6 +115,12 @@ func TestMethodProbesRewriteDeclaration(t *testing.T) {
 	if !strings.Contains(src, "Do_gomutantStructuralProbe() int") || strings.Contains(src, "func (Impl) Do() int") {
 		t.Fatalf("declaration not renamed: %s", src)
 	}
+	// Receiver discrimination: Decoy declares the same method name
+	// BEFORE Impl, so a rewrite that stops matching by receiver renames
+	// the wrong declaration — Decoy's must survive byte-intact.
+	if !strings.Contains(src, "func (Decoy) Do() int") {
+		t.Fatalf("the decoy's same-named method was renamed instead of the asserted type's: %s", src)
+	}
 }
 
 // Lifecycle pruning keeps shaped findings: a shaped identity resolves

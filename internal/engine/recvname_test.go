@@ -17,7 +17,7 @@ import (
 // lookup, gofresh's types-side subject walk) is deliberately wider
 // (promotion), which never concerns this reducer: a promoted
 // method has no declaration under the embedder to mutate.
-func TestRecvTypeNameUnwrapsParenthesizedForms(t *testing.T) {
+func TestRecvTypeNameReducesEveryReceiverForm(t *testing.T) {
 	cases := []struct {
 		recv string
 		want string
@@ -48,5 +48,12 @@ func TestRecvTypeNameUnwrapsParenthesizedForms(t *testing.T) {
 		if got := recvTypeName(fd); got != tc.want {
 			t.Errorf("recvTypeName(recv %s) = %q, want %q", tc.recv, got, tc.want)
 		}
+	}
+	// The entry guard's second operand is reachable only from a
+	// hand-constructed AST — the parser never yields a receiver-bearing
+	// declaration with an empty field list — so construct it directly:
+	// the pinned outcome is the guard's "" refusal, not an index panic.
+	if got := recvTypeName(&ast.FuncDecl{Name: ast.NewIdent("M"), Recv: &ast.FieldList{}}); got != "" {
+		t.Errorf(`recvTypeName(empty receiver list) = %q, want ""`, got)
 	}
 }

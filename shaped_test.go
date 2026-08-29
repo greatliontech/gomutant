@@ -62,7 +62,7 @@ func TestVacuous(t *testing.T) {}
 `,
 		// Interface-satisfaction subjects: the oracle's teeth are the
 		// compiler's own.
-		"iface/iface.go": "package iface\n\ntype Doer interface {\n\tDo() int\n}\n\ntype Impl struct{}\n\nfunc (Impl) Do() int { return 1 }\n",
+		"iface/iface.go": "package iface\n\ntype Doer interface {\n\tDo() int\n}\n\n// Decoy declares the same method name BEFORE Impl: a rewrite that\n// stops discriminating by receiver renames this declaration instead,\n// which the rewrite test asserts against.\ntype Decoy struct{}\n\nfunc (Decoy) Do() int { return 2 }\n\ntype Impl struct{}\n\nfunc (Impl) Do() int { return 1 }\n",
 		"iface/iface_test.go": `package iface
 
 import "testing"
