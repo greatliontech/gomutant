@@ -360,3 +360,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "f4b6e6cc2f732af0c57744e28a4167f874f8e0f49f15b79b56f71740be163831"
 }
+
+bindings {
+  requirement_id: "REQ-target-structural"
+  content_hash: "9b52e5453c771f0adfb6b3c33dac05d8d22e2494f079e538e4b3ad827701f9d8"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestMethodDeclarationRewriteRefusesShiftedOffsets"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cec1fdff0d9b15438f867977c1b4d2f33fc9ff16e22ad006aa399c66154943c0"
+}

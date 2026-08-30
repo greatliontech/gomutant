@@ -252,6 +252,11 @@ func (t *Tree) methodDeclarationRewrite(typeSymbol, typeName, method string) (st
 				}
 				offset := namePos.Offset
 				end := pkg.Fset.PositionFor(fn.Name.End(), false).Offset
+				// Backstop behind the digest pin above: unreachable
+				// while every walked file is pinned at load, kept so a
+				// future unpinned load path degrades to not-found
+				// instead of splicing into (or panicking on) foreign
+				// bytes.
 				if offset < 0 || end > len(src) || string(src[offset:end]) != method {
 					return "", nil, false, nil
 				}

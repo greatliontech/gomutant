@@ -4,6 +4,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,5 +58,61 @@ func TestRecvTypeNameReducesEveryReceiverForm(t *testing.T) {
 	// the pinned outcome is the guard's "" refusal, not an index panic.
 	if got := recvTypeName(&ast.FuncDecl{Name: ast.NewIdent("M"), Recv: &ast.FieldList{}}); got != "" {
 		t.Errorf(`recvTypeName(empty receiver list) = %q, want ""`, got)
+	}
+}
+
+// The rewrite's offset guard refuses to splice when the declaring
+// file's bytes no longer carry the loaded parse's name span. The
+// branch is unreachable in production by construction — every walked
+// file is digest-pinned at load and the drift arm fires first — so
+// this pins the deliberate defense-in-depth backstop, with the digest
+// entry deleted to isolate it: a truncated or same-length-edited file
+// yields a silent not-found (the caller's declares-no-method refusal),
+// never a corrupt rewrite or a slice panic (REQ-target-structural).
+func TestMethodDeclarationRewriteRefusesShiftedOffsets(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/off\n\ngo 1.26\n",
+		"p/p.go": "package p\n\ntype Impl struct{}\n\nfunc (Impl) Do() int { return 1 }\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, src, ok, err := tr.methodDeclarationRewrite("example.com/off/p.Impl", "Impl", "Do")
+	if err != nil || !ok || !strings.Contains(string(src), "Do_gomutantStructuralProbe") {
+		t.Fatalf("positive control failed: ok=%v err=%v src=%q", ok, err, src)
+	}
+	delete(tr.sourceDigests, file)
+	original, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same-length edit: the name span holds different bytes.
+	renamed := strings.Replace(string(original), "func (Impl) Do()", "func (Impl) Dq()", 1)
+	if len(renamed) != len(original) || renamed == string(original) {
+		t.Fatal("fixture edit did not hold length")
+	}
+	if err := os.WriteFile(file, []byte(renamed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, err := tr.methodDeclarationRewrite("example.com/off/p.Impl", "Impl", "Do"); ok || err != nil {
+		t.Fatalf("same-length drifted name span = ok %v err %v, want the silent not-found", ok, err)
+	}
+	// Truncation: the recorded offsets exceed the bytes on disk.
+	if err := os.WriteFile(file, []byte("package p\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, err := tr.methodDeclarationRewrite("example.com/off/p.Impl", "Impl", "Do"); ok || err != nil {
+		t.Fatalf("truncated declaring file = ok %v err %v, want the silent not-found", ok, err)
 	}
 }

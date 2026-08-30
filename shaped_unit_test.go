@@ -2,11 +2,14 @@ package gomutant
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // Shaped-declaration validation refuses every malformed form before any
@@ -120,6 +123,112 @@ func TestMethodProbesRewriteDeclaration(t *testing.T) {
 	// the wrong declaration — Decoy's must survive byte-intact.
 	if !strings.Contains(src, "func (Decoy) Do() int") {
 		t.Fatalf("the decoy's same-named method was renamed instead of the asserted type's: %s", src)
+	}
+}
+
+// A declaring file that moved after load refuses the method probe as
+// source drift NAMING THE FILE — never as "declares no method", the
+// embedding misdiagnosis that would mint a false structural refusal
+// (REQ-target-structural; the drift vocabulary is REQ-exec-quiescence's
+// target-local refusal).
+func TestMethodProbesRefuseMovedDeclaringFile(t *testing.T) {
+	tmp := writeShapedFixture(t)
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(tmp, "iface", "iface.go")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = tree.shapedCandidates(context.Background(), Target{Symbol: "s",
+		Structural: &StructuralSpec{Class: "interface-satisfaction", Type: "example.com/shaped/iface.Impl", Interface: "example.com/shaped/iface.Doer"},
+		Oracle:     []string{"example.com/shaped/iface.TestSatisfies"}, OracleExplicit: true})
+	var drift *engine.SourceDriftError
+	if !errors.As(err, &drift) {
+		t.Fatalf("moved declaring file = %v, want a source-drift refusal", err)
+	}
+	if drift.Path != path {
+		t.Fatalf("drift refusal names %q, want the moved declaring file %q — an unnamed drift is unattributable at the run's refusal line", drift.Path, path)
+	}
+}
+
+// A declaring file whose content drifted past the parse-time digest
+// refuses the same way, naming the file: the rewrite's offsets belong
+// to the loaded parse, and applying them to different bytes would
+// corrupt the probe (REQ-target-structural; REQ-exec-quiescence's
+// drift vocabulary).
+func TestMethodProbesRefuseContentDriftedDeclaringFile(t *testing.T) {
+	tmp := writeShapedFixture(t)
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(tmp, "iface", "iface.go")
+	src, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(src, []byte("\n// drifted after load\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = tree.shapedCandidates(context.Background(), Target{Symbol: "s",
+		Structural: &StructuralSpec{Class: "interface-satisfaction", Type: "example.com/shaped/iface.Impl", Interface: "example.com/shaped/iface.Doer"},
+		Oracle:     []string{"example.com/shaped/iface.TestSatisfies"}, OracleExplicit: true})
+	var drift *engine.SourceDriftError
+	if !errors.As(err, &drift) {
+		t.Fatalf("content-drifted declaring file = %v, want a source-drift refusal", err)
+	}
+	if drift.Path != path {
+		t.Fatalf("drift refusal names %q, want the drifted declaring file %q", drift.Path, path)
+	}
+}
+
+// The run-level half of the shaped drift contract: a Run whose shaped
+// target's declaring file moved after load refuses that target with
+// the drift named on its decision line while an unaffected sibling
+// completes its measurement (REQ-exec-quiescence's target-local drift
+// refusal). This test pins the refusal PLUMBING — operational failure
+// plus the skipped decision; the drift-CLASS discrimination
+// (SourceDriftError vs a raw not-exist error) is pinned by
+// TestMethodProbesRefuseMovedDeclaringFile alone, because the wrapped
+// run-level text is identical for both by construction.
+func TestRunRefusesShapedTargetOnSourceDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs target preparation and a sibling's mutants")
+	}
+	tmp := writeShapedFixture(t)
+	tree, err := Load(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(tmp, "iface", "iface.go")); err != nil {
+		t.Fatal(err)
+	}
+	var decisions []RunDecision
+	_, err = tree.Run(context.Background(), []Target{
+		{Symbol: "s",
+			Structural: &StructuralSpec{Class: "interface-satisfaction", Type: "example.com/shaped/iface.Impl", Interface: "example.com/shaped/iface.Doer"},
+			Oracle:     []string{"example.com/shaped/iface.TestSatisfies"}, OracleExplicit: true},
+		{Symbol: "b",
+			Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/shaped/core"}, Forbidden: "example.com/shaped/forbidden"},
+			Oracle:     []string{"example.com/shaped/arch.TestNoForbidden"}, OracleExplicit: true},
+	}, Options{Decision: func(d RunDecision) { decisions = append(decisions, d) }})
+	// The contracted shape mirrors the body-target drift test's: the
+	// run fails operationally with the refused set named — a pipeline
+	// never reads a drift-refused campaign as success — while the
+	// unaffected sibling's measurement completes and is kept.
+	if err == nil || !strings.Contains(err.Error(), "iface.go") || !strings.Contains(err.Error(), "1 completed target(s) kept") {
+		t.Fatalf("shaped drift run = %v, want an operational failure naming the drifted file and the kept sibling", err)
+	}
+	if len(decisions) != 2 {
+		t.Fatalf("decisions = %+v, want the drift skip and the sibling's measurement", decisions)
+	}
+	if decisions[0].Symbol != "s" || decisions[0].Action != "skipped" || !strings.Contains(decisions[0].Reason, "drift") || !strings.Contains(decisions[0].Reason, "iface.go") {
+		t.Fatalf("shaped drift decision = %+v, want a target-local skip naming the drifted file", decisions[0])
+	}
+	if decisions[1].Symbol != "b" || decisions[1].Action != "measure" {
+		t.Fatalf("sibling decision = %+v, want its ordinary measurement", decisions[1])
 	}
 }
 
