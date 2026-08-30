@@ -432,6 +432,43 @@ silent global switch. Matching is exact on subject and reason: an
 instability drifting even one byte is a different instability the record
 never reviewed.
 
+**REQ-result-ephemeral-attest** (behavior): A committed
+ephemeral-equivalence record beside the findings document
+(`ephemeral-attestations.json`, version 1) MUST carry each manual
+probe's judged equivalence as a reviewed entry: the probe's edit digest
+(a digest over the ordered replacement set — each resolved
+tree-relative file with its full replacement content — carried on the
+probe result, so the row names exactly the measured mutant and the
+identity travels across checkouts), the replaced files, the deciding
+oracle (test package and run pattern), the author's reasoning, and the
+judgment's provenance: the commit at attest time AND whether the
+replaced files diverged from it — a probe on a staged or dirty tree
+records dirty, its commit naming the nearest ancestor rather than the
+judged content, and a tree whose provenance cannot be established
+records dirty with no commit, fail-closed, so a row never claims a
+reproducibility it does not have (the committed-record coherence
+REQ-result-layers demands). A malformed record refuses; an entry
+missing digest, files, oracle, or reasoning refuses the record — at
+the load AND at the write, one shared predicate, so an invalid row can
+neither serve as authority nor land as a poison pill. Building or
+recording an attestation is refused for every probe state that is
+not an exercised full survivor: a kill or a mixed killed-some-runs
+outcome is evidence against equivalence (evidence beats attestation);
+an unexercised survivor is vacuous — no run reached the edit, so its
+survival supports nothing; and a survivor whose exercise state is
+unknown (the coverage probe failed — the probe result carries that
+fact distinctly, never encoded as the absence of the unexercised
+label) is unverifiable and refuses the same way. Re-attesting the
+identical edit digest replaces the prior entry's reasoning; the record
+stays digest-sorted for stable diffs, and the write holds the
+per-document lock and replaces the file atomically — committed audit
+evidence is never truncated by an interrupted write nor a row lost to
+a concurrent attest. The findings inspection surfaces the record
+beside the finding rows on both faces — the empty-document face
+included, since a probe loop persists no finding at all — greppable,
+auditable evidence of judged equivalences, never only a
+commit-message paragraph.
+
 **REQ-result-staged** (behavior): A staged run MUST measure the git index
 snapshot as its subject: the run refuses outright without a repository, a
 commit, or a writable index tree identity (an unmerged index has no

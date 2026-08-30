@@ -13,7 +13,11 @@ import (
 // Options.OwnWrites: residue attribution names the measured code's
 // tree writes, never the harness's own.
 func RunOwnWrites(findingsPath string) []string {
-	own := []string{findingsPath, findingsPath + ".campaign", findingsPath + ".lock"}
+	attestations := EphemeralAttestationsPathFor(findingsPath)
+	own := []string{
+		findingsPath, findingsPath + ".campaign", findingsPath + ".lock",
+		attestations, attestations + ".lock",
+	}
 	if dir := filepath.Dir(findingsPath); toolOwnedDir(dir) {
 		own = append(own, filepath.Join(dir, ".gitignore"))
 	}

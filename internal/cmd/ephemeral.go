@@ -15,6 +15,7 @@ import (
 
 type ephemeralOptions struct {
 	dir, file, replacement, batch, testPkg, runPat string
+	attest, findingsFile                           string
 	timeout, oracleTimeout                         time.Duration
 	oracleMemoryMiB                                int64
 	runs                                           int
@@ -39,6 +40,8 @@ func newEphemeralCommand() *cobra.Command {
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
 	f.IntVar(&o.runs, "runs", 1, "run the mutant this many times (1-10): killed means every run killed - consecutive kills split deterministic kills from a property generator's draw luck")
+	f.StringVar(&o.attest, "attest", "", "record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or never exercised the edit")
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document whose sibling ephemeral-attestation record --attest writes")
 	return cmd
 }
 
@@ -118,6 +121,17 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 		}
 	}
 	renderEphemeralVerdict(os.Stdout, res)
+	if o.attest != "" {
+		att, err := gomutant.AttestEphemeralEquivalence(ctx, o.dir, res, o.attest)
+		if err != nil {
+			return err
+		}
+		path := gomutant.EphemeralAttestationsPathFor(findingsAt(o.dir, o.findingsFile))
+		if err := gomutant.RecordEphemeralAttestation(ctx, path, att); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stdout, "equivalence recorded  %s  %s — %s\n", att.EditDigest[:min(12, len(att.EditDigest))], path, att.Reason)
+	}
 	return nil
 }
 

@@ -2710,9 +2710,6 @@ func TestRunExtensionDivergenceStampsAndAttributes(t *testing.T) {
 	}
 }
 
-
-
-
 // TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence pins the
 // divergence-stamp boundary of both splices at the counts layer
 // (REQ-exec-survivor-evidence): under an unverifiable spliced record only the

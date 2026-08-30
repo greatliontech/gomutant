@@ -273,7 +273,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
 		OwnWrites: gomutant.RunOwnWrites(docPath),
-		PlanOnly: o.plan,
+		PlanOnly:  o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
 			rep.executing(event)
 			if o.jsonl {

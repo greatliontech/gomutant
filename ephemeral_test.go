@@ -358,4 +358,10 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 	if res.UnexercisedFiles != nil {
 		t.Fatalf("failed probe still labeled: %v", res.UnexercisedFiles)
 	}
+	// The absent label must never read as exercised: the failed probe
+	// marks the exercise state UNKNOWN distinctly, the fact the
+	// attestation refusal consumes (REQ-result-ephemeral-attest).
+	if !res.CoverageUnknown {
+		t.Fatal("failed coverage probe left CoverageUnknown unset — absence would read as exercised")
+	}
 }

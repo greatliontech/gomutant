@@ -630,3 +630,93 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "b82d00f10cf939648bc9a0ad69a87f91cbff59afd0f05484921667b60da42717"
 }
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEphemeralAttestationRecordRoundTrip"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3915486f20adf8ca008e36bb919f94099fa506e191202e7893fdbcbd738f42a2"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEphemeralAttestationRecordRefusesMalformedEntries"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4f94e727fd30069c4e0a2c8bf305d831c6015e21f5e6bdf0bb577b839208af50"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestAttestEphemeralEquivalenceRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3e1ae7fb4f723f143a01eaba609b1cba31ff26be7283c1d950d6c26933b7525a"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestAttestEphemeralEquivalenceRefusesUnknownCoverage"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c9d680664281c2f8ffe5b8d68a6d9aeb95a9179328299e2a9a9d4f0c462a2225"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRecordEphemeralAttestationRefusesInvalidEntry"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "62e49a85628d88107c9cd2c0892ad5f43b1b10bb94494f8b38750007c3b03fe2"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestAttestEphemeralEquivalenceStampsDirtyProvenance"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1c1d4450592c393489983514a5b18da95dbf51bb9267d180fa69ec28a90d9ee6"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEphemeralEditDigestDiscriminates"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "89ca2859d2b9d8a85433e2aae3d48978cf43afbbce63822d9f304de55a3b0215"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEphemeralAttestEndToEnd"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cfb5a234f9fb440ae565d55e678cbfdd0aa34bab984a444b57c85bf09ef07ae0"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.AttestEphemeralEquivalence"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "5b70f1f066f6f8c151780611d0e43d84b14d596119796097bcb56b6a7f93c261"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.RecordEphemeralAttestation"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "16e82b9aa3d6967e56bbfe3ac53e68da385adccb371ffb4fa81cb611739cbd9c"
+}

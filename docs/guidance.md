@@ -175,12 +175,16 @@ to=example.com/new. after a package rename, then for real.
 - `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of each oracle process; 0 (mcp) or the default (cli) means 60 seconds.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling for the probe's oracle process tree in MiB: absent inherits the server's installed ceiling (mcp), 0 derives RAM/2 floored at 1 GiB, -1 disables; refused while a run is in flight — the campaign owns the process ceiling.
 - `runs` (mcp, cli) — run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed — N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result.
+- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document (`ephemeral-attestations.json`); refused when the probe killed, was mixed, or never exercised the edit.
+- `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes (default .gomutant/findings.json).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
 - `dir` (cli) — tree root (module or workspace).
 **when:** use ephemeral inside the adversarial loop — one
 hand-written mutant the operator set cannot generate, one deciding
-test, the tree never touched and nothing persisted; an observed
+test, the tree never touched and nothing persisted (an `attest`ed
+equivalence judgment is the one durable output, written to the
+committed record, never to a finding); an observed
 probe executes the named test once, bracketing runtime-input
 observation, and a kill carries the killing test's bounded output
 head. Give exactly one mutation form.
@@ -236,7 +240,9 @@ attest_survivor dispositions an equivalent mutant with the
 reasoning on record; prune removes resolved-dead records after a
 refactor and retarget follows a rename (both with check
 previews); ephemeral probes one hand-written mutant without
-persisting; discover lists effective targets without measuring;
+persisting a finding — its attest knob records a judged equivalence
+in the committed record beside the document; discover lists
+effective targets without measuring;
 explain answers why — a symbol's full machine-local clause list and
 per-survivor prescriptions, or the whole document's promotion
 triage. Survivors are findings awaiting disposition — strengthen a

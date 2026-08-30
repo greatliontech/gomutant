@@ -3,6 +3,8 @@ package gomutant
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -53,6 +55,18 @@ type EphemeralResult struct {
 	// not evidence the oracle noticed anything. Advisory, absent when
 	// the coverage probe fails (REQ-exec-ephemeral).
 	UnexercisedFiles []string `json:"unexercisedFiles,omitempty"`
+	// EditDigest identifies the measured mutant: a digest over the
+	// ordered replacement set (tree-relative file, full replacement
+	// content), the identity an equivalence attestation records
+	// (REQ-result-ephemeral-attest).
+	EditDigest string `json:"editDigest"`
+	// CoverageUnknown marks a non-kill verdict whose exercise state
+	// could not be established (the baseline coverage probe failed):
+	// UnexercisedFiles absent then means UNKNOWN, not exercised — the
+	// two must never share one encoding, or an unverifiable survivor
+	// reads as a vouched one (REQ-exec-ephemeral,
+	// REQ-result-ephemeral-attest's unverifiable refusal).
+	CoverageUnknown bool `json:"coverageUnknown,omitempty"`
 }
 
 // SetOracleMemoryLimit installs the per-oracle-process memory ceiling
@@ -142,6 +156,39 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 	}
 
 	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, oracleTimeout, runs)
+}
+
+// ephemeralEditDigest derives the mutant's identity: a digest over the
+// ordered replacement set, each entry keyed by the resolved
+// tree-relative path (so two alias spellings of one file share one
+// identity, and the identity travels across checkouts) with its full
+// replacement content. Distinct content, or the same content in a
+// different file, is a different mutant (REQ-result-ephemeral-attest).
+func ephemeralEditDigest(dir string, replacements []fileReplacement) string {
+	// The root is resolved to its physical form: replacement.Abs is
+	// symlink-resolved by resolveTreeFile, so an aliased tree root
+	// would otherwise make every Rel non-local and fall back to the
+	// caller's spelling — two alias spellings of one file earning two
+	// identities.
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+		if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+			dir = resolved
+		}
+	}
+	digest := sha256.New()
+	for _, replacement := range replacements {
+		key := replacement.File
+		if rel, err := filepath.Rel(dir, replacement.Abs); err == nil && filepath.IsLocal(rel) {
+			key = filepath.ToSlash(rel)
+		}
+		content := sha256.Sum256(replacement.Source)
+		digest.Write([]byte(key))
+		digest.Write([]byte{0})
+		digest.Write(content[:])
+		digest.Write([]byte{0})
+	}
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 // discardError maps a discarded probe to its repairing reason: an
@@ -265,10 +312,11 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	m := engine.Mutant{Replacements: engineReplacements}
 	res := &EphemeralResult{
-		Files:   files,
-		TestPkg: testPkg,
-		Run:     run,
-		Runs:    runs,
+		Files:      files,
+		TestPkg:    testPkg,
+		Run:        run,
+		Runs:       runs,
+		EditDigest: ephemeralEditDigest(t.dir, replacements),
 	}
 	// N runs against the once-probed baseline: per-run verdicts split a
 	// deterministic kill (every run killed) from a property generator's
@@ -304,9 +352,12 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// false-survivor reading open too; kills need no qualifier)
 		// classifies each
 		// replacement file; a probe failure leaves the advisory label
-		// absent rather than failing a sound measurement
-		// (REQ-exec-ephemeral).
-		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", oracleTimeout, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err == nil {
+		// absent rather than failing a sound measurement — and marks
+		// the exercise state UNKNOWN, so absence never reads as
+		// exercised (REQ-exec-ephemeral).
+		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", oracleTimeout, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err != nil {
+			res.CoverageUnknown = true
+		} else {
 			for i, replacement := range replacements {
 				pkgPath := t.eng.FileImportPath(replacement.Abs)
 				if pkgPath != "" && coverage.Unsound(pkgPath+"/"+filepath.Base(replacement.Abs)) {

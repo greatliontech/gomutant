@@ -1299,17 +1299,29 @@ type inspectedFinding struct {
 }
 
 type findingsOut struct {
-	Summary         []findingSummary   `json:"summary,omitempty" jsonschema:"the bounded default: one row per record"`
-	Findings        []inspectedFinding `json:"findings,omitempty" jsonschema:"full rows, only under detail"`
-	Omitted         int                `json:"omitted,omitempty" jsonschema:"rows beyond the cap - the document on disk always carries the full set"`
-	RepoCommittable int                `json:"repoCommittable" jsonschema:"records portable enough for the committed findings document"`
-	LocalOnly       int                `json:"localOnly" jsonschema:"records held in the machine-local overlay a reviewer would not inherit"`
-	Document        string             `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
-	Note            string             `json:"note,omitempty" jsonschema:"set when there are no rows: says whether the document is empty or the filters matched nothing, and the next step"`
+	Summary                      []findingSummary                `json:"summary,omitempty" jsonschema:"the bounded default: one row per record"`
+	Findings                     []inspectedFinding              `json:"findings,omitempty" jsonschema:"full rows, only under detail"`
+	Omitted                      int                             `json:"omitted,omitempty" jsonschema:"rows beyond the cap - the document on disk always carries the full set"`
+	RepoCommittable              int                             `json:"repoCommittable" jsonschema:"records portable enough for the committed findings document"`
+	LocalOnly                    int                             `json:"localOnly" jsonschema:"records held in the machine-local overlay a reviewer would not inherit"`
+	Document                     string                          `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	Note                         string                          `json:"note,omitempty" jsonschema:"set when there are no rows: says whether the document is empty or the filters matched nothing, and the next step"`
+	EphemeralAttestations        []gomutant.EphemeralAttestation `json:"ephemeralAttestations,omitempty" jsonschema:"committed ephemeral-equivalence attestations beside the document - judged-equivalent manual probes with their edit digests and reasoning; capped, the record on disk carries the full set"`
+	OmittedEphemeralAttestations int                             `json:"omittedEphemeralAttestations,omitempty" jsonschema:"attestation rows beyond the response cap - counted, never silent"`
 }
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
 	out := findingsOut{Document: s.findingsPath(in.Findings)}
+	// The committed ephemeral-equivalence record rides the inspection,
+	// independent of the finding rows (REQ-result-ephemeral-attest).
+	if atts, err := gomutant.LoadEphemeralAttestations(gomutant.EphemeralAttestationsPathFor(out.Document)); err != nil {
+		return nil, out, err
+	} else if len(atts) > guidanceListCap {
+		out.EphemeralAttestations = atts[:guidanceListCap]
+		out.OmittedEphemeralAttestations = len(atts) - guidanceListCap
+	} else {
+		out.EphemeralAttestations = atts
+	}
 	switch in.State {
 	case "", string(gomutant.FindingCurrent), string(gomutant.FindingStale), string(gomutant.FindingUnverifiable), string(gomutant.FindingDetached):
 	default:
@@ -1793,9 +1805,19 @@ type ephemeralIn struct {
 	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
 	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling for the probe's oracle process tree in MiB: absent inherits the server's installed ceiling, 0 derives RAM/2 floored at 1 GiB for this probe, -1 disables for this probe; refused while a run is in flight - the campaign owns the process ceiling"`
 	Runs             int                  `json:"runs,omitempty" jsonschema:"run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed - N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result"`
+	Attest           string               `json:"attest,omitempty" jsonschema:"record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or never exercised the edit"`
+	Findings         string               `json:"findings,omitempty" jsonschema:"findings document path whose sibling ephemeral-attestation record attest writes (default .gomutant/findings.json)"`
 }
 
-func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in ephemeralIn) (*mcp.CallToolResult, *gomutant.EphemeralResult, error) {
+// ephemeralOut is the probe result plus the attestation confirmation
+// when attest was requested.
+type ephemeralOut struct {
+	*gomutant.EphemeralResult
+	AttestationRecorded string `json:"attestationRecorded,omitempty" jsonschema:"edit digest of the equivalence attestation appended to the committed record"`
+	AttestationPath     string `json:"attestationPath,omitempty" jsonschema:"the committed record the attestation was written to"`
+}
+
+func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in ephemeralIn) (*mcp.CallToolResult, *ephemeralOut, error) {
 	// The ceiling is process state a running campaign owns: an explicit
 	// probe ceiling while a run is in flight would diverge the campaign's
 	// evidence from its stamped pin (a mutant and its baseline could even
@@ -1898,22 +1920,33 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	if notify != nil {
 		notify("running " + in.TestPkg)
 	}
-	if len(in.BatchEdits) > 0 {
-		res, err := withHeartbeat(ctx, notify, "ephemeral oracle", func(ctx context.Context) (*gomutant.EphemeralResult, error) {
-			return tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
-		})
-		return nil, res, err
-	}
-	if len(in.Edits) > 0 {
-		res, err := withHeartbeat(ctx, notify, "ephemeral oracle", func(ctx context.Context) (*gomutant.EphemeralResult, error) {
-			return tree.EphemeralEdits(ctx, in.File, in.Edits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
-		})
-		return nil, res, err
-	}
 	res, err := withHeartbeat(ctx, notify, "ephemeral oracle", func(ctx context.Context) (*gomutant.EphemeralResult, error) {
-		return tree.Ephemeral(ctx, in.File, []byte(in.Replacement), in.TestPkg, in.Run, oracleTimeout, in.Runs)
+		switch {
+		case len(in.BatchEdits) > 0:
+			return tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
+		case len(in.Edits) > 0:
+			return tree.EphemeralEdits(ctx, in.File, in.Edits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
+		default:
+			return tree.Ephemeral(ctx, in.File, []byte(in.Replacement), in.TestPkg, in.Run, oracleTimeout, in.Runs)
+		}
 	})
-	return nil, res, err
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &ephemeralOut{EphemeralResult: res}
+	if in.Attest != "" {
+		att, err := gomutant.AttestEphemeralEquivalence(ctx, s.dir, res, in.Attest)
+		if err != nil {
+			return nil, nil, err
+		}
+		path := gomutant.EphemeralAttestationsPathFor(s.findingsPath(in.Findings))
+		if err := gomutant.RecordEphemeralAttestation(ctx, path, att); err != nil {
+			return nil, nil, err
+		}
+		out.AttestationRecorded = att.EditDigest
+		out.AttestationPath = path
+	}
+	return nil, out, nil
 }
 
 // mcpOracleMemoryBytes converts the optional MiB input: absent or 0

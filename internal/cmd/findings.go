@@ -90,7 +90,11 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 			return renderFindingsJSON(out, []findingView{})
 		}
 		fmt.Fprintln(out, "no findings")
-		return nil
+		// The attestation record can exist without findings — the
+		// primary loop shape persists no finding at all — so the
+		// empty-document face still surfaces it
+		// (REQ-result-ephemeral-attest).
+		return printEphemeralAttestationLine(out, o)
 	}
 	judge := o.judged()
 	var tree *gomutant.Tree
@@ -119,13 +123,37 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	}
 	if len(views) == 0 {
 		fmt.Fprintln(out, "no findings")
-		return nil
+		return printEphemeralAttestationLine(out, o)
 	}
 	if !o.detail {
 		renderFindingSummaries(out, views, judge)
+	} else {
+		renderFindingViews(out, views)
+	}
+	return printEphemeralAttestationLine(out, o)
+}
+
+// printEphemeralAttestationLine surfaces the committed
+// ephemeral-equivalence record beside the finding rows on the human
+// face: a judged-equivalent manual probe is auditable next to the
+// findings it complements, never only in a commit message. The JSON
+// face keeps its array shape; the structured record is the MCP
+// findings tool's and the record file's own
+// (REQ-result-ephemeral-attest).
+func printEphemeralAttestationLine(out io.Writer, o findingsOptions) error {
+	attPath := gomutant.EphemeralAttestationsPathFor(findingsAt(o.dir, o.findingsFile))
+	atts, err := gomutant.LoadEphemeralAttestations(attPath)
+	if err != nil {
+		return err
+	}
+	if len(atts) == 0 {
 		return nil
 	}
-	renderFindingViews(out, views)
+	plural := ""
+	if len(atts) != 1 {
+		plural = "s"
+	}
+	fmt.Fprintf(out, "%d ephemeral equivalence attestation%s on record — %s\n", len(atts), plural, attPath)
 	return nil
 }
 
