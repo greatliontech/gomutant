@@ -24,5 +24,6 @@ deciding test named, all killed); the re-run condition below covers
 both repos.
 
 Lands: with cross-tool train chunk 113 (the oracle
-scheduling/robustness batch — coverage-guided-oracle-ordering is the
-same family), checked by re-running a `--changed`-scoped campaign.
+scheduling/robustness batch — the coverage-guided execution schedule
+of REQ-exec-oracle-run's schedule clause is the same family), checked
+by re-running a `--changed`-scoped campaign.

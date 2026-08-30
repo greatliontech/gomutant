@@ -15,7 +15,35 @@ symbol did not notice," rather than "no test anywhere noticed." An oracle
 spanning packages is scoped per package — each package run with the test
 pattern of its own oracle tests alone — because one union pattern would also
 run a same-named non-oracle test in a sibling package, whose failure is
-unattributable and aborts a sweep the per-package form completes.
+unattributable and aborts a sweep the per-package form completes. A run
+may execute a mutant's oracle as a SCHEDULE — an ordered sequence of
+per-package phases, probable killers first, guided by recorded baseline
+coverage over the mutant's own extent — provided the schedule is
+verdict-preserving: the phases of a group partition that group's test
+set exactly; a survivor verdict requires every phase to have run and
+passed; a kill ends the schedule early exactly as a test failure ends a
+single run; the phases of a group execute under the ONE oracle-timeout
+budget the unsplit run would have applied in aggregate (the memory
+ceiling is per process tree by REQ-exec-oracle-memory's own
+definition), and a TIMEOUT under any narrowed phase is never a verdict
+— the split's own second-process overhead is charged inside that
+budget, so only the unsplit run's bound decides a timeout kill, in
+either direction, via an unsplit re-measure; a test-attributed kill
+from a narrowed phase pattern is
+admitted only over a passing baseline of that same pattern — the shape
+symmetry REQ-exec-attribution establishes on the run-regex axis, since
+the full-group baseline vouches the full pattern and never a subset —
+and a phase kill that baseline cannot vouch, like a split whose
+individually verifiable phase observations merged unverifiable,
+re-measures unsplit with the unsplit run the scored measurement;
+serial confirmations execute unsplit for the same reason. Attribution
+classes, the oracle of record, and the
+reported oracle scope are all schedule-invariant. Coverage guides the
+order under its advisory posture only (REQ-exec-survivor-evidence,
+whose once-per-group bucket probe remains its own full-pattern
+measurement — a union of subset runs is not that measurement): an
+unavailable, unsound, or extent-less signal degrades to the unordered
+run — a schedule reorders execution and never narrows it.
 
 **REQ-exec-attribution** (behavior): A kill MUST be one of exactly three
 attributed events, enforcing REQ-core-attributed-kills: a named oracle test

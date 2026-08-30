@@ -17,11 +17,15 @@ type Replacement struct {
 }
 
 // Mutant is one mutation represented by every file replacement that must be
-// visible atomically during its overlay run.
+// visible atomically during its overlay run. Extent carries the
+// candidate's mutated source range so an execution schedule can ask
+// the coverage question before the run (empty on manual mutants and
+// pre-extent records — no schedule signal).
 type Mutant struct {
 	Symbol       string
 	Operator     string
 	Position     string
+	Extent       string
 	Replacements []Replacement
 }
 
@@ -52,7 +56,7 @@ func (c Candidate) Mutant() (Mutant, bool) {
 	if len(c.Replacements) == 0 {
 		return Mutant{}, false
 	}
-	return Mutant{Symbol: c.Symbol, Operator: c.Operator, Position: c.Position, Replacements: c.Replacements}, true
+	return Mutant{Symbol: c.Symbol, Operator: c.Operator, Position: c.Position, Extent: c.Extent, Replacements: c.Replacements}, true
 }
 
 // Generation is the complete candidate count and the budget-selected prefix.

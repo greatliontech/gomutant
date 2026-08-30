@@ -777,7 +777,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-oracle-run"
-  content_hash: "330455fcd863bfa04ba844a14fd177e551c79f41e2fa04533bb6f528a0bb5789"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPkgRuns"
   role: BINDING_ROLE_TESTS
@@ -786,7 +786,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-oracle-run"
-  content_hash: "330455fcd863bfa04ba844a14fd177e551c79f41e2fa04533bb6f528a0bb5789"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantOutcomes"
   role: BINDING_ROLE_TESTS
@@ -1043,4 +1043,85 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestEphemeralOracleTimeoutDefaultsToDerived"
   role: BINDING_ROLE_TESTS
   shape_hash: "1ae241907e40f1b36f027fe3d903a66418121d7cea0db0605e479a207f1b5139"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestScheduleBatchesPartition"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f62184047664461cd0666284a9686c00f4ab814e0de6571f0540a5ca15132e9c"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestScheduledGroupsPartitionAndOrder"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3dbc895e7cfb2ed341731b1dba942daadbfe7b23285b94ccc633640f3969c73e"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunSchedulesKillerInRemainderPhase"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "df44675008a4379e2ccd980a4361c3ccbb41de50e26862a84936b449e0decec5"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestPhaseKillWithoutPhaseBaselineDegradesToUnsplit"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a215f6afe09fabbd83d107d7d19efc0afed06ef6cef06de7b958f754ed00173b"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSplitPhasesShareOneOracleBudget"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3da09e1e52906838a9e02a53d61aa501eb46593daa95741bfc1973fe36636b98"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestProbeScheduleCoverageGatesAndDegrades"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fe22bcffaed2807ae686e0e1756654ec21296065bc3bd09743b703c5b719179e"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSerialConfirmationRunsUnscheduled"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "56fae707cb03e41ae20c86eefd855eb5c3a64173d01687fc255bd85f8ec8d15f"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSplitSurvivorUnverifiableMergeDegradesToUnsplit"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b14b8e77dc9da84c523c3a04cc376e2082f295eb6f0ff4930b8b75afb67804ee"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "a55aa503342bc009e6d452683b0a4ddbf1e534a0b7f1da904d40db552efbc8bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestNarrowedPhaseTimeoutDegradesToUnsplit"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "02a34f9ab730e9623f49c7a23457e1d7a62179625e1bc3327d9766fae164c9d0"
 }

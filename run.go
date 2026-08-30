@@ -252,11 +252,23 @@ type Options struct {
 	dispatched func(symbol string, mi int)
 	// executedScope observes each mutant execution's oracle scope
 	// (per-group -run patterns), keyed by candidate identity (position,
-	// operator) — emitted by the executor off the very work value whose
-	// groups it runs, so the observation cannot diverge from the
-	// execution: they are one variable. Unordered (workers race); pins
-	// the survivor narrowing.
+	// operator) — emitted by the executor off the same work value whose
+	// groups the execution derives from. The scope is
+	// SCHEDULE-INVARIANT: an execution schedule partitions a group's
+	// pattern into phases of the same test set (the partition property
+	// the schedule tests pin), and the scope speaks the oracle's
+	// canonical per-package patterns, never the phase split. Unordered
+	// (workers race); pins the survivor narrowing.
 	executedScope func(position, operator string, oracleScope []string)
+	// scheduleStore carries the run's schedule-coverage signal to the
+	// executors (REQ-exec-oracle-run's verdict-preserving schedule);
+	// nil disables scheduling (ephemeral probes, external callers).
+	scheduleStore *scheduleStore
+	// probeGate is the run's producer-probe gate: the phase-baseline
+	// vouch holds it shared exactly like every other producer-side
+	// oracle probe, so it never shares a window with a serial
+	// confirmation's scored run (REQ-exec-attribution).
+	probeGate *sync.RWMutex
 	// confirmScoped observes each serial confirmation's candidate group
 	// scope the same way, emitted at the confirmation executor's own
 	// entry off its w: the serial fallback executes those groups
@@ -882,7 +894,7 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 		return nil
 	}()
 	if scopedGroup != nil && t.scopedBaselinePasses(ctx, *scopedGroup, scopedBaselines, opts, runEnv) {
-		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := engine.RunMutantObservedEnv(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, opts.OracleTimeout, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, opts.OracleTimeout, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 		if err != nil {
 			return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: killer-scoped confirmation: %w", m.Symbol, m.Position, m.Operator, err)
 		}
@@ -897,7 +909,13 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 			return out, gk, confirmMemoryDecided, merged, incomplete, nil
 		}
 	}
-	return t.executeWorkMutant(ctx, w, m, opts, runEnv)
+	// The serial fallback runs UNSCHEDULED: REQ-exec-attribution makes
+	// the serial execution the scored measurement — the one corrector
+	// for a shape-induced window kill — and a scheduled corrector would
+	// reproduce the very narrowing it exists to re-examine.
+	unscheduled := opts
+	unscheduled.scheduleStore = nil
+	return t.executeWorkMutant(ctx, w, m, unscheduled, runEnv)
 }
 
 // scopedBaselineKey identifies one killer-scoped baseline probe: the
@@ -929,56 +947,200 @@ func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scope
 // the process observations - the shared execution the worker pool and
 // the serial kill confirmation both use.
 func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+	outcome, killer, memoryDecided, state, incomplete, degrade, err := t.runSteps(ctx, w, m, opts, runEnv, t.scheduleSteps(w, m, opts))
+	if err != nil || degrade == degradeNone {
+		return outcome, killer, memoryDecided, state, incomplete, err
+	}
+	// The schedule disqualified itself for this mutant; the unsplit
+	// re-run is the scored measurement. A STRUCTURAL disqualification —
+	// an unvouched phase kill (order-dependent suite) or a
+	// split-manufactured unverifiable observation — also stops the
+	// work's groups from scheduling for the rest of the run; a
+	// narrowed-bound timeout is per-mutant slowness and leaves the
+	// schedule standing for its siblings.
+	if degrade == degradeRerunUnschedule && opts.scheduleStore != nil && w.targetView != nil {
+		for _, g := range w.groups {
+			opts.scheduleStore.unschedule(coverageKey(g, w.targetView.subject.Package))
+		}
+	}
+	outcome, killer, memoryDecided, state, incomplete, _, err = t.runSteps(ctx, w, m, opts, runEnv, unscheduledSteps(w.groups))
+	return outcome, killer, memoryDecided, state, incomplete, err
+}
+
+// scheduleDegrade classifies a schedule that must not score
+// (REQ-exec-oracle-run's verdict-preserving schedule).
+type scheduleDegrade int
+
+const (
+	degradeNone scheduleDegrade = iota
+	// degradeRerun: a timeout under a narrowed phase — a subset pattern
+	// or a reduced remainder bound — is never a verdict: the split's own
+	// second-process overhead (package load, TestMain) is charged inside
+	// the shared budget, so only the UNSPLIT run's bound may decide a
+	// timeout kill, in either direction (a split near the bound could
+	// otherwise fabricate a timeout kill on a true survivor, or lose a
+	// true one).
+	degradeRerun
+	// degradeRerunUnschedule: a structural suite property the split
+	// exposed — the group stops scheduling for the rest of the run.
+	degradeRerunUnschedule
+)
+
+// stepResult is one oracle process's outcome inside a schedule step.
+type stepResult struct {
+	out           engine.MutantOutcome
+	killer        string
+	memoryDecided bool
+	state         runtimeinput.Observation
+	incomplete    string
+	diagnostic    string
+	degrade       scheduleDegrade
+}
+
+// runStepGroup executes one pattern of a schedule step and applies the
+// narrowed-pattern admission rules: a timeout kill from a narrowed
+// pattern degrades (only the unsplit bound decides timeouts), and a
+// test-attributed kill from a narrowed pattern is admitted only over a
+// passing baseline of that same pattern — the full group baseline
+// vouches the full pattern, never a subset (REQ-exec-attribution's
+// shape symmetry on the run-regex axis). A package-scope kill already
+// ran its differential baseline under this very pattern inside the
+// engine.
+func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string, g group, narrowed bool, timeout time.Duration) (stepResult, error) {
+	out, killer, memoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, timeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+	res := stepResult{out: out, killer: killer, memoryDecided: memoryDecided, state: state, incomplete: incomplete, diagnostic: diagnostic}
+	if err != nil {
+		return res, fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
+	}
+	if diagnostic != "" {
+		return res, nil
+	}
+	if out == engine.MutantKilled {
+		if killer == TimeoutKiller {
+			if narrowed {
+				res.degrade = degradeRerun
+			}
+			return res, nil
+		}
+		if aerr := attributedKill(killer, w.oracleSet); aerr != nil {
+			return res, fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, aerr)
+		}
+		if narrowed && !strings.HasPrefix(killer, PackageKillerPrefix) && !t.phaseKillVouched(ctx, g, opts, runEnv) {
+			res.degrade = degradeRerunUnschedule
+		}
+	}
+	return res, nil
+}
+
+// runSteps executes one mutant's schedule. A non-none degrade reports
+// a schedule that must not score — the caller re-runs unsplit
+// (REQ-exec-oracle-run's verdict-preserving schedule).
+func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string, steps []scheduleStep) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, scheduleDegrade, error) {
 	outcome := engine.MutantSurvived
 	killer := ""
 	memoryDecided := false
 	incompleteReason := ""
 	var processStates []runtimeinput.Observation
-	for _, g := range w.groups {
+	admit := func(res stepResult) {
+		if res.incomplete != "" && incompleteReason == "" {
+			incompleteReason = res.incomplete
+		}
+		outcome = res.out
+		killer = res.killer
+		memoryDecided = memoryDecided || res.memoryDecided
+	}
+	for _, st := range steps {
 		if err := ctx.Err(); err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
 		}
 		if outcome != engine.MutantSurvived {
 			break
 		}
-		out, groupKiller, groupMemoryDecided, state, incomplete, diagnostic, err := engine.RunMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
-		if diagnostic != "" {
+		narrowed := st.remainder != nil
+		// A split's two patterns share ONE oracle-timeout budget — the
+		// bound the unsplit run would have applied in aggregate (the
+		// memory ceiling is per process tree by
+		// REQ-exec-oracle-memory's own definition and needs no
+		// threading); the timeout VERDICT under any narrowed bound
+		// still belongs to the unsplit run alone (degradeRerun).
+		start := time.Now()
+		first, err := t.runStepGroup(ctx, w, m, opts, runEnv, st.first, narrowed, opts.OracleTimeout)
+		if err != nil {
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
+		}
+		if first.degrade != degradeNone {
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", first.degrade, nil
+		}
+		if first.diagnostic != "" {
 			// The mutant failed this group's build: no test process
-			// started, so the group contributes no runtime observation and
-			// no incomplete-process evidence — the discard is a pure
-			// function of the mutant source under the toolchain and
-			// build-configuration pins the serve validates
-			// (REQ-result-stale). Groups that ran keep their observations.
-			outcome = out
-			killer = groupKiller
-			memoryDecided = memoryDecided || groupMemoryDecided
-			if err != nil {
-				return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
-			}
+			// started, so the group contributes no runtime observation
+			// and no incomplete-process evidence — the discard is a
+			// pure function of the mutant source under the toolchain
+			// and build-configuration pins the serve validates
+			// (REQ-result-stale). Groups that ran keep their
+			// observations.
+			admit(first)
 			continue
 		}
-		processStates = append(processStates, state)
-		if incompleteReason == "" {
-			incompleteReason = incomplete
+		if first.out != engine.MutantSurvived || st.remainder == nil {
+			processStates = append(processStates, first.state)
+			admit(first)
+			continue
 		}
-		if err == nil && out == engine.MutantKilled {
-			err = attributedKill(groupKiller, w.oracleSet)
+		remainderTimeout := opts.OracleTimeout
+		if remainderTimeout > 0 {
+			remainderTimeout -= time.Since(start)
+			if remainderTimeout <= 0 {
+				// The shared budget is already spent: the decision is
+				// made — the mutant re-measures unsplit — and a doomed
+				// minimal-bound spawn would only rediscover it through
+				// the timeout classifier.
+				return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeRerun, nil
+			}
 		}
+		second, err := t.runStepGroup(ctx, w, m, opts, runEnv, *st.remainder, true, remainderTimeout)
 		if err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
 		}
-		outcome = out
-		killer = groupKiller
-		memoryDecided = memoryDecided || groupMemoryDecided
+		if second.degrade != degradeNone {
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", second.degrade, nil
+		}
+		if second.diagnostic != "" {
+			admit(second)
+			continue
+		}
+		// The pair's observations merge HERE, restoring the
+		// one-observation-per-group shape downstream sees from an
+		// unsplit run — and a pair whose individually sound phases
+		// merged unverifiable is the split MANUFACTURING
+		// unverifiability, never the suite's own truth: re-run unsplit
+		// (REQ-exec-observation's posture).
+		pair, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, first.state, second.state)
+		if err != nil {
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, fmt.Errorf("%s: merge phase observations: %w", m.Symbol, err)
+		}
+		if pairManufacturedUnverifiability(first.state, second.state, pair) {
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeRerunUnschedule, nil
+		}
+		processStates = append(processStates, pair)
+		if first.incomplete != "" && incompleteReason == "" {
+			incompleteReason = first.incomplete
+		}
+		// The first phase's memory-decided fact rides along too: the
+		// engine never marks a surviving run today, but that invariant
+		// lives in the engine's return sites — carrying the bit here
+		// costs nothing and cannot lose it if that ever changes.
+		memoryDecided = memoryDecided || first.memoryDecided
+		admit(second)
 	}
 	if err := ctx.Err(); err != nil {
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
+		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
 	}
 	state, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, processStates...)
 	if err != nil {
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
 	}
-	return outcome, killer, memoryDecided, state, incompleteReason, nil
+	return outcome, killer, memoryDecided, state, incompleteReason, degradeNone, nil
 }
 
 // newSurvivor is the ONE survivor-row constructor: every assembly path
@@ -1436,6 +1598,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// MCP server's concurrent campaigns over one cached Tree).
 	scopedBaselines := map[scopedBaselineKey]bool{}
 	coverageCache := map[string]engine.Coverage{}
+	opts.scheduleStore = newScheduleStore()
 	guidanceCache := map[string]oracleAttribution{}
 	decisions := make([]RunDecision, len(targets))
 	// skipTarget is the one no-measurement exit: the finding's mark and
@@ -1677,6 +1840,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// false flip. Probes hold it shared among themselves; each confirmation
 	// holds it exclusively (REQ-exec-attribution).
 	var probeGate sync.RWMutex
+	opts.probeGate = &probeGate
 	// One observed union over every target and oracle replaces the
 	// per-target proof builds the campaign previously paid (the measured
 	// ~270 observation passes per warm campaign): per-subject evidence is
@@ -2639,6 +2803,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			Symbol:         targets[window[0].target].Symbol,
 			CandidatesDone: mutantsDone, CandidatesTotal: int(preparedCandidates.Load()),
 		})
+		// The schedule probes run serially before the pool dispatches:
+		// one batched coverage pass per qualifying group, cached for the
+		// whole run, so the workers' schedule reads are wait-free and
+		// every mutant of the window can front its probable killers
+		// (REQ-exec-oracle-run's verdict-preserving schedule). The
+		// survivor buckets keep their own full-pattern probe — a union
+		// of subset runs is not that measurement.
+		for _, w := range window {
+			if err := t.probeScheduleCoverage(ctx, w, opts, runEnv); err != nil {
+				return nil, err
+			}
+		}
 		jobCh := make(chan job)
 		poolCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -4143,10 +4319,10 @@ func (t *Tree) oracleCoverage(ctx context.Context, w work, opts Options, runEnv 
 		if err := ctx.Err(); err != nil {
 			return engine.Coverage{}, false, err
 		}
-		key := g.pkgs[0] + "\x00" + g.runRegex + "\x00" + coverPkg
+		key := coverageKey(g, coverPkg)
 		got, ok := cache[key]
 		if !ok {
-			probed, err := engine.CoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.OracleTimeout, g.flags, runEnv, t.eng.DirectiveCoverage())
+			probed, err := campaignCoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.OracleTimeout, g.flags, runEnv, t.eng.DirectiveCoverage())
 			if err != nil {
 				if ctx.Err() != nil {
 					return engine.Coverage{}, false, ctx.Err()

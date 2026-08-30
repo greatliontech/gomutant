@@ -701,6 +701,14 @@ type pkgRun struct {
 	runRegex string
 }
 
+// testRunRegex is the ONE builder of a -run pattern over exact test
+// function names — pkgRuns and the execution schedule both speak it,
+// so a scheduled subset can never drift from the oracle's own pattern
+// grammar.
+func testRunRegex(fns []string) string {
+	return "^(" + strings.Join(fns, "|") + ")$"
+}
+
 // pkgRuns groups an oracle's test symbols by package into per-package run
 // patterns, deterministically ordered.
 func pkgRuns(oracle []string) []pkgRun {
@@ -721,7 +729,7 @@ func pkgRuns(oracle []string) []pkgRun {
 	for _, p := range pkgs {
 		fns := names[p]
 		sort.Strings(fns)
-		out = append(out, pkgRun{pkg: p, runRegex: "^(" + strings.Join(fns, "|") + ")$"})
+		out = append(out, pkgRun{pkg: p, runRegex: testRunRegex(fns)})
 	}
 	return out
 }
