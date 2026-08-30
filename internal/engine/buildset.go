@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -154,4 +156,128 @@ func (t *Tree) LinkedTestPackagesContext(ctx context.Context, testPkg string) (m
 	t.linked[testPkg] = set
 	t.linkedMu.Unlock()
 	return set, nil
+}
+
+// derivedOracleResult memoizes one package's expanded derivation
+// (REQ-target-default) for the Tree's lifetime — the loaded build is
+// immutable (REQ-exec-quiescence), and inspection faces re-derive per
+// record without it.
+type derivedOracleResult struct {
+	oracle    []string
+	stoodDown []string
+}
+
+type verifiedTestsResult struct {
+	tests []string
+	err   error
+}
+
+// verifiedTestsOfContext is TestsOfContext proven fresh: the
+// enumeration is cross-checked against a direct parse of the package's
+// on-disk test files EVERY time a package enters a derivation —
+// packages with no snapshot tests included, because a test file
+// written after the load is exactly the lag the check exists to catch
+// (REQ-target-default's freshness clause; a snapshot-only candidacy
+// was the demonstrated hole) — memoized per package for the Tree's
+// lifetime. Cancellation is never memoized.
+func (t *Tree) verifiedTestsOfContext(ctx context.Context, pkg string) ([]string, error) {
+	t.derivedMu.Lock()
+	if v, ok := t.verifiedTests[pkg]; ok {
+		t.derivedMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return v.tests, v.err
+	}
+	t.derivedMu.Unlock()
+	tests, err := t.TestsOfContext(ctx, pkg)
+	if err == nil {
+		err = t.VerifyTestEnumerationContext(ctx, pkg, tests)
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	t.derivedMu.Lock()
+	if t.verifiedTests == nil {
+		t.verifiedTests = map[string]verifiedTestsResult{}
+	}
+	t.verifiedTests[pkg] = verifiedTestsResult{tests: tests, err: err}
+	t.derivedMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return tests, nil
+}
+
+// DerivedOracleContext derives a package's expanded default oracle
+// (REQ-target-default): the freshness-verified runnable tests of every
+// in-tree package whose test binary links pkgPath, its own included —
+// a symbol's teeth can live one package up (a consumer suite
+// demonstrably kills mutants the symbol's own package cannot see), and
+// a derivation that stops at the package boundary mints survivors an
+// existing test kills. Every loaded package's enumeration is verified
+// against disk regardless of whether it contributes, so a lagging
+// snapshot refuses the derivation instead of silently capping it. A
+// test-bearing package whose linked closure stands down
+// (LinkedTestPackagesContext's nil — the closure does not resolve or
+// build) contributes nothing and is returned in stoodDown so the run
+// can NAME the cap rather than silently narrowing. Memoized per
+// package; cancellation is never memoized.
+func (t *Tree) DerivedOracleContext(ctx context.Context, pkgPath string) (oracle, stoodDown []string, err error) {
+	t.derivedMu.Lock()
+	if r, ok := t.derivedOracles[pkgPath]; ok {
+		t.derivedMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		// Cloned on every return: the memo's backing arrays are shared
+		// across a cached Tree's concurrent campaigns, and one caller's
+		// append or sort must never corrupt later derivations.
+		return slices.Clone(r.oracle), slices.Clone(r.stoodDown), nil
+	}
+	t.derivedMu.Unlock()
+	seen := map[string]bool{}
+	var bases []string
+	for _, pkg := range t.pkgs {
+		if base := basePackagePath(pkg); base != "" && !seen[base] {
+			seen[base] = true
+			bases = append(bases, base)
+		}
+	}
+	sort.Strings(bases)
+	for _, base := range bases {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		tests, err := t.verifiedTestsOfContext(ctx, base)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(tests) == 0 {
+			continue
+		}
+		linked, err := t.LinkedTestPackagesContext(ctx, base)
+		if err != nil {
+			return nil, nil, err
+		}
+		if linked == nil {
+			stoodDown = append(stoodDown, base)
+			continue
+		}
+		if linked[pkgPath] {
+			oracle = append(oracle, tests...)
+		}
+	}
+	sort.Strings(oracle)
+	sort.Strings(stoodDown)
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	t.derivedMu.Lock()
+	if t.derivedOracles == nil {
+		t.derivedOracles = map[string]derivedOracleResult{}
+	}
+	t.derivedOracles[pkgPath] = derivedOracleResult{oracle: oracle, stoodDown: stoodDown}
+	t.derivedMu.Unlock()
+	return slices.Clone(oracle), slices.Clone(stoodDown), nil
 }

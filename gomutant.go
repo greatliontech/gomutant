@@ -27,8 +27,9 @@ import (
 
 // Target is one symbol to mutate, paired with its kill oracle and its labels
 // (REQ-target-model): the oracle names the test symbols whose failure counts
-// as catching a mutant — empty means the derived default, the tests of the
-// symbol's own package (REQ-target-default) — and labels are opaque strings
+// as catching a mutant — empty means the derived default, the tests of every
+// in-tree package whose test binary links the symbol's package, its own
+// included (REQ-target-default) — and labels are opaque strings
 // echoed unchanged onto every finding the target produces
 // (REQ-target-labels).
 type Target struct {
@@ -689,7 +690,13 @@ func (t *Tree) resolveOracleContext(ctx context.Context, tg Target) ([]string, e
 	if pkg == "" {
 		return nil, nil
 	}
-	return t.eng.TestsOfContext(ctx, pkg)
+	// The derived oracle spans every in-tree package whose test binary
+	// links the symbol's package (REQ-target-default); the derivation is
+	// freshness-verified and memoized in the engine, and the describe
+	// face reports the oracle alone — the run names any stood-down
+	// packages on its decisions.
+	oracle, _, err := t.eng.DerivedOracleContext(ctx, pkg)
+	return oracle, err
 }
 
 // pkgRun is one package's oracle execution: the package and the -run

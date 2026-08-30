@@ -52,13 +52,28 @@ oracle as ambiguous rather than deduplicating the declarations or guessing which
 variant produced an event.
 
 **REQ-target-default** (behavior): A target given no oracle MUST fall back to
-a derived one — the runnable tests of the symbol's own package: its Test
-functions and the seed-corpus runs of its Fuzz targets, both variants, and
+a derived one — the runnable tests of every in-tree package whose test
+binary links the symbol's package, the symbol's own package included: each
+package's Test functions and the seed-corpus runs of its Fuzz targets, both
+variants, and
 nothing an ordinary `go test` invocation would not execute (a helper whose
 name merely starts with Test, or the TestMain harness, can kill nothing, so
 admitting it would derive an oracle that executes nothing and every mutant
 would survive an empty run) — so a bare list of symbols, or whole-package
-discovery, is a usable run without a caller enumerating tests. An explicit
+discovery, is a usable run without a caller enumerating tests. The
+cross-package reach is linkage-derived and deterministic, never
+coverage-derived: a symbol's teeth can live one package up (a consumer
+suite demonstrably kills mutants the symbol's own package cannot see), and
+a derivation stopping at the package boundary mints survivors an existing
+test kills. A test-bearing package whose linked closure cannot be RESOLVED
+contributes nothing to the derivation, and the run NAMES every such
+stood-down package on the target's decision — a silently narrowed oracle
+is the defect class the expansion exists to close. A consumer package
+whose closure resolves but whose baseline refuses (a failing or
+unbuildable suite) is never silently dropped either: the oracle of record
+is a derivation-time fact — record identity must not follow transient
+suite health — so the target skips with the refusing package and the
+escape named (fix the suite, or pass an explicit oracle). An explicit
 oracle overrides the default — including an explicitly *empty* one: a
 producer whose document is a complete statement of who vouches marks its
 oracles explicit, and an unwitnessed target then reports
@@ -68,9 +83,14 @@ A derived oracle is a measurement pin only if it is provably fresh: the
 package loader's snapshot has been observed lagging the filesystem under
 rapid successive invocations, and a lagging enumeration is a silent coverage
 cap recorded as evidence — new tests absent from the derived set while the
-same run's other evidence reads the current tree. Before a run trusts a
-derived set, it cross-checks the enumeration against a direct parse of
-the package's on-disk test files — every on-disk test file the effective
+same run's other evidence reads the current tree. Before a tree's derivations trust a
+derived set — once per tree load; a cached tree re-fingerprints its
+inputs before serving, so an edited tree always re-verifies — the
+enumeration is cross-checked against a direct parse of
+every loaded package's on-disk test files — every contributing package,
+and packages with no snapshot tests alike, because a package's first test
+file landing after the load is exactly the lag a contribution-only check
+would miss — every on-disk test file the effective
 build configuration selects, the configuration resolved from the tree's own
 environment (a persisted go-env value or a GOFLAGS tag changes which files
 the test binary compiles), snapshot-present files re-matched exactly like

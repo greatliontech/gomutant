@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -57,6 +58,11 @@ type Tree struct {
 	// lifetime (REQ-exec-quiescence).
 	linkedMu sync.Mutex
 	linked   map[string]map[string]bool
+	// derivedMu guards the expanded-derivation memos (REQ-target-default).
+	derivedMu      sync.Mutex
+	derivedOracles map[string]derivedOracleResult
+	verifiedTests  map[string]verifiedTestsResult
+	matchContexts  map[string]build.Context
 	// directiveView lazily carries the directive seam's product
 	// (DirectiveCoverage): the profile re-keying map and the
 	// known-unsound files.

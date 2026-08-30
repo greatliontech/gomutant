@@ -127,9 +127,9 @@ func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
 		packageOf: func(_ context.Context, symbol string) (string, string, error) {
 			return "example.com/p", strings.TrimPrefix(symbol, "example.com/p."), nil
 		},
-		testsOf: func(context.Context, string) ([]string, error) {
+		deriveOracle: func(context.Context, string) ([]string, []string, error) {
 			testsCalls++
-			return []string{"example.com/p.TestP"}, nil
+			return []string{"example.com/p.TestP"}, nil, nil
 		},
 		validate: func(context.Context, []string) error {
 			validationCalls++
@@ -143,24 +143,24 @@ func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
 			rapidCalls++
 			return map[string][]string{packages[0]: {"rapid"}}, nil
 		},
-		derivedOracles: map[string][]string{},
+		derivedOracles: map[string]derivedOracleMemo{},
 		validations:    map[string]oracleValidationResult{},
 		contexts:       map[string]packageContextResult{},
 	}
 
-	first, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.F"})
+	first, _, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.F"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	first[0] = "changed by caller"
-	second, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.G"})
+	second, _, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.G"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if testsCalls != 1 || !slices.Equal(second, []string{"example.com/p.TestP"}) {
 		t.Fatalf("derived oracle calls = %d, second = %v", testsCalls, second)
 	}
-	if explicit, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.H", Oracle: []string{"example.com/q.TestQ"}}); err != nil || !slices.Equal(explicit, []string{"example.com/q.TestQ"}) || testsCalls != 1 {
+	if explicit, _, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.H", Oracle: []string{"example.com/q.TestQ"}}); err != nil || !slices.Equal(explicit, []string{"example.com/q.TestQ"}) || testsCalls != 1 {
 		t.Fatalf("explicit oracle = %v, derived calls = %d", explicit, testsCalls)
 	}
 

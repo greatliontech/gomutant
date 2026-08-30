@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"example.com/fixture/genp"
 )
 
 //gofresh:pure
@@ -247,4 +249,10 @@ func TestBaselineStall(t *testing.T) {
 		return
 	}
 	os.Exit(3)
+}
+
+func TestGenpDelta(t *testing.T) {
+	if genp.Delta() != 3 {
+		t.Fatal("generated delta drifted")
+	}
 }

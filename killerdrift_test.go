@@ -510,7 +510,7 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 	}
 	remeasured := len(prior[0].Survivors) + auxKills + setWide
 	stand := prior[0].Killed - auxKills - setWide
-	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests)",
+	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests); oracle: 2 tests across 1 package",
 		killNoun(stand), candidateNoun(remeasured), survivorNoun(len(prior[0].Survivors)))
 	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != remeasured {
 		t.Fatalf("drift decision = %+v, want %q over %d candidates", decisions, wantReason, remeasured)
@@ -611,7 +611,7 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lonelyDecisions) != 1 || lonelyDecisions[0].Reason != "served: compartment delta reaches no recorded oracle; nothing re-measures" ||
+	if len(lonelyDecisions) != 1 || lonelyDecisions[0].Reason != "served: compartment delta reaches no recorded oracle; nothing re-measures; oracle: 2 tests across 1 package" ||
 		lonelyDecisions[0].Candidates != 0 || len(lonelyDispatched) != 0 {
 		t.Fatalf("no-reach decision = %+v dispatching %d, want a full serve", lonelyDecisions, len(lonelyDispatched))
 	}
@@ -840,7 +840,7 @@ func TestRunServesGrownAndDriftedComposition(t *testing.T) {
 	remeasured := len(prior[0].Survivors) + auxKills + setWide + 1 // + the flagged unmoved-killer kill
 	stand := smallKills - 1
 	wantReason := fmt.Sprintf(
-		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test); 1 candidate re-executes flagged evidence",
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test); 1 candidate re-executes flagged evidence; oracle: 3 tests across 1 package",
 		killNoun(stand), candidateNoun(remeasured), survivorNoun(len(prior[0].Survivors)))
 	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != remeasured {
 		t.Fatalf("composed decision = %+v, want %q over %d candidates", decisions, wantReason, remeasured)
@@ -1021,7 +1021,7 @@ func TestRunDriftAddedOnlyServesKillsAndBucketsSurvivors(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantReason := fmt.Sprintf(
-		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test)",
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test); oracle: 3 tests across 1 package",
 		killNoun(prior[0].Killed), candidateNoun(len(prior[0].Survivors)), survivorNoun(len(prior[0].Survivors)))
 	if len(decisions) != 1 || decisions[0].Reason != wantReason {
 		t.Fatalf("added-only decision = %+v, want %q", decisions, wantReason)
@@ -1106,7 +1106,7 @@ func TestRunDriftGrownFullyKilledRecordSaysSetGrew(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantReason := fmt.Sprintf(
-		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test)",
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (derived oracle grew by 1 test); oracle: 3 tests across 1 package",
 		killNoun(prior[0].Killed), candidateNoun(0))
 	if len(decisions) != 1 || decisions[0].Reason != wantReason || decisions[0].Candidates != 0 {
 		t.Fatalf("fully-killed grown decision = %+v, want %q with nothing re-measured", decisions, wantReason)

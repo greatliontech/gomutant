@@ -75,7 +75,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-target-default"
-  content_hash: "658c3ac6d2fe6d7bb23506e34fa8790c2ed430a9ce8965edd0d2375bbe915ea3"
+  content_hash: "ef9a8628510775c15fd7eabed253965cacf2ed6d35353aaa60cbf8822b8153f4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDerivedOracleDeltaNamesBothDirections"
   role: BINDING_ROLE_TESTS
@@ -84,7 +84,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-target-default"
-  content_hash: "658c3ac6d2fe6d7bb23506e34fa8790c2ed430a9ce8965edd0d2375bbe915ea3"
+  content_hash: "ef9a8628510775c15fd7eabed253965cacf2ed6d35353aaa60cbf8822b8153f4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestResolveOracle"
   role: BINDING_ROLE_TESTS
@@ -93,7 +93,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-target-default"
-  content_hash: "658c3ac6d2fe6d7bb23506e34fa8790c2ed430a9ce8965edd0d2375bbe915ea3"
+  content_hash: "ef9a8628510775c15fd7eabed253965cacf2ed6d35353aaa60cbf8822b8153f4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRefusesLaggingEnumeration"
   role: BINDING_ROLE_TESTS
@@ -314,4 +314,49 @@ bindings {
   symbol: "github.com/greatliontech/gomutant.TestWholeTreeShedKeepsShapedFindings"
   role: BINDING_ROLE_TESTS
   shape_hash: "55f70294600dd27bb3f25de2aa919e4264ce08e834f5384bc98c997d90f82963"
+}
+
+bindings {
+  requirement_id: "REQ-target-default"
+  content_hash: "ef9a8628510775c15fd7eabed253965cacf2ed6d35353aaa60cbf8822b8153f4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunDerivesCrossPackageOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "721bba8c0ced88e777a2adff46d508d803bf65dbf6c8abecc2ef64ccf3bc6a4e"
+}
+
+bindings {
+  requirement_id: "REQ-target-default"
+  content_hash: "ef9a8628510775c15fd7eabed253965cacf2ed6d35353aaa60cbf8822b8153f4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestDerivedOracleSpansLinkedPackages"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8917d90f2fc7ee8f96dc40ef64c673a0b7aed802f9b559857bf02d0294bdf4d9"
+}
+
+bindings {
+  requirement_id: "REQ-target-default"
+  content_hash: "ef9a8628510775c15fd7eabed253965cacf2ed6d35353aaa60cbf8822b8153f4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestDerivedOracleRefusesLaggingEnumeration"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fa580d965f4ddbd1dadc461138c571b5e6b576a45af7e33d3c83981b43dd725e"
+}
+
+bindings {
+  requirement_id: "REQ-target-default"
+  content_hash: "ef9a8628510775c15fd7eabed253965cacf2ed6d35353aaa60cbf8822b8153f4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunNamesRefusingConsumerPackage"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5844147997399968b002ec6f01a8829dab3e6f35c2bec942da53a391bc627edc"
+}
+
+bindings {
+  requirement_id: "REQ-target-default"
+  content_hash: "ef9a8628510775c15fd7eabed253965cacf2ed6d35353aaa60cbf8822b8153f4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunNamesFullyStoodDownDerivation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f4b6e6cc2f732af0c57744e28a4167f874f8e0f49f15b79b56f71740be163831"
 }

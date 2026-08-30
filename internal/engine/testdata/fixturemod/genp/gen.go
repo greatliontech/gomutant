@@ -7,3 +7,6 @@ type G struct{}
 
 // M is a generated method.
 func (G) M() {}
+
+// Delta is generated data whose only tests live in a consumer package.
+func Delta() int { return 3 }

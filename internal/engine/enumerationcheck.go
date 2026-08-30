@@ -36,11 +36,15 @@ import (
 // predicate from the type-checked one (pathological shadowing of a bound
 // testing name) refuse loudly rather than guessing.
 func (t *Tree) VerifyTestEnumerationContext(ctx context.Context, pkgPath string, derived []string) error {
-	_, packageDir, err := t.PackageContextContext(ctx, pkgPath)
+	moduleDir, packageDir, err := t.PackageContextContext(ctx, pkgPath)
 	if err != nil {
 		return err
 	}
-	matcher, err := t.buildMatchContext(ctx, packageDir)
+	// The matcher resolves per MODULE (go.env and GOFLAGS resolution are
+	// module-scoped), which is also what makes its memo hit: keyed on
+	// the package dir it could never repeat, since each package is
+	// verified at most once per Tree.
+	matcher, err := t.buildMatchContext(ctx, moduleDir)
 	if err != nil {
 		return fmt.Errorf("verify test enumeration of %s: %w", pkgPath, err)
 	}
@@ -114,6 +118,19 @@ func (t *Tree) VerifyTestEnumerationContext(ctx context.Context, pkgPath string,
 // environment, because a persisted `go env -w` value or a GOFLAGS tag
 // changes which files the test binary compiles.
 func (t *Tree) buildMatchContext(ctx context.Context, dir string) (build.Context, error) {
+	// Memoized per module directory: the effective configuration is
+	// constant for the tree's lifetime and module-scoped, so the
+	// tree-wide verification pass pays one go env exec per MODULE
+	// (measured 5ms each) instead of one per package.
+	t.derivedMu.Lock()
+	if m, ok := t.matchContexts[dir]; ok {
+		t.derivedMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return build.Context{}, err
+		}
+		return m, nil
+	}
+	t.derivedMu.Unlock()
 	cmd := exec.CommandContext(ctx, "go", "env", "-json", "GOOS", "GOARCH", "CGO_ENABLED", "GOFLAGS", "GOVERSION")
 	cmd.Dir = dir
 	cmd.Env = t.env
@@ -151,6 +168,14 @@ func (t *Tree) buildMatchContext(ctx context.Context, dir string) (build.Context
 		// test file under toolchain skew is the accepted residual, and it
 		// refuses loudly in every case but a brand-new such file.
 		matcher.ReleaseTags = tags
+	}
+	if ctx.Err() == nil {
+		t.derivedMu.Lock()
+		if t.matchContexts == nil {
+			t.matchContexts = map[string]build.Context{}
+		}
+		t.matchContexts[dir] = matcher
+		t.derivedMu.Unlock()
 	}
 	return matcher, nil
 }

@@ -2493,7 +2493,7 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if survivorCount < 2 {
 		t.Fatalf("fixture yielded %d survivors, want several so the plural literal below has teeth", survivorCount)
 	}
-	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test)",
+	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test); oracle: 2 tests across 1 package",
 		killNoun(prior[0].Killed), candidateNoun(survivorCount), survivorNoun(survivorCount))
 	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != survivorCount {
 		t.Fatalf("grown-set drift decision = %+v, want %q over %d survivors", decisions, wantReason, survivorCount)
@@ -2612,7 +2612,7 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	}
 	remeasured := prior[0].Killed + len(prior[0].Survivors)
 	wantEdited := fmt.Sprintf(
-		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test)",
+		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test); oracle: 2 tests across 1 package",
 		killNoun(0), candidateNoun(remeasured), survivorNoun(len(prior[0].Survivors)))
 	if edited[0].Cached || len(editedDecisions) != 1 || editedDecisions[0].Reason != wantEdited ||
 		len(editedDispatched) != remeasured {
@@ -5399,4 +5399,134 @@ func TestCarrySurvivorPreservesFlipEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCarried("drift", drifted.Survivors)
+}
+
+// The derived default oracle reaches the consumer package: genp has no
+// tests of its own — under the old package-scoped derivation its
+// targets were unwitnessed and every mutant survived by construction —
+// while lib's suite (whose binary links genp) holds the teeth. The
+// expanded derivation (REQ-target-default) finds them: mutants of
+// genp.Delta die to lib's TestGenpDelta, and the finding's oracle
+// evidence names the cross-package tests it measured against.
+func TestRunDerivesCrossPackageOracle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	var decisions []RunDecision
+	findings, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/genp.Delta"}}, Options{Decision: func(d RunDecision) { decisions = append(decisions, d) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := findings[0]
+	// The measure decision names the derived oracle's breadth: the
+	// operator sees the expanded width before paying for it
+	// (REQ-target-default's naming posture).
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.Contains(decisions[0].Reason, "oracle: ") || !strings.Contains(decisions[0].Reason, "packages") {
+		t.Fatalf("measure decision = %+v, want the oracle breadth named", decisions)
+	}
+	if f.Skipped != "" {
+		t.Fatalf("cross-package-witnessed target skipped: %q — the derivation stopped at the package boundary", f.Skipped)
+	}
+	if f.Killed == 0 {
+		t.Fatalf("no mutant of genp.Delta died to the consumer suite: %+v", f)
+	}
+	crossPackage := false
+	for _, ev := range f.OracleEvidence {
+		if strings.HasPrefix(ev.Symbol, "example.com/fixture/lib.") {
+			crossPackage = true
+			break
+		}
+	}
+	if !crossPackage {
+		t.Fatalf("oracle evidence names no consumer-package test: %+v", f.OracleEvidence)
+	}
+}
+
+// A consumer package of a DERIVED oracle whose baseline refuses never
+// silently drops from the oracle: the oracle of record is a
+// derivation-time fact (record identity must not follow transient
+// suite health), so the target skips with the refusing package and
+// the escape named (REQ-target-default's cross-package baseline
+// clause).
+func TestRunNamesRefusingConsumerPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.com/redmod\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc A() int { return 1 }\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) { if A() != 1 { t.Fatal() } }\n",
+		"r/r.go":      "package r\n\nimport \"example.com/redmod/a\"\n\nfunc R() int { return a.A() }\n",
+		"r/r_test.go": "package r\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { t.Fatal(\"always red\") }\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/redmod/a.A"}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipped := findings[0].Skipped
+	if !strings.Contains(skipped, "example.com/redmod/r") || !strings.Contains(skipped, "consumer package of the derived oracle") || !strings.Contains(skipped, "explicit oracle") {
+		t.Fatalf("consumer refusal = %q, want the package, the consumer framing, and the escape named", skipped)
+	}
+	// The explicit-oracle escape measures without the red consumer.
+	explicit, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/redmod/a.A", Oracle: []string{"example.com/redmod/a.TestA"}}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit[0].Skipped != "" || explicit[0].Killed == 0 {
+		t.Fatalf("explicit escape did not measure: %+v", explicit[0])
+	}
+}
+
+// A target whose ENTIRE derived oracle stood down is not "no oracle":
+// a consultable consumer suite exists and failed to resolve, and
+// filing the symbol as dark would be the naming duty's worst failure —
+// the skip carries the stood-down packages and the escape
+// (REQ-target-default's stand-down naming).
+func TestRunNamesFullyStoodDownDerivation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go list per test package")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.com/darkmod\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc A() int { return 1 }\n",
+		"c/c.go":      "package c\n\nimport (\n\t_ \"example.com/darkmod/a\"\n\t_ \"example.com/darkmod/missing\"\n)\n",
+		"c/c_test.go": "package c\n\nimport \"testing\"\n\nfunc TestC(t *testing.T) {}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/darkmod/a.A"}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipped := findings[0].Skipped
+	if !strings.Contains(skipped, "no oracle") || !strings.Contains(skipped, "stood down on: example.com/darkmod/c") || !strings.Contains(skipped, "explicit oracle") {
+		t.Fatalf("fully-stood-down skip = %q, want the cap and the escape named", skipped)
+	}
 }

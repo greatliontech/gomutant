@@ -444,69 +444,68 @@ type oracleValidationResult struct {
 	err error
 }
 
-type runPreparation struct {
-	packageOf  func(context.Context, string) (string, string, error)
-	testsOf    func(context.Context, string) ([]string, error)
-	validate   func(context.Context, []string) error
-	contextFor func(context.Context, string) (string, string, error)
-	runtimesOf func(context.Context, []string) (map[string][]string, error)
+// derivedOracleMemo is one package's memoized expanded derivation:
+// the oracle and the packages whose closures stood down.
+type derivedOracleMemo struct {
+	oracle    []string
+	stoodDown []string
+}
 
-	verifyEnumeration func(context.Context, string, []string) error
-	derivedOracles    map[string][]string
-	validations       map[string]oracleValidationResult
-	contexts          map[string]packageContextResult
-	rapid             map[string]bool
-	runtimes          map[string][]string
-	notedProperty     map[string]bool
+type runPreparation struct {
+	packageOf func(context.Context, string) (string, string, error)
+	// deriveOracle is the expanded, freshness-verified default-oracle
+	// derivation (REQ-target-default): (oracle, stood-down packages,
+	// error). One implementation lives in the engine; the seam exists
+	// for preparation unit tests.
+	deriveOracle func(context.Context, string) ([]string, []string, error)
+	validate     func(context.Context, []string) error
+	contextFor   func(context.Context, string) (string, string, error)
+	runtimesOf   func(context.Context, []string) (map[string][]string, error)
+
+	derivedOracles map[string]derivedOracleMemo
+	validations    map[string]oracleValidationResult
+	contexts       map[string]packageContextResult
+	rapid          map[string]bool
+	runtimes       map[string][]string
+	notedProperty  map[string]bool
 }
 
 func newRunPreparation(t *Tree) *runPreparation {
 	return &runPreparation{
-		packageOf:         t.eng.PackageOfContext,
-		testsOf:           t.eng.TestsOfContext,
-		validate:          t.eng.ValidateOracleContext,
-		contextFor:        t.eng.PackageContextContext,
-		runtimesOf:        t.eng.PropertyRuntimesContext,
-		verifyEnumeration: t.eng.VerifyTestEnumerationContext,
-		derivedOracles:    map[string][]string{},
-		validations:       map[string]oracleValidationResult{},
-		contexts:          map[string]packageContextResult{},
+		packageOf:      t.eng.PackageOfContext,
+		deriveOracle:   t.eng.DerivedOracleContext,
+		validate:       t.eng.ValidateOracleContext,
+		contextFor:     t.eng.PackageContextContext,
+		runtimesOf:     t.eng.PropertyRuntimesContext,
+		derivedOracles: map[string]derivedOracleMemo{},
+		validations:    map[string]oracleValidationResult{},
+		contexts:       map[string]packageContextResult{},
 	}
 }
 
-func (p *runPreparation) oracle(ctx context.Context, target Target) ([]string, error) {
+func (p *runPreparation) oracle(ctx context.Context, target Target) ([]string, []string, error) {
 	if len(target.Oracle) > 0 || target.OracleExplicit {
-		return slices.Clone(target.Oracle), ctx.Err()
+		return slices.Clone(target.Oracle), nil, ctx.Err()
 	}
 	pkg, _, err := p.packageOf(ctx, target.Symbol)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if pkg == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
-	if oracle, ok := p.derivedOracles[pkg]; ok {
-		return slices.Clone(oracle), ctx.Err()
+	if memo, ok := p.derivedOracles[pkg]; ok {
+		return slices.Clone(memo.oracle), slices.Clone(memo.stoodDown), ctx.Err()
 	}
-	oracle, err := p.testsOf(ctx, pkg)
+	oracle, stoodDown, err := p.deriveOracle(ctx, pkg)
 	if err != nil {
-		return nil, err
-	}
-	// The derived set is an oracle pin only if it is provably fresh: the
-	// package loader's snapshot has been observed lagging the filesystem, so
-	// the enumeration is cross-checked against a direct parse of the
-	// package's on-disk test files before it is trusted — once per package,
-	// memoized with the set it vouches for.
-	if p.verifyEnumeration != nil {
-		if err := p.verifyEnumeration(ctx, pkg, oracle); err != nil {
-			return nil, err
-		}
+		return nil, nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	p.derivedOracles[pkg] = slices.Clone(oracle)
-	return oracle, nil
+	p.derivedOracles[pkg] = derivedOracleMemo{oracle: slices.Clone(oracle), stoodDown: slices.Clone(stoodDown)}
+	return oracle, stoodDown, nil
 }
 
 func (p *runPreparation) validateOracle(ctx context.Context, oracle []string) error {
@@ -1567,6 +1566,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	type resolvedTarget struct {
 		index  int
 		oracle []string
+		// oracleNote is the derivation's self-description for the
+		// measure decision: breadth, and any stood-down packages
+		// (REQ-target-default's stand-down naming).
+		oracleNote string
 		// attested carries this target's package-process pairing: its
 		// oracle packages all equal its own, so the processes that
 		// attribute its subjects' verdicts are its own package's test
@@ -1658,14 +1661,36 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 		}
-		oracle, err := preparation.oracle(ctx, tg)
+		oracle, oracleStoodDown, err := preparation.oracle(ctx, tg)
 		if err != nil {
 			return nil, err
 		}
+		// The derivation names its own caps and breadth: the measure
+		// decision carries how wide the derived oracle is and which
+		// test-bearing packages the derivation could not consult — a
+		// silently narrowed oracle is the defect class this derivation
+		// exists to close (REQ-target-default's stand-down naming).
+		oracleNote := ""
+		if len(tg.Oracle) == 0 && !tg.OracleExplicit {
+			if len(oracle) > 0 {
+				oracleNote = fmt.Sprintf("; oracle: %s across %s", testNoun(len(oracle)), packageNoun(len(pkgRuns(oracle))))
+			}
+			if len(oracleStoodDown) > 0 {
+				oracleNote += "; derivation stood down on: " + strings.Join(oracleStoodDown, ", ")
+			}
+		}
 		if len(oracle) == 0 {
 			// Nothing can kill: the caller sees it and decides
-			// (REQ-target-default).
-			skipTarget(i, "no oracle", false)
+			// (REQ-target-default). An oracle that exists but could not
+			// be consulted is NOT "no oracle" — the stood-down packages
+			// and the escape ride the skip, the naming duty's worst
+			// case (a dark symbol filed as unwitnessed when a consumer
+			// suite merely failed to resolve).
+			reason := "no oracle"
+			if len(oracleStoodDown) > 0 {
+				reason += " — derivation stood down on: " + strings.Join(oracleStoodDown, ", ") + "; resolve the closure, or pass an explicit oracle"
+			}
+			skipTarget(i, reason, false)
 			continue
 		}
 		if err := preparation.validateOracle(ctx, oracle); err != nil {
@@ -1705,7 +1730,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			f.BodyHash = digest
 			f.OperatorSet = shapedOperatorSet
 			f.Shape = &TargetShape{Structural: tg.Structural, Manual: tg.Manual}
-			resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, shaped: candidates, shapedDigest: digest, shapedFiles: shapedFiles, attested: packageProcessAttestable(tg.Symbol, oracle)})
+			resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, oracleNote: oracleNote, shaped: candidates, shapedDigest: digest, shapedFiles: shapedFiles, attested: packageProcessAttestable(tg.Symbol, oracle)})
 			continue
 		}
 		bodyHash, err := t.eng.BodyHashContext(ctx, tg.Symbol)
@@ -1737,7 +1762,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, attested: packageProcessAttestable(tg.Symbol, oracle)})
+		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, oracleNote: oracleNote, attested: packageProcessAttestable(tg.Symbol, oracle)})
 	}
 	// Per-mode view bundles: each target's attestation is its own (the
 	// pairing above), so a mixed run builds one engine and view set per
@@ -1939,6 +1964,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				case !passed:
 					reason = fmt.Sprintf("oracle baseline does not pass in %s (failed: %s)", group.pkgs[0], strings.Join(failedTests, ", "))
 				}
+				// A refusing CONSUMER package of a derived oracle names
+				// the escape: the oracle-of-record is a derivation-time
+				// fact, so the group is never silently dropped (record
+				// identity must not follow transient suite health) —
+				// the caller fixes the suite or narrows explicitly
+				// (REQ-target-default's cross-package baseline clause).
+				if reason != "" && len(tg.Oracle) == 0 && !tg.OracleExplicit && w.targetView != nil && group.pkgs[0] != w.targetView.subject.Package {
+					reason += fmt.Sprintf(" — a consumer package of the derived oracle; fix its suite, or pass an explicit oracle to measure %s without it", tg.Symbol)
+				}
 				if reason != "" {
 					baselineFailures[key] = reason
 					return reason, nil
@@ -2022,7 +2056,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					return nil, nil
 				}
 				*f = served
-				cacheTarget(i, "served: shape and oracle pins unchanged")
+				cacheTarget(i, "served: shape and oracle pins unchanged"+resolved.oracleNote)
 				return nil, nil
 			}
 			reason = "stale"
@@ -2076,7 +2110,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			oracleSet[o] = true
 		}
 		w.oracleSet = oracleSet
-		decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Candidates: len(w.candidates)}
+		decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason + resolved.oracleNote, Candidates: len(w.candidates)}
 		f.Budget = 0
 		f.CandidateCount = len(w.candidates)
 		f.Generated = len(w.candidates)
@@ -2287,7 +2321,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if err := commitFinding(ctx, opts.Commit, cached); err != nil {
 					return nil, err
 				}
-				cacheTarget(i, "served: body, oracle closure, and runtime inputs unchanged")
+				cacheTarget(i, "served: body, oracle closure, and runtime inputs unchanged"+resolved.oracleNote)
 				return nil, nil
 			}
 			if matches {
@@ -2444,7 +2478,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if flagged, ok := flaggedCandidateIndexes(generation, *w.serve); ok {
 				w.candidates = generation.Candidates
 				w.flagged = flagged
-				decision = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: fmt.Sprintf("served: pins unchanged; re-executing %s", candidateNoun(len(flagged))), Candidates: len(flagged)}
+				decision = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: fmt.Sprintf("served: pins unchanged; re-executing %s", candidateNoun(len(flagged))) + resolved.oracleNote, Candidates: len(flagged)}
 			} else {
 				// Deterministic regeneration cannot re-identify every flagged
 				// candidate and recorded survivor, so the record cannot be
@@ -2465,7 +2499,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				w.candidates = generation.Candidates
 				w.extendFrom = w.extend.Generated
 				suffix := len(generation.Candidates) - w.extendFrom
-				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: fmt.Sprintf("served: prefix of %s stands; measuring %d more", candidateNoun(w.extendFrom), suffix), Candidates: suffix}
+				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: fmt.Sprintf("served: prefix of %s stands; measuring %d more", candidateNoun(w.extendFrom), suffix) + resolved.oracleNote, Candidates: suffix}
 			} else {
 				// Deterministic regeneration cannot re-identify the recorded
 				// prefix, so the record cannot be extended: the whole target
@@ -2500,7 +2534,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					// the grown wording above stands.
 					reason = "served: compartment delta reaches no recorded oracle; nothing re-measures"
 				}
-				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason, Candidates: len(remeasure)}
+				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason + resolved.oracleNote, Candidates: len(remeasure)}
 			} else {
 				// Deterministic regeneration cannot re-identify the recorded
 				// candidates, kills, and survivors, so the record cannot
@@ -2520,7 +2554,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		if w.serve == nil && w.extend == nil && w.drift == nil {
 			w.candidates = generation.Candidates
-			decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason, Candidates: len(generation.Candidates)}
+			decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason + resolved.oracleNote, Candidates: len(generation.Candidates)}
 			f.Budget = opts.Budget
 			f.CandidateCount = generation.CandidateCount
 			f.Generated = len(generation.Candidates)
@@ -4338,6 +4372,8 @@ func (t *Tree) oracleCoverage(ctx context.Context, w work, opts Options, runEnv 
 }
 
 func testNoun(n int) string { return countNoun(n, "test") }
+
+func packageNoun(n int) string { return countNoun(n, "package") }
 
 func survivorNoun(n int) string { return countNoun(n, "survivor") }
 
