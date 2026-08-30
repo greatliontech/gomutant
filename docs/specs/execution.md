@@ -407,10 +407,20 @@ refused rather than guessed: a mutation applied somewhere the
 caller did not mean is a measurement of the wrong mutant. The run refuses
 inputs the build would silently ignore before any process launches: a test
 package that is not a loaded package import path (a flag-shaped value would
-otherwise change the invocation being measured), and a replacement of a file
+otherwise change the invocation being measured); a replacement of a file
 the loaded build does not compile — a build-constraint-excluded source or a
 non-Go file — whose mutation could never be exercised and would report a
-false survivor. Before running the mutant gomutant probes the named
+false survivor; and a replacement of a file outside the named test
+package's linked dependency set (the import paths `go test` compiles into
+that binary) — a compiled-elsewhere file the oracle never links overlays
+cleanly and every test passes, even a syntax error going unnoticed, so no
+verdict exists to render: the refusal names the fact and the repair (an
+oracle that links the edited package) instead of reporting a false
+survivor, and an unparseable edit of such a file refuses on this ground
+first, before any build could diagnose it (a linked set the derivation
+cannot resolve leaves this gate standing down: a closure that does not
+build refuses at the baseline probe with the compiler's own diagnostic,
+this requirement's canonical framing). Before running the mutant gomutant probes the named
 test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
 and read as a fabricated kill — the flattering direction
@@ -423,10 +433,11 @@ guess. The result reports whether the named test killed the
 mutant and the attributed failing test; it is evidence for the caller to act
 on, never persisted to a finding record (REQ-result-record). A survivor
 verdict additionally names the replacement files no baseline-covered block
-touches - a compiled file in a package the probed test package never imports
-overlays cleanly and every test passes, so killed=false over an unexercised
-replacement is not evidence the oracle noticed nothing (the ephemeral twin of
-the survivor-evidence buckets); the classification comes from one baseline
+touches - the file is linked into the oracle's binary (an unlinked
+replacement refuses at validation), yet the probed run never reached it, so
+killed=false over an unexercised
+replacement is not evidence the oracle noticed anything (the ephemeral twin
+of the survivor-evidence buckets); the classification comes from one baseline
 coverage probe run only when the verdict is not a kill (plain survival and
 the mixed killed-some-runs outcome alike - both leave the false-survivor
 reading open), is advisory, and is absent when

@@ -51,6 +51,12 @@ type Tree struct {
 	dir string
 	// build lazily indexes the loaded build for ephemeral validation.
 	build buildSet
+	// linked caches each test package's linked dependency set (the
+	// import paths `go test` compiles into its binary), derived once
+	// per test package: the loaded build is immutable for the tree's
+	// lifetime (REQ-exec-quiescence).
+	linkedMu sync.Mutex
+	linked   map[string]map[string]bool
 	// directiveView lazily carries the directive seam's product
 	// (DirectiveCoverage): the profile re-keying map and the
 	// known-unsound files.

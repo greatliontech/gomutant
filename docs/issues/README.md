@@ -16,7 +16,6 @@ is deleted (git holds history).
 | [campaign-baseline-needs-scoped-oracles](campaign-baseline-needs-scoped-oracles.md) | root-suite scale blocks campaign baselines in gomutant (~16m) AND gofresh (~6.5m x 303 candidates, measured 2h21m/0 committed); chunk gates stand on ephemeral probes; go-test face resolved by CI's measured -timeout | train chunk 113 |
 | [graceful-interrupt-persistence](graceful-interrupt-persistence.md) | SIGINT finishes the mutant and persists partial-target resume state machine-locally | train chunk 113 |
 | [ephemeral-equivalence-attestation](ephemeral-equivalence-attestation.md) | judged-equivalent ephemeral probes live only in commit messages; --attest would give them a findings-document row | train chunk 113 |
-| [ephemeral-unexercised-survived](ephemeral-unexercised-survived.md) | ephemeral renders SURVIVED for an edit the oracle never links (unexercised bucket) — vacuous evidence that reads as a survivor | train chunk 113 |
 | [method-rewrite-unit-oracle](method-rewrite-unit-oracle.md) | engine-scoped campaign oracle misses methodDeclarationRewrite's root-package teeth — 86 machine-local survivors at 0 kills; line-235 sample measured 3-3 artifact/gap, decoy fixture landed; scoping fix + drift-pin/offset-bounds arms + stable-oracle re-run | train chunk 113 |
 - **[suite-shared-fixture-bracket-flake](suite-shared-fixture-bracket-flake.md)** — one full-suite
   parallel run moved the shared fixturemod/lib observation bracket (honest refusal, unidentified

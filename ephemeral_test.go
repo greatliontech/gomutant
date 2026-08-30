@@ -163,7 +163,18 @@ func TestEphemeral(t *testing.T) {
 	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestNoSuch$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "matched no tests") {
 		t.Fatalf("zero-match probe scored: %v", err)
 	}
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/failing", "^TestAlwaysFails$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") {
+	// The failing-clean pairing edits the failing package's OWN test
+	// file: the linkage gate admits it (the oracle's own files are in
+	// its linked set), so the baseline probe is what refuses.
+	failingSrc, err := os.ReadFile("internal/engine/testdata/fixturemod/failing/failing_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failingMutant := strings.Replace(string(failingSrc), "by design", "by design still", 1)
+	if failingMutant == string(failingSrc) {
+		t.Fatal("failing fixture edit failed")
+	}
+	if _, err := tr.Ephemeral(ctx, "failing/failing_test.go", []byte(failingMutant), "example.com/fixture/failing", "^TestAlwaysFails$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") {
 		t.Fatalf("failing-clean probe scored: %v", err)
 	}
 
@@ -263,9 +274,9 @@ func TestDiscardErrorSplitsNoiseFromCompileFailure(t *testing.T) {
 }
 
 // A survivor verdict over a replacement outside the probed oracle's
-// exercised set is labeled, never silent: the out-of-closure file
-// lands in UnexercisedFiles, while an in-closure covered survivor
-// carries no label (REQ-exec-ephemeral).
+// exercised set is labeled, never silent: the linked-but-unexecuted
+// file lands in UnexercisedFiles, while a covered file's
+// untested-branch survivor carries no label (REQ-exec-ephemeral).
 func TestEphemeralLabelsUnexercisedReplacement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per probe")
@@ -273,23 +284,28 @@ func TestEphemeralLabelsUnexercisedReplacement(t *testing.T) {
 	tr := fixtureTree(t)
 	ctx := context.Background()
 
-	outside, err := os.ReadFile("internal/engine/testdata/fixturemod/diskread/disk.go")
+	// A LINKED file the probed run never executes: genp is compiled
+	// into lib's test binary (lib.go embeds genp.G), but gen.go holds
+	// no statement the probe covers, so a surviving mutant of it earns
+	// the unexercised label — the only reachable arm now that an
+	// unlinked replacement refuses at validation.
+	linkedIdle, err := os.ReadFile("internal/engine/testdata/fixturemod/genp/gen.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated := strings.Replace(string(outside), "return x - 1", "return x - 2", 1)
-	if mutated == string(outside) {
+	mutated := strings.Replace(string(linkedIdle), "type G struct{}", "type G struct{ X int }", 1)
+	if mutated == string(linkedIdle) {
 		t.Fatal("fixture edit failed")
 	}
-	res, err := tr.Ephemeral(ctx, "diskread/disk.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	res, err := tr.Ephemeral(ctx, "genp/gen.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Killed {
-		t.Fatalf("out-of-closure replacement killed: %+v", res)
+		t.Fatalf("linked-unexecuted replacement killed: %+v", res)
 	}
-	if len(res.UnexercisedFiles) != 1 || res.UnexercisedFiles[0] != "diskread/disk.go" {
-		t.Fatalf("unexercised label = %v, want the out-of-closure file named", res.UnexercisedFiles)
+	if len(res.UnexercisedFiles) != 1 || res.UnexercisedFiles[0] != "genp/gen.go" {
+		t.Fatalf("unexercised label = %v, want the linked-unexecuted file named", res.UnexercisedFiles)
 	}
 
 	inside, err := os.ReadFile("internal/engine/testdata/fixturemod/lib/lib.go")
@@ -327,17 +343,17 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 	}
 	defer func() { coveredPositions = restore }()
 	tr := fixtureTree(t)
-	outside, err := os.ReadFile("internal/engine/testdata/fixturemod/diskread/disk.go")
+	linkedIdle, err := os.ReadFile("internal/engine/testdata/fixturemod/genp/gen.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated := strings.Replace(string(outside), "return x - 1", "return x - 2", 1)
-	res, err := tr.Ephemeral(context.Background(), "diskread/disk.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	mutated := strings.Replace(string(linkedIdle), "type G struct{}", "type G struct{ X int }", 1)
+	res, err := tr.Ephemeral(context.Background(), "genp/gen.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Killed {
-		t.Fatalf("out-of-closure replacement killed: %+v", res)
+		t.Fatalf("linked-unexecuted replacement killed: %+v", res)
 	}
 	if res.UnexercisedFiles != nil {
 		t.Fatalf("failed probe still labeled: %v", res.UnexercisedFiles)

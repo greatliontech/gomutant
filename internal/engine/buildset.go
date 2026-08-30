@@ -1,7 +1,12 @@
 package engine
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -52,4 +57,85 @@ func (t *Tree) BuildCompilesFile(abs string) bool {
 // replacement against a profile starts here.
 func (t *Tree) FileImportPath(abs string) string {
 	return t.buildIndex().filePkg[filepath.Clean(abs)]
+}
+
+// LinkedTestPackagesContext reports the import paths `go test` compiles
+// into testPkg's test binary — the package itself, its test variants,
+// and every transitive dependency — via `go list -deps -test` under the
+// tree's environment, cached per test package (the loaded build is
+// immutable for the tree's lifetime, REQ-exec-quiescence). An ephemeral
+// replacement of a file outside this set could never be exercised by
+// the named oracle: a compiled-elsewhere file overlays cleanly, every
+// test passes, and the verdict would be a false survivor — so
+// validation refuses on this set before any process launches
+// (REQ-exec-ephemeral).
+func (t *Tree) LinkedTestPackagesContext(ctx context.Context, testPkg string) (map[string]bool, error) {
+	t.linkedMu.Lock()
+	set, ok := t.linked[testPkg]
+	t.linkedMu.Unlock()
+	if ok {
+		return set, nil
+	}
+	// The lock is not held across the exec: concurrent probes on one
+	// Tree (the MCP server) derive in parallel, and a racing duplicate
+	// derivation costs one redundant go list, never a wrong set.
+	cmd := exec.CommandContext(ctx, "go", "list", "-deps", "-test", "-f", "{{.ImportPath}}", testPkg)
+	cmd.Dir = t.dir
+	cmd.Env = t.env
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			// go list RAN and said no: the closure itself does not
+			// resolve or build, and the established refusals — the
+			// baseline probe's compiler-diagnostic path above all —
+			// own that diagnosis in the spec's canonical framing, so
+			// the gate stands down rather than refusing in its own
+			// words (REQ-exec-ephemeral). The false-survivor risk
+			// stays closed: a closure that does not build fails the
+			// baseline probe before any verdict.
+			return nil, nil
+		}
+		// A start failure (fork/exec under memory pressure, RLIMIT)
+		// says nothing about the closure — standing down here would
+		// silently re-open the unlinked-false-survivor channel when a
+		// later spawn succeeds, so the derivation failure is the
+		// caller's error.
+		return nil, fmt.Errorf("resolving %s's linked dependency set: %w", testPkg, err)
+	}
+	set = map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		if i := strings.Index(line, " ["); i >= 0 {
+			// A test variant prints bracket-suffixed ("pkg_test
+			// [pkg.test]"); its files belong to the plain import path
+			// the build index records, so only genuinely bracketed
+			// lines are cut. A real tree package that shares the
+			// "<pkg>_test" import path would be indistinguishable —
+			// the go tool itself claims that path for the synthesized
+			// external test package — an inherent collision with no
+			// discriminator, accepted.
+			set[line[:i]] = true
+			continue
+		}
+		if line == testPkg+".test" {
+			// The synthesized test main is no source package; keeping
+			// it would wrongly admit a real tree package that happens
+			// to carry the ".test"-suffixed import path.
+			continue
+		}
+		set[line] = true
+	}
+	t.linkedMu.Lock()
+	if t.linked == nil {
+		t.linked = map[string]map[string]bool{}
+	}
+	t.linked[testPkg] = set
+	t.linkedMu.Unlock()
+	return set, nil
 }

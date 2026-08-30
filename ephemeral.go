@@ -47,10 +47,11 @@ type EphemeralResult struct {
 	RunVerdicts []string `json:"runVerdicts"`
 	// UnexercisedFiles names replacement files no baseline-covered block
 	// touches (non-kill verdicts - plain survival and the mixed
-	// killed-some-runs outcome alike): the probed oracle never linked
-	// or never reached them, so killed=false over these is not evidence
-	// the oracle noticed nothing. Advisory, absent when the coverage
-	// probe fails (REQ-exec-ephemeral).
+	// killed-some-runs outcome alike): the file is linked into the
+	// oracle's binary — an unlinked replacement refuses at validation —
+	// yet the probed run never reached it, so killed=false over it is
+	// not evidence the oracle noticed anything. Advisory, absent when
+	// the coverage probe fails (REQ-exec-ephemeral).
 	UnexercisedFiles []string `json:"unexercisedFiles,omitempty"`
 }
 
@@ -204,6 +205,28 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 			return nil, fmt.Errorf("replacement %s is not compiled by the loaded build (build-constraint-excluded, or not a Go source of any loaded package): the mutation would never be exercised", replacement.File)
 		}
 	}
+	// A file the build compiles SOMEWHERE can still be outside the named
+	// oracle's own binary: a fixture or sibling package the test package
+	// never imports overlays cleanly, every test passes — even a syntax
+	// error goes unnoticed, the broken package is never built — and the
+	// verdict would be a false survivor. The linked dependency set is
+	// the discriminator, and it refuses before any process launches; a
+	// linked-but-uncovered replacement remains an honest survivor with
+	// the unexercised advisory (REQ-exec-ephemeral).
+	linked, err := t.eng.LinkedTestPackagesContext(ctx, testPkg)
+	if err != nil {
+		return nil, err
+	}
+	// A nil set means the closure itself does not resolve or build: the
+	// gate stands down and the baseline probe owns the refusal with the
+	// compiler's own diagnostic, the spec's canonical framing.
+	if linked != nil {
+		for _, replacement := range replacements {
+			if pkg := t.eng.FileImportPath(replacement.Abs); !linked[pkg] {
+				return nil, fmt.Errorf("the oracle never compiles %s: package %s is outside %s's linked dependency set — no verdict; name an oracle that links the edited package", replacement.File, pkg, testPkg)
+			}
+		}
+	}
 	// A rapid property failing on the baseline or against the mutant must
 	// never write a reproducer into the tree (REQ-mut-overlay).
 	var binFlags []string
@@ -271,11 +294,12 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	res.Killed = res.KilledRuns == runs
 	if !res.Killed {
-		// A survivor verdict over a replacement the probed binary never
-		// exercised is not evidence the oracle noticed nothing - the
-		// out-of-closure false-survivor channel: a compiled file in a
-		// package the test package never imports overlays cleanly and
-		// every test passes. One baseline coverage probe (non-kill
+		// A survivor verdict over a replacement the probed run never
+		// exercised is not evidence the oracle noticed anything — the
+		// linked-but-unexecuted false-survivor channel (an UNLINKED
+		// replacement already refused at validation): the file is in
+		// the binary, but no covered block reaches it, so every test
+		// passing says nothing about the mutant. One baseline coverage probe (non-kill
 		// verdicts only - the mixed killed-some-runs outcome leaves the
 		// false-survivor reading open too; kills need no qualifier)
 		// classifies each

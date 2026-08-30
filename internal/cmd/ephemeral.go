@@ -142,7 +142,7 @@ func renderEphemeralVerdict(w io.Writer, res *gomutant.EphemeralResult) {
 		fmt.Fprintf(w, "SURVIVED  %s  — %s did not notice the mutation\n", strings.Join(res.Files, ", "), res.Run)
 	}
 	for _, f := range res.UnexercisedFiles {
-		fmt.Fprintf(w, "unexercised  %s  — no baseline-covered block reaches this replacement (never linked or never reached); its survival is not evidence the oracle noticed nothing\n", f)
+		fmt.Fprintf(w, "unexercised  %s  — no baseline-covered block reaches this replacement (linked into the oracle's binary, never reached by the probed run); its survival is not evidence the oracle noticed anything\n", f)
 	}
 	if res.KillerOutput != "" {
 		for _, l := range strings.Split(res.KillerOutput, "\n") {
