@@ -56,3 +56,26 @@ func TestLinkedTestPackagesFollowsTagSelection(t *testing.T) {
 		t.Fatalf("tag-selected linked set lacks the gated import: %v", gatedSet)
 	}
 }
+
+// The direct scan is the load-bearing fallback when a closure is
+// unresolvable: with a nil linked set cached, a directly-importing
+// rapid package still detects — the narrow go-list-fails-where-go-test-
+// builds residual keeps its direct-importer coverage
+// (REQ-exec-property-oracles).
+func TestPropertyRuntimesDirectScanCoversUnresolvableClosure(t *testing.T) {
+	tr, err := Load("testdata/fixturemod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const prop = "example.com/fixture/prop"
+	tr.linkedMu.Lock()
+	tr.linked = map[string]map[string]bool{prop: nil}
+	tr.linkedMu.Unlock()
+	runtimes, err := tr.PropertyRuntimesContext(context.Background(), []string{prop})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runtimes[prop]; len(got) != 1 || got[0] != "rapid" {
+		t.Fatalf("direct-scan fallback runtimes = %v, want rapid via the direct import", got)
+	}
+}

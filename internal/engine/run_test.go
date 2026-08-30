@@ -360,8 +360,9 @@ func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 }
 
 // TestSplitRapidPkgs pins the rapid-failfile partition (REQ-mut-overlay's
-// runtime tree purity): the flag is per-binary, so packages split by whether
-// their test files (in-package or external variant) import rapid — a mixed
+// runtime tree purity): the flag is per-binary, so packages split by
+// whether their test binary LINKS rapid — directly, via a test
+// variant, or through a helper — and a mixed
 // union must never put the flag in front of a rapid-free binary, which would
 // die on it and read as a false kill.
 func TestSplitRapidPkgs(t *testing.T) {
@@ -374,6 +375,27 @@ func TestSplitRapidPkgs(t *testing.T) {
 	}
 	if len(plain) != 1 || plain[0] != plainPkg {
 		t.Fatalf("plain group = %v", plain)
+	}
+
+	// A test driving rapid solely through a helper package links the
+	// runtime all the same: the linked-closure detection classifies it
+	// rapid — a direct-imports-only verdict would run it unpinned,
+	// record the empty regime, and let a killed property write
+	// reproducer litter (REQ-exec-property-oracles).
+	indirect := "example.com/fixture/indirectprop"
+	rapid, plain = tr.SplitRapidPkgs([]string{indirect, plainPkg})
+	if len(rapid) != 1 || rapid[0] != indirect {
+		t.Fatalf("helper-linked rapid group = %v, want the indirect package classified rapid", rapid)
+	}
+	if len(plain) != 1 || plain[0] != plainPkg {
+		t.Fatalf("helper-linked plain group = %v", plain)
+	}
+	runtimes, err := tr.PropertyRuntimesContext(context.Background(), []string{indirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runtimes[indirect]; len(got) != 1 || got[0] != "rapid" {
+		t.Fatalf("helper-linked runtimes = %v, want the rapid prerequisite statement", got)
 	}
 }
 

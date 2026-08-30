@@ -81,6 +81,23 @@ func TestRunStatesPropertyOraclePrerequisites(t *testing.T) {
 	if len(notes) != 2 || notes[0].Runtime != "gopter" || notes[1].Runtime != "rapid" {
 		t.Fatalf("mixed-runtime notes = %+v, want both statements sorted", notes)
 	}
+
+	// The SHAPED lane states what it pins exactly like the symbol
+	// lane: a shaped-only run over a rapid oracle must not pin
+	// silently (REQ-exec-property-oracles' once-per-package
+	// statement).
+	notes = nil
+	if _, err := tr.Run(ctx, []Target{{
+		Symbol:         "structural:lib-no-plain",
+		Structural:     &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/fixture/lib"}, Forbidden: "example.com/fixture/plain"},
+		Oracle:         []string{"example.com/fixture/lib.TestPropRapidCheck"},
+		OracleExplicit: true,
+	}}, Options{Budget: 1, PropertyOracle: collect}); err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 || notes[0].Runtime != "rapid" || notes[0].Package != "example.com/fixture/lib" {
+		t.Fatalf("shaped-lane rapid prerequisite notes = %+v, want the one pinned statement", notes)
+	}
 }
 
 // The property regime is a measurement pin: a rapid-oracle record

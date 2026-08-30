@@ -11,7 +11,6 @@ is deleted (git holds history).
 | [planonly-gatherwindow-suite-hang](planonly-gatherwindow-suite-hang.md) | a plan-only Tree.Run hangs the suite at gatherWindow, cause undumped | train chunk 113 (closes unreproducible at triage absent a mechanism-showing dump) |
 | [derive-probe-oracle-timeout](derive-probe-oracle-timeout.md) | derive the mutant-run budget from the measured baseline instead of a fixed timeout knob | train chunk 113 |
 | [symbol-cutter-duality](symbol-cutter-duality.md) | two symbol cutters over one grammar, relationship unstated | train chunk 113 |
-| [campaign-refuses-tree-change-from-rapid-failfiles](campaign-refuses-tree-change-from-rapid-failfiles.md) | rapid failfile persistence poisons campaign analysis views and ephemeral tree cleanliness | train chunk 113 |
 | [semantic-closure-in-the-carry-gate](semantic-closure-in-the-carry-gate.md) | a comment-insensitive closure identity would dominate both poles of the carry gate | train chunk 130 (after 129 ships the gofresh identity) |
 | [coverage-guided-oracle-ordering](coverage-guided-oracle-ordering.md) | run symbol-reaching tests first with failfast; schedule, never narrowing | train chunk 113 |
 | [campaign-baseline-needs-scoped-oracles](campaign-baseline-needs-scoped-oracles.md) | root-suite scale blocks campaign baselines in gomutant (~16m) AND gofresh (~6.5m x 303 candidates, measured 2h21m/0 committed); chunk gates stand on ephemeral probes; go-test face resolved by CI's measured -timeout | train chunk 113 |

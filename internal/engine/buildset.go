@@ -96,7 +96,23 @@ func (t *Tree) LinkedTestPackagesContext(ctx context.Context, testPkg string) (m
 			// the gate stands down rather than refusing in its own
 			// words (REQ-exec-ephemeral). The false-survivor risk
 			// stays closed: a closure that does not build fails the
-			// baseline probe before any verdict.
+			// baseline probe before any verdict. The nil verdict is
+			// cached like any other — re-execing go list on every
+			// consult would bill the unresolvable state repeatedly.
+			// The latch's bound: it is sound when the failure is a
+			// function of the loaded source (the common class — a
+			// broken closure stays broken for this Tree's lifetime),
+			// and accepted for the narrow transient class (a module
+			// cache mid-fetch, environment hiccups): a fresh Tree
+			// re-derives, and the ephemeral gate standing down on the
+			// latched nil still leaves the baseline probe to refuse
+			// anything that genuinely does not build.
+			t.linkedMu.Lock()
+			if t.linked == nil {
+				t.linked = map[string]map[string]bool{}
+			}
+			t.linked[testPkg] = nil
+			t.linkedMu.Unlock()
 			return nil, nil
 		}
 		// A start failure (fork/exec under memory pressure, RLIMIT)

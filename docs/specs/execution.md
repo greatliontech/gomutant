@@ -362,9 +362,21 @@ condition that invalidates every measurement — cancellation of the run
 itself.
 
 **REQ-exec-property-oracles** (behavior): gomutant MUST detect recognized
-property runtimes in an oracle package's imports (test variants included)
-before execution and settle each detected runtime's determinism
-prerequisite there, never leaving the discovery to the caller
+property runtimes in an oracle package's test binary: the direct
+imports (test variants included) for every runtime, and — for
+flag-registering runtimes (rapid), whose pin must reach every binary
+that links them — the binary's linked dependency closure regardless of
+what the direct scan found, because a runtime driven solely through a
+helper package registers its flags and its draws in the binary all the
+same, and a direct-imports-only verdict would run it unpinned, record
+the empty regime for a property-decided verdict, and let a killed
+property write reproducer litter. A merely-linked non-flag runtime
+(gopter) draws nothing unless a test calls it, so linkage-based
+detection would mint a false prerequisite statement; it stays on the
+direct-use scan. An unresolvable closure falls back to the direct scan
+alone. Each detected
+runtime's determinism prerequisite settles before execution, never
+left to the caller
 mid-campaign — a mixed package earns every detected runtime's own
 statement, because a single-winner note would state something false
 either way. A rapid package
@@ -379,7 +391,13 @@ share one draw sequence, so total draw coverage narrows versus
 per-process random seeds, and a mutant killable only under other draws
 survives deterministically — the reproducible-survivor direction is
 chosen over the flaky-kill one, and the seed value is incidental, not
-contract. The regime a finding's oracle ran under is a recorded
+contract. The pin guarantees identical draws only while the recorded
+failfile set is stable: rapid replays testdata/rapid failfiles
+unconditionally — `-rapid.nofailfile` gates only the write — so a
+pre-existing failfile is a genuine oracle input the freshness view
+rightly hashes, and a failfile appearing mid-run is real drift,
+rightly refused; excluding testdata/rapid from the view would forfeit
+exactly that truth. The regime a finding's oracle ran under is a recorded
 measurement pin: a record measured under other draws — a pre-regime
 document included — re-measures rather than serving as reproducible.
 A recognized runtime gomutant cannot pin

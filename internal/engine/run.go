@@ -9,6 +9,7 @@ import (
 	iofs "io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -54,47 +55,29 @@ func observationProcess(kind string) string {
 	return fmt.Sprintf("gomutant-%s-%d", kind, observationSequence.Add(1))
 }
 
-// SplitRapidPkgs partitions test packages by whether their test files
-// (in-package or external variant) import pgregory.net/rapid. Rapid packages
+// SplitRapidPkgs partitions test packages by whether their test binary
+// links pgregory.net/rapid. Rapid packages
 // need -rapid.nofailfile so a mutant-induced property failure never writes a
 // reproducer into the source tree — and one mutant's failfile cannot replay
 // into the next mutant's run (REQ-mut-overlay). The flag is per-binary: a
 // test binary that does not register it fails on the unknown flag and reads
-// as a false kill, so the two groups must run in separate invocations. The
-// scan is of direct imports only — a test driving rapid solely through a
-// helper package escapes the guard; the failure mode there is visible
-// failfile litter, never a false kill.
+// as a false kill, so the two groups must run in separate invocations.
 func (t *Tree) SplitRapidPkgs(testPkgs []string) (rapid, plain []string) {
 	rapid, plain, _ = t.SplitRapidPkgsContext(context.Background(), testPkgs)
 	return rapid, plain
 }
 
-// SplitRapidPkgsContext is SplitRapidPkgs with cooperative cancellation.
+// SplitRapidPkgsContext is SplitRapidPkgs with cooperative
+// cancellation, expressed on the one runtime-detection walk
+// (PropertyRuntimesContext) so the split and the prerequisite
+// statements can never disagree about which binaries carry rapid.
 func (t *Tree) SplitRapidPkgsContext(ctx context.Context, testPkgs []string) (rapid, plain []string, err error) {
-	byPath := map[string]bool{}
-	for _, pkg := range t.pkgs {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, err
-		}
-		if byPath[pkg.PkgPath] {
-			continue
-		}
-		for _, f := range pkg.Syntax {
-			if err := ctx.Err(); err != nil {
-				return nil, nil, err
-			}
-			for _, imp := range f.Imports {
-				if strings.Trim(imp.Path.Value, `"`) == rapidPkg {
-					byPath[pkg.PkgPath] = true
-				}
-			}
-		}
+	runtimes, err := t.PropertyRuntimesContext(ctx, testPkgs)
+	if err != nil {
+		return nil, nil, err
 	}
 	for _, p := range testPkgs {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, err
-		}
-		if byPath[p] || byPath[p+"_test"] {
+		if slices.Contains(runtimes[p], "rapid") {
 			rapid = append(rapid, p)
 		} else {
 			plain = append(plain, p)
@@ -140,6 +123,29 @@ func (t *Tree) PropertyRuntimesContext(ctx context.Context, testPkgs []string) (
 		}
 		for name := range byPath[p+"_test"] {
 			names[name] = true
+		}
+		// The direct scan decides positively but never negatively: a
+		// runtime driven solely through a helper package links into
+		// the binary all the same, so the binary's linked closure is
+		// consulted for every package (REQ-exec-property-oracles'
+		// linked-closure detection; cached per test package). The
+		// closure detects FLAG-REGISTERING runtimes only (rapid): for
+		// those, linkage is exactly the predicate — the flags register
+		// in package init and the pin must reach every linking binary
+		// — while a merely-linked non-flag runtime (gopter) draws
+		// nothing unless a test calls it, so linkage-based detection
+		// would mint a false prerequisite statement; gopter stays on
+		// the direct-use scan. An unresolvable closure (nil set) falls
+		// back to the direct scan alone; the residual — go list
+		// failing where go test would build — is narrow (a workspace
+		// cwd asymmetry), and the direct scan still covers direct
+		// importers there.
+		linked, err := t.LinkedTestPackagesContext(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		if linked[rapidPkg] {
+			names["rapid"] = true
 		}
 		if len(names) == 0 {
 			continue

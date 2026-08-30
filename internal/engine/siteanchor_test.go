@@ -41,9 +41,9 @@ func TestSiteHashDiscriminatesSameShapedSites(t *testing.T) {
 }
 
 // PropertyRuntimesContext maps oracle packages to their recognized
-// property runtimes: rapid via in-package or external test variants,
-// gopter via its own import, plain packages absent
-// (REQ-exec-property-oracles).
+// property runtimes: rapid wherever the test binary links it (direct,
+// test-variant, or helper-driven), gopter via its own direct use,
+// plain packages absent (REQ-exec-property-oracles).
 func TestPropertyRuntimesContext(t *testing.T) {
 	tr := fixtureTree(t)
 	got, err := tr.PropertyRuntimesContext(context.Background(), []string{

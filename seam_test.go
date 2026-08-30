@@ -139,9 +139,9 @@ func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
 			contextCalls++
 			return "/module", "/module/p", nil
 		},
-		splitRapidPkgs: func(_ context.Context, packages []string) ([]string, []string, error) {
+		runtimesOf: func(_ context.Context, packages []string) (map[string][]string, error) {
 			rapidCalls++
-			return []string{packages[0]}, packages[1:], nil
+			return map[string][]string{packages[0]: {"rapid"}}, nil
 		},
 		derivedOracles: map[string][]string{},
 		validations:    map[string]oracleValidationResult{},
@@ -188,13 +188,20 @@ func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
 		t.Fatalf("package context calls = %d", contextCalls)
 	}
 
+	// The split derives from the ONE runtime walk: a propertyRuntimes
+	// derivation already on record must serve rapidPackages without a
+	// second detection — the fold's invariant that split, flags,
+	// statements, and regime can never disagree.
+	if _, err := preparation.propertyRuntimes(context.Background(), []string{"example.com/p", "example.com/q"}); err != nil {
+		t.Fatal(err)
+	}
 	rapid, err := preparation.rapidPackages(context.Background(), []string{"example.com/p", "example.com/q"})
 	if err != nil || !rapid["example.com/p"] {
 		t.Fatal("rapid package not classified")
 	}
 	rapid, err = preparation.rapidPackages(context.Background(), []string{"ignored after first scan"})
 	if err != nil || !rapid["example.com/p"] || rapidCalls != 1 {
-		t.Fatalf("rapid scan calls = %d", rapidCalls)
+		t.Fatalf("rapid scan calls = %d, want the single shared derivation", rapidCalls)
 	}
 }
 

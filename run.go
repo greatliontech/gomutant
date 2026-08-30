@@ -433,12 +433,11 @@ type oracleValidationResult struct {
 }
 
 type runPreparation struct {
-	packageOf      func(context.Context, string) (string, string, error)
-	testsOf        func(context.Context, string) ([]string, error)
-	validate       func(context.Context, []string) error
-	contextFor     func(context.Context, string) (string, string, error)
-	splitRapidPkgs func(context.Context, []string) ([]string, []string, error)
-	runtimesOf     func(context.Context, []string) (map[string][]string, error)
+	packageOf  func(context.Context, string) (string, string, error)
+	testsOf    func(context.Context, string) ([]string, error)
+	validate   func(context.Context, []string) error
+	contextFor func(context.Context, string) (string, string, error)
+	runtimesOf func(context.Context, []string) (map[string][]string, error)
 
 	verifyEnumeration func(context.Context, string, []string) error
 	derivedOracles    map[string][]string
@@ -455,7 +454,6 @@ func newRunPreparation(t *Tree) *runPreparation {
 		testsOf:           t.eng.TestsOfContext,
 		validate:          t.eng.ValidateOracleContext,
 		contextFor:        t.eng.PackageContextContext,
-		splitRapidPkgs:    t.eng.SplitRapidPkgsContext,
 		runtimesOf:        t.eng.PropertyRuntimesContext,
 		verifyEnumeration: t.eng.VerifyTestEnumerationContext,
 		derivedOracles:    map[string][]string{},
@@ -530,20 +528,27 @@ func (p *runPreparation) packageContext(ctx context.Context, pkg string) (string
 	return moduleDir, packageDir, err
 }
 
+// rapidPackages derives the rapid set from the one runtime-detection
+// walk (propertyRuntimes): the split, the flags, the statements, and
+// the regime pin all consume a single derivation and can never
+// disagree.
+// candidates feeds the shared propertyRuntimes memo: whichever caller
+// derives first fixes the memo's package list, so every caller must
+// pass the same run-wide oracle set (both in-tree callers pass
+// oraclePackages).
 func (p *runPreparation) rapidPackages(ctx context.Context, candidates []string) (map[string]bool, error) {
 	if p.rapid != nil {
 		return p.rapid, ctx.Err()
 	}
-	rapid, _, err := p.splitRapidPkgs(ctx, candidates)
+	runtimes, err := p.propertyRuntimes(ctx, candidates)
 	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	p.rapid = map[string]bool{}
-	for _, pkg := range rapid {
-		p.rapid[pkg] = true
+	for pkg, names := range runtimes {
+		if slices.Contains(names, "rapid") {
+			p.rapid[pkg] = true
+		}
 	}
 	return p.rapid, nil
 }
@@ -1801,10 +1806,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		rec, hasPrior := prior[tg.Symbol]
 		// The property-runtime regime is a measurement pin for shaped
 		// findings exactly as for symbol findings: a rapid oracle
-		// package pins its draws (REQ-exec-property-oracles).
+		// package pins its draws (REQ-exec-property-oracles). A
+		// detection failure (a go list spawn failing under load) is
+		// this target's own condition, never a campaign abort — the
+		// same locality every other preparation probe keeps
+		// (REQ-exec-quiescence).
 		targetRapid, err := preparation.rapidPackages(ctx, oraclePackages)
 		if err != nil {
-			return nil, err
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			skipTarget(i, "property-runtime detection unavailable: "+err.Error(), true)
+			return nil, nil
 		}
 		regime := ""
 		for _, run := range pkgRuns(oracle) {
@@ -1913,10 +1926,24 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		runs := pkgRuns(w.oracle)
 		runtimes, err := preparation.propertyRuntimes(ctx, oraclePackages)
 		if err != nil {
-			return nil, err
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			skipTarget(i, "property-runtime detection unavailable: "+err.Error(), true)
+			return nil, nil
 		}
 		for _, pr := range runs {
 			flags := propertyOracleFlags(slices.Contains(runtimes[pr.pkg], "rapid"))
+			// The shaped lane states what it pins exactly as the
+			// symbol lane's group construction does: a shaped-only
+			// campaign over a property package must not pin silently
+			// (REQ-exec-property-oracles' once-per-package statement).
+			for _, runtime := range runtimes[pr.pkg] {
+				note, ok := propertyOracleNote(pr.pkg, runtime)
+				if ok && preparation.noteProperty(pr.pkg+"/"+runtime) && opts.PropertyOracle != nil {
+					opts.PropertyOracle(note)
+				}
+			}
 			moduleDir, packageDir, err := preparation.packageContext(ctx, pr.pkg)
 			if err != nil {
 				return nil, err
@@ -1976,10 +2003,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// The target's property-runtime measurement regime: a rapid
 		// oracle package pins its draws, and the regime is a measurement
 		// pin - a record measured under other draws re-measures
-		// (REQ-exec-property-oracles).
+		// (REQ-exec-property-oracles). A detection failure is this
+		// target's own condition, never a campaign abort
+		// (REQ-exec-quiescence's locality).
 		targetRapid, err := preparation.rapidPackages(ctx, oraclePackages)
 		if err != nil {
-			return nil, err
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			skipTarget(i, "property-runtime detection unavailable: "+err.Error(), true)
+			return nil, nil
 		}
 		regime := ""
 		for _, run := range pkgRuns(oracle) {
@@ -2347,7 +2380,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		runtimes, err := preparation.propertyRuntimes(ctx, oraclePackages)
 		if err != nil {
-			return nil, err
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			skipTarget(i, "property-runtime detection unavailable: "+err.Error(), true)
+			return nil, nil
 		}
 		buildGroups := func(oracle []string) ([]group, error) {
 			var groups []group
