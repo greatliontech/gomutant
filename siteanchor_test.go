@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -305,7 +306,7 @@ func TestDriftCarryAdoptsSitesOntoGrandfatheredDispositions(t *testing.T) {
 		Survivors: []Survivor{{Position: "f.go:3:3", Operator: "op-b", Execution: "executed-and-passed"}},
 		Attested:  []Attestation{{Position: "f.go:3:3", Operator: "op-b", Reason: "pre-site disposition"}},
 	}
-	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: []engine.MutantOutcome{engine.MutantSurvived}}, nil, nil, 0)
+	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: []engine.MutantOutcome{engine.MutantSurvived}}, nil, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}

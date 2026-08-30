@@ -53,7 +53,7 @@ func newRunCommand() *cobra.Command {
 	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
 	f.IntVar(&o.budget, "budget", 0, "candidates per symbol; 0 = exhaustive")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result commit after this duration; 0 = unlimited")
-	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
+	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "maximum duration of each oracle process; 0 derives each oracle group's budget from its measured baseline (an explicit value is the uniform override)")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling per oracle process tree in MiB (GOMEMLIMIT plus a hard data-segment cap): 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host")
 	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
 	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "external surface the oracle legitimately reads (module-relative path or absolute file, repeatable; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run")
@@ -601,6 +601,8 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 		fmt.Fprintln(w, "prepare   loading")
 	case gomutant.PreparationBaseline:
 		fmt.Fprintf(w, "prepare   %s %s %s\n", event.Stage, event.Symbol, event.Package)
+	case gomutant.PreparationOracleBudget:
+		fmt.Fprintf(w, "prepare   %s %s %s %s\n", event.Stage, event.Symbol, event.Package, event.OracleBudget)
 	default:
 		fmt.Fprintf(w, "prepare   %s %s\n", event.Stage, event.Symbol)
 	}

@@ -238,13 +238,25 @@ const MaxEphemeralRuns = 10
 // the whole probe.
 const ephemeralBaselineLeash = 10 * time.Minute
 
+// campaignBaselineLeash bounds baselines and advisory probes in
+// derived-budget mode: the baseline is the measurement each group's
+// budget derives from, so it gets a generous ceiling rather than the
+// budget it exists to derive — sized for suite-class oracles (the
+// measured field shapes: ~6.5m and ~16m root suites), where the
+// ephemeral face's 10m leash was sized for probe-class ones. A hung
+// suite burns it once per group; the command timeout still bounds.
+const campaignBaselineLeash = time.Hour
+
 // ephemeralBudgetFloor keeps a derived budget from ever being less
 // patient than the fixed default it replaced: the floor is the
 // retired 60s, because a warm-cache baseline pays no compile while
 // the mutant run always recompiles the mutated package inside its
 // bound — the multiple alone would time out honest slow mutants of
-// fast tests, and a timeout is a kill, the flattering direction.
-const ephemeralBudgetFloor = 60 * time.Second
+// fast tests, and a timeout is a kill, the flattering direction. A
+// variable only so tests can pin the measured derivation and the
+// timeout-kill serve without minute-class hangs; production never
+// writes it.
+var ephemeralBudgetFloor = 60 * time.Second
 
 // derivedOracleBudget maps a measured baseline duration to the mutant
 // budget: a multiple with a floor (REQ-exec-ephemeral's derived

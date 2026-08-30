@@ -8,9 +8,9 @@ is deleted (git holds history).
 |------|---------|-------|
 | [mcp-liveness-cancellation-witness](mcp-liveness-cancellation-witness.md) | keepalive config pinned but the ping-failure cancellation propagation has no witness over the SDK transport seam | transport-seam fault injection lands in the mcpserver harness |
 | [windows-process-fact-arms-unexecuted](windows-process-fact-arms-unexecuted.md) | windows process facts (killed flag, job kills, timeout attribution) are compile-checked only; two attribution defects survived to review state walks | when a windows runner enters the CI matrix |
+| [run-scoped-services-through-options](run-scoped-services-through-options.md) | groupBudget/probeGate/scheduleStore ride exported Options as unexported fields; collapse into one explicitly threaded runServices value | with train chunk 136 |
 | [ephemeral-attestation-lifecycle](ephemeral-attestation-lifecycle.md) | attestation rows have no prune/retarget lifecycle; commit+dirty stamp is the only staleness signal | with the next change to prune or retarget record surfaces |
 | [planonly-gatherwindow-suite-hang](planonly-gatherwindow-suite-hang.md) | a plan-only Tree.Run hangs the suite at gatherWindow, cause undumped | train chunk 113 (closes unreproducible at triage absent a mechanism-showing dump) |
-| [derive-probe-oracle-timeout](derive-probe-oracle-timeout.md) | derive the mutant-run budget from the measured baseline instead of a fixed timeout knob | train chunk 113 |
 | [symbol-cutter-duality](symbol-cutter-duality.md) | two symbol cutters over one grammar, relationship unstated | train chunk 113 |
 | [semantic-closure-in-the-carry-gate](semantic-closure-in-the-carry-gate.md) | a comment-insensitive closure identity would dominate both poles of the carry gate | train chunk 130 (after 129 ships the gofresh identity) |
 | [campaign-baseline-needs-scoped-oracles](campaign-baseline-needs-scoped-oracles.md) | root-suite scale blocks campaign baselines in gomutant (~16m) AND gofresh (~6.5m x 303 candidates, measured 2h21m/0 committed); chunk gates stand on ephemeral probes; go-test face resolved by CI's measured -timeout | train chunk 113 |

@@ -21,3 +21,61 @@ func TestSymbolPackageAbsorbsVersionElements(t *testing.T) {
 		}
 	}
 }
+
+// The oracle-bound pin under derivation (REQ-result-stale's
+// timeout-kill rule): exact agreement always matches; derived on both
+// sides matches when every "(timeout)" kill carries its candidate-local
+// evidence row (the flagged serve re-executes it under the current
+// budget — the re-vouching route the relaxation rides) and refuses when
+// any lacks one (a shaped record's wholesale serve has no such route);
+// an explicit side keeps the exact pin.
+func TestTimeoutPinMatchesTimeoutKillRule(t *testing.T) {
+	clean := Finding{OracleTimeout: "2m0s", OracleTimeoutDerived: true, Kills: []Kill{{Killer: "p.TestA"}}}
+	timedOut := Finding{
+		OracleTimeout: "2m0s", OracleTimeoutDerived: true,
+		Kills:             []Kill{{Position: "f.go:3:2", Operator: "unary assignment: -- -> ++", Killer: TimeoutKiller}},
+		CandidateEvidence: []CandidateEvidence{{Position: "f.go:3:2", Operator: "unary assignment: -- -> ++", Reason: "mutant test process timed out", Disposition: "killed"}},
+	}
+	unroutedTimeout := Finding{OracleTimeout: "2m0s", OracleTimeoutDerived: true, Kills: []Kill{{Position: "f.go:3:2", Operator: "unary assignment: -- -> ++", Killer: TimeoutKiller}}}
+	explicit := Finding{OracleTimeout: "1m0s"}
+
+	if !timeoutPinMatches(explicit, "1m0s", false) {
+		t.Fatal("exact explicit pin did not match")
+	}
+	if timeoutPinMatches(explicit, "2m0s", false) {
+		t.Fatal("explicit pin matched across values")
+	}
+	if timeoutPinMatches(explicit, "1m0s", true) {
+		t.Fatal("explicit record matched a derived run at the same value's spelling — the posture is part of the pin")
+	}
+	if !timeoutPinMatches(clean, "3m0s", true) {
+		t.Fatal("derived record with completed verdicts re-measured on a budget change — completed verdicts are budget-independent")
+	}
+	if !timeoutPinMatches(timedOut, "3m0s", true) {
+		t.Fatal("derived record with an evidence-backed timeout kill re-measured wholesale — the flagged serve re-executes it under the current budget, so the pin relaxes")
+	}
+	if timeoutPinMatches(unroutedTimeout, "3m0s", true) {
+		t.Fatal("timeout kill without its evidence row served across a budget change — no re-execution route re-vouches the bound claim")
+	}
+	mismatched := timedOut
+	mismatched.CandidateEvidence = []CandidateEvidence{{Position: "g.go:9:1", Operator: "comparison: > -> <", Reason: "mutant test process timed out", Disposition: "killed"}}
+	if timeoutPinMatches(mismatched, "3m0s", true) {
+		t.Fatal("timeout kill covered by another candidate's evidence row — the route must belong to the kill itself")
+	}
+	if !timeoutPinMatches(unroutedTimeout, "2m0s", true) {
+		t.Fatal("unrouted timeout kill did not match its own exact bound")
+	}
+	if timeoutPinMatches(clean, "3m0s", false) {
+		t.Fatal("derived record matched an explicit run")
+	}
+
+	if !timeoutPinMatchesRecord(clean, Finding{OracleTimeout: "5m0s", OracleTimeoutDerived: true}) {
+		t.Fatal("record-to-record derived clean pair did not match")
+	}
+	if timeoutPinMatchesRecord(unroutedTimeout, Finding{OracleTimeout: "5m0s", OracleTimeoutDerived: true}) {
+		t.Fatal("record-to-record unrouted timeout kill matched across bounds")
+	}
+	if timeoutPinMatchesRecord(clean, explicit) {
+		t.Fatal("derived-vs-explicit records matched")
+	}
+}

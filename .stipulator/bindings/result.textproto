@@ -471,7 +471,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-stale"
-  content_hash: "189dca8b71acf2bec25afb7f5b3bd44245b2946cade06708cc4d1830f0e93db4"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestApplySplicedUnionAcceptsRelativeEraRecords"
   role: BINDING_ROLE_TESTS
@@ -480,7 +480,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-stale"
-  content_hash: "189dca8b71acf2bec25afb7f5b3bd44245b2946cade06708cc4d1830f0e93db4"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestApplySplicedUnionMarksDivergedEvidenceNonReusable"
   role: BINDING_ROLE_TESTS
@@ -489,7 +489,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-stale"
-  content_hash: "189dca8b71acf2bec25afb7f5b3bd44245b2946cade06708cc4d1830f0e93db4"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestApplySplicedUnionNamesDivergingInputs"
   role: BINDING_ROLE_TESTS
@@ -498,7 +498,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-stale"
-  content_hash: "189dca8b71acf2bec25afb7f5b3bd44245b2946cade06708cc4d1830f0e93db4"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCandidateSpliceDirtyRecordPromotesOnCleanTree"
   role: BINDING_ROLE_TESTS
@@ -507,7 +507,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-stale"
-  content_hash: "189dca8b71acf2bec25afb7f5b3bd44245b2946cade06708cc4d1830f0e93db4"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCompartmentReachFlagsUnconditionalRoots"
   role: BINDING_ROLE_TESTS
@@ -516,7 +516,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-stale"
-  content_hash: "189dca8b71acf2bec25afb7f5b3bd44245b2946cade06708cc4d1830f0e93db4"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCompartmentReachObservesDeltaDeclarations"
   role: BINDING_ROLE_TESTS
@@ -525,7 +525,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-stale"
-  content_hash: "189dca8b71acf2bec25afb7f5b3bd44245b2946cade06708cc4d1830f0e93db4"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDriftRemeasureIndexesSelectsMovedEvidence"
   role: BINDING_ROLE_TESTS
@@ -534,7 +534,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-stale"
-  content_hash: "189dca8b71acf2bec25afb7f5b3bd44245b2946cade06708cc4d1830f0e93db4"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDriftServePromotesDirtyBornRecordOnCleanTree"
   role: BINDING_ROLE_TESTS
@@ -719,4 +719,31 @@ bindings {
   symbol: "github.com/greatliontech/gomutant.RecordEphemeralAttestation"
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "16e82b9aa3d6967e56bbfe3ac53e68da385adccb371ffb4fa81cb611739cbd9c"
+}
+
+bindings {
+  requirement_id: "REQ-result-stale"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestMergeScoredFactsRaisesDerivedBudget"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8d8b56ef462f756254d20f6998d5f49c73de04a099b0e166185ea9315cd70148"
+}
+
+bindings {
+  requirement_id: "REQ-result-stale"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestTimeoutPinMatchesTimeoutKillRule"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1dccd09f3e7d3f8bc7005984addf20bb6f9841a061ba7248191e319486c87456"
+}
+
+bindings {
+  requirement_id: "REQ-result-stale"
+  content_hash: "04f2143b01e7c498dddc0182c1d8ef6d8af2ec62be28d98812148251a0ad7337"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunServesDerivedTimeoutKillsByReexecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "50555e1ed1487e90be07369f5184c8d7cf9c365741ab2b6d6b70395718b79d63"
 }

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -278,12 +279,25 @@ func (t *Tree) probeScheduleCoverage(ctx context.Context, w work, opts Options, 
 type scheduleStep struct {
 	first     group
 	remainder *group
+	// budget is the step's oracle bound — the source group's derived
+	// budget in derive mode, the caller's explicit timeout otherwise —
+	// resolved from the UNSPLIT group before any narrowing, so a
+	// split's two phases share the group's one budget window
+	// (REQ-exec-oracle-run's derived campaign budget).
+	budget time.Duration
 }
 
-func unscheduledSteps(groups []group) []scheduleStep {
+func stepBudget(g group, opts Options) time.Duration {
+	if opts.groupBudget != nil {
+		return opts.groupBudget(g)
+	}
+	return opts.OracleTimeout
+}
+
+func unscheduledSteps(groups []group, opts Options) []scheduleStep {
 	out := make([]scheduleStep, len(groups))
 	for i, g := range groups {
-		out[i] = scheduleStep{first: g}
+		out[i] = scheduleStep{first: g, budget: stepBudget(g, opts)}
 	}
 	return out
 }
@@ -298,15 +312,16 @@ func unscheduledSteps(groups []group) []scheduleStep {
 func (t *Tree) scheduleSteps(w work, m engine.Mutant, opts Options) []scheduleStep {
 	store := opts.scheduleStore
 	if store == nil || w.shaped || w.targetView == nil || m.Extent == "" {
-		return unscheduledSteps(w.groups)
+		return unscheduledSteps(w.groups, opts)
 	}
 	coverPkg := w.targetView.subject.Package
 	probe := Survivor{Position: m.Position, Extent: m.Extent}
 	var out []scheduleStep
 	for _, g := range w.groups {
+		budget := stepBudget(g, opts)
 		entry := store.get(coverageKey(g, coverPkg))
 		if entry == nil || len(entry.batches) < 2 {
-			out = append(out, scheduleStep{first: g})
+			out = append(out, scheduleStep{first: g, budget: budget})
 			continue
 		}
 		var reaching, rest []string
@@ -327,7 +342,7 @@ func (t *Tree) scheduleSteps(w work, m engine.Mutant, opts Options) []scheduleSt
 			}
 		}
 		if !sound || len(reaching) == 0 || len(rest) == 0 {
-			out = append(out, scheduleStep{first: g})
+			out = append(out, scheduleStep{first: g, budget: budget})
 			continue
 		}
 		sort.Strings(reaching)
@@ -335,7 +350,7 @@ func (t *Tree) scheduleSteps(w work, m engine.Mutant, opts Options) []scheduleSt
 		gFirst, gRest := g, g
 		gFirst.runRegex = testRunRegex(reaching)
 		gRest.runRegex = testRunRegex(rest)
-		out = append(out, scheduleStep{first: gFirst, remainder: &gRest})
+		out = append(out, scheduleStep{first: gFirst, remainder: &gRest, budget: budget})
 	}
 	return out
 }
@@ -369,7 +384,7 @@ func pairManufacturedUnverifiability(a, b, merged runtimeinput.Observation) bool
 // serial confirmation's scored run. A non-pass means the suite is
 // order-dependent under this pattern: the caller re-runs the mutant
 // unsplit and the group stops scheduling.
-func (t *Tree) phaseKillVouched(ctx context.Context, g group, opts Options, runEnv []string) bool {
+func (t *Tree) phaseKillVouched(ctx context.Context, g group, bound time.Duration, opts Options, runEnv []string) bool {
 	if opts.scheduleStore == nil {
 		return false
 	}
@@ -379,7 +394,7 @@ func (t *Tree) phaseKillVouched(ctx context.Context, g group, opts Options, runE
 			opts.probeGate.RLock()
 			defer opts.probeGate.RUnlock()
 		}
-		ran, passed, _, _, err := phaseBaselineProbe(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		ran, passed, _, _, err := phaseBaselineProbe(ctx, t.dir, g.pkgs[0], g.runRegex, bound, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 		return err == nil && ran > 0 && passed
 	})
 }

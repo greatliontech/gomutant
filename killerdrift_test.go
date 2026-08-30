@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -340,7 +341,7 @@ func TestDriftFindingCountsRescoresRemeasured(t *testing.T) {
 	// Index 4 is a recorded discard re-executing through the
 	// candidate-evidence composition; it discards again, conserving its
 	// recorded disposition through a fresh execution.
-	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, windowScores{outcomes: outcomes, killers: killers, memoryDecided: []bool{true}}, nil, nil, 0)
+	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, remeasured, windowScores{outcomes: outcomes, killers: killers, memoryDecided: []bool{true}}, nil, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +723,7 @@ func TestEvidenceSetCoversKillerDriftEarlyGate(t *testing.T) {
 		// The head pins the explicit flags equal, so the grown-explicit
 		// refusal is exercised with both sides explicit — the only state
 		// the pin admits.
-		moved, added, ok, err := evidenceSetCoversKillerDriftContext(ctx, tc.prior, nil, tc.oracle, tc.explicit, "go/12", "1m0s", 0, "")
+		moved, added, ok, err := evidenceSetCoversKillerDriftContext(ctx, tc.prior, nil, tc.oracle, tc.explicit, "go/12", "1m0s", false, 0, "")
 		if err != nil || ok || moved != nil || added != nil {
 			t.Fatalf("%s: drift gate = %v %v %v %v, want a refusal before any evidence check", name, moved, added, ok, err)
 		}

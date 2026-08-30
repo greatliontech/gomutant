@@ -128,8 +128,8 @@ func TestRunTimeoutFlagsNameIndependentLimits(t *testing.T) {
 	if got := cmd.Flags().Lookup("timeout"); got == nil || got.DefValue != "0s" {
 		t.Fatalf("--timeout = %+v, want unlimited command default", got)
 	}
-	if got := cmd.Flags().Lookup("oracle-timeout"); got == nil || got.DefValue != "1m0s" {
-		t.Fatalf("--oracle-timeout = %+v, want one-minute oracle default", got)
+	if got := cmd.Flags().Lookup("oracle-timeout"); got == nil || got.DefValue != "0s" {
+		t.Fatalf("--oracle-timeout = %+v, want the derive-from-baseline default (0s)", got)
 	}
 }
 

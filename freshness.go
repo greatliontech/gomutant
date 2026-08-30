@@ -1082,13 +1082,65 @@ func memoryPinStale(prior Finding, currentPin int64) bool {
 	return effectiveCeiling(currentPin) < effectiveCeiling(prior.OracleMemoryBytes)
 }
 
+// timeoutPinMatches compares a record's oracle-bound pin against the
+// current run's posture: exact agreement, or derived on both sides
+// with every timeout kill re-executable — derived budgets vary with
+// the measured tree, and re-pinning to them would churn every record
+// every run for bounds that cannot change any verdict. The relaxation
+// covers every verdict class it admits: a completed verdict is an
+// answer about the suite (tests pass or fail on the mutant), and a
+// budget change can only turn answers into refusals to answer, never
+// into different answers; a "(timeout)"-attributed kill is a claim
+// about the bound itself, admitted only where its candidate-local
+// incomplete-observation evidence rides the record — the flagged serve
+// discipline then re-executes exactly that candidate under the current
+// derived budget, re-vouching the bound claim by measurement. A
+// timeout kill without that evidence (a structural-shaped record's,
+// whose serve is wholesale and carries no candidate evidence) has no
+// re-execution route, so the pin refuses and the record re-measures
+// (REQ-result-stale's timeout-kill rule).
+func timeoutPinMatches(prior Finding, timeout string, derived bool) bool {
+	if prior.OracleTimeout == timeout && prior.OracleTimeoutDerived == derived {
+		return true
+	}
+	return prior.OracleTimeoutDerived && derived && timeoutKillsReexecutable(prior)
+}
+
+// timeoutKillsReexecutable reports every "(timeout)"-attributed kill
+// carrying its candidate-local evidence row — the re-vouching route the
+// relaxed derived pin rides.
+func timeoutKillsReexecutable(f Finding) bool {
+	for _, k := range f.Kills {
+		if k.Killer != TimeoutKiller {
+			continue
+		}
+		covered := false
+		for _, ev := range f.CandidateEvidence {
+			if ev.Position == k.Position && ev.Operator == k.Operator {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
+}
+
+// timeoutPinMatchesRecord is timeoutPinMatches for record-to-record
+// comparisons (the attestation-carry pins).
+func timeoutPinMatchesRecord(prior, current Finding) bool {
+	return timeoutPinMatches(prior, current.OracleTimeout, current.OracleTimeoutDerived)
+}
+
 func sameAttestationPins(prior, current Finding) bool {
 	if prior.PropertyRegime != current.PropertyRegime {
 		return false
 	}
 	if prior.OperatorSet != current.OperatorSet || prior.OracleExplicit != current.OracleExplicit || prior.Budget != current.Budget ||
 		prior.CandidateCount != current.CandidateCount || prior.Generated != current.Generated ||
-		prior.OracleTimeout != current.OracleTimeout || memoryPinStale(prior, current.OracleMemoryBytes) || attestationPinView(prior.TargetEvidence) != attestationPinView(current.TargetEvidence) ||
+		!timeoutPinMatchesRecord(prior, current) || memoryPinStale(prior, current.OracleMemoryBytes) || attestationPinView(prior.TargetEvidence) != attestationPinView(current.TargetEvidence) ||
 		len(prior.OracleEvidence) != len(current.OracleEvidence) {
 		return false
 	}
@@ -1525,9 +1577,9 @@ func (r *compartmentReach) walk(seeds []int) bool {
 // by this target's delta) or when its reference walk over the current ledger
 // reaches a delta declaration. Returns the moved and added oracle symbols,
 // each sorted.
-func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string) (moved, added []string, drifts bool, err error) {
+func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (moved, added []string, drifts bool, err error) {
 	if prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
-		prior.OperatorSet != operatorSet || prior.OracleTimeout != timeout ||
+		prior.OperatorSet != operatorSet || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime ||
 		len(prior.OracleEvidence) > len(oracle) ||
 		len(prior.Kills) != prior.Killed {
@@ -1655,12 +1707,12 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 	return moved, added, true, nil
 }
 
-func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string) (bool, error) {
-	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, memoryPin, regime, runtimeinput.CurrentEnvContext)
+func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (bool, error) {
+	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, timeoutDerived, memoryPin, regime, runtimeinput.CurrentEnvContext)
 }
 
-func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
-	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || prior.OracleTimeout != timeout ||
+func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
+	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
@@ -1692,8 +1744,8 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 // ordinary pins and every oracle evidence row, with no target pair —
 // the shape digest is compared by the caller as the BodyHash pin
 // (REQ-target-structural, REQ-target-manual-recipes).
-func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*subjectView, operatorSet, timeout string, memoryPin int64, regime string) (bool, error) {
-	if prior.OperatorSet != operatorSet || !prior.OracleExplicit || prior.OracleTimeout != timeout ||
+func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*subjectView, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (bool, error) {
+	if prior.OperatorSet != operatorSet || !prior.OracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) ||
 		len(prior.CandidateEvidence) != 0 {
 		return false, nil
@@ -1719,10 +1771,6 @@ func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*
 		return ok, err
 	}
 	return memo.verify(ctx)
-}
-
-func evidenceSetMatches(prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, memoryPin int64, regime string) (bool, error) {
-	return evidenceSetMatchesContext(context.Background(), prior, target, oracle, oracleExplicit, operatorSet, timeout, memoryPin, regime)
 }
 
 // ErrEvidenceFinalization marks the evidence-conversion error class:

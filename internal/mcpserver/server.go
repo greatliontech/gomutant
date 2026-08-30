@@ -437,6 +437,9 @@ func preparationMessage(event gomutant.PreparationEvent) string {
 	if event.Package != "" {
 		message += " " + event.Package
 	}
+	if event.OracleBudget != "" {
+		message += " " + event.OracleBudget
+	}
 	return message
 }
 
@@ -522,7 +525,7 @@ type runIn struct {
 	Changed           string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
 	Budget            int      `json:"budget,omitempty" jsonschema:"candidates per symbol; 0 means exhaustive"`
 	TimeoutSec        *int     `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before the final findings commit after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
-	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 means 60"`
+	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 derives each oracle group's budget from its measured baseline (an explicit value is the uniform override)"`
 	Jobs              int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
 	BracketPaths      []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
 	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any measurement. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness (RemoveAll before MkdirAll) and expect permission-mangled residue from mutated code"`

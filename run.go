@@ -87,7 +87,11 @@ func lockCallbacks(opts Options) Options {
 type Options struct {
 	// Budget caps selected candidates per symbol; 0 means all (REQ-mut-budget).
 	Budget int
-	// OracleTimeout bounds each oracle process; 0 means 60s.
+	// OracleTimeout bounds each oracle process as a uniform explicit
+	// pin; 0 derives each oracle group's budget from that group's own
+	// measured baseline (a multiple with a 60s floor), the finding
+	// marking the derived posture (REQ-exec-oracle-run's derived
+	// campaign budget).
 	OracleTimeout time.Duration
 	// OracleMemoryBytes ceilings each oracle process tree's memory
 	// (REQ-exec-oracle-memory): 0 derives RAM/(2 x jobs) floored at
@@ -264,6 +268,10 @@ type Options struct {
 	// executors (REQ-exec-oracle-run's verdict-preserving schedule);
 	// nil disables scheduling (ephemeral probes, external callers).
 	scheduleStore *scheduleStore
+	// groupBudget resolves an oracle group's effective budget: the
+	// group's derived budget in derive mode, the explicit timeout
+	// otherwise; nil (probes, external callers) means OracleTimeout.
+	groupBudget func(g group) time.Duration
 	// probeGate is the run's producer-probe gate: the phase-baseline
 	// vouch holds it shared exactly like every other producer-side
 	// oracle probe, so it never shares a window with a serial
@@ -287,6 +295,11 @@ const (
 	PreparationFreshness PreparationStage = "freshness"
 	PreparationMutants   PreparationStage = "mutants"
 	PreparationBaseline  PreparationStage = "baseline"
+	// PreparationOracleBudget reports an oracle group's derived budget
+	// the moment its passing baseline measures it (REQ-exec-oracle-run's
+	// derived campaign budget) — the campaign face's parity with the
+	// ephemeral face's effective-budget report.
+	PreparationOracleBudget PreparationStage = "oracle-budget"
 )
 
 // ExecutionEvent is one advisory execution-phase progress report: the
@@ -336,6 +349,9 @@ type PreparationEvent struct {
 	Stage   PreparationStage `json:"stage"`
 	Symbol  string           `json:"symbol,omitempty"`
 	Package string           `json:"package,omitempty"`
+	// OracleBudget carries the group's derived oracle budget on
+	// PreparationOracleBudget events.
+	OracleBudget string `json:"oracleBudget,omitempty"`
 }
 
 // RunDecision explains whether one target is cached, skipped, or measured.
@@ -865,6 +881,7 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 		// this seam reports.
 		opts.confirmScoped(m.Position, m.Operator, oracleScope(w))
 	}
+	confirmBudget := opts.OracleTimeout
 	scopedGroup := func() *group {
 		if w.shaped || killer == TimeoutKiller || strings.HasPrefix(killer, PackageKillerPrefix) {
 			return nil
@@ -887,13 +904,14 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 			if len(g.pkgs) == 1 && g.pkgs[0] == pkg {
 				scoped := *g
 				scoped.runRegex = "^" + regexp.QuoteMeta(fn) + "$"
+				confirmBudget = stepBudget(*g, opts)
 				return &scoped
 			}
 		}
 		return nil
 	}()
 	if scopedGroup != nil && t.scopedBaselinePasses(ctx, *scopedGroup, scopedBaselines, opts, runEnv) {
-		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, opts.OracleTimeout, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, confirmBudget, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 		if err != nil {
 			return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: killer-scoped confirmation: %w", m.Symbol, m.Position, m.Operator, err)
 		}
@@ -962,7 +980,7 @@ func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts 
 			opts.scheduleStore.unschedule(coverageKey(g, w.targetView.subject.Package))
 		}
 	}
-	outcome, killer, memoryDecided, state, incomplete, _, err = t.runSteps(ctx, w, m, opts, runEnv, unscheduledSteps(w.groups))
+	outcome, killer, memoryDecided, state, incomplete, _, err = t.runSteps(ctx, w, m, opts, runEnv, unscheduledSteps(w.groups, opts))
 	return outcome, killer, memoryDecided, state, incomplete, err
 }
 
@@ -1024,7 +1042,12 @@ func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts O
 		if aerr := attributedKill(killer, w.oracleSet); aerr != nil {
 			return res, fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, aerr)
 		}
-		if narrowed && !strings.HasPrefix(killer, PackageKillerPrefix) && !t.phaseKillVouched(ctx, g, opts, runEnv) {
+		// The vouch probe is an advisory baseline, not a verdict-bearing
+		// process: it runs under the run-wide bound (the measurement
+		// leash in derive mode), never the phase's residual budget — a
+		// starved probe would fail the vouch and disable scheduling for
+		// the rest of the run over a budget artifact.
+		if narrowed && !strings.HasPrefix(killer, PackageKillerPrefix) && !t.phaseKillVouched(ctx, g, opts.OracleTimeout, opts, runEnv) {
 			res.degrade = degradeRerunUnschedule
 		}
 	}
@@ -1063,7 +1086,7 @@ func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts Optio
 		// threading); the timeout VERDICT under any narrowed bound
 		// still belongs to the unsplit run alone (degradeRerun).
 		start := time.Now()
-		first, err := t.runStepGroup(ctx, w, m, opts, runEnv, st.first, narrowed, opts.OracleTimeout)
+		first, err := t.runStepGroup(ctx, w, m, opts, runEnv, st.first, narrowed, st.budget)
 		if err != nil {
 			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
 		}
@@ -1086,7 +1109,7 @@ func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts Optio
 			admit(first)
 			continue
 		}
-		remainderTimeout := opts.OracleTimeout
+		remainderTimeout := st.budget
 		if remainderTimeout > 0 {
 			remainderTimeout -= time.Since(start)
 			if remainderTimeout <= 0 {
@@ -1190,12 +1213,34 @@ func (s windowScores) anyMemoryDecided() bool {
 // and the current one, the pin raises to the larger effective ceiling —
 // the directional serve's premise is that the recorded pin bounds
 // every verdict's measurement ceiling.
-func mergeScoredFacts(rec Finding, scores windowScores, currentPin int64) Finding {
+func mergeScoredFacts(rec Finding, scores windowScores, currentPin int64, currentBudget time.Duration, budgetDerived bool) Finding {
 	rec.OracleCeilingDecided = rec.OracleCeilingDecided || scores.anyMemoryDecided()
 	if effectiveCeiling(currentPin) > effectiveCeiling(rec.OracleMemoryBytes) {
 		rec.OracleMemoryBytes = currentPin
 	}
+	// The oracle budget mirrors the ceiling's directional pin: a
+	// derived record's OracleTimeout is the LOOSEST bound any of its
+	// verdicts ran under, raised as fresh verdicts join under wider
+	// derived budgets (REQ-result-stale's timeout-kill rule).
+	if budgetDerived || rec.OracleTimeoutDerived {
+		if prior, err := time.ParseDuration(rec.OracleTimeout); err == nil && currentBudget > prior {
+			rec.OracleTimeout = currentBudget.String()
+		}
+		rec.OracleTimeoutDerived = rec.OracleTimeoutDerived || budgetDerived
+	}
 	return rec
+}
+
+// maxGroupBudget is the loosest bound any of the work's verdict-bearing
+// processes ran under — the value a derived record pins.
+func maxGroupBudget(w work, opts Options) time.Duration {
+	budget := time.Duration(0)
+	for _, g := range w.groups {
+		if b := stepBudget(g, opts); b > budget {
+			budget = b
+		}
+	}
+	return budget
 }
 
 // carrySurvivor is the carry-prior constructor: the candidate did not
@@ -1486,8 +1531,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// per-spawn capture resolves against), memoized, at group
 	// formation - before that module's first spawn.
 	bracketPreflights := map[string]error{}
-	if opts.OracleTimeout == 0 {
-		opts.OracleTimeout = 60 * time.Second
+	// The oracle budget: an explicit timeout is the caller's override;
+	// 0 derives each group's budget from its own measured baseline —
+	// the baseline probe IS a measurement of the oracle's cost on this
+	// tree under this load, the same derivation the ephemeral face
+	// carries (REQ-exec-oracle-run's derived campaign budget). In
+	// derive mode the run-wide bound becomes the campaign measurement
+	// leash: it governs baselines and advisory probes, while every
+	// verdict-bearing process runs under its group's derived budget.
+	deriveOracleBudgets := opts.OracleTimeout == 0
+	if deriveOracleBudgets {
+		opts.OracleTimeout = campaignBaselineLeash
 	}
 	opts = lockCallbacks(opts)
 	targets = snapshotTargets(targets)
@@ -1591,6 +1645,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	type baselineKey struct {
 		pkg, run, flags, moduleDir, packageDir string
 	}
+	// keyFor is the one group→key projection: every map keyed by
+	// baselineKey must agree on it exactly.
+	keyFor := func(g group) baselineKey {
+		return baselineKey{pkg: g.pkgs[0], run: g.runRegex, flags: strings.Join(g.flags, "\x00"), moduleDir: g.moduleDir, packageDir: g.packageDir}
+	}
 	baselineCache := map[baselineKey]runtimeinput.Observation{}
 	// scopedBaselines memoizes killer-scoped baseline probes for the
 	// serial confirmation's differential ground — Run-local like
@@ -1651,6 +1710,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		f := &findings[i]
 		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, OracleTimeout: opts.OracleTimeout.String(), OracleMemoryBytes: oracleMemoryPin}
+		if deriveOracleBudgets {
+			// The derived record's bound starts at the floor and raises
+			// to the loosest budget any verdict runs under
+			// (mergeScoredFacts); the leash is a measurement ceiling,
+			// never a recorded bound.
+			f.OracleTimeout = ephemeralBudgetFloor.String()
+			f.OracleTimeoutDerived = true
+		}
 		if tg.Shaped() {
 			// Validation precedes oracle derivation: a shaped identity
 			// resolves to no package, so deriving an oracle from it
@@ -1929,6 +1996,27 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// the campaign: siblings sharing the flaky package skip on the
 	// recorded reason without re-probing.
 	baselineFailures := map[baselineKey]string{}
+	// groupBudgets memoizes each oracle group's derived budget beside
+	// its measured baseline: written by the serial preparation as each
+	// group first probes, read by pipelined workers — the mutex covers
+	// that overlap (REQ-exec-oracle-run's derived campaign budget).
+	var groupBudgetMu sync.Mutex
+	groupBudgets := map[baselineKey]time.Duration{}
+	budgetFor := func(g group) time.Duration {
+		if !deriveOracleBudgets {
+			return opts.OracleTimeout
+		}
+		groupBudgetMu.Lock()
+		defer groupBudgetMu.Unlock()
+		if b, ok := groupBudgets[keyFor(g)]; ok {
+			return b
+		}
+		// A group never baselined under this run (a narrowed
+		// confirmation scope, a probe): the leash — a generous bound
+		// that fabricates nothing.
+		return opts.OracleTimeout
+	}
+	opts.groupBudget = budgetFor
 	// probeGroupBaselines fills w.baselines for the target's oracle
 	// groups. A non-cancellation baseline condition - a probe failure,
 	// an empty match, a failing test - is the target's own condition:
@@ -1940,7 +2028,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	probeGroupBaselines := func(ctx context.Context, tg Target, w *work) (string, error) {
 		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
 		for _, group := range append(append([]group(nil), w.groups...), w.narrowGroups...) {
-			key := baselineKey{pkg: group.pkgs[0], run: group.runRegex, flags: strings.Join(group.flags, "\x00"), moduleDir: group.moduleDir, packageDir: group.packageDir}
+			key := keyFor(group)
 			if reason, failed := baselineFailures[key]; failed {
 				return reason, nil
 			}
@@ -1950,9 +2038,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if err := ctx.Err(); err != nil {
 					return "", err
 				}
+				baselineStart := time.Now()
 				probeGate.RLock()
 				ran, passed, failedTests, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 				probeGate.RUnlock()
+				baselineElapsed := time.Since(baselineStart)
 				var reason string
 				switch {
 				case err != nil && ctx.Err() != nil:
@@ -1976,6 +2066,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if reason != "" {
 					baselineFailures[key] = reason
 					return reason, nil
+				}
+				if deriveOracleBudgets {
+					// The measurement is the PASSING baseline's own
+					// wall-clock — a failing or refused baseline
+					// returned above and derives nothing (a baseline
+					// dying at the leash must not register a
+					// leash-multiple budget for its group's siblings).
+					budget := derivedOracleBudget(baselineElapsed)
+					groupBudgetMu.Lock()
+					groupBudgets[key] = budget
+					groupBudgetMu.Unlock()
+					reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: budget.String()})
 				}
 				state = observed
 				if err := ctx.Err(); err != nil {
@@ -2031,7 +2133,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			reason = "forced"
 		}
 		if hasPrior && !opts.Force {
-			matches, err := shapedEvidenceMatchesContext(ctx, *rec, oracleViews, shapedOperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
+			matches, err := shapedEvidenceMatchesContext(ctx, *rec, oracleViews, shapedOperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime)
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
@@ -2242,7 +2344,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			refuseSkipped(i, reason, true)
 		}
 		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
-			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
+			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime)
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
@@ -2257,7 +2359,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// additions with nothing moved — so kills keyed to unmoved
 				// oracles stand and the rest re-measures
 				// (REQ-result-stale's killer-drift carve-out).
-				if moved, addedOracles, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime); derr != nil {
+				if moved, addedOracles, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime); derr != nil {
 					if ctx.Err() != nil {
 						return nil, ctx.Err()
 					}
@@ -2344,7 +2446,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// disciplines (REQ-result-stale).
 				reason += "; prior candidate evidence re-executes only under its recorded budget, so the whole target re-measures"
 			} else {
-				matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), oracleMemoryPin, regime)
+				matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime)
 				if err != nil {
 					return nil, err
 				}
@@ -3081,7 +3183,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 			f := &findings[w.target]
 			if w.serve != nil {
-				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions, oracleMemoryPin)
+				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions, oracleMemoryPin, maxGroupBudget(w, opts), deriveOracleBudgets)
 				if err != nil {
 					// The splice revalidates recorded and fresh evidence
 					// against disk; motion between execution and here is
@@ -3130,7 +3232,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.drift != nil {
-				spliced, _, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions, oracleMemoryPin)
+				spliced, _, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions, oracleMemoryPin, maxGroupBudget(w, opts), deriveOracleBudgets)
 				if err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
@@ -3196,7 +3298,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			if w.extend != nil {
-				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget, opts.Exemptions, oracleMemoryPin)
+				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget, opts.Exemptions, oracleMemoryPin, maxGroupBudget(w, opts), deriveOracleBudgets)
 				if err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
@@ -3318,10 +3420,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				continue
 			}
 			stampExemptions(f, opts.Exemptions)
-			// Fresh path: the record's pin IS the entry-resolved pin, so
-			// the raise is vacuous by construction; the same call is
-			// load-bearing on the four serve arms.
-			*f = mergeScoredFacts(*f, scores[wi], f.OracleMemoryBytes)
+			// Fresh path: the memory pin IS the entry-resolved pin, so
+			// its raise is vacuous by construction, while the budget
+			// raise is exactly where a fresh derived record's bound
+			// climbs from the skeleton floor to the loosest group budget
+			// its verdicts ran under; the same call is load-bearing on
+			// the four serve arms.
+			*f = mergeScoredFacts(*f, scores[wi], f.OracleMemoryBytes, maxGroupBudget(w, opts), deriveOracleBudgets)
 			f.Operators = summarizeOperators(w.candidates, scores[wi].outcomes)
 			for _, summary := range f.Operators {
 				if err := ctx.Err(); err != nil {
@@ -4186,7 +4291,7 @@ func carryAnchoredAttestations(prior []Attestation, survivors []Survivor) (kept 
 // drifted outcome but stamps it explicitly non-reusable. Returns the
 // reconciled union (for provenance) and the shed attestations of newly
 // killed survivors.
-func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding, w work, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption, memoryPin int64) (Finding, runtimeinput.Observation, []Attestation, error) {
+func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding, w work, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, runtimeinput.Observation, []Attestation, error) {
 	outcomes := scores.outcomes
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.driftRemeasure, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes, observations, incompletes, labels, true, false)
 	if err != nil {
@@ -4203,7 +4308,7 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 			rec.OracleEvidence[i].RuntimeUnverifiable, rec.OracleEvidence[i].RuntimeReason = true, divergenceReason
 		}
 	}
-	driftedFinding, shed, err := driftFindingCounts(ctx, rec, w.candidates, w.driftRemeasure, scores, spliced.fresh, exemptions, memoryPin)
+	driftedFinding, shed, err := driftFindingCounts(ctx, rec, w.candidates, w.driftRemeasure, scores, spliced.fresh, exemptions, memoryPin, oracleBudget, budgetDerived)
 	return driftedFinding, spliced.union, shed, err
 }
 
@@ -4220,11 +4325,11 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 // unstable-oracle when the spliced evidence landed non-reusable; a newly
 // killed attested survivor's attestation is shed and returned — evidence
 // beats attestation (REQ-attest-survivor).
-func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, remeasured map[int]bool, scores windowScores, freshEvidence []CandidateEvidence, exemptions []Exemption, memoryPin int64) (Finding, []Attestation, error) {
+func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, remeasured map[int]bool, scores windowScores, freshEvidence []CandidateEvidence, exemptions []Exemption, memoryPin int64, budget time.Duration, budgetDerived bool) (Finding, []Attestation, error) {
 	rec = // The pin is the ENTRY-resolved one the serve gate compared,
 		// never a live read of the process global: a mid-campaign change
 		// must not ratchet the record (see the run-entry resolution).
-		mergeScoredFacts(rec, scores, memoryPin)
+		mergeScoredFacts(rec, scores, memoryPin, budget, budgetDerived)
 	outcomes, killers, flips := scores.outcomes, scores.killers, scores.flips
 	operators := append([]OperatorSummary(nil), rec.Operators...)
 	byOperator := make(map[string]int, len(operators))
@@ -4644,7 +4749,7 @@ func extendedPrefixStands(generation engine.Generation, rec Finding) bool {
 // while a read beyond the record's pins is runtime information it never
 // pinned, so the extended outcome is preserved but explicitly non-reusable
 // (REQ-result-stale's fail-closed bound).
-func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int, exemptions []Exemption, memoryPin int64) (Finding, error) {
+func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, error) {
 	outcomes := scores.outcomes
 	suffix := make(map[int]bool, len(candidates)-from)
 	for mi := from; mi < len(candidates); mi++ {
@@ -4656,7 +4761,7 @@ func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Find
 	if err != nil {
 		return Finding{}, err
 	}
-	return extendFindingCounts(ctx, spliced.rec, candidates, from, scores, spliced.fresh, budget, exemptions, memoryPin)
+	return extendFindingCounts(ctx, spliced.rec, candidates, from, scores, spliced.fresh, budget, exemptions, memoryPin, oracleBudget, budgetDerived)
 }
 
 // splicedEvidence is one splice's evidence outcome: the record after
@@ -4758,11 +4863,11 @@ func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding,
 // survivors are appended in candidate order, the suffix run's candidate
 // evidence becomes the record's (an extendable record carries none), and the
 // budget, generated, and candidate counts record the merged truth.
-func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, from int, scores windowScores, freshEvidence []CandidateEvidence, budget int, exemptions []Exemption, memoryPin int64) (Finding, error) {
+func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, from int, scores windowScores, freshEvidence []CandidateEvidence, budget int, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, error) {
 	rec = // The pin is the ENTRY-resolved one the serve gate compared,
 		// never a live read of the process global: a mid-campaign change
 		// must not ratchet the record (see the run-entry resolution).
-		mergeScoredFacts(rec, scores, memoryPin)
+		mergeScoredFacts(rec, scores, memoryPin, oracleBudget, budgetDerived)
 	outcomes, killers, flips := scores.outcomes, scores.killers, scores.flips
 	// Prefix kill attributions carry verbatim — their pins did not move —
 	// and suffix kills append theirs; a record predating attribution stays
@@ -4847,13 +4952,13 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 // process's pinned runtime inputs; fresh observations that diverge are runtime
 // information the record never pinned, so the spliced outcome is preserved but
 // explicitly non-reusable (REQ-exec-observation).
-func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption, memoryPin int64) (Finding, error) {
+func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, error) {
 	outcomes := scores.outcomes
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, flagged, baselines, targetView, oracleViews, currentLedger, outcomes, observations, incompletes, labels, false, true)
 	if err != nil {
 		return Finding{}, err
 	}
-	return spliceFindingCounts(ctx, spliced.rec, candidates, flagged, scores, spliced.fresh, exemptions, memoryPin)
+	return spliceFindingCounts(ctx, spliced.rec, candidates, flagged, scores, spliced.fresh, exemptions, memoryPin, oracleBudget, budgetDerived)
 }
 
 // applySplicedUnion reconciles the re-executed processes' completed union with
@@ -5022,11 +5127,11 @@ func splicedUnionDiverged(state runtimeinput.State, prior SubjectEvidence) bool 
 // pins the serve verified — an attestation rides only a survivor that
 // survives again at the same position and operator (REQ-attest-survivor),
 // and the fresh candidate evidence replaces the served record's.
-func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, flagged map[int]bool, scores windowScores, freshEvidence []CandidateEvidence, exemptions []Exemption, memoryPin int64) (Finding, error) {
+func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.Candidate, flagged map[int]bool, scores windowScores, freshEvidence []CandidateEvidence, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, error) {
 	rec = // The pin is the ENTRY-resolved one the serve gate compared,
 		// never a live read of the process global: a mid-campaign change
 		// must not ratchet the record (see the run-entry resolution).
-		mergeScoredFacts(rec, scores, memoryPin)
+		mergeScoredFacts(rec, scores, memoryPin, oracleBudget, budgetDerived)
 	outcomes, killers, flips := scores.outcomes, scores.killers, scores.flips
 	// Covered kills carry their recorded attribution, flagged candidates
 	// that die again record their fresh killer; a record predating

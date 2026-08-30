@@ -163,7 +163,24 @@ carry).
 than serve a record whose pins no longer cover the request — an edit to the
 target or any target/oracle dependency, a changed runtime input, purity,
 toolchain, or build configuration, an added or removed oracle identity, a new
-oracle selection mode or operator version, or a different effective oracle timeout each invalidates the record; a
+oracle selection mode or operator version, or a different effective oracle
+timeout each invalidates the record — the oracle-timeout pin relaxing to the
+TIMEOUT-KILL RULE when the bound was DERIVED on both sides (the record marks
+derivation and pins the loosest bound any verdict ran under): every
+completed verdict is an ANSWER about the suite — tests pass or fail on the
+mutant — and a budget change can only turn answers into refusals to answer,
+never into different answers, while a "(timeout)"-attributed kill is a claim
+about the bound itself, admitted into the relaxation only where its
+candidate-local incomplete-observation evidence rides the record (the killed
+process never completes its runtime observation, so every symbol-lane
+timeout kill carries a row): the flagged-candidate serve discipline below
+then re-executes exactly that candidate under the current derived budget on
+every serve — the bound claim re-vouches by measurement, never by
+comparison. A timeout kill without its evidence row — a structural-shaped
+record's, whose wholesale serve carries no candidate evidence and so has no
+re-execution route — refuses the relaxed pin and re-measures on any
+derived-budget change; an explicit bound on either side keeps the exact
+pin; a
 request for more candidates than a capped record generated invalidates only
 the unmeasured remainder, under the budget-extension carve-out below. The
 oracle-memory pin alone is DIRECTIONAL: a record none of whose verdicts the
@@ -215,7 +232,9 @@ explicitly non-reusable. The budget is the second carve-out: candidate
 enumeration is deterministic — a stable global order over the unchanged body,
 pinned by the record's target evidence and operator set — so when every pin
 except the budget holds (target and oracle evidence valid, equal oracle set
-and selection mode, equal operator set and effective oracle timeout, no
+and selection mode, equal operator set, the oracle-timeout pin held (exact,
+or derived on both sides — the no-candidate-evidence requirement already
+excludes every timeout kill), no
 candidate evidence on the record), the recorded prefix remains exact evidence
 for candidates `[0, generated)` and the run measures only the unmeasured
 suffix `[generated, needed)`. The splice appends the suffix outcomes onto the
@@ -667,7 +686,12 @@ is unobservable from its record: the shape digest covers the single
 rewritten file for the interface-satisfaction and manual classes, and
 for the import-boundary class the forbidden-side linkage closure —
 never the probed packages' own content or the wider surface the oracle
-analyzes — and no shaped candidate carries a site anchor. The serve
+analyzes — and no shaped candidate carries a site anchor. The pin
+gate's oracle-timeout comparison follows the timeout-kill rule exactly
+as serving does (derived on both sides matches across bounds): an
+attestation exists only for an exercised full survivor, whose every
+run completed, so no equivalence judgment can premise on a budget and
+derived-budget drift is a held pin, never a reported carry. The serve
 pin decomposes by verdict channel. The oracle's own inputs are pinned
 by its evidence: validation requires an observation-closed oracle (the
 engine's read-only observability proof blocks process execution,

@@ -790,8 +790,20 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 		{Stage: PreparationFreshness, Symbol: target.Symbol},
 		{Stage: PreparationMutants, Symbol: target.Symbol},
 		{Stage: PreparationBaseline, Symbol: target.Symbol, Package: "example.com/fixture/lib"},
+		{Stage: PreparationOracleBudget, Symbol: target.Symbol, Package: "example.com/fixture/lib"},
 	}
-	if !slices.Equal(firstStatus.preparation, wantPreparation) || !slices.Equal(firstStatus.timeline, []string{"prepare", "prepare", "prepare", "prepare", "decision"}) {
+	// The derived-budget value is a measurement; the sequence pin
+	// blanks it after asserting the event carries one.
+	firstPreparation := slices.Clone(firstStatus.preparation)
+	for i := range firstPreparation {
+		if firstPreparation[i].Stage == PreparationOracleBudget {
+			if firstPreparation[i].OracleBudget == "" {
+				t.Fatalf("oracle-budget event carries no budget: %+v", firstPreparation[i])
+			}
+			firstPreparation[i].OracleBudget = ""
+		}
+	}
+	if !slices.Equal(firstPreparation, wantPreparation) || !slices.Equal(firstStatus.timeline, []string{"prepare", "prepare", "prepare", "prepare", "prepare", "decision"}) {
 		t.Fatalf("first status = preparation %+v, timeline %v", firstStatus.preparation, firstStatus.timeline)
 	}
 	_, cachedStatus, err := collect(context.Background(), Options{Budget: 1, Prior: first, Jobs: 1})
@@ -1100,9 +1112,21 @@ func TestRunReportsSharedBaselineOnce(t *testing.T) {
 		{Stage: PreparationFreshness, Symbol: targets[1].Symbol},
 		{Stage: PreparationMutants, Symbol: targets[0].Symbol},
 		{Stage: PreparationBaseline, Symbol: targets[0].Symbol, Package: "example.com/fixture/lib"},
+		// The shared group's budget derives exactly once, with its one
+		// baseline; the serving sibling emits neither event.
+		{Stage: PreparationOracleBudget, Symbol: targets[0].Symbol, Package: "example.com/fixture/lib"},
 		{Stage: PreparationMutants, Symbol: targets[1].Symbol},
 	}
-	if !slices.Equal(preparation, wantStages) {
+	stages := slices.Clone(preparation)
+	for i := range stages {
+		if stages[i].Stage == PreparationOracleBudget {
+			if stages[i].OracleBudget == "" {
+				t.Fatalf("oracle-budget event carries no budget: %+v", stages[i])
+			}
+			stages[i].OracleBudget = ""
+		}
+	}
+	if !slices.Equal(stages, wantStages) {
 		t.Fatalf("batched preparation = %+v, want %+v", preparation, wantStages)
 	}
 	// Pipelined preparation completes each target — capture through
@@ -2229,7 +2253,7 @@ func TestSpliceFindingCountsConservesChangedOutcomes(t *testing.T) {
 	flagged := map[int]bool{1: true, 2: true, 4: true}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantKilled, 0, engine.MutantDiscarded}
 	fresh := []CandidateEvidence{{Position: "f.go:5:5", Operator: "op-c", Reason: "mutant test process did not start because the mutant failed to build", Disposition: "discarded"}}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, windowScores{outcomes: outcomes, memoryDecided: []bool{true}}, fresh, nil, 0)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, windowScores{outcomes: outcomes, memoryDecided: []bool{true}}, fresh, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2375,7 +2399,7 @@ func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 		views.bySymbol["example.com/driftgate.TestSmall"],
 		views.bySymbol["example.com/driftgate.TestMore"],
 	}
-	moved, added, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes, "")
+	moved, added, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleTimeoutDerived, prior[0].OracleMemoryBytes, "")
 	if err != nil || !ok || len(moved) != 0 || len(added) != 1 || added[0] != "example.com/driftgate.TestMore" {
 		t.Fatalf("intact pins refused the drift gate: moved=%v added=%v ok=%v err=%v", moved, added, ok, err)
 	}
@@ -2384,13 +2408,13 @@ func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	// refuses even though the compartment delta classifies attributable.
 	tampered := prior[0]
 	tampered.TargetEvidence.Toolchain = "go0.0-never"
-	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleMemoryBytes, ""); err != nil || ok {
+	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleTimeoutDerived, tampered.OracleMemoryBytes, ""); err != nil || ok {
 		t.Fatalf("a moved toolchain hid behind the compartment verdict: ok=%v err=%v", ok, err)
 	}
 	// A grown set is a derived-oracle claim on both sides: an explicit
 	// request supersetting the recorded derived set is the caller's
 	// selection, never derived growth.
-	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleMemoryBytes, ""); err != nil || ok {
+	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleTimeoutDerived, prior[0].OracleMemoryBytes, ""); err != nil || ok {
 		t.Fatalf("an explicit request rode the derived-growth composition: ok=%v err=%v", ok, err)
 	}
 }
@@ -2731,7 +2755,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 		},
 	}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, windowScores{outcomes: outcomes}, nil, nil, 0)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{1: true}, windowScores{outcomes: outcomes}, nil, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2744,7 +2768,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op-a", Execution: "never-executed"}},
 	}
-	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, windowScores{outcomes: outcomes}, nil, 2, nil, 0)
+	extended, err := extendFindingCounts(context.Background(), capped, candidates, 1, windowScores{outcomes: outcomes}, nil, 2, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4007,7 +4031,7 @@ func TestExtendFindingCountsAppendsSuffixOutcomes(t *testing.T) {
 	}
 	outcomes := []engine.MutantOutcome{0, 0, engine.MutantSurvived, engine.MutantKilled, engine.MutantDiscarded}
 	fresh := []CandidateEvidence{{Position: "f.go:3:3", Operator: "op-a", Reason: "test process produced no runtime-input log", Disposition: "survived"}}
-	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, windowScores{outcomes: outcomes, memoryDecided: []bool{true}}, fresh, 5, nil, 0)
+	extended, err := extendFindingCounts(context.Background(), rec, candidates, 2, windowScores{outcomes: outcomes, memoryDecided: []bool{true}}, fresh, 5, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5298,7 +5322,7 @@ func TestExtendFindingCountsRecordsFlip(t *testing.T) {
 	}
 	outcomes := []engine.MutantOutcome{0, engine.MutantSurvived, engine.MutantSurvived}
 	flips := map[int]string{1: "p.TestFlaky"}
-	extended, err := extendFindingCounts(context.Background(), rec, candidates, 1, windowScores{outcomes: outcomes, flips: flips}, nil, 3, nil, 0)
+	extended, err := extendFindingCounts(context.Background(), rec, candidates, 1, windowScores{outcomes: outcomes, flips: flips}, nil, 3, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5344,14 +5368,14 @@ func TestFlipReachesEveryAssemblyMode(t *testing.T) {
 	rec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Killed: 1}},
 		Kills:     []Kill{{Position: "f.go:1:1", Operator: "op-a", Killer: "p.TestOld"}}}
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertFlip("splice", spliced.Survivors)
 
 	erec := Finding{Symbol: "p.F", Budget: 0, CandidateCount: 1, Generated: 0}
-	extended, err := extendFindingCounts(context.Background(), erec, candidates, 0, windowScores{outcomes: outcomes, flips: flips}, nil, 1, nil, 0)
+	extended, err := extendFindingCounts(context.Background(), erec, candidates, 0, windowScores{outcomes: outcomes, flips: flips}, nil, 1, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5360,7 +5384,7 @@ func TestFlipReachesEveryAssemblyMode(t *testing.T) {
 	drec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Killed: 1}},
 		Kills:     []Kill{{Position: "f.go:1:1", Operator: "op-a", Killer: "p.TestOld"}}}
-	drifted, _, err := driftFindingCounts(context.Background(), drec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0)
+	drifted, _, err := driftFindingCounts(context.Background(), drec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5388,13 +5412,13 @@ func TestCarrySurvivorPreservesFlipEvidence(t *testing.T) {
 		}
 	}
 
-	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil, 0)
+	spliced, err := spliceFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertCarried("splice", spliced.Survivors)
 
-	drifted, _, err := driftFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil, 0)
+	drifted, _, err := driftFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil, 0, time.Minute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5528,5 +5552,264 @@ func TestRunNamesFullyStoodDownDerivation(t *testing.T) {
 	skipped := findings[0].Skipped
 	if !strings.Contains(skipped, "no oracle") || !strings.Contains(skipped, "stood down on: example.com/darkmod/c") || !strings.Contains(skipped, "explicit oracle") {
 		t.Fatalf("fully-stood-down skip = %q, want the cap and the escape named", skipped)
+	}
+}
+
+// The campaign derives each group's oracle budget from its measured
+// baseline when no explicit timeout is given: the record marks the
+// derivation and pins the loosest bound any verdict ran under (>= the
+// retired 60s floor), and a second derived run SERVES it — completed
+// verdicts are budget-independent, so derived budgets varying with
+// load never churn records (REQ-exec-oracle-run's derived campaign
+// budget; REQ-result-stale's timeout-kill rule). An explicit timeout
+// stays the exact uniform pin.
+func TestRunDerivesOracleBudgetsAndServesAcrossThem(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines and mutants")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.com/budgetmod\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc A(x int) int {\n\tif x > 0 {\n\t\treturn x - 1\n\t}\n\treturn 0\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {\n\tif A(2) != 1 {\n\t\tt.Fatal()\n\t}\n\tif A(-1) != 0 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	target := []Target{{Symbol: "example.com/budgetmod/a.A"}}
+	first, err := tr.Run(ctx, target, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := first[0]
+	if !f.OracleTimeoutDerived {
+		t.Fatalf("derived-mode record not marked derived: %+v", f)
+	}
+	bound, err := time.ParseDuration(f.OracleTimeout)
+	if err != nil || bound < 60*time.Second || bound >= campaignBaselineLeash {
+		t.Fatalf("derived bound = %q (%v), want floor <= bound < the campaign leash — a bound equal to the leash means the derivation never ran", f.OracleTimeout, err)
+	}
+	var decisions []RunDecision
+	second, err := tr.Run(ctx, target, Options{Prior: first, Decision: func(d RunDecision) { decisions = append(decisions, d) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "cached" {
+		t.Fatalf("second derived run = %+v, want a full serve — derived budgets must not churn completed verdicts", decisions)
+	}
+	if !second[0].OracleTimeoutDerived {
+		t.Fatal("served record lost the derivation mark")
+	}
+
+	explicit, err := tr.Run(ctx, target, Options{OracleTimeout: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit[0].OracleTimeoutDerived || explicit[0].OracleTimeout != "1m0s" {
+		t.Fatalf("explicit record = %q derived=%v, want the exact uniform pin", explicit[0].OracleTimeout, explicit[0].OracleTimeoutDerived)
+	}
+}
+
+// The derived budget is the measured baseline's own wall-clock times
+// the multiple — with the floor lowered out of the way, a campaign
+// that never consults the measurement (or falls back to the leash)
+// cannot pin a bound in the measured band (REQ-exec-oracle-run's
+// derived campaign budget).
+func TestRunMeasuresDerivedBudgetFromBaseline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines and mutants")
+	}
+	oldFloor := ephemeralBudgetFloor
+	ephemeralBudgetFloor = time.Millisecond
+	defer func() { ephemeralBudgetFloor = oldFloor }()
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.com/measuredmod\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc A(x int) int {\n\tif x > 0 {\n\t\treturn x - 1\n\t}\n\treturn 0\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {\n\tif A(2) != 1 {\n\t\tt.Fatal()\n\t}\n\tif A(-1) != 0 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var budgets []string
+	findings, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/measuredmod/a.A"}}, Options{Progress: func(e PreparationEvent) {
+		if e.Stage == PreparationOracleBudget {
+			budgets = append(budgets, e.OracleBudget)
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := time.ParseDuration(findings[0].OracleTimeout)
+	if err != nil || bound < 100*time.Millisecond || bound >= campaignBaselineLeash {
+		t.Fatalf("derived bound = %q (%v), want the measured band — a floor-class bound means the measurement never ran, a leash-class one means the fallback pinned", findings[0].OracleTimeout, err)
+	}
+	if len(budgets) == 0 {
+		t.Fatal("no oracle-budget preparation event reported the derived budget")
+	}
+	if reported, err := time.ParseDuration(budgets[0]); err != nil || reported < bound {
+		t.Fatalf("reported group budget %q does not cover the recorded bound %q", budgets[0], findings[0].OracleTimeout)
+	}
+}
+
+// recordHasTimeoutKill reports a record carrying a "(timeout)"-attributed
+// kill — the verdict class the timeout-kill rule routes through flagged
+// re-execution.
+func recordHasTimeoutKill(f Finding) bool {
+	for _, k := range f.Kills {
+		if k.Killer == TimeoutKiller {
+			return true
+		}
+	}
+	return false
+}
+
+// A derived record carrying a timeout kill serves under any derived
+// budget, because the timeout kill by construction rides candidate-local
+// incomplete-observation evidence and the flagged-candidate serve
+// re-executes exactly that candidate under the current derived budget —
+// the bound claim re-vouches by measurement, the completed verdicts
+// serve as answers (REQ-result-stale's timeout-kill rule).
+func TestRunServesDerivedTimeoutKillsByReexecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines and a hanging mutant")
+	}
+	oldFloor := ephemeralBudgetFloor
+	ephemeralBudgetFloor = 2 * time.Second
+	defer func() { ephemeralBudgetFloor = oldFloor }()
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.com/hangmod\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc Wait(n int) int {\n\tfor n > 0 {\n\t\tn--\n\t}\n\treturn n\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestWait(t *testing.T) {\n\tif Wait(3) != 0 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	target := []Target{{Symbol: "example.com/hangmod/a.Wait"}}
+	first, err := tr.Run(ctx, target, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first[0].OracleTimeoutDerived || !recordHasTimeoutKill(first[0]) {
+		t.Fatalf("hanging-mutant record = derived %v, timeout kill %v; want both (the -- -> ++ mutant must hang)", first[0].OracleTimeoutDerived, recordHasTimeoutKill(first[0]))
+	}
+	if len(first[0].CandidateEvidence) == 0 {
+		t.Fatalf("timeout kill carried no candidate evidence — the killed process must record an incomplete observation, the ground the timeout-kill rule stands on: %+v", first[0])
+	}
+	var decisions []RunDecision
+	served, err := tr.Run(ctx, target, Options{Prior: first, Decision: func(d RunDecision) { decisions = append(decisions, d) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "cached" || !strings.Contains(decisions[0].Reason, "re-executing") {
+		t.Fatalf("derived timeout-kill serve = %+v, want the flagged re-execution serve", decisions)
+	}
+	if !recordHasTimeoutKill(served[0]) || !served[0].OracleTimeoutDerived {
+		t.Fatalf("served record lost its verdicts or its derivation mark: %+v", served[0])
+	}
+	if len(served[0].CandidateEvidence) == 0 {
+		t.Fatalf("re-executed timeout kill shed its candidate evidence — the next serve would stop re-vouching the bound claim: %+v", served[0])
+	}
+}
+
+// A shaped candidate's verdict-bearing process runs under its group's
+// derived budget, never the campaign measurement leash: a hanging
+// manual mutant times out at the derived bound within seconds — under
+// the leash this test would hang for an hour (REQ-exec-oracle-run's
+// derived campaign budget).
+func TestShapedMutantRunsUnderDerivedBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines and a hanging shaped mutant")
+	}
+	oldFloor := ephemeralBudgetFloor
+	ephemeralBudgetFloor = 2 * time.Second
+	defer func() { ephemeralBudgetFloor = oldFloor }()
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.com/hangshaped\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc Wait(n int) int {\n\tfor n > 0 {\n\t\tn--\n\t}\n\treturn n\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestWait(t *testing.T) {\n\tif Wait(3) != 0 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	findings, err := tr.Run(context.Background(), []Target{{
+		Symbol: "hangshaped/manual-hang",
+		Oracle: []string{"example.com/hangshaped/a.TestWait"},
+		Manual: &ManualSpec{File: "a/a.go", Edits: []ManualEdit{{Find: "n--", Replace: "n++"}}},
+	}}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !findings[0].OracleTimeoutDerived || !recordHasTimeoutKill(findings[0]) {
+		t.Fatalf("hanging shaped record = derived %v, timeout kill %v; want both", findings[0].OracleTimeoutDerived, recordHasTimeoutKill(findings[0]))
+	}
+	// Generous cap: baseline + one hang at the derived bound is
+	// seconds-class; a leash-bound hang would blow far past it.
+	if elapsed := time.Since(start); elapsed > 2*time.Minute {
+		t.Fatalf("shaped hang ran %s — the mutant did not execute under the derived budget", elapsed)
+	}
+	// A shaped record carries no candidate evidence, so its timeout kill
+	// has no flagged re-execution route: the relaxed derived pin refuses
+	// and the record re-measures wholesale — serving it would retain a
+	// bound claim no run re-vouches, masking a survivor under a wider
+	// budget (REQ-result-stale's timeout-kill rule).
+	if len(findings[0].CandidateEvidence) != 0 {
+		t.Fatalf("shaped record carries candidate evidence — it would never serve: %+v", findings[0].CandidateEvidence)
+	}
+	var decisions []RunDecision
+	if _, err := tr.Run(context.Background(), []Target{{
+		Symbol: "hangshaped/manual-hang",
+		Oracle: []string{"example.com/hangshaped/a.TestWait"},
+		Manual: &ManualSpec{File: "a/a.go", Edits: []ManualEdit{{Find: "n--", Replace: "n++"}}},
+	}}, Options{Prior: findings, Decision: func(d RunDecision) { decisions = append(decisions, d) }}); err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.Contains(decisions[0].Reason, "pin moved") {
+		t.Fatalf("shaped timeout-kill record on a derived re-run = %+v, want a wholesale re-measure — no route re-vouches the bound claim", decisions)
 	}
 }

@@ -10,7 +10,7 @@
 - `changed` (mcp, cli) — target only symbols whose bodies differ from this git ref (requires git).
 - `budget` (mcp, cli) — candidates per symbol; 0 means exhaustive.
 - `timeout_sec` (mcp, cli as `timeout`) — cancel work before the final findings commit; on mcp omitted means 300 seconds and an explicit 0 unlimited, on the cli a duration defaulting to unlimited.
-- `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of each oracle process; 0 (mcp) or the default (cli) means 60 seconds.
+- `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of each oracle process; 0 (the default on both faces) derives each oracle group's budget from its measured baseline — an explicit value is the uniform override, and the record pins the loosest bound any verdict ran under.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling per oracle process tree in MiB (GOMEMLIMIT plus a hard data-segment cap): absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host.
 - `jobs` (mcp, cli) — concurrent mutant runs; 0 means half the CPUs.
 - `bracket_paths` (mcp, cli as `bracket-path`) — external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run.

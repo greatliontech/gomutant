@@ -43,7 +43,19 @@ order under its advisory posture only (REQ-exec-survivor-evidence,
 whose once-per-group bucket probe remains its own full-pattern
 measurement — a union of subset runs is not that measurement): an
 unavailable, unsound, or extent-less signal degrades to the unordered
-run — a schedule reorders execution and never narrows it.
+run — a schedule reorders execution and never narrows it. Without an
+explicit oracle timeout the campaign DERIVES each oracle group's budget
+from that group's own measured baseline — the baseline probe is a
+measurement of the oracle's cost on this tree under this load, run once
+per group under a generous campaign measurement leash — as a multiple
+with the retired 60-second default as its floor, the same derivation
+the ephemeral face carries; the measurement is a passing baseline's own
+wall-clock (a failing or refused baseline skips its targets and derives
+nothing), every verdict-bearing process of a group — scheduled phases,
+serial confirmations, structural-shaped runs alike — executes under
+that group's derived budget while unmutated advisory probes run under
+the leash, and an explicit timeout remains the caller's uniform
+override.
 
 **REQ-exec-attribution** (behavior): A kill MUST be one of exactly three
 attributed events, enforcing REQ-core-attributed-kills: a named oracle test
@@ -751,7 +763,9 @@ unchanged, while a deadline after it cannot roll back the committed result and
 final output completes successfully. For an ephemeral
 run, completion of the attributed oracle result is the equivalent success
 point. The independently named oracle timeout bounds each unmutated probe and
-mutant oracle process; it defaults to 60 seconds. The oracle timeout and the
+mutant oracle process — an explicit value as the caller's uniform pin, or,
+omitted, the per-group derived budget REQ-exec-oracle-run defines. The
+oracle timeout and the
 oracle memory ceiling are the two resource bounds whose configured values
 decide attribution directly and therefore pin finding reuse evidence
 (REQ-result-record) -

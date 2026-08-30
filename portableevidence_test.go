@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -153,9 +154,37 @@ func TestMergeScoredFactsJoinsCeilingFacts(t *testing.T) {
 		{"unlimited record stays unlimited", Finding{OracleMemoryBytes: 0}, clean, 1 << 30, false, 0},
 	}
 	for _, tc := range cases {
-		got := mergeScoredFacts(tc.rec, tc.scores, tc.currentPin)
+		got := mergeScoredFacts(tc.rec, tc.scores, tc.currentPin, time.Minute, false)
 		if got.OracleCeilingDecided != tc.wantDecided || got.OracleMemoryBytes != tc.wantPin {
 			t.Errorf("%s: decided=%v pin=%d, want decided=%v pin=%d", tc.name, got.OracleCeilingDecided, got.OracleMemoryBytes, tc.wantDecided, tc.wantPin)
+		}
+	}
+}
+
+// The oracle-budget pin mirrors the ceiling's directional join: a
+// derived record's OracleTimeout is the loosest bound any verdict ran
+// under, raised as fresh verdicts join under wider derived budgets and
+// never lowered; an explicit run leaves the pin untouched
+// (REQ-result-stale's timeout-kill rule).
+func TestMergeScoredFactsRaisesDerivedBudget(t *testing.T) {
+	clean := windowScores{}
+	cases := []struct {
+		name          string
+		rec           Finding
+		currentBudget time.Duration
+		budgetDerived bool
+		wantTimeout   string
+		wantDerived   bool
+	}{
+		{"wider derived budget raises the pin", Finding{OracleTimeout: "1m0s", OracleTimeoutDerived: true}, 5 * time.Minute, true, "5m0s", true},
+		{"narrower derived budget keeps the recorded bound", Finding{OracleTimeout: "5m0s", OracleTimeoutDerived: true}, time.Minute, true, "5m0s", true},
+		{"explicit run leaves an explicit pin untouched", Finding{OracleTimeout: "1m0s"}, 5 * time.Minute, false, "1m0s", false},
+		{"derived join marks the record derived", Finding{OracleTimeout: "1m0s"}, 30 * time.Second, true, "1m0s", true},
+	}
+	for _, tc := range cases {
+		got := mergeScoredFacts(tc.rec, clean, tc.rec.OracleMemoryBytes, tc.currentBudget, tc.budgetDerived)
+		if got.OracleTimeout != tc.wantTimeout || got.OracleTimeoutDerived != tc.wantDerived {
+			t.Errorf("%s: timeout=%q derived=%v, want %q derived=%v", tc.name, got.OracleTimeout, got.OracleTimeoutDerived, tc.wantTimeout, tc.wantDerived)
 		}
 	}
 }

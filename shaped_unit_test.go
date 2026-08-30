@@ -167,7 +167,7 @@ func TestWholeTreeShedKeepsShapedFindings(t *testing.T) {
 // (REQ-exec-property-oracles, REQ-result-stale).
 func TestShapedServeMatcherPinsRegime(t *testing.T) {
 	prior := Finding{OperatorSet: shapedOperatorSet, OracleExplicit: true, OracleTimeout: "1m0s", PropertyRegime: ""}
-	if ok, err := shapedEvidenceMatchesContext(context.Background(), prior, nil, shapedOperatorSet, "1m0s", 0, "rapid/v1"); err != nil || ok {
+	if ok, err := shapedEvidenceMatchesContext(context.Background(), prior, nil, shapedOperatorSet, "1m0s", false, 0, "rapid/v1"); err != nil || ok {
 		t.Fatalf("regime mismatch served: ok=%v err=%v", ok, err)
 	}
 }

@@ -437,7 +437,14 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 		if outcome != engine.MutantSurvived {
 			break
 		}
-		out, groupKiller, groupMemoryDecided, diagnostic, err := engine.RunMutantBaselineDirEnv(ctx, scratch, cleanScratch, scratchMutant, g.pkgs, g.runRegex, opts.OracleTimeout, g.flags, env, cleanEnv)
+		// The verdict-bearing process runs under the group's effective
+		// budget — derived in derive mode, uniform when explicit — while
+		// the clean-twin probe below stays an advisory measurement under
+		// the run-wide bound (REQ-exec-oracle-run's derived campaign
+		// budget). maxGroupBudget's "loosest bound any verdict-bearing
+		// process ran under" holds for shaped records through exactly
+		// this stepBudget.
+		out, groupKiller, groupMemoryDecided, diagnostic, err := engine.RunMutantBaselineDirEnv(ctx, scratch, cleanScratch, scratchMutant, g.pkgs, g.runRegex, stepBudget(g, opts), g.flags, env, cleanEnv)
 		if diagnostic != "" {
 			if m.Operator == "structural: interface-satisfaction" {
 				// A satisfaction assertion's natural teeth are the

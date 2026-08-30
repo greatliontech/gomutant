@@ -275,6 +275,58 @@ func TestPhaseKillWithoutPhaseBaselineDegradesToUnsplit(t *testing.T) {
 	}
 }
 
+// The phase-kill vouch probe is an advisory baseline, never a
+// verdict-bearing process: it runs under the run-wide bound, not the
+// remainder phase's residual budget — a residual-starved probe would
+// fail the vouch and unschedule the group over a budget artifact. The
+// residual is strictly below the run-wide bound (the first phase's
+// spend is always positive), so the exact-bound pin discriminates.
+func TestPhaseKillVouchRunsUnderRunWideBound(t *testing.T) {
+	const pkg, coverPkg = "example.com/p", "example.com/p"
+	fns := []string{"TestA", "TestB", "TestC", "TestD"}
+	w := scheduleTestWork(pkg, coverPkg, fns)
+	w.candidates = make([]engine.Candidate, 2)
+	w.oracleSet = map[string]bool{pkg + ".TestA": true, pkg + ".TestB": true, pkg + ".TestC": true, pkg + ".TestD": true}
+	m := engine.Mutant{Position: "f.go:10:2", Extent: "10:2-12:3", Replacements: []engine.Replacement{{File: "f.go"}}}
+	reach := engine.CoverageForTest(map[string][]engine.CoverSpanForTest{coverPkg + "/f.go": {{StartLine: 9, StartCol: 1, EndLine: 20, EndCol: 1}}})
+	store := newScheduleStore()
+	store.byKey[coverageKey(w.groups[0], coverPkg)] = &groupSchedule{batches: []scheduleBatch{
+		{fns: []string{"TestA", "TestB"}, cov: reach},
+		{fns: []string{"TestC", "TestD"}, cov: engine.CoverageForTest(nil)},
+	}}
+	opts := Options{scheduleStore: store, OracleTimeout: time.Minute}
+
+	restoreRun := runMutantObservedEnv
+	restoreProbe := phaseBaselineProbe
+	defer func() {
+		runMutantObservedEnv = restoreRun
+		phaseBaselineProbe = restoreProbe
+	}()
+	runMutantObservedEnv = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+		if runRegex == testRunRegex([]string{"TestC", "TestD"}) {
+			return engine.MutantKilled, pkg + ".TestC", false, runtimeinput.Observation{}, "", "", nil
+		}
+		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
+	}
+	var vouchBounds []time.Duration
+	phaseBaselineProbe = func(_ context.Context, _, _, _ string, bound time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string) (int, bool, []string, runtimeinput.Observation, error) {
+		vouchBounds = append(vouchBounds, bound)
+		return 1, true, nil, runtimeinput.Observation{}, nil
+	}
+
+	tr := &Tree{}
+	outcome, killer, _, _, _, err := tr.executeMutant(context.Background(), w, m, opts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != engine.MutantKilled || killer != pkg+".TestC" {
+		t.Fatalf("vouched remainder-phase kill = outcome %v killer %q", outcome, killer)
+	}
+	if len(vouchBounds) != 1 || vouchBounds[0] != time.Minute {
+		t.Fatalf("vouch probe bounds = %v, want exactly the run-wide bound — a residual bound starves the probe", vouchBounds)
+	}
+}
+
 // The two phases of a split share ONE oracle-timeout budget: phase two
 // launches with the unsplit bound minus phase one's spend, so a
 // timeout kill stays schedule-invariant (REQ-exec-oracle-run's

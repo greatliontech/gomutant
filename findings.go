@@ -359,6 +359,15 @@ type Finding struct {
 	OracleEvidence []SubjectEvidence `json:"oracleEvidence"`
 	OracleExplicit bool              `json:"oracleExplicit"`
 	OracleTimeout  string            `json:"oracleTimeout"`
+	// OracleTimeoutDerived marks a record whose oracle bounds were
+	// DERIVED from measured baselines: OracleTimeout then records the
+	// loosest bound any verdict ran under, and the staleness pin
+	// relaxes to the timeout-kill rule — completed verdicts are
+	// answers a budget cannot flip, and every "(timeout)" kill rides
+	// candidate-local incomplete-observation evidence, so the flagged
+	// serve re-executes it under the current derived budget
+	// (REQ-result-stale).
+	OracleTimeoutDerived bool `json:"oracleTimeoutDerived,omitempty"`
 	// OracleMemoryBytes is the effective per-oracle memory ceiling the
 	// measurement ran under (REQ-exec-oracle-memory); 0 means no
 	// ceiling. A measurement pin exactly like the oracle timeout: a
@@ -1426,12 +1435,16 @@ func budgetCovers(f Finding, req int) bool {
 // about unhardened or stale-measured symbols asks this instead of
 // re-deriving pin arithmetic.
 func (t *Tree) Fresh(f Finding, tg Target, budget int) (bool, error) {
-	return t.FreshForContext(context.Background(), f, tg, budget, 60*time.Second)
+	return t.FreshContext(context.Background(), f, tg, budget)
 }
 
-// FreshContext is Fresh with caller-owned cancellation.
+// FreshContext is Fresh with caller-owned cancellation. It mirrors a
+// default run's serve posture: derived oracle budgets, so a derived
+// record with no timeout kills reads fresh (completed verdicts are
+// budget-independent) while an explicit record reads stale exactly as
+// a derive-mode Run would re-measure it.
 func (t *Tree) FreshContext(ctx context.Context, f Finding, tg Target, budget int) (bool, error) {
-	return t.FreshForContext(ctx, f, tg, budget, 60*time.Second)
+	return t.freshForContext(ctx, f, tg, budget, campaignBaselineLeash, true)
 }
 
 // FreshFor is Fresh under an explicit effective oracle timeout.
@@ -1441,6 +1454,10 @@ func (t *Tree) FreshFor(f Finding, tg Target, budget int, timeout time.Duration)
 
 // FreshForContext is FreshFor with caller-owned cancellation.
 func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget int, timeout time.Duration) (bool, error) {
+	return t.freshForContext(ctx, f, tg, budget, timeout, false)
+}
+
+func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget int, timeout time.Duration, timeoutDerived bool) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -1491,7 +1508,11 @@ func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget
 	if len(rapidPkgs) > 0 {
 		regime = engine.PropertyRegimeRapid
 	}
-	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String(), engine.OracleMemoryLimitBytes(), regime)
+	// The pin comparison takes the REQUEST's posture, never the
+	// record's: an explicit caller timeout invalidates a derived
+	// record exactly as an explicit Run would re-measure it, and the
+	// derive-posture default relaxes to the timeout-kill rule.
+	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String(), timeoutDerived, engine.OracleMemoryLimitBytes(), regime)
 	if err != nil || !matches {
 		return matches, err
 	}
