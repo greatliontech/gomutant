@@ -37,7 +37,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill")
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
-	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 60*time.Second, "maximum duration of each oracle process")
+	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "maximum duration of the baseline and mutant oracle processes; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
 	f.IntVar(&o.runs, "runs", 1, "run the mutant this many times (1-10): killed means every run killed - consecutive kills split deterministic kills from a property generator's draw luck")
 	f.StringVar(&o.attest, "attest", "", "record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or never exercised the edit")
@@ -154,6 +154,13 @@ func renderEphemeralVerdict(w io.Writer, res *gomutant.EphemeralResult) {
 		fmt.Fprintf(w, "FLAKY     %s  — killed %d/%d runs by %s\n", strings.Join(res.Files, ", "), res.KilledRuns, res.Runs, res.Killer)
 	default:
 		fmt.Fprintf(w, "SURVIVED  %s  — %s did not notice the mutation\n", strings.Join(res.Files, ", "), res.Run)
+	}
+	// The effective bound is part of the verdict's meaning — a timeout
+	// kill under a 60s budget and one under 40m are different claims —
+	// and in derived-budget mode this line is the only place the caller
+	// learns what budget the derivation produced.
+	if res.OracleBudget != "" {
+		fmt.Fprintf(w, "oracle budget %s  (baseline measured %s)\n", res.OracleBudget, res.MeasuredBaseline)
 	}
 	for _, f := range res.UnexercisedFiles {
 		fmt.Fprintf(w, "unexercised  %s  — no baseline-covered block reaches this replacement (linked into the oracle's binary, never reached by the probed run); its survival is not evidence the oracle noticed anything\n", f)

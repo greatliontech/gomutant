@@ -42,7 +42,11 @@ var goVersionSampler = func(ctx context.Context, dir string, env []string) (stri
 // `go env GOVERSION` is invariant under both — nothing else could
 // notice a dropped env).
 func goVersionCmd(ctx context.Context, dir string, env []string) *exec.Cmd {
-	cmd := commandContext(ctx, "go", "env", "GOVERSION")
+	// A plain command, not commandContext: the sampler is a metadata
+	// read, not an oracle process — the oracle constructor's process
+	// containment (job objects on windows, where its wrapper type does
+	// not even satisfy this signature) has no business here.
+	cmd := exec.CommandContext(ctx, "go", "env", "GOVERSION")
 	cmd.Dir = dir
 	cmd.Env = env
 	return cmd

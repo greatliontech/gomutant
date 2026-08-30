@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -864,6 +866,137 @@ func TestBaselineProbeTimeoutDiscardsAsUnclassifiable(t *testing.T) {
 	}
 	if unclassifiable == 0 {
 		t.Fatal("no mutant reached the stalling baseline probe; the zeroed StallGuard should")
+	}
+}
+
+// A deadline expiry alone attributes nothing: only the oracle bound's
+// own firing is a timeout. A caller's command timeout expiring mid-run
+// is a cancellation — scored as a timeout kill (or as the baseline's
+// oracle-bound refusal) it would fabricate evidence naming a bound
+// that never fired (REQ-exec-attribution's cause discrimination; a Go
+// child context inherits the parent's DeadlineExceeded verbatim, so
+// only the timeout cause can tell the two apart).
+func TestParentDeadlineIsCancellationNotTimeoutKill(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	tr := fixtureTree(t)
+	dir := "testdata/fixturemod"
+	env := append(GoEnv(dir), "GOMUTANT_BASELINE_STALL=1")
+
+	// The oracle bound firing on the baseline probe is the typed
+	// refusal naming the bound.
+	_, _, err := TestProbeEnv(context.Background(), dir, "example.com/fixture/lib", "^TestBaselineStall$", 3*time.Second, nil, env)
+	var bt *BaselineTimeoutError
+	if !errors.As(err, &bt) {
+		t.Fatalf("oracle-bound expiry = %v, want the baseline-timeout refusal", err)
+	}
+
+	// The parent deadline firing under a generous oracle bound is a
+	// cancellation, never the oracle bound's refusal.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _, err = TestProbeEnv(ctx, dir, "example.com/fixture/lib", "^TestBaselineStall$", 10*time.Minute, nil, env)
+	if err == nil {
+		t.Fatal("parent-deadline baseline probe returned no error")
+	}
+	if errors.As(err, &bt) {
+		t.Fatalf("parent expiry read as the oracle bound firing: %v", err)
+	}
+
+	// The parent deadline firing during a mutant run is never a kill:
+	// the mutant leaves StallGuard intact, so the stalling arm runs and
+	// the 3s parent expires far inside the 10m oracle bound.
+	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) == 0 {
+		t.Fatal("no Add mutants generated")
+	}
+	mctx, mcancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer mcancel()
+	out, killer, _, err := RunMutantEnv(mctx, dir, ms[0], []string{"example.com/fixture/lib"}, "^TestBaselineStall$", 10*time.Minute, nil, env)
+	if out == MutantKilled || killer == TimeoutKiller {
+		t.Fatalf("parent expiry scored as a kill: outcome=%v killer=%q", out, killer)
+	}
+	if err == nil {
+		t.Fatal("parent-deadline mutant run reported no error — either the cancellation read as a sound measurement, or the first Add mutant failed to compile (an operator-set reordering; pick a compiling mutant)")
+	}
+}
+
+// The timeout attribution needs a process the bound KILLED (ExitCode
+// -1: never exited on its own), not merely a failed one under the
+// bound's cause: the timer can fire during post-exit teardown (scratch
+// sweep, observation finalization), and relabeling a self-exited
+// process — a clean pass scored as a timeout kill, or a
+// test-attributed failure scored as "(timeout)" and dodging the
+// oracle-set gate — fabricates evidence. The cancellation twin scores
+// a completed measurement from its output even when the context died
+// in teardown, and discards only genuinely failed runs
+// (REQ-exec-attribution's cause discrimination).
+func TestOracleBudgetFiredDiscriminates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs child processes for real exit states")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("exit-state fixtures use sh; the shared predicate is platform-independent and the windows killed fact is the wrapper's own cancelled flag")
+	}
+	bg := context.Background()
+	exited := commandContext(bg, "sh", "-c", "true")
+	_ = exited.Run()
+	failed := commandContext(bg, "sh", "-c", "exit 1")
+	failedErr := failed.Run()
+	killed := commandContext(bg, "sh", "-c", "kill -KILL $$")
+	killedErr := killed.Run()
+	if exited.ProcessState == nil || failed.ProcessState == nil || killed.ProcessState == nil || failedErr == nil || killedErr == nil {
+		t.Fatal("fixture processes did not produce the three exit states")
+	}
+	// The platform-owned killed fact: only the signal-killed process
+	// reads as "did not exit on its own".
+	if !oracleProcessKilled(killed) || oracleProcessKilled(exited) || oracleProcessKilled(failed) {
+		t.Fatalf("oracleProcessKilled = killed:%v exited:%v failed:%v, want true/false/false", oracleProcessKilled(killed), oracleProcessKilled(exited), oracleProcessKilled(failed))
+	}
+	budget, cancel := context.WithTimeoutCause(context.Background(), -time.Second, errOracleBudgetExceeded)
+	defer cancel()
+	<-budget.Done()
+	if !oracleBudgetFired(killedErr, killed.ProcessState, oracleProcessKilled(killed), budget) {
+		t.Fatal("signal-killed process under the fired bound did not attribute as a timeout")
+	}
+	if oracleBudgetFired(nil, exited.ProcessState, oracleProcessKilled(exited), budget) {
+		t.Fatal("cleanly exited process attributed as a timeout — teardown expiry fabricates a kill")
+	}
+	if oracleBudgetFired(failedErr, failed.ProcessState, oracleProcessKilled(failed), budget) {
+		t.Fatal("self-exited failing process attributed as a timeout — a test-attributed kill relabeled \"(timeout)\" dodges the oracle-set gate")
+	}
+	// Never-started splits on EVIDENCE: Start returning the context's
+	// own expiry is the bound preventing the start (the sub-startup
+	// explicit timeout); any other start failure is environmental
+	// noise even when the bound's cause is set by check time.
+	if !oracleBudgetFired(fmt.Errorf("starting oracle: %w", context.DeadlineExceeded), nil, false, budget) {
+		t.Fatal("bound-prevented start did not attribute — a sub-startup explicit timeout must refuse as the bound firing")
+	}
+	if oracleBudgetFired(errors.New("fork/exec /usr/bin/go: resource temporarily unavailable"), nil, false, budget) {
+		t.Fatal("fork-level start failure attributed as a timeout — environmental noise scored as a kill")
+	}
+	parent, pcancel := context.WithTimeout(context.Background(), -time.Second)
+	defer pcancel()
+	child, ccancel := context.WithTimeoutCause(parent, time.Hour, errOracleBudgetExceeded)
+	defer ccancel()
+	<-child.Done()
+	if oracleBudgetFired(killedErr, killed.ProcessState, oracleProcessKilled(killed), child) {
+		t.Fatal("parent expiry attributed as the oracle bound firing")
+	}
+
+	if !oracleRunCancelled(killedErr, child) {
+		t.Fatal("failed run under a dead context did not discard as cancelled")
+	}
+	if oracleRunCancelled(nil, child) {
+		t.Fatal("completed measurement discarded as cancelled — a teardown-window expiry threw away sound evidence")
+	}
+	live := context.Background()
+	if oracleRunCancelled(killedErr, live) {
+		t.Fatal("failed run under a live context discarded as cancelled instead of being scored")
 	}
 }
 

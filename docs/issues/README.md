@@ -7,6 +7,7 @@ is deleted (git holds history).
 | slug | summary | Lands |
 |------|---------|-------|
 | [mcp-liveness-cancellation-witness](mcp-liveness-cancellation-witness.md) | keepalive config pinned but the ping-failure cancellation propagation has no witness over the SDK transport seam | transport-seam fault injection lands in the mcpserver harness |
+| [windows-process-fact-arms-unexecuted](windows-process-fact-arms-unexecuted.md) | windows process facts (killed flag, job kills, timeout attribution) are compile-checked only; two attribution defects survived to review state walks | when a windows runner enters the CI matrix |
 | [ephemeral-attestation-lifecycle](ephemeral-attestation-lifecycle.md) | attestation rows have no prune/retarget lifecycle; commit+dirty stamp is the only staleness signal | with the next change to prune or retarget record surfaces |
 | [planonly-gatherwindow-suite-hang](planonly-gatherwindow-suite-hang.md) | a plan-only Tree.Run hangs the suite at gatherWindow, cause undumped | train chunk 113 (closes unreproducible at triage absent a mechanism-showing dump) |
 | [derive-probe-oracle-timeout](derive-probe-oracle-timeout.md) | derive the mutant-run budget from the measured baseline instead of a fixed timeout knob | train chunk 113 |

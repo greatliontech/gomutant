@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	iofs "io/fs"
@@ -174,6 +175,18 @@ func PropertyOracleBinFlags() []string {
 // record measured under other draws must not serve as if reproducible
 // under this one (REQ-exec-property-oracles, REQ-result-stale).
 const PropertyRegimeRapid = "rapid:nofailfile,seed=1"
+
+// BaselineTimeoutError is the baseline probe's refusal when the oracle
+// bound itself expired (told apart from a caller cancellation by the
+// bound's own timeout cause, REQ-exec-attribution). Typed so a caller
+// that set the bound as something other than the oracle knob — the
+// derived-budget measurement leash — can re-frame the refusal in the
+// bound's true name.
+type BaselineTimeoutError struct{ Bound time.Duration }
+
+func (e *BaselineTimeoutError) Error() string {
+	return fmt.Sprintf("baseline test timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", e.Bound)
+}
 
 // TimeoutKiller is the killer attribution of a timed-out mutant run: the
 // hang itself is the noticed breakage, so no named test claims the kill
@@ -482,7 +495,13 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	}
 
 	parent := ctx
-	runCtx, cancel := context.WithTimeout(parent, timeout)
+	// The oracle bound carries its own cause: a Go child context
+	// inherits the parent's DeadlineExceeded verbatim, so a bare
+	// deadline test cannot tell "the oracle budget fired" from "the
+	// command timeout fired" — and only the former is a kill. A parent
+	// expiry attributed as a timeout kill would fabricate evidence
+	// naming a bound that never fired (REQ-exec-attribution).
+	runCtx, cancel := context.WithTimeoutCause(parent, timeout, errOracleBudgetExceeded)
 	defer cancel()
 	// -failfast: one oracle failure decides the binary's verdict; the
 	// remaining tests in it prove nothing further about this mutant.
@@ -519,11 +538,11 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	// paths dropped and the union stamped unverifiable.
 	sweepScratch()
 
-	if runCtx.Err() == context.DeadlineExceeded {
+	if oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), runCtx) {
 		state, incomplete, err := processObservationContext(ctx, testlog, moduleDir, "mutant test process timed out", env, scratchRoot, capture, oracleFrame, namespaces)
 		return MutantKilled, TimeoutKiller, state, incomplete, "", err
 	}
-	if runCtx.Err() != nil {
+	if oracleRunCancelled(runErr, runCtx) {
 		state, incomplete, observationErr := processObservationContext(ctx, testlog, moduleDir, "mutant test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
@@ -936,7 +955,10 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 }
 
 func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, failed []string, state runtimeinput.Observation, err error) {
-	ctx2, cancel := context.WithTimeout(ctx, timeout)
+	// The oracle bound carries its own cause exactly as the mutant
+	// run's: a parent expiry must read as cancellation, never as the
+	// oracle bound firing (REQ-exec-attribution).
+	ctx2, cancel := context.WithTimeoutCause(ctx, timeout, errOracleBudgetExceeded)
 	defer cancel()
 	scratchEnv, scratchRoot, sweepScratch, removeScratch, err := oracleScratch(env)
 	if err != nil {
@@ -972,19 +994,19 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	// Sweep before finalization - the record captures the swept truth
 	// (see the mutant site).
 	sweepScratch()
-	if ctx2.Err() == context.DeadlineExceeded {
+	if oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), ctx2) {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, "baseline test process timed out", env, scratchRoot, capture, oracleFrame, namespaces)
 		if observationErr != nil {
 			return 0, false, nil, runtimeinput.Observation{}, observationErr
 		}
-		return 0, false, nil, state, fmt.Errorf("baseline test timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", timeout)
+		return 0, false, nil, state, &BaselineTimeoutError{Bound: timeout}
 	}
-	if err := ctx2.Err(); err != nil {
+	if oracleRunCancelled(runErr, ctx2) {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, "baseline test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces)
 		if observationErr != nil {
 			return 0, false, nil, runtimeinput.Observation{}, observationErr
 		}
-		return 0, false, nil, state, err
+		return 0, false, nil, state, ctx2.Err()
 	}
 	if strings.Contains(buf.String(), "[build failed]") {
 		if diagnostic := compileDiagnostics(buf.Bytes(), nil); diagnostic != "" {
@@ -1286,4 +1308,55 @@ func oracleScratch(env []string) ([]string, string, func(), func(), error) {
 		os.RemoveAll(dir)
 	}
 	return append(append([]string(nil), env...), "TMPDIR="+dir), dir, sweep, remove, nil
+}
+
+// errOracleBudgetExceeded is the oracle bound's own timeout cause: a
+// child context inherits the parent's DeadlineExceeded verbatim, so
+// only the cause can tell the oracle budget firing (a kill, or a
+// baseline-timeout refusal) from a caller's command timeout (a
+// cancellation) — the discrimination REQ-exec-attribution requires.
+var errOracleBudgetExceeded = errors.New("oracle budget exceeded")
+
+// oracleBudgetFired reports whether an oracle process was killed by
+// this site's own bound. The discrimination needs BOTH facts: the
+// bound's own cause (a parent expiry keeps the parent's cause — the
+// cause alone subsumes a DeadlineExceeded check, since WithTimeoutCause
+// sets both atomically), and a process that did NOT exit on its own
+// (ExitCode -1: killed by signal, never exited). A mere failure check
+// would let the timer firing during post-exit teardown (scratch sweep,
+// observation finalization) relabel a self-exited process — a clean
+// pass scored as a timeout kill, or a test-attributed failure scored
+// as "(timeout)" and thereby dodging the oracle-set attribution gate —
+// fabricating exactly the evidence the discrimination exists to
+// prevent (REQ-exec-attribution). A self-exited process is scored from
+// its own output no matter when the timer fired; "did not exit on its
+// own" is the platform-owned killed fact (oracleProcessKilled — unix
+// reads the signal-kill exit code, windows the job wrapper's own
+// cancelled flag, since its job kill exits with a code the tool itself
+// chose). A process that never started (nil state) attributes to the
+// bound only on the evidence that the context is why nothing started —
+// Start returns the context's own expiry verbatim in exactly that case
+// (the sub-startup explicit timeout) — never presumptively: a
+// fork-level failure (EAGAIN on a saturated host, ENOENT, EMFILE) is
+// environmental noise even when the bound expires before this check
+// runs.
+func oracleBudgetFired(runErr error, state *os.ProcessState, killed bool, c context.Context) bool {
+	if context.Cause(c) != errOracleBudgetExceeded {
+		return false
+	}
+	if state == nil {
+		return errors.Is(runErr, context.DeadlineExceeded)
+	}
+	return killed
+}
+
+// oracleRunCancelled reports a failed oracle process whose context
+// died without this site's bound having killed it — a caller
+// cancellation or command-timeout expiry: the measurement is
+// discarded, never scored. A process that exited on its own is scored
+// from its output even when the context died in teardown — a
+// completed measurement is evidence regardless of what happened after
+// it completed (REQ-exec-attribution).
+func oracleRunCancelled(runErr error, c context.Context) bool {
+	return runErr != nil && c.Err() != nil
 }

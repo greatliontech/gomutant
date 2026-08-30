@@ -22,3 +22,9 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 func runOracleProcess(cmd *exec.Cmd) error {
 	return cmd.Run()
 }
+
+// oracleProcessKilled mirrors the unix reading for compilation
+// completeness (execution is refused earlier during tree loading).
+func oracleProcessKilled(cmd *exec.Cmd) bool {
+	return cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1
+}

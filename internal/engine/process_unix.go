@@ -32,6 +32,14 @@ func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 	return cmd
 }
 
+// oracleProcessKilled is the platform-owned fact "the oracle process
+// did not exit on its own": on unix a bound expiry SIGKILLs the
+// process group, recorded as ExitCode -1 (killed by signal, never
+// exited) — a self-exited process reports its real code.
+func oracleProcessKilled(cmd *exec.Cmd) bool {
+	return cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == -1
+}
+
 // oracleNiceness is the absolute niceness every oracle process tree
 // runs at: batch work that yields to interactive neighbors while a
 // campaign saturates the host (REQ-exec-oracle-parallelism). Verdicts

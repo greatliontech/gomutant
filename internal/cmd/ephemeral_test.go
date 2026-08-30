@@ -150,6 +150,32 @@ func TestRenderEphemeralVerdictNamesUnexercisedFiles(t *testing.T) {
 	}
 }
 
+// The effective oracle bound and its measured input are part of the
+// verdict's meaning — a timeout kill under a 60s budget and one under
+// 40m are different claims — so the render surfaces both
+// (REQ-exec-ephemeral's derived budget: the result reports the
+// effective budget either way).
+func TestRenderEphemeralVerdictReportsOracleBudget(t *testing.T) {
+	var out bytes.Buffer
+	renderEphemeralVerdict(&out, &gomutant.EphemeralResult{
+		Files: []string{"a.go"}, Run: "^TestOK$", Runs: 1, KilledRuns: 1, Killed: true, Killer: "TestOK",
+		OracleBudget: "1m4s", MeasuredBaseline: "16s",
+	})
+	if text := out.String(); !strings.Contains(text, "oracle budget 1m4s") || !strings.Contains(text, "baseline measured 16s") {
+		t.Fatalf("render missing the effective budget or its measured input:\n%s", text)
+	}
+}
+
+// 0 is the ephemeral face's oracle-timeout default: the budget derives
+// from the measured baseline, and an explicit value is the override
+// (REQ-exec-ephemeral's derived budget).
+func TestEphemeralOracleTimeoutDefaultsToDerived(t *testing.T) {
+	cmd := newEphemeralCommand()
+	if got := cmd.Flags().Lookup("oracle-timeout"); got == nil || got.DefValue != "0s" {
+		t.Fatalf("--oracle-timeout = %+v, want the derive-from-baseline default (0s)", got)
+	}
+}
+
 // syncWriter is the run face's one serialization point for the
 // heartbeat's concurrency-exempt callback beside the callback-locked
 // render lines; concurrent writes must stay whole and race-free.

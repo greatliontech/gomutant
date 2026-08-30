@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,12 @@ import (
 // sound - is testable without constructing a genuinely unbuildable
 // probe.
 var coveredPositions = engine.CoveredPositions
+
+// testProbe is the baseline probe; a variable so the bound each mode
+// hands it — the measurement leash in derived-budget mode, the
+// caller's override otherwise — is pinnable by a delegating recorder
+// without constructing a genuinely slow baseline.
+var testProbe = engine.TestProbeEnv
 
 // EphemeralResult is one manual mutant's evidence (REQ-exec-ephemeral): what
 // was mutated, the test it ran against, whether that test killed it, and the
@@ -60,6 +67,17 @@ type EphemeralResult struct {
 	// content), the identity an equivalence attestation records
 	// (REQ-result-ephemeral-attest).
 	EditDigest string `json:"editDigest"`
+	// OracleBudget is the effective per-process oracle bound the
+	// mutant runs used — the caller's explicit timeout, or the budget
+	// derived from the measured baseline (REQ-exec-ephemeral's
+	// derived budget), as a canonical duration string.
+	OracleBudget string `json:"oracleBudget"`
+	// MeasuredBaseline is the baseline probe's wall-clock duration
+	// rounded to the millisecond — the recorded value IS the derivation
+	// input for OracleBudget in derived-budget mode (recorded in
+	// explicit-timeout mode too: it is a measurement either way), as a
+	// canonical duration string.
+	MeasuredBaseline string `json:"measuredBaseline"`
 	// CoverageUnknown marks a non-kill verdict whose exercise state
 	// could not be established (the baseline coverage probe failed):
 	// UnexercisedFiles absent then means UNKNOWN, not exercised — the
@@ -127,15 +145,17 @@ func RestoreOracleParallelism(s OracleParallelismSnapshot) { engine.RestoreOracl
 // it probes the named test on the unmutated tree: a run pattern matching
 // nothing, or a test already failing clean, cannot attribute a mutant, so
 // either refuses the run rather than scoring it. file is tree-relative;
-// testPkg is a go package path; run is a -run pattern. A mutant that fails
+// testPkg is a go package path; run is a -run pattern. A non-positive
+// oracleTimeout derives the mutant budget from the measured baseline (a
+// leash-bounded baseline, then a multiple with a floor); an explicit value
+// is the caller's bound for the baseline and mutant runs alike — the
+// result reports the effective budget and the measured baseline either
+// way. A mutant that fails
 // to compile is an error, not a survivor: nothing was measured.
 func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	engine.EnsureOracleMemoryDefault(1)
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	if oracleTimeout <= 0 {
-		oracleTimeout = 60 * time.Second
 	}
 	abs, err := resolveTreeFile(t.dir, file)
 	if err != nil {
@@ -209,6 +229,79 @@ func discardError(files []string, diagnostic string) error {
 // and an unbounded N would let one probe request scale like a campaign.
 const MaxEphemeralRuns = 10
 
+// ephemeralBaselineLeash is the generous non-measurement ceiling for
+// two workloads the oracle bound does not fit: the derived-budget
+// baseline (the measurement the budget derives from, which must not
+// run under the budget it exists to derive) and the coverage probe in
+// both modes (an instrumented whole-closure rebuild, structurally
+// heavier than the measured oracle). The command timeout still bounds
+// the whole probe.
+const ephemeralBaselineLeash = 10 * time.Minute
+
+// ephemeralBudgetFloor keeps a derived budget from ever being less
+// patient than the fixed default it replaced: the floor is the
+// retired 60s, because a warm-cache baseline pays no compile while
+// the mutant run always recompiles the mutated package inside its
+// bound — the multiple alone would time out honest slow mutants of
+// fast tests, and a timeout is a kill, the flattering direction.
+const ephemeralBudgetFloor = 60 * time.Second
+
+// derivedOracleBudget maps a measured baseline duration to the mutant
+// budget: a multiple with a floor (REQ-exec-ephemeral's derived
+// budget; the values are incidental, not contract).
+func derivedOracleBudget(baseline time.Duration) time.Duration {
+	budget := 4 * baseline
+	if budget < ephemeralBudgetFloor {
+		budget = ephemeralBudgetFloor
+	}
+	return budget
+}
+
+// derivedBaselineRefusal re-frames a baseline refusal for
+// derived-budget mode, naming the bound that actually fired
+// (REQ-exec-ephemeral's derived budget names its bounds honestly):
+//   - the oracle bound's own expiry means the measurement leash fired
+//     (the oracle knob the engine's message names never governed) —
+//     the refusal REPLACES the engine's error rather than wrapping
+//     it, because the wrapped text's knob claim would contradict the
+//     re-frame and the typed error carries nothing else any consumer
+//     reads (audited: the attest record, CLI, and MCP faces render
+//     Error() only);
+//   - a bare deadline expiry is the command deadline dying during the
+//     leashed baseline (on faces whose command timeout is shorter
+//     than the leash the leash can never fire), named as such;
+//   - every other refusal — cancellation included — passes through.
+func derivedBaselineRefusal(err error) error {
+	var bt *engine.BaselineTimeoutError
+	if errors.As(err, &bt) {
+		return fmt.Errorf("baseline test ran past the %s measurement leash - the derived budget needs a measured baseline; pass an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) to bound this oracle instead", bt.Bound)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("the command deadline expired during the %s-leashed baseline measurement - raise the command timeout (timeout_sec / --timeout), or pass an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) to bound this oracle instead: %w", ephemeralBaselineLeash, err)
+	}
+	return err
+}
+
+// derivedTimeoutEvidence is a timeout kill's evidence text in
+// derived-budget mode: the engine's names the oracle knob, which here
+// never governed — the bound's provenance is the measured baseline,
+// and the override path rides along.
+func derivedTimeoutEvidence(mutantBudget, measuredBaseline time.Duration) string {
+	return fmt.Sprintf("oracle timed out after %s - the bound is the budget derived from the measured %s baseline; an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) overrides the derivation", mutantBudget, measuredBaseline)
+}
+
+// timeoutEvidenceForMode picks a kill's evidence text: only a timeout
+// kill under a DERIVED bound is re-framed (the engine's text names the
+// oracle knob, which never governed); every other kill — explicit
+// bound, or any non-timeout killer — keeps the engine's evidence
+// verbatim.
+func timeoutEvidenceForMode(derive bool, killer, evidence string, mutantBudget, measuredBaseline time.Duration) string {
+	if derive && killer == engine.TimeoutKiller {
+		return derivedTimeoutEvidence(mutantBudget, measuredBaseline)
+	}
+	return evidence
+}
+
 func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	engine.EnsureOracleMemoryDefault(1)
 	if err := ctx.Err(); err != nil {
@@ -230,8 +323,21 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		}
 		seen[replacement.Abs] = true
 	}
-	if oracleTimeout <= 0 {
-		oracleTimeout = 60 * time.Second
+	// The oracle budget: an explicit timeout is the caller's override;
+	// zero derives it from the baseline itself — the baseline run IS a
+	// measurement of the oracle's cost, so the budget follows the
+	// measured tree instead of a fixed knob that dies at baseline on a
+	// loaded host and idles through most of itself on a quiet one
+	// (REQ-exec-ephemeral's derived budget). The baseline runs under a
+	// generous measurement leash (and the command timeout still
+	// bounds); the derived budget is a multiple with a floor — the
+	// values are incidental like the seed: headroom for scheduler
+	// noise and genuine mutant-induced slowdown without unmooring the
+	// timeout-kill meaning.
+	derive := oracleTimeout <= 0
+	baselineBound := oracleTimeout
+	if derive {
+		baselineBound = ephemeralBaselineLeash
 	}
 	if runs == 0 {
 		runs = 1
@@ -290,8 +396,12 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 
 	env := t.eng.GoEnv()
-	ran, passed, err := engine.TestProbeEnv(ctx, t.dir, testPkg, run, oracleTimeout, binFlags, env)
+	baselineStart := time.Now()
+	ran, passed, err := testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env)
 	if err != nil {
+		if derive {
+			return nil, derivedBaselineRefusal(err)
+		}
 		return nil, err
 	}
 	if ran == 0 {
@@ -299,6 +409,17 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	if !passed {
 		return nil, fmt.Errorf("the named test does not pass on the unmutated tree in %s: a kill against it would be fabricated", testPkg)
+	}
+	measuredBaseline := time.Since(baselineStart).Round(time.Millisecond)
+	mutantBudget := oracleTimeout
+	if derive {
+		// The baseline just measured the oracle's cost on this tree
+		// under this load. The measurement can UNDERSTATE the mutant
+		// run's cost — a warm-cache baseline pays no compile while
+		// the mutant always recompiles the mutated package inside its
+		// bound — which is why the floor is the retired fixed
+		// default, never lower.
+		mutantBudget = derivedOracleBudget(measuredBaseline)
 	}
 
 	files := make([]string, len(replacements))
@@ -312,17 +433,19 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	m := engine.Mutant{Replacements: engineReplacements}
 	res := &EphemeralResult{
-		Files:      files,
-		TestPkg:    testPkg,
-		Run:        run,
-		Runs:       runs,
-		EditDigest: ephemeralEditDigest(t.dir, replacements),
+		Files:            files,
+		TestPkg:          testPkg,
+		Run:              run,
+		Runs:             runs,
+		EditDigest:       ephemeralEditDigest(t.dir, replacements),
+		OracleBudget:     mutantBudget.String(),
+		MeasuredBaseline: measuredBaseline.String(),
 	}
 	// N runs against the once-probed baseline: per-run verdicts split a
 	// deterministic kill (every run killed) from a property generator's
 	// draw luck (REQ-exec-ephemeral).
 	for i := 0; i < runs; i++ {
-		outcome, killer, evidence, diagnostic, err := engine.RunMutantEvidenceEnv(ctx, t.dir, m, []string{testPkg}, run, oracleTimeout, binFlags, env)
+		outcome, killer, evidence, diagnostic, err := engine.RunMutantEvidenceEnv(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env)
 		if err != nil {
 			return nil, err
 		}
@@ -330,6 +453,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 			return nil, discardError(files, diagnostic)
 		}
 		if outcome == engine.MutantKilled {
+			evidence = timeoutEvidenceForMode(derive, killer, evidence, mutantBudget, measuredBaseline)
 			res.KilledRuns++
 			res.RunVerdicts = append(res.RunVerdicts, "killed: "+killer)
 			if res.Killer == "" {
@@ -355,7 +479,15 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// absent rather than failing a sound measurement — and marks
 		// the exercise state UNKNOWN, so absence never reads as
 		// exercised (REQ-exec-ephemeral).
-		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", oracleTimeout, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err != nil {
+		// The coverage probe recompiles the linked closure instrumented
+		// — a structurally different (heavier) workload than the
+		// measured oracle — so neither the derived budget (scaled to
+		// the uninstrumented baseline) nor the caller's explicit oracle
+		// bound (sized for the oracle, not the rebuild) fits it: it
+		// runs under the measurement leash in both modes. Its expiry is
+		// the advisory posture, never a verdict — CoverageUnknown, the
+		// label absent — and the command timeout still bounds.
+		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", ephemeralBaselineLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err != nil {
 			res.CoverageUnknown = true
 		} else {
 			for i, replacement := range replacements {
@@ -379,7 +511,9 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 
 // EphemeralBatch runs one atomic multi-file exact-match edit batch as a manual
 // mutant. Every edit resolves against the original files before one overlay
-// exposes all effective replacements to the named test.
+// exposes all effective replacements to the named test. oracleTimeout
+// carries Ephemeral's semantics: non-positive derives the mutant budget
+// from the measured baseline.
 func (t *Tree) EphemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	replacements, err := prepareEditBatchContext(ctx, t.dir, edits)
 	if err != nil {
@@ -458,7 +592,8 @@ func overlappingMatchStarts(s, pattern string) int {
 
 // EphemeralEdits runs an ephemeral mutant given as exact-match edits against
 // the file's current content (REQ-exec-ephemeral): the edits are applied and
-// the result runs exactly as a whole replacement would.
+// the result runs exactly as a whole replacement would, oracleTimeout
+// carrying Ephemeral's derive-on-non-positive semantics.
 func (t *Tree) EphemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, oracleTimeout time.Duration, runs int) (*EphemeralResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

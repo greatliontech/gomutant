@@ -58,6 +58,33 @@ func commandContext(ctx context.Context, name string, args ...string) *jobComman
 	return wrapped
 }
 
+// oracleProcessKilled is the platform-owned fact "the oracle process
+// did not exit on its own". The job-object kill exits every process in
+// the tree with an exit code the tool itself chose
+// (TerminateJobObject's 1), so an exit-code reading cannot tell a kill
+// from a failing test — the wrapper's own cancelled flag, set under mu
+// by both ctx-driven job kills (the Cancel closure and Run's
+// spawn-window terminateJob), is the source of truth; the
+// environmental terminations deliberately never set it.
+func oracleProcessKilled(cmd *jobCommand) bool {
+	cmd.mu.Lock()
+	defer cmd.mu.Unlock()
+	return cmd.cancelled
+}
+
+// terminateJob is the wrapper's own ctx-driven job kill: every path
+// that terminates the job BECAUSE THE CONTEXT DIED marks the wrapper
+// cancelled first, so oracleProcessKilled has one source of truth —
+// the environmental terminations (assign or resume failure) stay
+// unmarked, because an environmental death must never read as the
+// bound's kill (REQ-exec-attribution).
+func (c *jobCommand) terminateJob() {
+	c.mu.Lock()
+	c.cancelled = true
+	c.mu.Unlock()
+	_ = windows.TerminateJobObject(c.job, 1)
+}
+
 func (c *jobCommand) Run() error {
 	if c.job != 0 {
 		defer windows.CloseHandle(c.job)
@@ -88,7 +115,7 @@ func (c *jobCommand) Run() error {
 	c.assigned = true
 	c.mu.Unlock()
 	if err := c.ctx.Err(); err != nil {
-		_ = windows.TerminateJobObject(c.job, 1)
+		c.terminateJob()
 		_ = c.Wait()
 		return err
 	}

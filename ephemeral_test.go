@@ -365,3 +365,187 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 		t.Fatal("failed coverage probe left CoverageUnknown unset — absence would read as exercised")
 	}
 }
+
+// The coverage probe recompiles the linked closure instrumented — a
+// structurally different workload than either the measured oracle or
+// the caller's oracle bound's subject — so it runs under the
+// measurement leash in BOTH modes: the derived budget is scaled to the
+// uninstrumented baseline, and an explicit bound is sized for the
+// oracle, not the rebuild (REQ-exec-ephemeral's derived budget and
+// probe-failure posture).
+func TestEphemeralCoverageProbeRunsUnderMeasurementLeash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per probe")
+	}
+	restore := coveredPositions
+	var got []time.Duration
+	coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView) (engine.Coverage, error) {
+		got = append(got, timeout)
+		return engine.Coverage{}, errors.New("probe refused")
+	}
+	defer func() { coveredPositions = restore }()
+	tr := fixtureTree(t)
+	linkedIdle, err := os.ReadFile("internal/engine/testdata/fixturemod/genp/gen.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(linkedIdle), "type G struct{}", "type G struct{ X int }", 1)
+	for _, timeout := range []time.Duration{0, time.Minute} {
+		res, err := tr.Ephemeral(context.Background(), "genp/gen.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", timeout, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Killed {
+			t.Fatalf("linked-unexecuted replacement killed: %+v", res)
+		}
+	}
+	if len(got) != 2 || got[0] != ephemeralBaselineLeash || got[1] != ephemeralBaselineLeash {
+		t.Fatalf("coverage probe bounds = %v, want the %v measurement leash in both modes", got, ephemeralBaselineLeash)
+	}
+}
+
+// The derive-mode baseline runs under the measurement leash — the
+// knob the derivation exists to escape must not govern the
+// measurement itself — while an explicit timeout hands the baseline
+// the caller's bound verbatim (REQ-exec-ephemeral's derived budget).
+func TestEphemeralBaselineRunsUnderLeash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per probe")
+	}
+	restore := testProbe
+	var bounds []time.Duration
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, error) {
+		bounds = append(bounds, timeout)
+		return restore(ctx, dir, testPkg, run, timeout, binFlags, env)
+	}
+	defer func() { testProbe = restore }()
+	tr := fixtureTree(t)
+	inside, err := os.ReadFile("internal/engine/testdata/fixturemod/lib/lib.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(inside), "return x - 1", "return x - 2", 1)
+	ctx := context.Background()
+	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 90*time.Second, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(bounds) != 2 || bounds[0] != ephemeralBaselineLeash || bounds[1] != 90*time.Second {
+		t.Fatalf("baseline bounds = %v, want the %v measurement leash in derive mode and the caller's 1m30s override verbatim", bounds, ephemeralBaselineLeash)
+	}
+}
+
+// The mutant budget derives from the measured baseline when no
+// explicit timeout is given — a multiple with a floor, reported on the
+// result — while an explicit timeout stays the caller's override
+// (REQ-exec-ephemeral's derived budget).
+func TestEphemeralDerivesOracleBudgetFromBaseline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per probe")
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	inside, err := os.ReadFile("internal/engine/testdata/fixturemod/lib/lib.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(inside), "return x - 1", "return x - 2", 1)
+	res, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	derived, err := time.ParseDuration(res.OracleBudget)
+	if err != nil || derived < ephemeralBudgetFloor || derived >= ephemeralBaselineLeash {
+		t.Fatalf("derived budget = %q (%v), want the floor <= budget < the baseline leash — a budget equal to the leash means the derivation never ran", res.OracleBudget, err)
+	}
+	// The derivation input is pinned on the result: a zeroed or
+	// unmeasured baseline would leave the budget unexplainable.
+	measured, err := time.ParseDuration(res.MeasuredBaseline)
+	if err != nil || measured <= 0 {
+		t.Fatalf("measured baseline = %q (%v), want a positive measurement", res.MeasuredBaseline, err)
+	}
+	if derived != derivedOracleBudget(measured) {
+		t.Fatalf("derived budget %v != derivedOracleBudget(%v) = %v — the reported budget did not come from the reported measurement", derived, measured, derivedOracleBudget(measured))
+	}
+	explicit, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 90*time.Second, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicit.OracleBudget != "1m30s" {
+		t.Fatalf("explicit budget = %q, want the caller's override reported verbatim", explicit.OracleBudget)
+	}
+	if m, err := time.ParseDuration(explicit.MeasuredBaseline); err != nil || m <= 0 {
+		t.Fatalf("explicit-mode measured baseline = %q (%v), want the measurement recorded either way", explicit.MeasuredBaseline, err)
+	}
+}
+
+// derivedOracleBudget is a multiple with a floor, and the floor is
+// never below the retired fixed default: the baseline measurement can
+// understate the mutant run's cost (no compile on a warm cache; the
+// mutant always recompiles), and a timeout is a kill — the flattering
+// direction.
+func TestDerivedOracleBudget(t *testing.T) {
+	if ephemeralBudgetFloor < 60*time.Second {
+		t.Fatalf("floor = %v, below the retired 60s fixed default — a derived budget must never be less patient than the knob it replaced", ephemeralBudgetFloor)
+	}
+	if got := derivedOracleBudget(time.Second); got != ephemeralBudgetFloor {
+		t.Fatalf("sub-floor baseline budget = %v, want the floor", got)
+	}
+	if got := derivedOracleBudget(time.Minute); got != 4*time.Minute {
+		t.Fatalf("baseline-derived budget = %v, want the multiple", got)
+	}
+}
+
+// Derived-budget mode names its bounds honestly: an oracle-bound
+// expiry on the baseline is re-framed as the measurement leash (the
+// oracle knob never governed), any other refusal passes through, and
+// a timeout kill's evidence names the derivation and its override
+// path (REQ-exec-ephemeral's derived budget).
+func TestDerivedBoundsNamedHonestly(t *testing.T) {
+	reframed := derivedBaselineRefusal(&engine.BaselineTimeoutError{Bound: ephemeralBaselineLeash})
+	if !strings.Contains(reframed.Error(), "measurement leash") || !strings.Contains(reframed.Error(), ephemeralBaselineLeash.String()) {
+		t.Fatalf("leash expiry re-frame = %q, want the leash named", reframed)
+	}
+	if strings.Contains(reframed.Error(), "the oracle timeout governs") {
+		t.Fatalf("leash expiry still names the oracle knob as governing: %q", reframed)
+	}
+	// The message names the bound the typed error carries, not a
+	// package constant it assumes.
+	if got := derivedBaselineRefusal(&engine.BaselineTimeoutError{Bound: 42 * time.Second}); !strings.Contains(got.Error(), "42s") {
+		t.Fatalf("re-frame ignored the fired bound: %q", got)
+	}
+	// A bare deadline expiry is the command deadline dying during the
+	// leashed baseline — on faces whose command timeout undercuts the
+	// leash, the only bound that can fire — named as such, with the
+	// original error kept in the chain.
+	cmdExpiry := derivedBaselineRefusal(fmt.Errorf("running baseline: %w", context.DeadlineExceeded))
+	if !strings.Contains(cmdExpiry.Error(), "command deadline") || !errors.Is(cmdExpiry, context.DeadlineExceeded) {
+		t.Fatalf("command-deadline expiry re-frame = %q, want the command deadline named and the chain kept", cmdExpiry)
+	}
+	if cancelled := derivedBaselineRefusal(context.Canceled); cancelled != context.Canceled {
+		t.Fatalf("cancellation was rewritten: %v", cancelled)
+	}
+	other := errors.New("baseline test failed to build")
+	if got := derivedBaselineRefusal(other); got != other {
+		t.Fatalf("non-timeout refusal was rewritten: %v", got)
+	}
+	ev := derivedTimeoutEvidence(2*time.Minute, 30*time.Second)
+	if !strings.Contains(ev, "2m0s") || !strings.Contains(ev, "30s") || !strings.Contains(ev, "derived") {
+		t.Fatalf("timeout-kill evidence = %q, want the derived budget and its measured baseline named", ev)
+	}
+	// The re-frame applies to exactly one shape: a timeout kill under a
+	// derived bound. An explicit bound keeps the engine's knob-naming
+	// text (there the knob DID govern), and a test-attributed kill
+	// keeps its own output either way.
+	if got := timeoutEvidenceForMode(true, engine.TimeoutKiller, "engine text", 2*time.Minute, 30*time.Second); got != ev {
+		t.Fatalf("derived timeout kill kept the engine's text: %q", got)
+	}
+	if got := timeoutEvidenceForMode(false, engine.TimeoutKiller, "engine text", 2*time.Minute, 30*time.Second); got != "engine text" {
+		t.Fatalf("explicit-bound timeout kill was re-framed: %q", got)
+	}
+	if got := timeoutEvidenceForMode(true, "example.com/x.TestY", "test output", 2*time.Minute, 30*time.Second); got != "test output" {
+		t.Fatalf("test-attributed kill was re-framed: %q", got)
+	}
+}

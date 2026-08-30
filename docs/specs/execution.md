@@ -20,7 +20,12 @@ unattributable and aborts a sweep the per-package form completes.
 **REQ-exec-attribution** (behavior): A kill MUST be one of exactly three
 attributed events, enforcing REQ-core-attributed-kills: a named oracle test
 that passed in a pre-measurement run of the unmutated tree reporting failure
-in the mutant run's structured output; a timeout; or a
+in the mutant run's structured output; a timeout — attributed only when the
+oracle's own bound fired, discriminated by that bound's own expiry cause: a
+caller's command timeout expiring mid-run is a cancellation, never a kill,
+because a deadline test alone cannot tell the two apart and a parent expiry
+scored as a timeout kill would fabricate evidence naming a bound that never
+fired; or a
 package-scope failure with no test-level event — admitted only when a
 baseline probe of the unmutated tree passes, which distinguishes a
 goroutine-panic-class kill from environmental noise. The probe runs even when
@@ -443,7 +448,26 @@ test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
 and read as a fabricated kill — the flattering direction
 REQ-core-attributed-kills refuses — so either probe result refuses the run
-rather than scoring it. A manual mutant that fails to build, and a baseline
+rather than scoring it. Without an explicit oracle timeout the mutant
+budget is DERIVED from that baseline: the baseline run is itself a
+measurement of the oracle's cost on this tree under this load, so it
+executes under a generous measurement leash and the mutant budget
+follows as a multiple with a floor — instead of a fixed knob that dies
+at baseline on a loaded host and idles through most of itself on a
+quiet one. The measurement can understate the mutant run's cost — a
+warm-cache baseline pays no compile while the mutant run always
+recompiles the mutated package inside its bound — so the floor is
+never below the fixed default the derivation replaced: that relation
+is contract; the particular multiple and leash values are incidental.
+An explicit timeout remains the
+caller's override; the result reports the effective budget and the
+measured baseline either way; and a refusal or timeout kill under a
+derived bound names that bound's true provenance (the leash, the
+derived budget, or a command deadline that undercut them) rather than
+the oracle knob that never governed it. The honest-naming duty
+attaches to refusals and kills; the advisory coverage probe's bound
+expiry is the recorded probe-failure posture (exercise state unknown,
+the label absent), never a named refusal. A manual mutant that fails to build, and a baseline
 probe whose test package fails to build, each refuse with the compiler's own
 diagnostic in the message — manual probes are interactive evidence gathering,
 so the caller repairs the edit from the compiler's reason, never from a
