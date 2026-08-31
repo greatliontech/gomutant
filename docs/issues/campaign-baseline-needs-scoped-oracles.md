@@ -32,4 +32,5 @@ the record settles alone:
 (c) ACCEPT day/week-class campaigns as idle-window background work
     only, with chunk gates permanently probe-based.
 
-Lands: user decision (the fork above, raised with these measurements).
+Lands: cross-tool train chunk 137 (user ruled option (b), survivor-oracle
+narrowing, 2026-08-31; the chunk carries the carve-outs and the audit).
