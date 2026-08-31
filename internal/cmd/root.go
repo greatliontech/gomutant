@@ -18,6 +18,8 @@ func Execute(args []string) error {
 // ExecuteContext runs the gomutant command tree with args and cancellation.
 func ExecuteContext(ctx context.Context, args []string) error {
 	startDebugProfiler()
+	ctx, stop := withSoftInterrupt(ctx)
+	defer stop()
 	cmd := newRootCommand()
 	cmd.SetArgs(args)
 	return cmd.ExecuteContext(ctx)

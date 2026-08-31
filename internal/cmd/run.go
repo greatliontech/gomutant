@@ -270,8 +270,26 @@ func runCommand(ctx context.Context, o runOptions) error {
 	for _, f := range prior {
 		priorLayer[f.Symbol], _ = docStore.Layer(f)
 	}
+	// The first SIGINT drains: no new mutants, in-flight ones finish,
+	// measured prefixes commit as candidate-capped records; the second
+	// cancels hard (REQ-exec-cancellation's graceful-interrupt clause).
+	var softStop <-chan struct{}
+	soft := softInterruptFrom(ctx)
+	if soft != nil {
+		drain := make(chan struct{})
+		softStop = drain
+		soft.arm(func() {
+			fmt.Fprintln(os.Stderr, "gomutant: interrupt - draining in-flight mutants and committing measured prefixes; interrupt again to cancel hard")
+			close(drain)
+		})
+		// Disarmed the moment Run returns (below), so a SIGINT landing
+		// during the final merge or rendering cancels hard instead of
+		// closing a channel nothing reads; the defer is the panic net.
+		defer soft.disarm()
+	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
-		Budget: o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
+		SoftStop: softStop,
+		Budget:   o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
 		OwnWrites: gomutant.RunOwnWrites(docPath),
 		PlanOnly:  o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
@@ -413,6 +431,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 			return nil
 		},
 	})
+	if soft != nil {
+		soft.disarm()
+	}
 	rep.stop()
 	var drift *gomutant.TreeDriftError
 	if err != nil && !errors.As(err, &drift) {
@@ -640,6 +661,11 @@ func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent, selectionN
 // exitCause names the exit path for the banked-state summary.
 func exitCause(err error) string {
 	switch {
+	case errors.Is(err, gomutant.ErrInterrupted):
+		// The graceful drain: measured prefixes are committed and
+		// re-running the same command extends them — the one exit that
+		// is neither a timeout, a hard cancel, nor an abort.
+		return "interrupted gracefully - measured prefixes committed; re-run to extend"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "command timeout"
 	case errors.Is(err, context.Canceled):

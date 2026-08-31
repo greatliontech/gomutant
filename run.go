@@ -93,6 +93,19 @@ type Options struct {
 	// marking the derived posture (REQ-exec-oracle-run's derived
 	// campaign budget).
 	OracleTimeout time.Duration
+	// SoftStop, when non-nil and closed, interrupts the campaign
+	// GRACEFULLY: no further mutants are admitted, in-flight mutants
+	// finish and their kills confirm serially, and each fresh-measure
+	// target whose candidate prefix drained commits as an ordinary
+	// candidate-capped record — Budget and Generated at the measured
+	// prefix — whose reuse follows REQ-result-stale's budget-extension
+	// carve-out, so re-running the same command measures only the
+	// remainder. In-flight serve, splice, and drift work discards
+	// whole (its prior records stand). The run still returns an
+	// operational cancellation error; a context cancellation remains
+	// the hard stop that discards unfinished work whole
+	// (REQ-exec-cancellation's graceful-interrupt clause).
+	SoftStop <-chan struct{}
 	// OracleMemoryBytes ceilings each oracle process tree's memory
 	// (REQ-exec-oracle-memory): 0 derives RAM/(2 x jobs) floored at
 	// 1 GiB, negative disables. A runaway-allocation mutant dies on its
@@ -2918,6 +2931,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// value, so no assembly path can receive the verdicts without
 		// the flips (REQ-exec-survivor-evidence).
 		scores []windowScores
+		// discard is non-nil exactly when Options.SoftStop drained the
+		// window: the fresh works were truncated to their dispatched
+		// candidate prefixes and restamped as candidate-capped, each
+		// true entry marks a work with nothing committable, and the run
+		// ends after this window aggregates (REQ-exec-cancellation's
+		// graceful-interrupt clause).
+		discard []bool
 	}
 	executeWindow := func(window []work) (*executedWindow, error) {
 		outcomes := make([][]engine.MutantOutcome, len(window))
@@ -2992,9 +3012,28 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 			}()
 		}
+		// The graceful drain (REQ-exec-cancellation's graceful-interrupt
+		// clause): a fired SoftStop stops admitting candidates; every
+		// already-dispatched mutant finishes under the still-live pool
+		// context, and prefixes records how far each work's candidate
+		// walk got — the contiguous handled prefix, the capped-record
+		// boundary the truncation below commits (-1 = fully handled).
+		softStopped := false
+		breakWi := len(window)
+		prefixes := make([]int, len(window))
+		for wi := range prefixes {
+			prefixes[wi] = -1
+		}
 	dispatching:
 		for wi := range window {
 			for mi, candidate := range window[wi].candidates {
+				select {
+				case <-opts.SoftStop:
+					softStopped = true
+					prefixes[wi], breakWi = mi, wi
+					break dispatching
+				default:
+				}
 				if _, runnable := candidate.Mutant(); !runnable {
 					continue
 				}
@@ -3027,6 +3066,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				select {
 				case jobCh <- job{wi, mi, scopedWork(window[wi], mi)}:
+				case <-opts.SoftStop:
+					softStopped = true
+					prefixes[wi], breakWi = mi, wi
+					break dispatching
 				case <-poolCtx.Done():
 					break dispatching
 				}
@@ -3039,6 +3082,43 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		var discard []bool
+		if softStopped {
+			// The drained window truncates before confirmation and
+			// assembly: each fresh work keeps its handled candidate
+			// prefix and restamps as candidate-capped — the committed
+			// record is indistinguishable from a budget-K run's, so its
+			// reuse follows the budget-extension carve-out exactly and a
+			// re-run measures only the remainder. Serve, splice, and
+			// drift work, and a fresh work with an empty prefix, discard
+			// whole — their prior records stand
+			// (REQ-exec-cancellation's graceful-interrupt clause).
+			discard = make([]bool, len(window))
+			for wi := range window {
+				k := prefixes[wi]
+				if wi > breakWi {
+					k = 0
+				}
+				if k < 0 {
+					continue
+				}
+				if window[wi].serve != nil || window[wi].extend != nil || window[wi].drift != nil || k == 0 {
+					discard[wi] = true
+					window[wi].candidates = nil
+					outcomes[wi], observations[wi], incompletes[wi], killers[wi], memoryDecided[wi] = nil, nil, nil, nil, nil
+					continue
+				}
+				window[wi].candidates = window[wi].candidates[:k]
+				outcomes[wi] = outcomes[wi][:k]
+				observations[wi] = observations[wi][:k]
+				incompletes[wi] = incompletes[wi][:k]
+				killers[wi] = killers[wi][:k]
+				memoryDecided[wi] = memoryDecided[wi][:k]
+				f := &findings[window[wi].target]
+				f.Budget = k
+				f.Generated = k
+			}
 		}
 		// Serial kill confirmation (REQ-exec-attribution): a test-attributed
 		// or package-scope kill measured beside sibling mutants re-executes
@@ -3160,7 +3240,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for wi := range window {
 			scores[wi] = windowScores{outcomes: outcomes[wi], killers: killers[wi], flips: flips[wi], memoryDecided: memoryDecided[wi]}
 		}
-		return &executedWindow{window: window, scores: scores, observations: observations, incompletes: incompletes}, nil
+		return &executedWindow{window: window, scores: scores, observations: observations, incompletes: incompletes, discard: discard}, nil
 	}
 	// aggregateWindow folds one executed window into findings and commits
 	// each one — always before the next window dispatches
@@ -3174,6 +3254,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	aggregateWindow := func(st *executedWindow) error {
 		window, observations, incompletes, scores := st.window, st.observations, st.incompletes, st.scores
 		for wi := range window {
+			if st.discard != nil && st.discard[wi] {
+				// A work the graceful drain discarded whole: nothing
+				// committable, the prior record stands, and the
+				// interrupt error names the truncation
+				// (REQ-exec-cancellation's graceful-interrupt clause).
+				continue
+			}
 			w := window[wi]
 			if err := ctx.Err(); err != nil {
 				return err
@@ -3577,6 +3664,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err != nil {
 			return nil, err
 		}
+		if executed.discard != nil {
+			// The drained window aggregates NOW — its capped prefixes
+			// commit under the incremental-commit clause — and the run
+			// ends with the operational interrupt error; later windows
+			// never dispatch (REQ-exec-cancellation's graceful-interrupt
+			// clause).
+			if err := aggregateWindow(executed); err != nil {
+				return nil, err
+			}
+			return nil, ErrInterrupted
+		}
 		held = executed
 	}
 	<-prepDone
@@ -3642,6 +3740,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 	return findings, nil
 }
+
+// ErrInterrupted is the graceful-interrupt run result: an operational
+// cancellation — the campaign did not finish — whose drained prefixes
+// are already committed as candidate-capped records; re-running the
+// same command serves the committed work and measures the remainder.
+// Exported so faces and embedders can classify the one outcome the
+// graceful drain exists to distinguish from a hard abort
+// (REQ-exec-cancellation's graceful-interrupt clause).
+var ErrInterrupted = errors.New("gomutant: interrupted - in-flight mutants drained and measured prefixes committed as candidate-capped records; re-run the same command to measure the remainder")
 
 func snapshotTargets(targets []Target) []Target {
 	snapshot := slices.Clone(targets)

@@ -751,7 +751,18 @@ and content drift keeps its target-local refusal
 (REQ-exec-quiescence). Preparation progress
 and ordered decisions may contain only the prefix delivered before
 cancellation became observable. A cancelled run never reports or persists a
-partial per-target measurement.
+partial per-target measurement. A caller can additionally request a GRACEFUL
+interrupt (the CLI's first SIGINT; a second cancels hard): no further
+mutants are admitted, in-flight mutants finish under their budgets and
+their kills confirm serially, and each fresh-measure target whose
+candidate prefix drained commits as an ORDINARY candidate-capped record —
+Budget and Generated at the measured prefix, evidence attached exactly as a
+budget-capped run's — so nothing partial is ever persisted: the committed
+record is a complete answer to a smaller request, its reuse follows
+REQ-result-stale's budget-extension carve-out, and re-running the same
+command measures only the remainder. In-flight serve, splice, and drift
+work discards whole under a graceful interrupt (its prior records stand),
+and the run still returns an operational cancellation error.
 
 The command timeout bounds CLI or MCP work through its result commit. Omitted,
 it is unlimited on the CLI, while the MCP tools default it to 300 seconds —

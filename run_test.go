@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -5742,6 +5743,257 @@ func TestRunServesDerivedTimeoutKillsByReexecution(t *testing.T) {
 	}
 	if len(served[0].CandidateEvidence) == 0 {
 		t.Fatalf("re-executed timeout kill shed its candidate evidence — the next serve would stop re-vouching the bound claim: %+v", served[0])
+	}
+}
+
+// A graceful interrupt drains in-flight mutants and commits the
+// measured prefix as an ordinary candidate-capped record whose reuse
+// follows the budget-extension carve-out: re-running the same command
+// serves the prefix and measures only the remainder, and the union of
+// both runs equals an uninterrupted run's verdicts
+// (REQ-exec-cancellation's graceful-interrupt clause,
+// REQ-result-stale's budget-extension carve-out).
+func TestRunGracefulInterruptCommitsCappedPrefix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	files := map[string]string{
+		"go.mod":      "module example.com/interruptmod\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc Clamp(v, lo, hi int) int {\n\tif v < lo {\n\t\treturn lo\n\t}\n\tif v > hi {\n\t\treturn hi\n\t}\n\treturn v\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestClamp(t *testing.T) {\n\tif Clamp(5, 1, 3) != 3 {\n\t\tt.Fatal()\n\t}\n\tif Clamp(0, 1, 3) != 1 {\n\t\tt.Fatal()\n\t}\n\tif Clamp(2, 1, 3) != 2 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	build := func(t *testing.T) (string, *Tree) {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range files {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		tr, err := Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, tr
+	}
+	ctx := context.Background()
+	target := []Target{{Symbol: "example.com/interruptmod/a.Clamp"}}
+
+	_, ref := build(t)
+	reference, err := ref.Run(ctx, target, Options{Jobs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reference[0].Generated < 4 {
+		t.Fatalf("fixture too small to interrupt meaningfully: %d candidates", reference[0].Generated)
+	}
+
+	_, tr := build(t)
+	softStop := make(chan struct{})
+	dispatchedCount := 0
+	var committed []Finding
+	// Jobs 2 keeps the serial-confirmation phase live for the drained
+	// window's kills; the SoftStop close races the in-flight dispatch,
+	// so the prefix is a small nonzero count, not an exact one.
+	interrupted, err := tr.Run(ctx, target, Options{Jobs: 2,
+		Commit: func(f Finding) error { committed = append(committed, cloneFinding(f)); return nil },
+		dispatched: func(string, int) {
+			dispatchedCount++
+			if dispatchedCount == 2 {
+				close(softStop)
+			}
+		}, SoftStop: softStop})
+	if !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("graceful interrupt returned %v (findings %v), want the interrupt error", err, interrupted)
+	}
+	// The committed prefix arrived through the incremental commit as an
+	// ordinary capped record — and survives the persisted round-trip,
+	// where a mis-stamped capped record would refuse to parse.
+	if len(committed) != 1 {
+		t.Fatalf("interrupted run committed %d records, want the one drained prefix", len(committed))
+	}
+	doc, err := Export(committed)
+	if err != nil {
+		t.Fatalf("capped prefix refused export: %v", err)
+	}
+	roundTripped, err := ParseFindings(doc)
+	if err != nil || len(roundTripped) != 1 {
+		t.Fatalf("capped prefix refused the persisted round-trip: %v", err)
+	}
+	prefix := roundTripped[0]
+	if prefix.Generated == 0 || prefix.Generated >= reference[0].Generated || prefix.Budget != prefix.Generated || prefix.CandidateCount != reference[0].CandidateCount {
+		t.Fatalf("prefix record = budget %d generated %d of %d, want a proper capped prefix of %d", prefix.Budget, prefix.Generated, prefix.CandidateCount, reference[0].Generated)
+	}
+
+	var decisions []RunDecision
+	resumed, err := tr.Run(ctx, target, Options{Jobs: 1, Prior: roundTripped, Decision: func(d RunDecision) { decisions = append(decisions, d) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decisions) != 1 || !strings.Contains(decisions[0].Reason, "prefix") {
+		t.Fatalf("resume decision = %+v, want the budget-extension serve of the committed prefix", decisions)
+	}
+	killSet := func(f Finding) map[string]string {
+		kills := map[string]string{}
+		for _, k := range f.Kills {
+			kills[k.Position+" "+k.Operator] = k.Killer
+		}
+		return kills
+	}
+	survivorSet := func(f Finding) map[string]bool {
+		set := map[string]bool{}
+		for _, s := range f.Survivors {
+			set[s.Position+" "+s.Operator] = true
+		}
+		return set
+	}
+	if resumed[0].Generated != reference[0].Generated ||
+		!maps.Equal(killSet(resumed[0]), killSet(reference[0])) ||
+		!maps.Equal(survivorSet(resumed[0]), survivorSet(reference[0])) {
+		t.Fatalf("interrupt+resume diverged from the uninterrupted run:\nresumed  %+v\nreference %+v", resumed[0], reference[0])
+	}
+}
+
+// A graceful interrupt inside a multi-target window commits only the
+// broken target's prefix: siblings after the break point — never
+// dispatched — discard whole rather than committing zero-valued
+// outcomes as fabricated records, and a drain landing before any
+// dispatch commits nothing at all
+// (REQ-exec-cancellation's graceful-interrupt clause).
+func TestRunGracefulInterruptDiscardsUndispatchedSiblings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	files := map[string]string{
+		"go.mod":      "module example.com/multistop\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc Clamp(v, lo, hi int) int {\n\tif v < lo {\n\t\treturn lo\n\t}\n\tif v > hi {\n\t\treturn hi\n\t}\n\treturn v\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestClamp(t *testing.T) {\n\tif Clamp(5, 1, 3) != 3 {\n\t\tt.Fatal()\n\t}\n\tif Clamp(0, 1, 3) != 1 {\n\t\tt.Fatal()\n\t}\n\tif Clamp(2, 1, 3) != 2 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"b/b.go":      "package b\n\nfunc Step(v int) int {\n\tif v > 0 {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
+		"b/b_test.go": "package b\n\nimport \"testing\"\n\nfunc TestStep(t *testing.T) {\n\tif Step(2) != 1 {\n\t\tt.Fatal()\n\t}\n\tif Step(-1) != 0 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	dir := t.TempDir()
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	targets := []Target{{Symbol: "example.com/multistop/a.Clamp"}, {Symbol: "example.com/multistop/b.Step"}}
+
+	softStop := make(chan struct{})
+	dispatched := 0
+	var committed []Finding
+	_, err = tr.Run(ctx, targets, Options{Jobs: 1,
+		Commit: func(f Finding) error { committed = append(committed, cloneFinding(f)); return nil },
+		dispatched: func(string, int) {
+			dispatched++
+			if dispatched == 2 {
+				close(softStop)
+			}
+		}, SoftStop: softStop})
+	if !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("multi-target graceful interrupt returned %v, want the interrupt error", err)
+	}
+	if len(committed) != 1 || committed[0].Symbol != targets[0].Symbol {
+		t.Fatalf("interrupted window committed %+v — the undispatched sibling must discard whole, never commit zero-valued outcomes as a record", committed)
+	}
+	if committed[0].Generated == 0 || committed[0].Budget != committed[0].Generated {
+		t.Fatalf("broken target's prefix = budget %d generated %d, want the capped prefix", committed[0].Budget, committed[0].Generated)
+	}
+
+	// A drain before any dispatch commits nothing: an empty prefix is
+	// not a record.
+	tr2, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preFired := make(chan struct{})
+	close(preFired)
+	committed = nil
+	_, err = tr2.Run(ctx, targets, Options{Jobs: 1, SoftStop: preFired,
+		Commit: func(f Finding) error { committed = append(committed, cloneFinding(f)); return nil }})
+	if !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("pre-fired graceful interrupt returned %v, want the interrupt error", err)
+	}
+	if len(committed) != 0 {
+		t.Fatalf("pre-fired drain committed %d records — an empty prefix must not mint one", len(committed))
+	}
+}
+
+// A graceful interrupt discards in-flight serve work whole: the prior
+// record it would have refined stands untouched, nothing partial
+// commits, and the run reports the interrupt
+// (REQ-exec-cancellation's graceful-interrupt clause).
+func TestRunGracefulInterruptDiscardsServeWorkWhole(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines and a hanging mutant")
+	}
+	oldFloor := ephemeralBudgetFloor
+	ephemeralBudgetFloor = 2 * time.Second
+	defer func() { ephemeralBudgetFloor = oldFloor }()
+	dir := t.TempDir()
+	// Two independent hang points, so the serve work carries TWO flagged
+	// candidates and the drain can land mid-serve (k=1) — the arm that
+	// discards a partially re-executed serve whole.
+	files := map[string]string{
+		"go.mod":      "module example.com/servestop\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nfunc Wait(a, b int) int {\n\tfor a > 0 {\n\t\ta--\n\t}\n\tfor b > 0 {\n\t\tb--\n\t}\n\treturn a + b\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestWait(t *testing.T) {\n\tif Wait(3, 2) != 0 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	target := []Target{{Symbol: "example.com/servestop/a.Wait"}}
+	first, err := tr.Run(ctx, target, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first[0].CandidateEvidence) < 2 {
+		t.Fatalf("fixture produced %d candidate-evidence rows — the mid-serve drain needs at least two flagged re-executions: %+v", len(first[0].CandidateEvidence), first[0])
+	}
+	// The drain lands mid-serve: with one worker, the first flagged
+	// hang occupies it for the 2s floor while the second's dispatch
+	// blocks; closing SoftStop during that window stops the serve at
+	// k=1 deterministically.
+	softStop := make(chan struct{})
+	dispatched := 0
+	var committed []Finding
+	_, err = tr.Run(ctx, target, Options{Jobs: 1, SoftStop: softStop, Prior: first,
+		Commit: func(f Finding) error { committed = append(committed, cloneFinding(f)); return nil },
+		dispatched: func(string, int) {
+			dispatched++
+			if dispatched == 1 {
+				time.AfterFunc(500*time.Millisecond, func() { close(softStop) })
+			}
+		}})
+	if !errors.Is(err, ErrInterrupted) {
+		t.Fatalf("interrupted serve run returned %v, want the interrupt error", err)
+	}
+	if len(committed) != 0 {
+		t.Fatalf("interrupted serve work committed %d records — a partially re-executed serve must discard whole, leaving the prior record as the only truth", len(committed))
 	}
 }
 

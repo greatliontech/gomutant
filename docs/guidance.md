@@ -30,6 +30,11 @@
 **when:** use run for a judged campaign — prior findings with matching
 pins are served, the rest re-measure, and each finished target
 commits incrementally so an interrupted run keeps completed targets.
+On the CLI the FIRST interrupt (Ctrl-C) drains gracefully: in-flight
+mutants finish, the drained target's measured prefix commits as an
+ordinary candidate-capped record, and re-running the same command
+measures only the remainder; a second interrupt (or SIGTERM) cancels
+hard and discards unfinished work whole.
 Each mutant's oracle executes once, bracketing runtime-input
 observation — the bracket a declared external surface extends;
 prefer ephemeral for one hand-written probe. Survivors are findings

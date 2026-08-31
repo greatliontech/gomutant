@@ -268,7 +268,7 @@ func (r *runReporter) bankedState(cause string) {
 	}
 	r.mu.Unlock()
 	r.line("banked", p, func(w io.Writer) {
-		fmt.Fprintf(w, "banked    %s after %s: %d target(s) committed to the findings document this run (%d killed, %d open among them); selection was %d target(s) — %d served, %d skipped before exit; every committed target is kept (REQ-exec-cancellation), the rest re-measure on the next run\n",
+		fmt.Fprintf(w, "banked    %s after %s: %d target(s) committed to the findings document this run (%d killed, %d open among them); selection was %d target(s) — %d served, %d skipped before exit; every committed target is kept (REQ-exec-cancellation), the rest re-measure — a gracefully drained prefix extends — on the next run\n",
 			p.Cause, p.Elapsed, p.Committed, p.Killed, p.Open, p.Selected, p.Served, p.Skipped)
 	})
 }
