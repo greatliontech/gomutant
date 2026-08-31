@@ -161,7 +161,14 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 // as "gopkg.in/yaml" and a genuinely dark versioned package merged
 // with its sibling (the chunk-132 review's L2). A dotted path element
 // outside the vN pattern stays ambiguous against a Type.Method
-// spelling and keeps the first-dot cut.
+// spelling and keeps the first-dot cut — NOT benign everywhere: two
+// dotted sibling package dirs truncate to one prefix, and
+// packageProcessAttestable would then grant process-execution honesty
+// across them; the string alone cannot decide that edge, the loaded
+// package set can. splitTestSymbol is this grammar's sibling for the
+// NARROWER test-function input class, where the last-dot cut is exact
+// — the two cutters trade generality for exactness and neither
+// subsumes the other.
 func symbolPackage(symbol string) string {
 	slash := strings.LastIndex(symbol, "/")
 	rest := symbol[slash+1:]

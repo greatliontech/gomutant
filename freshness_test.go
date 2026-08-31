@@ -22,6 +22,33 @@ func TestSymbolPackageAbsorbsVersionElements(t *testing.T) {
 	}
 }
 
+// splitTestSymbol's input-class contract: over package-scope
+// test-function symbols the last-dot cut is exact — dotted package
+// path elements included, the case symbolPackage's arbitrary-symbol
+// grammar must guess at. The method-valued row is the contract
+// boundary's named anchor: such an input mis-splits here by design
+// and belongs to symbolPackage instead.
+func TestSplitTestSymbolHonorsItsInputClassContract(t *testing.T) {
+	cases := []struct {
+		symbol, pkg, fn string
+	}{
+		{"example.com/mod/pkg.TestX", "example.com/mod/pkg", "TestX"},
+		{"example.com/mod/pkg.beta.TestX", "example.com/mod/pkg.beta", "TestX"},
+		{"gopkg.in/yaml.v3.TestMarshal", "gopkg.in/yaml.v3", "TestMarshal"},
+		{"nopath.TestX", "nopath", "TestX"},
+		{"example.com/mod/pkg.Type.Method", "example.com/mod/pkg.Type", "Method"},
+		{"pkg.", "pkg", ""},
+		{"example.com/mod/nodot", "", ""},
+		{"", "", ""},
+	}
+	for _, tc := range cases {
+		pkg, fn := splitTestSymbol(tc.symbol)
+		if pkg != tc.pkg || fn != tc.fn {
+			t.Errorf("splitTestSymbol(%q) = %q, %q; want %q, %q", tc.symbol, pkg, fn, tc.pkg, tc.fn)
+		}
+	}
+}
+
 // The oracle-bound pin under derivation (REQ-result-stale's
 // timeout-kill rule): exact agreement always matches; derived on both
 // sides matches when every "(timeout)" kill carries its candidate-local

@@ -6,21 +6,22 @@ run): TestRunUsesEnvironmentFrozenAtLoad's survivor bucketed
 the bracket over `internal/engine/testdata/fixturemod/lib` reported
 movement inside the run→ingest span. The refusal itself is the seal
 working as specified; the defect is the interference. Solo re-run and a
-full-suite re-run were both green.
+full-suite re-run were both green. Not reproduced since (through
+2026-08-31's suite runs).
 
-Writer unidentified: ephemeral is overlay-only (REQ-exec-ephemeral, the
-tree never touched), every in-place test writer traced targets temp
-scaffolds, and mcpserver copies the fixture (CopyFS). The suspicion
-class is a cross-package parallel window over the shared fixturemod
-(root, internal/engine, internal/cmd, internal/mcpserver all use it;
-go test runs packages concurrently), but no concrete write site was
-found in one pass.
+Writer unidentified after one static pass (ephemeral is overlay-only,
+in-place writers target temp scaffolds, mcpserver copies the fixture);
+the suspicion class is a cross-package parallel window over the shared
+fixturemod. The chartered instrumentation LANDED: gofresh's
+moved-bracket refusal now names WHAT moved — members added/removed by
+name, or the most recently touched members with mtimes
+(runtimeinput.bracketMoveAttribution, gofresh > v0.92.0) — so the next
+occurrence carries its lead. gomutant consumes it at its next gofresh
+bump.
 
-Ask: identify the writer (instrument the bracket's refusal with WHAT
-moved — file list, not just the package — or reproduce under a watcher),
-then isolate: mutable-fixture users copy to TempDir, or the fixture
-becomes provably read-only for every package. A recurring flake of the
-suite gate erodes exactly the evidence the gates exist to produce.
+Remaining ask: on the next occurrence, read the named file/mtime,
+identify the writer, then isolate (mutable-fixture users copy to
+TempDir, or the fixture becomes provably read-only per package).
 
-Lands: cross-tool train chunk 113 (gomutant ergonomics and robustness
-batch).
+Lands: when the instrumented refusal names the writer (next
+occurrence under a gofresh bump past v0.92.0).

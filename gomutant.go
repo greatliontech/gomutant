@@ -741,11 +741,24 @@ func pkgRuns(oracle []string) []pkgRun {
 	return out
 }
 
-// splitTestSymbol splits "importpath.TestName" at the last dot: test
-// functions are package-scope, so the final segment is always the function.
+// splitTestSymbol splits "importpath.TestName" at the last dot. Its
+// INPUT-CLASS CONTRACT: callers feed package-scope TEST-FUNCTION
+// symbols exclusively (killers past the attribution filter, oracle
+// members, oracle evidence symbols), where the final segment is
+// always the function — so the last-dot cut is exact even for a
+// dotted package path element, the case symbolPackage's
+// first-dot-after-slash grammar must guess at. The two cutters share
+// one symbol grammar but different input classes: symbolPackage cuts
+// ARBITRARY subject symbols (methods included) and owns the dotted
+// path ambiguity; this cutter's exactness is bought by its narrower
+// class, and a method-valued input would mis-split here — feed those
+// to symbolPackage.
 func splitTestSymbol(symbol string) (pkg, fn string) {
 	i := strings.LastIndex(symbol, ".")
-	if i < 0 {
+	if i <= strings.LastIndex(symbol, "/") {
+		// No dot in the name position: a dot inside the path (or none
+		// at all) is not a name cut — refuse rather than mint a
+		// slash-carrying function name.
 		return "", ""
 	}
 	return symbol[:i], symbol[i+1:]
