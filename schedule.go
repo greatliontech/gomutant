@@ -8,46 +8,43 @@ import (
 	"sync"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
-// The execution schedule (REQ-exec-oracle-run's verdict-preserving
-// schedule): a mutant's oracle group may run as two phases — the tests
-// whose baseline coverage reaches the mutated extent first, the rest
-// only when no phase-one test killed — because -failfast ends a kill
-// at the first failing test, so fronting the probable killers cuts the
-// common kill to a fraction of the suite while a survivor still runs
-// everything. Reach is probed at BATCH granularity: the group's tests
-// split into ~sqrt(N) contiguous batches, each probed as one coverage
-// run — per-test probes would multiply a heavy TestMain by N, while
-// batches bound the extra setup cost at sqrt(N) and the phases
-// partition exactly by construction (a phase is a union of whole
-// batches). The schedule preserves the verdict's whole envelope:
-//   - the two phases of a group share ONE oracle-timeout budget (the
-//     unsplit run's bound applied in aggregate; the memory ceiling is
-//     per process tree by REQ-exec-oracle-memory's own definition),
-//     and a TIMEOUT under any narrowed phase is never a verdict — the
-//     split's own second-process overhead is charged inside that
-//     budget, so only the unsplit re-run's bound decides a timeout
-//     kill, in either direction;
-//   - a test-attributed kill from a narrowed phase pattern is admitted
-//     only over a passing baseline of that same pattern
-//     (REQ-exec-attribution's shape symmetry on the run-regex axis) —
-//     otherwise the mutant re-runs unsplit and the group stops
-//     scheduling (an order-dependent suite);
-//   - a split pair whose individually verifiable observations merged
-//     unverifiable re-runs unsplit the same way — the split must never
-//     manufacture unverifiability a single process would not have had
-//     (phases unverifiable alone carry the suite's own truth);
-//   - serial confirmations run UNSPLIT: the corrector must not
-//     reproduce the narrowing it exists to correct.
-// Coverage guides the order under its advisory posture only
-// (REQ-exec-survivor-evidence): a failed probe, an unsound file, a
-// missing extent, or a one-sided split all degrade to today's
-// unordered run — the schedule reorders execution, never narrows it.
-// The survivor buckets' aggregate coverage stays a separate,
-// full-pattern probe: a union of subset runs is not the same
+// The execution schedule (REQ-exec-oracle-run's narrowed-survivor
+// clause, user ruling 2026-08-31): a mutant's oracle group runs its
+// COVERING phase — the tests whose baseline coverage reaches the
+// mutated extent — and, when every batch of the group carries a sound
+// coverage verdict, the non-reaching remainder is EXEMPT from
+// execution: a mutation alters behavior only where execution reaches
+// its extent, and per-batch coverage is per-process, so an extent
+// executed before or outside test bodies (init, package-level,
+// TestMain) is covered by every batch and degenerates to the full run
+// by construction. Reach is probed at BATCH granularity: the group's
+// tests split into ~sqrt(N) contiguous batches, each probed as one
+// coverage run — per-test probes would multiply a heavy TestMain by N,
+// while batches bound the extra setup cost at sqrt(N) and the exempt
+// set is the complement of whole batches by construction. The
+// narrowed verdict keeps its envelope:
+//   - the covering phase runs under the group's ONE oracle-timeout
+//     budget (the unsplit run's bound; the memory ceiling is per
+//     process tree by REQ-exec-oracle-memory's own definition), and a
+//     TIMEOUT under the narrowed pattern is never a verdict — only the
+//     unsplit re-run's bound decides a timeout kill, in either
+//     direction;
+//   - a KILL is never narrowed: a test-attributed kill from the
+//     covering pattern is admitted only over a passing baseline of
+//     that same pattern (REQ-exec-attribution's shape symmetry on the
+//     run-regex axis) — otherwise the mutant re-runs unsplit and the
+//     group stops scheduling (an order-dependent suite);
+//   - serial confirmations and the narrowed-survivor AUDIT run
+//     UNSPLIT: the corrector must not reproduce the narrowing it
+//     exists to examine, and the audit's full-oracle sample is what
+//     keeps the exemption's residual risk a measured quantity.
+// A failed probe, an unsound file, a missing extent, or an empty
+// covering or exempt side all degrade to the unordered FULL run. The
+// survivor buckets' aggregate coverage stays a separate, full-pattern
+// probe: a union of subset runs is not the same
 // measurement (inter-test state moves branches both ways), and the
 // spec pins "measured once per oracle group".
 
@@ -68,9 +65,9 @@ var (
 var campaignCoveredPositions = engine.CoveredPositions
 
 // runMutantObservedEnv is the group executor's engine call; a variable
-// so a test can count oracle processes — the schedule is deliberately
-// verdict-invisible, so process count is the one observable that pins
-// a split actually executing as two phases.
+// so a test can observe the executed patterns — the exemption's one
+// direct observable is which patterns ran (the exempt remainder's
+// never appears outside the audit's full runs).
 var runMutantObservedEnv = engine.RunMutantObservedEnv
 
 // phaseBaselineProbe is the phase-pattern baseline runner; a variable
@@ -123,8 +120,8 @@ func (s *scheduleStore) get(key string) *groupSchedule {
 }
 
 // unschedule clears a group's signal so every later mutant runs
-// unordered — the degrade for an order-dependent suite or a
-// split-manufactured unverifiable observation.
+// unordered — the degrade for an order-dependent suite (an unvouched
+// covering-phase kill).
 func (s *scheduleStore) unschedule(key string) {
 	if s == nil {
 		return
@@ -272,17 +269,22 @@ func (t *Tree) probeScheduleCoverage(ctx context.Context, w work, opts Options, 
 }
 
 // scheduleStep is one budget window of a mutant's schedule: a group
-// run whole, or a split pair — the reaching phase and its remainder —
-// executing under one shared budget. The split is ONE value, so a
-// remainder can never dangle without the partner whose window it
-// shares, and both patterns of a split are narrowed by construction.
+// run whole, or a NARROWED step whose executing pattern is the
+// covering tests alone — the exempt remainder is never materialized,
+// so "run the remainder" is inexpressible by construction
+// (REQ-exec-oracle-run's narrowed-survivor clause).
 type scheduleStep struct {
-	first     group
-	remainder *group
+	// first is the executing pattern: the covering tests when narrowed,
+	// the whole group otherwise.
+	first group
+	// narrowed marks a sound covering/exempt partition: the first
+	// pattern is the covering tests and a surviving run is a NARROWED
+	// survivor — the exempt remainder never executes
+	// (REQ-exec-oracle-run's narrowed-survivor clause).
+	narrowed bool
 	// budget is the step's oracle bound — the source group's derived
 	// budget in derive mode, the caller's explicit timeout otherwise —
-	// resolved from the UNSPLIT group before any narrowing, so a
-	// split's two phases share the group's one budget window
+	// resolved from the UNSPLIT group before any narrowing
 	// (REQ-exec-oracle-run's derived campaign budget).
 	budget time.Duration
 }
@@ -303,12 +305,13 @@ func unscheduledSteps(groups []group, opts Options) []scheduleStep {
 }
 
 // scheduleSteps is the schedule transform: each group either stands
-// whole or becomes a split step whose (reaching, remainder) patterns
-// are unions of whole probe batches — together exactly the group's own
-// test set, the partition REQ-exec-oracle-run's schedule clause
-// demands; the reach question is survivorCovered, the one range-shaped
-// probe every classification pass shares
-// (REQ-exec-survivor-evidence).
+// whole or becomes a narrowed step whose executing pattern is the
+// union of whole reaching probe batches — the exempt set is the
+// complement of whole batches by construction, so the covering/exempt
+// split partitions the group's own test set exactly as
+// REQ-exec-oracle-run's schedule clause demands; the reach question is
+// survivorCovered, the one range-shaped probe every classification
+// pass shares (REQ-exec-survivor-evidence).
 func (t *Tree) scheduleSteps(w work, m engine.Mutant, opts Options) []scheduleStep {
 	store := opts.scheduleStore
 	if store == nil || w.shaped || w.targetView == nil || m.Extent == "" {
@@ -346,33 +349,11 @@ func (t *Tree) scheduleSteps(w work, m engine.Mutant, opts Options) []scheduleSt
 			continue
 		}
 		sort.Strings(reaching)
-		sort.Strings(rest)
-		gFirst, gRest := g, g
+		gFirst := g
 		gFirst.runRegex = testRunRegex(reaching)
-		gRest.runRegex = testRunRegex(rest)
-		out = append(out, scheduleStep{first: gFirst, remainder: &gRest, budget: budget})
+		out = append(out, scheduleStep{first: gFirst, narrowed: true, budget: budget})
 	}
 	return out
-}
-
-// pairManufacturedUnverifiability reports a split pair whose merged
-// observation went unverifiable while each phase was individually
-// sound — sealed evidence (OK) that is itself verifiable: two
-// same-package processes can surface an inter-phase input divergence a
-// single process would have absorbed, and the split must never
-// MANUFACTURE unverifiability — the caller re-runs unsplit. A phase
-// already unverifiable alone carries the suite's own truth, which an
-// unsplit re-run could not improve (REQ-exec-observation's posture).
-func pairManufacturedUnverifiability(a, b, merged runtimeinput.Observation) bool {
-	if !merged.Unverifiable {
-		return false
-	}
-	for _, ph := range []runtimeinput.Observation{a, b} {
-		if !ph.OK || ph.Unverifiable {
-			return false
-		}
-	}
-	return true
 }
 
 // phaseKillVouched reports whether a narrowed phase's test-attributed

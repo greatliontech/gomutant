@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	iofs "io/fs"
 	"os"
 	"path"
@@ -354,6 +355,16 @@ type ExecutionEvent struct {
 	// being corroboration.
 	FlipPosition string `json:"flipPosition,omitempty"`
 	FlipKiller   string `json:"flipKiller,omitempty"`
+	// AuditedNarrowed/AuditDisagreed report the narrowed-survivor
+	// audit on its summary event (Phase "audit"): how many narrowed
+	// survivors the window's deterministic sample re-scored under the
+	// full unsplit oracle, and how many disagreed — each disagreement
+	// is a FALSE SURVIVOR re-scored from the full run (the authority)
+	// and additionally reported as its own audit-flip event carrying
+	// FlipPosition/FlipKiller (REQ-exec-oracle-run's narrowed-survivor
+	// clause).
+	AuditedNarrowed int `json:"auditedNarrowed,omitempty"`
+	AuditDisagreed  int `json:"auditDisagreed,omitempty"`
 }
 
 // PreparationEvent reports one operation before it begins. Symbol is set for
@@ -852,15 +863,17 @@ func oracleScope(w work) []string {
 // analyzes source at runtime, so the forbidden state must exist on
 // disk — the overlay reaches only the oracle binary's own
 // compilation), body mutants run through the build overlay.
-func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, error) {
 	if opts.executedScope != nil {
 		// Emitted off the same w whose groups execute below: the
 		// observation and the execution cannot diverge.
 		opts.executedScope(m.Position, m.Operator, oracleScope(w))
 	}
 	if w.shaped {
+		// Shaped candidates never narrow: their oracles are explicit
+		// and their extents carry no coverage signal.
 		outcome, killer, memoryDecided, err := t.executeShapedCandidate(ctx, w, m, opts, runEnv)
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
+		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, err
 	}
 	return t.executeMutant(ctx, w, m, opts, runEnv)
 }
@@ -945,7 +958,8 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 	// reproduce the very narrowing it exists to re-examine.
 	unscheduled := opts
 	unscheduled.scheduleStore = nil
-	return t.executeWorkMutant(ctx, w, m, unscheduled, runEnv)
+	out, gk, md, state, incomplete, _, err := t.executeWorkMutant(ctx, w, m, unscheduled, runEnv)
+	return out, gk, md, state, incomplete, err
 }
 
 // scopedBaselineKey identifies one killer-scoped baseline probe: the
@@ -975,26 +989,28 @@ func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scope
 
 // executeMutant runs one mutant through its oracle groups and merges
 // the process observations - the shared execution the worker pool and
-// the serial kill confirmation both use.
-func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
-	outcome, killer, memoryDecided, state, incomplete, degrade, err := t.runSteps(ctx, w, m, opts, runEnv, t.scheduleSteps(w, m, opts))
+// the serial kill confirmation both use. The sixth result marks a
+// NARROWED survivor: one whose non-reaching remainder was exempt from
+// execution on the schedule's sound batch coverage
+// (REQ-exec-oracle-run's narrowed-survivor clause).
+func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, error) {
+	outcome, killer, memoryDecided, state, incomplete, narrowedSurvivor, degrade, err := t.runSteps(ctx, w, m, opts, runEnv, t.scheduleSteps(w, m, opts))
 	if err != nil || degrade == degradeNone {
-		return outcome, killer, memoryDecided, state, incomplete, err
+		return outcome, killer, memoryDecided, state, incomplete, narrowedSurvivor, err
 	}
 	// The schedule disqualified itself for this mutant; the unsplit
 	// re-run is the scored measurement. A STRUCTURAL disqualification —
-	// an unvouched phase kill (order-dependent suite) or a
-	// split-manufactured unverifiable observation — also stops the
-	// work's groups from scheduling for the rest of the run; a
-	// narrowed-bound timeout is per-mutant slowness and leaves the
+	// an unvouched covering-phase kill (order-dependent suite) — also
+	// stops the work's groups from scheduling for the rest of the run;
+	// a narrowed-bound timeout is per-mutant slowness and leaves the
 	// schedule standing for its siblings.
 	if degrade == degradeRerunUnschedule && opts.scheduleStore != nil && w.targetView != nil {
 		for _, g := range w.groups {
 			opts.scheduleStore.unschedule(coverageKey(g, w.targetView.subject.Package))
 		}
 	}
-	outcome, killer, memoryDecided, state, incomplete, _, err = t.runSteps(ctx, w, m, opts, runEnv, unscheduledSteps(w.groups, opts))
-	return outcome, killer, memoryDecided, state, incomplete, err
+	outcome, killer, memoryDecided, state, incomplete, _, _, err = t.runSteps(ctx, w, m, opts, runEnv, unscheduledSteps(w.groups, opts))
+	return outcome, killer, memoryDecided, state, incomplete, false, err
 }
 
 // scheduleDegrade classifies a schedule that must not score
@@ -1070,10 +1086,11 @@ func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts O
 // runSteps executes one mutant's schedule. A non-none degrade reports
 // a schedule that must not score — the caller re-runs unsplit
 // (REQ-exec-oracle-run's verdict-preserving schedule).
-func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string, steps []scheduleStep) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, scheduleDegrade, error) {
+func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string, steps []scheduleStep) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, scheduleDegrade, error) {
 	outcome := engine.MutantSurvived
 	killer := ""
 	memoryDecided := false
+	narrowedSurvivor := false
 	incompleteReason := ""
 	var processStates []runtimeinput.Observation
 	admit := func(res stepResult) {
@@ -1086,25 +1103,23 @@ func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts Optio
 	}
 	for _, st := range steps {
 		if err := ctx.Err(); err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, degradeNone, err
 		}
 		if outcome != engine.MutantSurvived {
 			break
 		}
-		narrowed := st.remainder != nil
-		// A split's two patterns share ONE oracle-timeout budget — the
-		// bound the unsplit run would have applied in aggregate (the
-		// memory ceiling is per process tree by
-		// REQ-exec-oracle-memory's own definition and needs no
-		// threading); the timeout VERDICT under any narrowed bound
-		// still belongs to the unsplit run alone (degradeRerun).
-		start := time.Now()
-		first, err := t.runStepGroup(ctx, w, m, opts, runEnv, st.first, narrowed, st.budget)
+		// The covering phase runs under the group's whole budget — the
+		// bound the unsplit run would have applied (the memory ceiling
+		// is per process tree by REQ-exec-oracle-memory's own
+		// definition and needs no threading); the timeout VERDICT
+		// under any narrowed bound still belongs to the unsplit run
+		// alone (degradeRerun).
+		first, err := t.runStepGroup(ctx, w, m, opts, runEnv, st.first, st.narrowed, st.budget)
 		if err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, degradeNone, err
 		}
 		if first.degrade != degradeNone {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", first.degrade, nil
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, first.degrade, nil
 		}
 		if first.diagnostic != "" {
 			// The mutant failed this group's build: no test process
@@ -1117,65 +1132,30 @@ func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts Optio
 			admit(first)
 			continue
 		}
-		if first.out != engine.MutantSurvived || st.remainder == nil {
-			processStates = append(processStates, first.state)
-			admit(first)
-			continue
-		}
-		remainderTimeout := st.budget
-		if remainderTimeout > 0 {
-			remainderTimeout -= time.Since(start)
-			if remainderTimeout <= 0 {
-				// The shared budget is already spent: the decision is
-				// made — the mutant re-measures unsplit — and a doomed
-				// minimal-bound spawn would only rediscover it through
-				// the timeout classifier.
-				return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeRerun, nil
-			}
-		}
-		second, err := t.runStepGroup(ctx, w, m, opts, runEnv, *st.remainder, true, remainderTimeout)
-		if err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
-		}
-		if second.degrade != degradeNone {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", second.degrade, nil
-		}
-		if second.diagnostic != "" {
-			admit(second)
-			continue
-		}
-		// The pair's observations merge HERE, restoring the
-		// one-observation-per-group shape downstream sees from an
-		// unsplit run — and a pair whose individually sound phases
-		// merged unverifiable is the split MANUFACTURING
-		// unverifiability, never the suite's own truth: re-run unsplit
-		// (REQ-exec-observation's posture).
-		pair, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, first.state, second.state)
-		if err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, fmt.Errorf("%s: merge phase observations: %w", m.Symbol, err)
-		}
-		if pairManufacturedUnverifiability(first.state, second.state, pair) {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeRerunUnschedule, nil
-		}
-		processStates = append(processStates, pair)
-		if first.incomplete != "" && incompleteReason == "" {
-			incompleteReason = first.incomplete
-		}
-		// The first phase's memory-decided fact rides along too: the
-		// engine never marks a surviving run today, but that invariant
-		// lives in the engine's return sites — carrying the bit here
-		// costs nothing and cannot lose it if that ever changes.
-		memoryDecided = memoryDecided || first.memoryDecided
-		admit(second)
+		// A surviving narrowed step IS the narrowed survivor
+		// (REQ-exec-oracle-run's narrowed-survivor clause, user ruling
+		// 2026-08-31): the covering phase passed, and the partition
+		// exists only when every batch of the group carried a sound
+		// coverage verdict over the mutant's extent — the non-reaching
+		// remainder is exempt from execution, because a mutation
+		// alters behavior only where execution reaches its extent and
+		// per-batch coverage is per-process (an extent executed before
+		// or outside test bodies is covered by every batch and never
+		// partitions). The exemption's ground is the measured batch
+		// coverage; the survivor records the narrowed class, and each
+		// campaign's audit re-scores a sample under the full oracle.
+		narrowedSurvivor = narrowedSurvivor || (st.narrowed && first.out == engine.MutantSurvived)
+		processStates = append(processStates, first.state)
+		admit(first)
 	}
 	if err := ctx.Err(); err != nil {
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, err
+		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, degradeNone, err
 	}
 	state, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, processStates...)
 	if err != nil {
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", degradeNone, fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, degradeNone, fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
 	}
-	return outcome, killer, memoryDecided, state, incompleteReason, degradeNone, nil
+	return outcome, killer, memoryDecided, state, incompleteReason, narrowedSurvivor && outcome == engine.MutantSurvived, degradeNone, nil
 }
 
 // newSurvivor is the ONE survivor-row constructor: every assembly path
@@ -1203,6 +1183,13 @@ type windowScores struct {
 	// oracle memory ceiling decided (REQ-exec-oracle-memory); nil at
 	// carry-prior sites, whose candidates did not run.
 	memoryDecided []bool
+	// narrowed marks, per candidate, a NARROWED survivor — one whose
+	// non-reaching remainder was exempt from execution on the
+	// schedule's sound batch coverage (REQ-exec-oracle-run's
+	// narrowed-survivor clause); nil at carry-prior sites. It travels
+	// with the verdicts because the survivor's recorded class must
+	// never detach from the measurement that earned it.
+	narrowed []bool
 }
 
 // anyMemoryDecided reports whether any executed candidate's verdict
@@ -1265,13 +1252,28 @@ func carrySurvivor(candidate engine.Candidate, prior Survivor) Survivor {
 	return Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution, WithdrawnKiller: prior.WithdrawnKiller}
 }
 
-func newSurvivor(candidate engine.Candidate, execution string, flips map[int]string, mi int) Survivor {
+func newSurvivor(candidate engine.Candidate, execution string, flips map[int]string, mi int, narrowed bool) Survivor {
 	row := Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution}
+	if narrowed && execution != "unstable-oracle" {
+		// The NARROWED class is this run's own measurement fact — the
+		// covering phases passed and the non-reaching remainder was
+		// exempt on sound batch coverage — so it replaces any carried
+		// text; instability and flips still outrank it below and in
+		// the bucket passes (REQ-exec-oracle-run's narrowed-survivor
+		// clause).
+		row.Execution = "covering-passed"
+	}
 	if withdrawn, flipped := flips[mi]; flipped {
 		row.Execution = "flipped-kill"
 		row.WithdrawnKiller = withdrawn
 	}
 	return row
+}
+
+// narrowedAt reports the narrowed-survivor mark for one candidate,
+// nil-safe for carry sites whose candidates did not run.
+func (s windowScores) narrowedAt(mi int) bool {
+	return mi < len(s.narrowed) && s.narrowed[mi]
 }
 
 // bucketSurvivorExecution classifies why each survivor lived
@@ -1331,6 +1333,15 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 			// The flip outranks the coverage probe: it is per-mutant
 			// execution evidence, not baseline-advisory
 			// (REQ-exec-survivor-evidence).
+			continue
+		}
+		if f.Survivors[si].Execution == "covering-passed" {
+			// The narrowed class is the run's own measurement claim —
+			// covering phases passed, the remainder exempt on sound
+			// batch coverage — and the advisory probe never overwrites
+			// it; the unstable and overlay-bypassed passes above still
+			// do, in the labeled-never-silent direction
+			// (REQ-exec-oracle-run's narrowed-survivor clause).
 			continue
 		}
 		covered, ok := survivorCovered(coverage, coverPkg, f.Survivors[si])
@@ -2946,12 +2957,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		incompletes := make([][]string, len(window))
 		killers := make([][]string, len(window))
 		memoryDecided := make([][]bool, len(window))
+		narrowedFlags := make([][]bool, len(window))
 		for wi := range window {
 			outcomes[wi] = make([]engine.MutantOutcome, len(window[wi].candidates))
 			observations[wi] = make([]runtimeinput.Observation, len(window[wi].candidates))
 			incompletes[wi] = make([]string, len(window[wi].candidates))
 			killers[wi] = make([]string, len(window[wi].candidates))
 			memoryDecided[wi] = make([]bool, len(window[wi].candidates))
+			narrowedFlags[wi] = make([]bool, len(window[wi].candidates))
 		}
 		reportExecuting(opts.Executing, ExecutionEvent{
 			Phase:       "executing",
@@ -2993,7 +3006,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					if !runnable {
 						continue
 					}
-					outcome, killer, candidateMemoryDecided, state, incompleteReason, err := t.executeWorkMutant(poolCtx, w, m, opts, runEnv)
+					outcome, killer, candidateMemoryDecided, state, incompleteReason, narrowedSurvivor, err := t.executeWorkMutant(poolCtx, w, m, opts, runEnv)
 					if err != nil {
 						if poolCtx.Err() != nil {
 							return
@@ -3007,6 +3020,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					observations[j.wi][j.mi] = interner.intern(state)
 					incompletes[j.wi][j.mi] = incompleteReason
 					memoryDecided[j.wi][j.mi] = candidateMemoryDecided
+					narrowedFlags[j.wi][j.mi] = narrowedSurvivor
 					killers[j.wi][j.mi] = killer
 					outcomes[j.wi][j.mi] = outcome
 				}
@@ -3106,7 +3120,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if window[wi].serve != nil || window[wi].extend != nil || window[wi].drift != nil || k == 0 {
 					discard[wi] = true
 					window[wi].candidates = nil
-					outcomes[wi], observations[wi], incompletes[wi], killers[wi], memoryDecided[wi] = nil, nil, nil, nil, nil
+					outcomes[wi], observations[wi], incompletes[wi], killers[wi], memoryDecided[wi], narrowedFlags[wi] = nil, nil, nil, nil, nil, nil
 					continue
 				}
 				window[wi].candidates = window[wi].candidates[:k]
@@ -3115,6 +3129,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				incompletes[wi] = incompletes[wi][:k]
 				killers[wi] = killers[wi][:k]
 				memoryDecided[wi] = memoryDecided[wi][:k]
+				narrowedFlags[wi] = narrowedFlags[wi][:k]
 				f := &findings[window[wi].target]
 				f.Budget = k
 				f.Generated = k
@@ -3233,12 +3248,107 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		// The narrowed-survivor AUDIT (REQ-exec-oracle-run's
+		// narrowed-survivor clause): a deterministic sample of this
+		// window's narrowed survivors re-scores under the full unsplit
+		// oracle. Selection is the lowest FNV hashes of each survivor's
+		// identity — a FIXED-SAMPLE estimator: an unchanged tree
+		// re-audits the same rows and a fully served campaign audits
+		// nothing; coverage widens only as bodies change and re-key the
+		// hashes — capped at auditNarrowedCap full-oracle runs per
+		// window: bounded against the very cost the narrowing removes,
+		// while keeping the residual risk a measured quantity. A
+		// drained window skips the audit (the interrupt asked for less
+		// work, not more).
+		if discard == nil {
+			type auditPick struct {
+				wi, mi int
+				hash   uint64
+			}
+			var pool []auditPick
+			for wi := range window {
+				for mi := range window[wi].candidates {
+					if outcomes[wi][mi] == engine.MutantSurvived && narrowedFlags[wi][mi] {
+						h := fnv.New64a()
+						h.Write([]byte(targets[window[wi].target].Symbol))
+						h.Write([]byte(window[wi].candidates[mi].Position))
+						h.Write([]byte(window[wi].candidates[mi].Operator))
+						pool = append(pool, auditPick{wi: wi, mi: mi, hash: h.Sum64()})
+					}
+				}
+			}
+			sort.Slice(pool, func(i, j int) bool {
+				if pool[i].hash != pool[j].hash {
+					return pool[i].hash < pool[j].hash
+				}
+				return pool[i].wi < pool[j].wi || (pool[i].wi == pool[j].wi && pool[i].mi < pool[j].mi)
+			})
+			if len(pool) > auditNarrowedCap {
+				pool = pool[:auditNarrowedCap]
+			}
+			disagreed := 0
+			for _, pick := range pool {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				w := scopedWork(window[pick.wi], pick.mi)
+				m, runnable := w.candidates[pick.mi].Mutant()
+				if !runnable {
+					continue
+				}
+				unscheduled := opts
+				unscheduled.scheduleStore = nil
+				// The audit's re-score is a SCORED serial run exactly
+				// like a confirmation's: it holds the probe gate
+				// exclusively so a pipelined sibling's preparation
+				// probe cannot interfere with the verdict it mints —
+				// an audit-minted kill is terminal, never confirmed
+				// again.
+				probeGate.Lock()
+				outcome, killer, auditMemoryDecided, state, incompleteReason, _, err := t.executeWorkMutant(ctx, w, m, unscheduled, runEnv)
+				probeGate.Unlock()
+				if err != nil {
+					return nil, err
+				}
+				if outcome == engine.MutantKilled {
+					if aerr := attributedKill(killer, w.oracleSet); aerr != nil && killer != TimeoutKiller && !strings.HasPrefix(killer, PackageKillerPrefix) {
+						return nil, fmt.Errorf("%s: narrowed-survivor audit: %w", targets[w.target].Symbol, aerr)
+					}
+					disagreed++
+					reportExecuting(opts.Executing, ExecutionEvent{
+						Phase:       "audit-flip",
+						TargetIndex: dispatchedTargets + pick.wi + 1, TargetCount: int(preparedTargets.Load()),
+						Symbol:       targets[w.target].Symbol,
+						FlipPosition: w.candidates[pick.mi].Position,
+						FlipKiller:   killer,
+					})
+				}
+				// The full unsplit run is the authority either way: its
+				// verdict, observation, and evidence replace the
+				// narrowed measurement wholesale.
+				outcomes[pick.wi][pick.mi] = outcome
+				killers[pick.wi][pick.mi] = killer
+				memoryDecided[pick.wi][pick.mi] = auditMemoryDecided
+				observations[pick.wi][pick.mi] = interner.intern(state)
+				incompletes[pick.wi][pick.mi] = incompleteReason
+				narrowedFlags[pick.wi][pick.mi] = false
+			}
+			if len(pool) > 0 {
+				// The summary spans the window's targets; no single
+				// symbol owns it (the per-flip events carry theirs).
+				reportExecuting(opts.Executing, ExecutionEvent{
+					Phase:       "audit",
+					TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
+					AuditedNarrowed: len(pool), AuditDisagreed: disagreed,
+				})
+			}
+		}
 
 		cancel()
 		dispatchedTargets += len(window)
 		scores := make([]windowScores, len(window))
 		for wi := range window {
-			scores[wi] = windowScores{outcomes: outcomes[wi], killers: killers[wi], flips: flips[wi], memoryDecided: memoryDecided[wi]}
+			scores[wi] = windowScores{outcomes: outcomes[wi], killers: killers[wi], flips: flips[wi], memoryDecided: memoryDecided[wi], narrowed: narrowedFlags[wi]}
 		}
 		return &executedWindow{window: window, scores: scores, observations: observations, incompletes: incompletes, discard: discard}, nil
 	}
@@ -3529,7 +3639,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				switch scores[wi].outcomes[mi] {
 				case engine.MutantSurvived:
-					f.Survivors = append(f.Survivors, newSurvivor(candidate, "", scores[wi].flips, mi))
+					f.Survivors = append(f.Survivors, newSurvivor(candidate, "", scores[wi].flips, mi, scores[wi].narrowedAt(mi)))
 				case engine.MutantKilled:
 					// The keystone persisted: every kill names its killer
 					// (REQ-core-attributed-kills), so reuse can key the kill
@@ -3740,6 +3850,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	}
 	return findings, nil
 }
+
+// auditNarrowedCap bounds the narrowed-survivor audit to a handful of
+// full-oracle runs per window (REQ-exec-oracle-run's narrowed-survivor
+// clause): the sample must stay small against the very cost the
+// narrowing removes — at suite-scale oracles each audit costs one full
+// linked-suite run. The deterministic lowest-hash selection is a
+// fixed-sample estimator that widens only as bodies change and re-key
+// the hashes. A derived bound, not a knob: its scale argument is this
+// comment.
+const auditNarrowedCap = 4
 
 // ErrInterrupted is the graceful-interrupt run result: an operational
 // cancellation — the campaign did not finish — whose drained prefixes
@@ -4498,7 +4618,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 			if stamp {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi))
+			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi, scores.narrowedAt(mi)))
 		case "killed":
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
 		}
@@ -5013,7 +5133,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 		applyDisposition(&operators[i], disposition, 1)
 		switch disposition {
 		case "survived":
-			survivors = append(survivors, newSurvivor(candidate, suffixExecution, flips, mi))
+			survivors = append(survivors, newSurvivor(candidate, suffixExecution, flips, mi, scores.narrowedAt(mi)))
 		case "killed":
 			if killsComplete {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -5308,7 +5428,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 			if unstableForBuckets(&rec, exemptions) {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi))
+			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi, scores.narrowedAt(mi)))
 		}
 		if disposition == "killed" && killsComplete {
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})

@@ -20,8 +20,18 @@ may execute a mutant's oracle as a SCHEDULE — an ordered sequence of
 per-package phases, probable killers first, guided by recorded baseline
 coverage over the mutant's own extent — provided the schedule is
 verdict-preserving: the phases of a group partition that group's test
-set exactly; a survivor verdict requires every phase to have run and
-passed; a kill ends the schedule early exactly as a test failure ends a
+set exactly; a survivor verdict requires every COVERING phase to have
+run and passed — the NARROWED SURVIVOR (user ruling 2026-08-31): when
+every batch of a group carries a sound coverage verdict over the
+mutant's extent, the non-reaching remainder is exempt from execution,
+because a mutation alters behavior only where execution reaches its
+extent and per-batch coverage is per-process, so an extent executed
+before or outside test bodies (package initialization, TestMain) is
+covered by EVERY batch and degenerates to the full run by
+construction; the exemption's ground is the measured batch coverage
+itself, the survivor records the narrowed class distinctly, and any
+batch without a sound verdict restores the full-run requirement for
+the whole group; a kill ends the schedule early exactly as a test failure ends a
 single run; the phases of a group execute under the ONE oracle-timeout
 budget the unsplit run would have applied in aggregate (the memory
 ceiling is per process tree by REQ-exec-oracle-memory's own
@@ -39,11 +49,20 @@ re-measures unsplit with the unsplit run the scored measurement;
 serial confirmations execute unsplit for the same reason. Attribution
 classes, the oracle of record, and the
 reported oracle scope are all schedule-invariant. Coverage guides the
-order under its advisory posture only (REQ-exec-survivor-evidence,
-whose once-per-group bucket probe remains its own full-pattern
-measurement — a union of subset runs is not that measurement): an
-unavailable, unsound, or extent-less signal degrades to the unordered
-run — a schedule reorders execution and never narrows it. Without an
+order — and, for the narrowed survivor above, the covering-set
+exemption — while REQ-exec-survivor-evidence's once-per-group bucket
+probe remains its own full-pattern measurement (a union of subset
+runs is not that measurement): an unavailable, unsound, or
+extent-less signal degrades to the unordered full run, and a KILL
+verdict is never narrowed — every kill stands on an executed failing
+test over its vouched pattern exactly as before. Each campaign
+additionally re-scores a small deterministic sample of its narrowed
+survivors — bounded per execution window — under the full unsplit
+oracle as a standing audit: a
+disagreement is a false survivor, scored from the full run (the
+authority) and reported loudly, and the sample's measured
+disagreement rate rides the run summary — the narrowing's residual
+risk is a measured quantity, never an assumption. Without an
 explicit oracle timeout the campaign DERIVES each oracle group's budget
 from that group's own measured baseline — the baseline probe is a
 measurement of the oracle's cost on this tree under this load, run once
@@ -251,7 +270,15 @@ node's half-open source extent (a coverage gap), `executed-and-passed` when
 the extent intersects executed coverage and the oracle still passes (a weak
 assertion or an equivalent mutant) — one range-shaped probe shared by every
 classification pass, with a survivor row that
-carries no extent answered by its anchor point alone — `overlay-bypassed` when
+carries no extent answered by its anchor point alone — `covering-passed`
+when the survivor is NARROWED (REQ-exec-oracle-run's narrowed-survivor
+clause): every covering test ran and passed and the non-reaching remainder
+was exempt on sound batch coverage — the same weak-assertion-or-equivalence
+reading as executed-and-passed with the exemption named, minted at
+measurement from the run's own narrowed verdict (never derived by the
+coverage probe, which must not overwrite it; the unstable and
+overlay-bypass judgments still do, in their evidence-outranks-probe
+direction) — `overlay-bypassed` when
 the finding's observed union recorded a read of a mutated file's own
 on-disk path - the mutant executes through the build overlay, so a
 disk-walking oracle's verdict derived from the unmutated tree and the
@@ -273,8 +300,12 @@ re-measure re-derives its re-measured survivors' buckets from the
 current probe — re-judging the overlay-bypass from the current union
 before classifying fresh — while standing survivors and an extension's
 carried prefix are never touched; `overlay-bypassed`, `unstable-oracle`,
-and `flipped-kill` are judged from evidence a coverage probe cannot see,
-so no probe-derived classification ever overrides them. The overlay-bypass judgment precedes the coverage probe:
+`flipped-kill`, and `covering-passed` are judged from evidence a coverage
+probe cannot see — the first three from runtime and confirmation
+evidence, the last minted at measurement from the run's own narrowed
+verdict — so no probe-derived classification ever overrides them
+(the unstable and overlay-bypass judgments still override
+`covering-passed`, per its definition above). The overlay-bypass judgment precedes the coverage probe:
 a bypassed target's coverage would bucket confidence the evidence
 cannot support. Coverage is measured once per oracle group on the unmutated tree
 and cached across the run's targets sharing the group and cover package —

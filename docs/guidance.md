@@ -252,7 +252,9 @@ explain answers why — a symbol's full machine-local clause list and
 per-survivor prescriptions, or the whole document's promotion
 triage. Survivors are findings awaiting disposition — strengthen a
 test or attest an equivalence — never verdicts. A survivor bucketed
-never-executed wants coverage; executed-and-passed wants a sharper
+never-executed wants coverage; executed-and-passed and covering-passed (the
+narrowed survivor: covering tests passed, the non-reaching remainder exempt
+on measured coverage) want a sharper
 assertion or an attestation. Send a progress token on run/ephemeral
 for phase notifications and a heartbeat; long campaigns exceed MCP
 client timeouts — raise the timeout or use the CLI (mcp timeouts

@@ -234,7 +234,13 @@ type Survivor struct {
 	// mutated position, so the survivor is a coverage gap;
 	// "executed-and-passed" - the position runs and the oracle still
 	// passes, so the survivor is a weak assertion or an equivalent
-	// mutant; "overlay-bypassed" - the observed union recorded a read of
+	// mutant; "covering-passed" - the NARROWED survivor
+	// (REQ-exec-oracle-run's narrowed-survivor clause): every covering
+	// test ran and passed, and the non-reaching remainder was exempt
+	// from execution on sound batch coverage — the same weak-assertion
+	// or equivalence reading as executed-and-passed, with the exemption
+	// named so the campaign audit can re-score a sample under the full
+	// oracle; "overlay-bypassed" - the observed union recorded a read of
 	// a mutated file's own on-disk path, so a disk-walking oracle's
 	// verdict derived from the unmutated tree and the survivor reading
 	// is not evidence the oracle noticed nothing; "unstable-oracle" - the finding's runtime evidence is
@@ -267,6 +273,8 @@ func SurvivorAdvice(execution string) string {
 		return "no oracle test executes the mutated position - extend a test to reach it"
 	case "executed-and-passed":
 		return "the position executes and every oracle assertion still passes - sharpen an assertion or attest an equivalence"
+	case "covering-passed":
+		return "every covering test executes the position and still passes (the non-reaching remainder was exempt on measured coverage) - sharpen an assertion or attest an equivalence"
 	case "overlay-bypassed":
 		return "the oracle's observed reads include a mutated file's own on-disk path - its verdict came from the unmutated tree, not the built mutant; restructure the test to judge the linked build (a pure core over in-memory inputs) instead of re-reading the tree"
 	case "unstable-oracle":

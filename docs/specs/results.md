@@ -644,7 +644,8 @@ inspecting JSON: CLI faces render only the machine-local marker, absence
 meaning repo, while MCP rows carry the layer explicitly.
 
 A survivor carries optional execution evidence — `never-executed`,
-`executed-and-passed`, `overlay-bypassed`, or `unstable-oracle` per REQ-exec-survivor-evidence in
+`executed-and-passed`, `covering-passed`, `overlay-bypassed`,
+`unstable-oracle`, or `flipped-kill` per REQ-exec-survivor-evidence in
 [execution.md](execution.md) — advisory and empty on records measured before
 bucketing existed; it is location metadata's sibling, never a measurement pin.
 

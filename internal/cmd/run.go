@@ -529,6 +529,15 @@ func runCommand(ctx context.Context, o runOptions) error {
 		} else {
 			renderRunSummary(&terminal, gomutant.SummarizeRun(rendered))
 		}
+		// The narrowed-survivor audit's measured rate rides the run
+		// summary (REQ-exec-oracle-run's narrowed-survivor clause).
+		if audited, disagreed := rep.auditTotals(); audited > 0 {
+			if o.jsonl {
+				rep.emit("audit", map[string]int{"auditedNarrowed": audited, "auditDisagreed": disagreed})
+			} else {
+				fmt.Fprintf(&terminal, "audit     %d narrowed survivor(s) re-scored under the full oracle this run, %d disagreed\n", audited, disagreed)
+			}
+		}
 	}
 	// The class line earns its place only when it aggregates: a single
 	// skip's decision line already said everything.
@@ -630,6 +639,18 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 }
 
 func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent, selectionNote, modeSuffix string) {
+	if event.Phase == "audit-flip" {
+		// A false survivor is never silent: the audit's full-oracle
+		// re-run killed a narrowed survivor.
+		fmt.Fprintf(w, "audit FLIP: %s %s - narrowed survivor killed by %s under the full oracle; verdict re-scored\n",
+			event.Symbol, event.FlipPosition, event.FlipKiller)
+		return
+	}
+	if event.Phase == "audit" {
+		fmt.Fprintf(w, "audit     %d narrowed survivor(s) re-scored under the full oracle, %d disagreed\n",
+			event.AuditedNarrowed, event.AuditDisagreed)
+		return
+	}
 	if event.Phase == "confirmation-flip" {
 		// A demoted kill is never silent: the serial re-run re-scored
 		// this mutant a survivor and withdrew its provisional killer.

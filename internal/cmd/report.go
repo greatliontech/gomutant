@@ -30,15 +30,19 @@ type runReporter struct {
 	skipped  int // decisions: skipped
 	measure  int // decisions: measure
 
-	committed     int // findings whose incremental commit returned
-	bankedKilled  int
-	bankedOpen    int
-	lastExec      gomutant.ExecutionEvent
-	lastMode      map[string]string // symbol -> last confirmation mode rendered
-	stopCadence   chan struct{}
-	cadenceDone   chan struct{}
-	cadenceClosed sync.Once
-	writeErr      error // first structured-face write failure, surfaced at exit
+	committed    int // findings whose incremental commit returned
+	bankedKilled int
+	bankedOpen   int
+	lastExec     gomutant.ExecutionEvent
+	// auditedNarrowed/auditDisagreed accumulate the narrowed-survivor
+	// audit's per-window events for the run-summary rate line.
+	auditedNarrowed int
+	auditDisagreed  int
+	lastMode        map[string]string // symbol -> last confirmation mode rendered
+	stopCadence     chan struct{}
+	cadenceDone     chan struct{}
+	cadenceClosed   sync.Once
+	writeErr        error // first structured-face write failure, surfaced at exit
 }
 
 func newRunReporter(out io.Writer, jsonl bool, selected int) *runReporter {
@@ -123,7 +127,20 @@ func (r *runReporter) decision(d gomutant.RunDecision) {
 func (r *runReporter) executing(e gomutant.ExecutionEvent) {
 	r.mu.Lock()
 	r.lastExec = e
+	if e.Phase == "audit" {
+		r.auditedNarrowed += e.AuditedNarrowed
+		r.auditDisagreed += e.AuditDisagreed
+	}
 	r.mu.Unlock()
+}
+
+// auditTotals reports the run's accumulated narrowed-survivor audit
+// counts for the summary line (REQ-exec-oracle-run's narrowed-survivor
+// clause: the measured disagreement rate rides the run summary).
+func (r *runReporter) auditTotals() (audited, disagreed int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.auditedNarrowed, r.auditDisagreed
 }
 
 // confirmationModeSuffix reports the suffix to append to a confirming
