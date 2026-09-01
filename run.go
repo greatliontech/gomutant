@@ -282,6 +282,9 @@ type Options struct {
 	// executors (REQ-exec-oracle-run's verdict-preserving schedule);
 	// nil disables scheduling (ephemeral probes, external callers).
 	scheduleStore *scheduleStore
+	// baselineBank is the run's machine-local measurement bank
+	// (REQ-result-baseline-bank); nil disables banking.
+	baselineBank *baselineBank
 	// groupBudget resolves an oracle group's effective budget: the
 	// group's derived budget in derive mode, the explicit timeout
 	// otherwise; nil (probes, external callers) means OracleTimeout.
@@ -403,6 +406,11 @@ type PreparationEvent struct {
 	// OracleBudget carries the group's derived oracle budget on
 	// PreparationOracleBudget events.
 	OracleBudget string `json:"oracleBudget,omitempty"`
+	// Banked marks a baseline event served from the machine-local
+	// measurement bank instead of probed — the pins re-verified and
+	// the observation re-entered through adoption
+	// (REQ-result-baseline-bank).
+	Banked bool `json:"banked,omitempty"`
 }
 
 // RunDecision explains whether one target is cached, skipped, or measured.
@@ -1693,14 +1701,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		shapedFiles []string
 	}
 	var resolvedTargets []resolvedTarget
-	type baselineKey struct {
-		pkg, run, flags, moduleDir, packageDir string
-	}
 	// keyFor is the one group→key projection: every map keyed by
 	// baselineKey must agree on it exactly.
-	keyFor := func(g group) baselineKey {
-		return baselineKey{pkg: g.pkgs[0], run: g.runRegex, flags: strings.Join(g.flags, "\x00"), moduleDir: g.moduleDir, packageDir: g.packageDir}
-	}
+	keyFor := baselineKeyFor
 	baselineCache := map[baselineKey]runtimeinput.Observation{}
 	// scopedBaselines memoizes killer-scoped baseline probes for the
 	// serial confirmation's differential ground — Run-local like
@@ -1712,6 +1715,24 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	scopedBaselines := map[scopedBaselineKey]bool{}
 	coverageCache := map[string]engine.Coverage{}
 	opts.scheduleStore = newScheduleStore()
+	// The bank rides findings-producing runs only (OwnWrites is their
+	// marker, and the campaign lock they hold serializes the file);
+	// library embeddings and probes stay bank-less. It persists on
+	// EVERY exit — success, error, interrupt: a deposit is verified
+	// measurement the next run wants regardless of how this one ended
+	// (REQ-result-baseline-bank).
+	if len(opts.OwnWrites) > 0 {
+		opts.baselineBank = openBaselineBank(t.dir)
+		defer opts.baselineBank.save()
+	}
+	// bankScope folds the observation-shaping per-run axes into the
+	// persisted bank key: bracket paths and scratch namespaces change
+	// what a probe records, so entries never serve across differing
+	// declarations. The remaining per-run axes are deliberately
+	// unpinned — budget bounds never shape the observation (and a
+	// stale duration is evidence-gated), and the environment is
+	// re-verified at serve time by the evidence memo and adoption.
+	bankScope := bankScopeString(opts.BracketPaths, opts.ScratchNamespaces)
 	guidanceCache := map[string]oracleAttribution{}
 	decisions := make([]RunDecision, len(targets))
 	// skipTarget is the one no-measurement exit: the finding's mark and
@@ -2063,6 +2084,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		budget time.Duration
 	}
 	groupBaselines := map[baselineKey]groupBaseline{}
+	// pendingBankDeposits holds really-probed baselines until their
+	// finding's evidence rows complete the deposit (guarded by
+	// groupBudgetMu with the other group maps).
+	pendingBankDeposits := map[baselineKey]pendingBankDeposit{}
 	budgetFor := func(g group) time.Duration {
 		if !deriveOracleBudgets {
 			return opts.OracleTimeout
@@ -2094,12 +2119,53 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// itself (REQ-exec-quiescence's baseline locality).
 	probeGroupBaselines := func(ctx context.Context, tg Target, w *work) (string, error) {
 		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
-		for _, group := range append(append([]group(nil), w.groups...), w.narrowGroups...) {
+		groupsAll := append(append([]group(nil), w.groups...), w.narrowGroups...)
+		for gi, group := range groupsAll {
+			narrowScoped := gi >= len(w.groups)
 			key := keyFor(group)
 			if reason, failed := baselineFailures[key]; failed {
 				return reason, nil
 			}
 			state, ok := baselineCache[key]
+			if !ok {
+				// The bank consult (REQ-result-baseline-bank): a banked
+				// group whose pins re-verify serves its measurement —
+				// the observation re-enters through adoption, which
+				// re-evaluates every recorded identity against disk and
+				// refuses on drift; any failure falls through to the
+				// probe.
+				if banked, hit := opts.baselineBank.baseline(key.persistedKey(bankScope)); !opts.Force && hit {
+					views := groupOracleViews(*w, group)
+					// A pin-check ERROR falls through to the probe
+					// exactly like a pin mismatch — the bank never
+					// aborts a campaign (REQ-result-baseline-bank);
+					// only the run's own cancellation propagates.
+					held, herr := bankPinsHold(ctx, banked.Evidence, views)
+					if herr != nil && ctx.Err() != nil {
+						return "", ctx.Err()
+					}
+					if herr == nil && held {
+						adopted, aerr := runtimeinput.AdoptEnv(banked.Manifest, group.moduleDir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
+						if aerr == nil && adopted.Digest == banked.Digest {
+							reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0], Banked: true})
+							raw := time.Duration(banked.RawMillis) * time.Millisecond
+							if deriveOracleBudgets {
+								budget := derivedOracleBudget(raw)
+								groupBudgetMu.Lock()
+								groupBaselines[key] = groupBaseline{raw: raw, budget: budget}
+								groupBudgetMu.Unlock()
+								reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: budget.String()})
+							} else {
+								groupBudgetMu.Lock()
+								groupBaselines[key] = groupBaseline{raw: raw}
+								groupBudgetMu.Unlock()
+							}
+							state, ok = adopted, true
+							baselineCache[key] = state
+						}
+					}
+				}
+			}
 			if !ok {
 				reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0]})
 				if err := ctx.Err(); err != nil {
@@ -2107,7 +2173,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				baselineStart := time.Now()
 				probeGate.RLock()
-				ran, passed, failedTests, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+				ran, passed, failedTests, observed, err := groupBaselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 				probeGate.RUnlock()
 				baselineElapsed := time.Since(baselineStart)
 				var reason string
@@ -2147,6 +2213,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				groupBudgetMu.Lock()
 				groupBaselines[key] = entry
 				groupBudgetMu.Unlock()
+				// The deposit is PENDING (REQ-result-baseline-bank): a
+				// clean, verifiable, passing probe records what it
+				// measured; the pins — observation-bearing evidence
+				// rows — are built once by the finding assembly, so the
+				// deposit completes at commit time from the finding's
+				// own rows. The unverifiable guard is belt-and-braces:
+				// a banked unverifiable row could never SERVE anyway
+				// (bankPinsHold runs the finding-serve pair discipline,
+				// whose accept refuses unverifiable evidence) — the
+				// guard only keeps dead weight out of the bank. The
+				// manifest guard is load-bearing: adoption needs one.
+				if !narrowScoped && !observed.Unverifiable && observed.Manifest != "" {
+					groupBudgetMu.Lock()
+					pendingBankDeposits[key] = pendingBankDeposit{manifest: observed.Manifest, digest: observed.Digest, raw: baselineElapsed}
+					groupBudgetMu.Unlock()
+				}
 				if deriveOracleBudgets {
 					reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: entry.budget.String()})
 				}
@@ -2974,6 +3056,31 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return err
 		}
 		committed[w.target] = true
+		// Complete pending bank deposits (REQ-result-baseline-bank):
+		// the committed finding's OracleEvidence rows are the pins —
+		// the exact observation-bearing rows finding freshness
+		// compares, so a banked serve inherits the finding-serve
+		// semantics verbatim.
+		for _, g := range w.groups {
+			key := keyFor(g)
+			groupBudgetMu.Lock()
+			pd, pending := pendingBankDeposits[key]
+			groupBudgetMu.Unlock()
+			if !pending {
+				continue
+			}
+			rows := bankOracleRowsFor(f, g.pkgs[0])
+			if len(rows) == 0 {
+				continue
+			}
+			opts.baselineBank.putBaseline(key.persistedKey(bankScope), bankedBaseline{
+				Evidence: rows, Manifest: pd.manifest, Digest: pd.digest,
+				RawMillis: pd.raw.Milliseconds(), MeasuredAtUnix: time.Now().Unix(),
+			})
+			groupBudgetMu.Lock()
+			delete(pendingBankDeposits, key)
+			groupBudgetMu.Unlock()
+		}
 		return t.emitOracleGuidance(ctx, f, w, targets[w.target].Symbol, opts, runEnv, guidanceCache)
 	}
 	// Advisory execution progress rides window boundaries and
@@ -4005,6 +4112,10 @@ func snapshotFindings(findings []Finding) []Finding {
 // runWindowCandidates overrides the execution window candidate budget
 // when positive - a test seam; zero means the jobs-derived default.
 var runWindowCandidates int
+
+// groupBaselineProbe is the baseline probe seam — a var so the bank
+// e2e can count real probes without stubbing the engine wholesale.
+var groupBaselineProbe = engine.TestProbeObservedEnv
 
 // runWaitPreparedBeforePick holds each window pick until preparation
 // completes — a test seam: value-order assertions see the whole ready

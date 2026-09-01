@@ -273,6 +273,23 @@ func (t *Tree) probeScheduleCoverage(ctx context.Context, w work, opts Options, 
 		if len(fns) < scheduleMinTests {
 			continue
 		}
+		// The bank consult (REQ-result-baseline-bank): a banked probe
+		// whose pins — the group's oracle subjects AND the covered
+		// package's own row, coverage speaking about both sides —
+		// re-verify serves its batches without probing; any failure
+		// falls through to the probe.
+		if banked, hit := opts.baselineBank.coverage(key); !opts.Force && hit && w.targetView != nil {
+			if closurePinsHold(banked.Evidence, groupOracleViews(w, g)) && banked.CoverRow == closureRowOf(w.targetView) {
+				entry := &groupSchedule{}
+				for _, b := range banked.Batches {
+					entry.batches = append(entry.batches, scheduleBatch{fns: b.Fns, cov: b.Coverage.Restore(), dur: time.Duration(b.DurMillis) * time.Millisecond})
+				}
+				store.mu.Lock()
+				store.byKey[key] = entry
+				store.mu.Unlock()
+				continue
+			}
+		}
 		entry := &groupSchedule{}
 		for _, batch := range scheduleBatches(fns) {
 			probeStart := time.Now()
@@ -289,6 +306,17 @@ func (t *Tree) probeScheduleCoverage(ctx context.Context, w work, opts Options, 
 		store.mu.Lock()
 		store.byKey[key] = entry
 		store.mu.Unlock()
+		// Deposit (REQ-result-baseline-bank): only a complete healthy
+		// probe banks — a failed pass stored the empty no-signal entry.
+		if len(entry.batches) > 0 && w.targetView != nil {
+			if views := groupOracleViews(w, g); len(views) > 0 {
+				banked := bankedCoverage{Evidence: closureRows(views), CoverRow: closureRowOf(w.targetView)}
+				for _, b := range entry.batches {
+					banked.Batches = append(banked.Batches, bankedBatch{Fns: b.fns, DurMillis: b.dur.Milliseconds(), Coverage: b.cov.Persist()})
+				}
+				opts.baselineBank.putCoverage(key, banked)
+			}
+		}
 	}
 	return nil
 }

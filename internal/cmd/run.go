@@ -630,6 +630,13 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 	case gomutant.PreparationLoading:
 		fmt.Fprintln(w, "prepare   loading")
 	case gomutant.PreparationBaseline:
+		if event.Banked {
+			// Served from the machine-local measurement bank: pins
+			// re-verified, observation adopted — no probe ran
+			// (REQ-result-baseline-bank).
+			fmt.Fprintf(w, "prepare   %s %s %s (banked)\n", event.Stage, event.Symbol, event.Package)
+			return
+		}
 		fmt.Fprintf(w, "prepare   %s %s %s\n", event.Stage, event.Symbol, event.Package)
 	case gomutant.PreparationOracleBudget:
 		fmt.Fprintf(w, "prepare   %s %s %s %s\n", event.Stage, event.Symbol, event.Package, event.OracleBudget)

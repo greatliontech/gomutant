@@ -59,6 +59,27 @@ type overlayCacheEntry struct {
 	finding Finding
 }
 
+// machineLocalDir derives this machine's per-tree cache home — the
+// user cache directory keyed by the resolved tree — shared by the
+// findings overlay and the baseline bank so every machine-local
+// artifact of one tree lives under one key. It returns the resolved
+// absolute module dir alongside.
+func machineLocalDir(moduleDir string) (abs, dir string, err error) {
+	abs, err = filepath.Abs(moduleDir)
+	if err != nil {
+		return "", "", err
+	}
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", "", fmt.Errorf("gomutant: no user cache directory for machine-local artifacts: %w", err)
+	}
+	key := sha256.Sum256([]byte(abs))
+	return abs, filepath.Join(cache, "gomutant", "repos", hex.EncodeToString(key[:12])), nil
+}
+
 // overlayEntryCeiling is the overlay's evidence-size ceiling
 // (REQ-result-layers): an entry larger than this is discarded at stat
 // time, before any read — orders of magnitude above healthy evidence,
@@ -69,20 +90,11 @@ const overlayEntryCeiling = 64 << 20
 // OpenStore opens the two-layer store for the findings document at path
 // inside the module rooted at moduleDir.
 func OpenStore(path, moduleDir string) (*Store, error) {
-	abs, err := filepath.Abs(moduleDir)
+	abs, machineDir, err := machineLocalDir(moduleDir)
 	if err != nil {
 		return nil, err
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err == nil {
-		abs = resolved
-	}
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return nil, fmt.Errorf("gomutant: no user cache directory for the local overlay: %w", err)
-	}
-	key := sha256.Sum256([]byte(abs))
-	overlay := filepath.Join(cache, "gomutant", "repos", hex.EncodeToString(key[:12]), "findings")
+	overlay := filepath.Join(machineDir, "findings")
 	// The committed exemption record beside the findings document is
 	// the live authority for the portable line's exemption clause
 	// (REQ-result-exemptions); a malformed record refuses the store

@@ -662,6 +662,53 @@ Under INV-RESULT-CANDIDATE-CONSERVATION, occurrence suffixes are assigned over
 the complete globally ordered candidate set before budget selection or discard;
 an earlier discarded candidate can therefore reserve an occurrence number.
 
+**REQ-result-baseline-bank** (behavior): Baseline and coverage-probe
+measurements MUST bank machine-local — a killed or finished
+campaign's measurement is never discarded by the calendar — in a
+versioned bank file (`baselines.json`, version 1) beside the findings
+overlay under the same resolved-tree key, never in the repo document
+(durations and probe identities are one machine's facts). A banked
+baseline entry carries the group's oracle-subject evidence rows as
+its content pins, the passing observation's persisted manifest and
+digest, and the raw wall-clock; a banked coverage entry additionally
+pins the covered package's own closure pin and carries each batch's
+test names, coverage spans, and wall-clock. Serving re-verifies,
+each entry class at the strength its reuse requires: a BASELINE's
+rows validate against the current subject views through the same
+evidence discipline finding serves use (per-pair prechecks, the
+runtime memo, nothing skipped), and its observation re-enters ONLY
+through runtime-input adoption, which re-evaluates every recorded
+identity against disk and refuses on any disagreement, the adopted
+digest compared against the banked one; a COVERAGE entry pins source
+closures and code guards alone — closure contributions hash whole
+files, so any edit to the covered package or the oracle tests moves
+a pinned closure and stale spans cannot survive a held pin, and the
+residual axis (runtime-dependent coverage, an environment-dependent
+skip) is exactly the risk class the narrowed-survivor audit measures
+on every window, banked coverage and probed coverage alike. Any pin,
+adoption, or digest failure falls through to a fresh
+probe, never an error — a pin-check error is a fall-through too,
+only the run's own cancellation propagates — exactly as an absent,
+unreadable, malformed,
+version-skewed, or over-ceiling bank reads as empty (the bank is
+cache with a fixed size ceiling; the
+re-measure is the recovery path). Only a clean, verifiable, PASSING
+probe deposits — an unverifiable observation would re-enter
+unverifiable evidence — and a BASELINE deposit completes when its
+finding COMMITS: the pins are the finding's own attached evidence
+rows (attachment is one-shot), so a campaign killed before its first
+commit banks coverage but not baselines, and the graceful drain's
+capped commits bank normally. The bank rides findings-producing runs
+only, and a forced run bypasses the serve entirely — force is the
+operator's distrust-the-cache control, and the fresh probes it takes
+re-deposit. A served group reports its banked
+baseline event (REQ-exec-run-status). A banked duration serves at
+any age: verdict integrity is evidence-gated (a timeout kill needs a
+re-executable candidate-evidence row), so staleness can cost
+re-runs, never a wrong verdict, and no calendar leash discards
+content-valid measurement.
+
+
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among
 the record's current survivors; a record's open findings are its survivors

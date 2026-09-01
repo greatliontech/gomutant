@@ -78,11 +78,18 @@ risk is a measured quantity, never an assumption. Without an
 explicit oracle timeout the campaign DERIVES each oracle group's budget
 from that group's own measured baseline — the baseline probe is a
 measurement of the oracle's cost on this tree under this load, run once
-per group under a generous campaign measurement leash — as a multiple
+per group under a generous campaign measurement leash, OR SERVED from
+the machine-local measurement bank when the banked entry's content
+pins re-verify (REQ-result-baseline-bank in
+[results.md](results.md)): a banked duration serves at ANY age,
+because verdict integrity is evidence-gated elsewhere — a timeout
+kill needs a re-executable candidate-evidence row — so a stale-fast
+banked baseline can cost re-runs, never a wrong verdict, and the
+leash plays no discard role over banked measurement — as a multiple
 with the retired 60-second default as its floor, the same derivation
 the ephemeral face carries; the measurement is a passing baseline's own
-wall-clock (a failing or refused baseline skips its targets and derives
-nothing), every verdict-bearing process of a group — scheduled phases,
+wall-clock (a failing or refused baseline skips its targets, derives
+nothing, and banks nothing), every verdict-bearing process of a group — scheduled phases,
 serial confirmations, structural-shaped runs alike — executes under
 that group's derived budget while unmutated advisory probes run under
 the leash, and an explicit timeout remains the caller's uniform
@@ -613,7 +620,11 @@ before tree loading; the shared runner reports `resolving` before each target's
 target and oracle resolution, `freshness` before constructing and checking that
 target's subject views, `mutants` before enumerating a target that requires
 measurement, and `baseline` before each package-scoped oracle group actually
-probed rather than reused within the run. Resolution and freshness events
+probed rather than reused within the run — a group served from the
+machine-local measurement bank instead of probed reports the same
+`baseline` event MARKED banked (a cross-run serve must never be
+silent), rendered distinguishably on the CLI and carried as a field
+on the structured faces. Resolution and freshness events
 follow target order before module-batched view construction; subsequent mutant
 and baseline events follow target order, with baseline events in canonical
 package-group order. Worker count cannot affect the sequence's content or

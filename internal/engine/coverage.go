@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -311,6 +312,51 @@ func (c Coverage) UnsoundForTest(files ...string) Coverage {
 	}
 	for _, f := range files {
 		c.unsound[f] = true
+	}
+	return c
+}
+
+// PersistedCoverage is Coverage's wire form for machine-local banking
+// (gomutant's baseline bank): every span and every unsound mark,
+// nothing else — the round trip is lossless for every query Coverage
+// answers.
+type PersistedCoverage struct {
+	Covered map[string][][4]int `json:"covered,omitempty"`
+	Unsound []string            `json:"unsound,omitempty"`
+}
+
+// Persist converts to the wire form.
+func (c Coverage) Persist() PersistedCoverage {
+	p := PersistedCoverage{}
+	if len(c.covered) > 0 {
+		p.Covered = make(map[string][][4]int, len(c.covered))
+		for file, spans := range c.covered {
+			rows := make([][4]int, 0, len(spans))
+			for _, s := range spans {
+				rows = append(rows, [4]int{s.startLine, s.startCol, s.endLine, s.endCol})
+			}
+			p.Covered[file] = rows
+		}
+	}
+	for file := range c.unsound {
+		p.Unsound = append(p.Unsound, file)
+	}
+	sort.Strings(p.Unsound)
+	return p
+}
+
+// Restore converts back from the wire form.
+func (p PersistedCoverage) Restore() Coverage {
+	c := Coverage{covered: map[string][]coverSpan{}, unsound: map[string]bool{}}
+	for file, rows := range p.Covered {
+		spans := make([]coverSpan, 0, len(rows))
+		for _, r := range rows {
+			spans = append(spans, coverSpan{startLine: r[0], startCol: r[1], endLine: r[2], endCol: r[3]})
+		}
+		c.covered[file] = spans
+	}
+	for _, file := range p.Unsound {
+		c.unsound[file] = true
 	}
 	return c
 }

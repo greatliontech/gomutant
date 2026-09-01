@@ -440,6 +440,11 @@ func preparationMessage(event gomutant.PreparationEvent) string {
 	if event.OracleBudget != "" {
 		message += " " + event.OracleBudget
 	}
+	if event.Banked {
+		// A cross-run serve from the measurement bank is never silent
+		// on any face (REQ-result-baseline-bank).
+		message += " (banked)"
+	}
 	return message
 }
 

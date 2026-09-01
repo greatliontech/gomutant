@@ -747,3 +747,48 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "50555e1ed1487e90be07369f5184c8d7cf9c365741ab2b6d6b70395718b79d63"
 }
+
+bindings {
+  requirement_id: "REQ-result-baseline-bank"
+  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestBaselineBankRoundTripAndCorruptionReadsEmpty"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "54ae59ea032c6b53b82fa513bbffc75d3190467a26c3e9ddf2add60cff1f5705"
+}
+
+bindings {
+  requirement_id: "REQ-result-baseline-bank"
+  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestBankPathSharesOverlayKeying"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "51667ffe9425b4733bfe66008a6079ae2e4c1bf77a41dcfdd5e34f2ccc30798e"
+}
+
+bindings {
+  requirement_id: "REQ-result-baseline-bank"
+  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunServesBankedBaselinesAcrossRuns"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "326530cd2304732d33f629f936669e313401262db960b4a7a424f9d18878369d"
+}
+
+bindings {
+  requirement_id: "REQ-result-baseline-bank"
+  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestPersistedCoverageRoundTrip"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b60ff422144970e5ca0fc70b95939a9137338b43a70fd3182f66cd5ca77354bc"
+}
+
+bindings {
+  requirement_id: "REQ-result-baseline-bank"
+  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.openBaselineBank"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "d33361e23c43f65a917070abbd0ee16477d08d06a78f48e81beecce8510b195f"
+}
