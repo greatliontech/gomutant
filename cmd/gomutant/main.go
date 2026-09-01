@@ -6,20 +6,19 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	internalcmd "github.com/greatliontech/gomutant/internal/cmd"
 )
 
 func main() {
-	// SIGTERM is the process-level hard cancel; SIGINT routes through
-	// the command tree's two-stage policy (first interrupt drains a
-	// running campaign, the second cancels hard) installed by
-	// ExecuteContext.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
-	defer stop()
-	if err := internalcmd.ExecuteContext(ctx, os.Args[1:]); err != nil {
+	// SIGINT and SIGTERM both route through the command tree's
+	// two-stage policy installed by ExecuteContext: the first signal
+	// drains a running campaign or cancels outright when no drain is
+	// armed; a second of either cancels hard. A SIGTERM drain is
+	// deadline-bounded so a supervisor's stop banks what fits its
+	// kill window and then dies cleanly — never eating a SIGKILL with
+	// orphaned oracle process trees.
+	if err := internalcmd.ExecuteContext(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "gomutant:", err)
 		os.Exit(1)
 	}

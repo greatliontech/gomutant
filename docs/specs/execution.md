@@ -685,7 +685,21 @@ done tally advances candidate by candidate instead of window by
 window (a multi-hour window must not read as a stuck campaign),
 truing up to the prepared totals at each window boundary and never
 regressing — a drained window's discarded work must not un-happen
-completions on any face. The CLI
+completions on any face. Window EXECUTION order is value-ordered:
+among the READY windows — a window is ready once admitted to the
+driver's pool; a gathered-but-unadmitted window waits for a later
+pick, and once preparation completes every remaining window is
+admitted before the next pick — the cheapest dispatches first by the
+PRE-PROBE price (the same cost model with every executing candidate
+priced whole-group off the measured baselines, which legitimately
+differs from the same window's post-probe estimate event); an
+unpriced window — one ANY of whose executing candidates has no
+recorded price — never jumps the queue on fabricated cheapness: it
+waits behind every priced window, in arrival order. Window membership
+and the deterministic preparation-and-decision sequence are
+unaffected, only the execution axis the pipelining clause already
+leaves timing-dependent — so an interrupt at any point has banked the
+most verdicts its elapsed time could buy. The CLI
 additionally renders, in the same advisory class: the requested
 selection size beside the prepared-target denominator whenever the
 two differ or serves and skips have offset an equality (a resumed
@@ -812,7 +826,18 @@ and content drift keeps its target-local refusal
 and ordered decisions may contain only the prefix delivered before
 cancellation became observable. A cancelled run never reports or persists a
 partial per-target measurement. A caller can additionally request a GRACEFUL
-interrupt (the CLI's first SIGINT; a second cancels hard): no further
+interrupt (the CLI's first SIGINT or SIGTERM; a second signal of
+either kind cancels hard). A SIGINT drain is bounded only by the
+in-flight oracles' own budgets — the human at the terminal escalates.
+A SIGTERM drain is additionally DEADLINE-BOUNDED: a supervisor
+follows SIGTERM with SIGKILL on its own clock, and SIGKILL bypasses
+cancellation entirely — orphaned oracle process trees, unswept
+per-process scratch — so the drain hard-cancels cleanly at a constant
+derived from the ecosystem's smallest common kill window (docker's
+10-second default; Kubernetes and systemd allow more), banking what
+fits and dying reaped and swept before any common supervisor
+escalates; a drain that completes disarms the deadline, so the final
+merge is never shot mid-write. For the drain itself: no further
 mutants are admitted, in-flight mutants finish under their budgets and
 their kills confirm serially, and each fresh-measure target whose
 candidate prefix drained commits as an ORDINARY candidate-capped record —

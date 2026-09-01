@@ -154,6 +154,28 @@ func TestAdvanceDoneNeverRegresses(t *testing.T) {
 	}
 }
 
+// The ready pool executes value-ordered: cheapest priced window
+// first; an unpriced window never jumps the queue on fabricated
+// cheapness — it waits behind every priced window. Pool order IS
+// arrival order (append-only, order-preserving deletes), so strict
+// comparisons keep the first of any tie: ties and unpriced windows
+// run in gather order.
+func TestNextReadyWindowOrdersByCost(t *testing.T) {
+	pool := []readyWindow{
+		{cost: 30 * time.Second, priced: true},
+		{priced: false},
+		{cost: 5 * time.Second, priced: true},
+		{cost: 5 * time.Second, priced: true},
+	}
+	if got := nextReadyWindow(pool); got != 2 {
+		t.Fatalf("pick = %d, want the cheapest priced window (index 2; index 3 ties but arrived later)", got)
+	}
+	mixed := []readyWindow{{priced: false}, {cost: time.Hour, priced: true}}
+	if got := nextReadyWindow(mixed); got != 1 {
+		t.Fatalf("pick = %d — an expensive PRICED window still outranks an unpriced one", got)
+	}
+}
+
 // The estimate's rendered strings fabricate nothing: an all-unpriced
 // window renders no bound (never "0s"), a real sub-second price never
 // erases to "0s", and an unpriced audit renders nothing.

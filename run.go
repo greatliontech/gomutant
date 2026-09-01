@@ -3815,10 +3815,77 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		held = nil
 		return err
 	}
+	// Window EXECUTION order is value-ordered (REQ-exec-run-status's
+	// estimate class): the gathering goroutine runs the SAME blocking
+	// gather rule as ever — membership stays deterministic and
+	// independent of execution timing (REQ-exec-attribution) — and the
+	// driver picks the cheapest READY window by the pre-probe
+	// projection, so an interrupt at any point has banked the most
+	// verdicts its elapsed time could buy. The channel is sized for
+	// every possible window, so the gatherer never blocks behind
+	// execution and the ready pool deepens while long windows run.
+	windowCh := make(chan []work, len(targets))
+	go func() {
+		defer close(windowCh)
+		for {
+			window, ok := gatherWindow(items, windowBudget)
+			if !ok {
+				return
+			}
+			windowCh <- window
+		}
+	}()
+	mkReady := func(window []work) readyWindow {
+		cost, priced := windowPrice(window, opts.baselineDur)
+		return readyWindow{window: window, cost: cost, priced: priced}
+	}
+	var pool []readyWindow
+	windowChOpen := true
 	for {
-		window, ok := gatherWindow(items, windowBudget)
-		if !ok {
-			break
+		if len(pool) == 0 {
+			if !windowChOpen {
+				break
+			}
+			window, ok := <-windowCh
+			if !ok {
+				break
+			}
+			pool = append(pool, mkReady(window))
+		}
+		if windowChOpen {
+			if runWaitPreparedBeforePick {
+				// Test seam: hold each pick until preparation
+				// completes, so ordering assertions see the whole
+				// pool instead of racing the serial preparation.
+				<-prepDone
+			}
+			select {
+			case <-prepDone:
+				// Preparation is complete, so every remaining window
+				// is imminent (the gatherer only drains the buffered
+				// items and closes): drain to closure so the pick sees
+				// the WHOLE remaining pool — without this, a window in
+				// flight between the items buffer and windowCh loses
+				// the pick by a scheduling race.
+				for window := range windowCh {
+					pool = append(pool, mkReady(window))
+				}
+				windowChOpen = false
+			default:
+			drainReady:
+				for {
+					select {
+					case window, ok := <-windowCh:
+						if !ok {
+							windowChOpen = false
+							break drainReady
+						}
+						pool = append(pool, mkReady(window))
+					default:
+						break drainReady
+					}
+				}
+			}
 		}
 		// A failed preparation surfaces before the next window executes,
 		// not after every buffered item is paid for: gathered-but-unmeasured
@@ -3833,13 +3900,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		default:
 		}
-		// The previously executed window aggregates only now, after the
-		// next window's items arrived and proved it was not the last:
-		// its commits still land before this window dispatches
-		// (REQ-exec-cancellation's incremental-commit clause), and in the
-		// common case — preparation running ahead of execution through the
-		// buffered channel — the gather returns instantly, so the hold
-		// costs nothing.
+		pick := nextReadyWindow(pool)
+		window := pool[pick].window
+		pool = append(pool[:pick], pool[pick+1:]...)
+		// The previously executed window aggregates only now, with the
+		// next window in hand proving it was not the last: its commits
+		// still land before this window dispatches
+		// (REQ-exec-cancellation's incremental-commit clause).
 		if err := aggregateHeld(); err != nil {
 			return nil, err
 		}
@@ -3963,6 +4030,12 @@ func snapshotFindings(findings []Finding) []Finding {
 // runWindowCandidates overrides the execution window candidate budget
 // when positive - a test seam; zero means the jobs-derived default.
 var runWindowCandidates int
+
+// runWaitPreparedBeforePick holds each window pick until preparation
+// completes — a test seam: value-order assertions see the whole ready
+// pool instead of racing the serial preparation. Production picks
+// never wait: a window that has not been gathered is not ready.
+var runWaitPreparedBeforePick bool
 
 // runTruncateAfterItems, when positive, makes the preparation pipeline
 // stop delivering work after that many items with the stopping error
@@ -4142,6 +4215,40 @@ func reportExecuting(callback func(ExecutionEvent), event ExecutionEvent) {
 	if callback != nil {
 		callback(event)
 	}
+}
+
+// readyWindow is one gathered-but-unexecuted window in the driver's
+// ready pool: its works, its pre-probe ordering price, and whether
+// every executing candidate priced. The pool is append-only with
+// order-preserving deletes, so POOL ORDER IS ARRIVAL ORDER — the one
+// fact nextReadyWindow's tie handling stands on.
+type readyWindow struct {
+	window []work
+	cost   time.Duration
+	priced bool
+}
+
+// nextReadyWindow picks the pool index to execute next: the cheapest
+// fully-priced window; an unpriced window never jumps the queue on
+// fabricated cheapness — it waits behind every priced window. Strict
+// comparisons keep the FIRST of any tie, and pool order is arrival
+// order, so equal-cost windows and unpriced windows alike run in
+// gather order without any recorded sequence. The caller guarantees a
+// non-empty pool.
+func nextReadyWindow(pool []readyWindow) int {
+	pick := 0
+	for i := 1; i < len(pool); i++ {
+		a, b := pool[i], pool[pick]
+		switch {
+		case a.priced != b.priced:
+			if a.priced {
+				pick = i
+			}
+		case a.priced && a.cost < b.cost:
+			pick = i
+		}
+	}
+	return pick
 }
 
 // advanceDone is the window-boundary true-up of the done counter: it

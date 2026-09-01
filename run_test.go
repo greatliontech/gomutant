@@ -4313,6 +4313,71 @@ func TestRunCommitsEarlierWindowsBeforeLaterOnesDispatch(t *testing.T) {
 	}
 }
 
+// Window EXECUTION is value-ordered (REQ-exec-run-status's estimate
+// class): with the wait-prepared seam every pick sees the whole ready
+// pool, and the CHEAPEST pre-probe projection dispatches first — the
+// exact inverse of arrival order, which the fixture's baseline sleeps
+// make the only discriminator (a > b > c by measured baseline; a
+// arrives first). Membership and the decision sequence stay
+// deterministic — only execution order moves.
+func TestRunExecutesCheapestReadyWindowFirst(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test with sleeping oracles")
+	}
+	old := runWindowCandidates
+	runWindowCandidates = 1
+	runWaitPreparedBeforePick = true
+	t.Cleanup(func() { runWindowCandidates = old; runWaitPreparedBeforePick = false })
+	files := map[string]string{
+		"go.mod": "module example.com/valueorder\n\ngo 1.26\n",
+		// a: the slow first window — its oracle sleep keeps the driver
+		// busy long enough for b and c to gather into the ready pool.
+		"a/a.go":      "package a\n\nfunc F(v int) int {\n\treturn v + 1\n}\n",
+		"a/a_test.go": "package a\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestF(t *testing.T) {\n\ttime.Sleep(2400 * time.Millisecond)\n\tif F(1) != 2 {\n\t\tt.Fatal()\n\t}\n}\n",
+		// b: expensive (arrives before c).
+		"b/b.go":      "package b\n\nfunc G(v int) int {\n\treturn v + 2\n}\n",
+		"b/b_test.go": "package b\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestG(t *testing.T) {\n\ttime.Sleep(900 * time.Millisecond)\n\tif G(1) != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		// c: cheap (arrives last, must execute before b).
+		"c/c.go":      "package c\n\nfunc H(v int) int {\n\treturn v + 3\n}\n",
+		"c/c_test.go": "package c\n\nimport \"testing\"\n\nfunc TestH(t *testing.T) {\n\tif H(1) != 4 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	dir := t.TempDir()
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := []Target{
+		{Symbol: "example.com/valueorder/a.F"},
+		{Symbol: "example.com/valueorder/b.G"},
+		{Symbol: "example.com/valueorder/c.H"},
+	}
+	var mu sync.Mutex
+	var commits []string
+	findings, err := tr.Run(context.Background(), targets, Options{Budget: 1, Jobs: 1,
+		Commit: func(f Finding) error {
+			mu.Lock()
+			commits = append(commits, f.Symbol)
+			mu.Unlock()
+			return nil
+		}})
+	if err != nil || len(findings) != 3 {
+		t.Fatalf("run = %+v, %v", findings, err)
+	}
+	want := []string{"example.com/valueorder/c.H", "example.com/valueorder/b.G", "example.com/valueorder/a.F"}
+	if len(commits) != 3 || commits[0] != want[0] || commits[1] != want[1] || commits[2] != want[2] {
+		t.Fatalf("commit order = %v, want cheapest-first %v — arrival order would execute a, b, c", commits, want)
+	}
+}
+
 // A fully-cached run still owes the campaign epilogue — the closing
 // validation and its hook run even when no target re-measured. With
 // nothing produced the validation is vacuous, so the observable pin is

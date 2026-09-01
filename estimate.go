@@ -143,3 +143,12 @@ func roundedDuration(d time.Duration) string {
 	}
 	return d.Round(time.Millisecond).String()
 }
+
+// windowPrice is the PRE-PROBE flavor of the window cost model: no
+// coverage store yet, so every executing candidate prices whole-group
+// off the measured baselines — the driver's ordering price, refined
+// by the post-probe estimate event once the window's probes run.
+func windowPrice(window []work, baselineDur func(group) (time.Duration, bool)) (cost time.Duration, priced bool) {
+	est := estimateWindow(window, nil, baselineDur, auditNarrowedCap)
+	return est.projected, est.unknown == 0
+}
