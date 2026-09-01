@@ -12,5 +12,12 @@ audit call, making a future divergence unrepresentable. The
 confirmation's stride/flip machinery stays its own; only the scored
 re-run and its replacement discipline unify.
 
-Lands: with train chunk 136 (the consolidation audit), or the next
-change to either rescore path.
+Lands: with train chunk 136 (the consolidation audit). The original
+second trigger ("the next change to either rescore path") fired
+during chunk 137's own change sets and was dispositioned there as
+REDEFER: those sets changed the audit's selection and depth policy
+(auditSample, the savings-derived cap) while the rescore execution
+and replacement discipline — this collapse's subject — stayed
+untouched in structure; folding the cross-mechanism unification into
+an already four-set chunk would have broken its coherence. The
+collapse remains chartered for the consolidation chunk.

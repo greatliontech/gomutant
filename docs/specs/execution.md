@@ -57,8 +57,20 @@ extent-less signal degrades to the unordered full run, and a KILL
 verdict is never narrowed — every kill stands on an executed failing
 test over its vouched pattern exactly as before. Each campaign
 additionally re-scores a small deterministic sample of its narrowed
-survivors — bounded per execution window — under the full unsplit
-oracle as a standing audit: a
+survivors under the full unsplit
+oracle as a standing audit, bounded per execution window BY THE
+NARROWING'S OWN MODELED SAVINGS: one sample is FLOORED whenever the
+window has a narrowed survivor — the disagreement rate is measured
+in every narrowing window on any oracle duration, never assumed, and
+the floor is a deliberate purchase of measurement that can exceed a
+low-savings window's own win — and BEYOND that floored first sample
+the audit spends at most a fixed share of what the window's
+narrowing saved (each re-run priced at the costliest work's
+full-oracle baseline), with a fixed per-window sample ceiling
+binding above it; the derived bound varies only the DEPTH of the
+content-stable selection order, so audited sets across runs of an
+unchanged tree NEST — one is a prefix of the other — rather than
+repeating identically. A
 disagreement is a false survivor, scored from the full run (the
 authority) and reported loudly, and the sample's measured
 disagreement rate rides the run summary — the narrowing's residual

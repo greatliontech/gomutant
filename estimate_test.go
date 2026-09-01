@@ -1,6 +1,7 @@
 package gomutant
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -77,7 +78,10 @@ func TestEstimateWindowPricesOnlyMeasuredDurations(t *testing.T) {
 		t.Fatalf("dur-less batch bound = %v, want %v", est.projected, want)
 	}
 
-	// The audit worst case saturates at the per-window cap.
+	// The audit projection derives the SAME savings-based cap the
+	// executed audit uses: six narrowed candidates model ~6x57s of
+	// savings against a 60s unit — below auditShareDivisor x 2 — so
+	// the projection floors at ONE re-run, not the ceiling.
 	store.byKey[coverageKey(w.groups[0], coverPkg)].batches[0].dur = 3 * time.Second
 	many := w
 	many.candidates = nil
@@ -88,8 +92,57 @@ func TestEstimateWindowPricesOnlyMeasuredDurations(t *testing.T) {
 	if est.narrowed != 6 {
 		t.Fatalf("narrowed = %d, want 6", est.narrowed)
 	}
-	if want := 4 * time.Minute; est.auditProjected != want {
-		t.Fatalf("audit bound = %v, want the cap x full oracle = %v", est.auditProjected, want)
+	if want := time.Minute; est.auditProjected != want {
+		t.Fatalf("audit projection = %v, want the derived floor x full oracle = %v", est.auditProjected, want)
+	}
+	// Enough modeled savings leaves the floor: twenty narrowed
+	// candidates model ~20x57s against the 60s unit — share 2.
+	sated := w
+	sated.candidates = nil
+	for i := 0; i < 20; i++ {
+		sated.candidates = append(sated.candidates, engine.Candidate{Symbol: "S", Operator: "op", Position: "f.go:10:2", Extent: "10:2-12:3", Replacements: repl})
+	}
+	est = estimateWindow([]work{sated}, store, baseline, 4)
+	if want := 2 * time.Minute; est.auditProjected != want {
+		t.Fatalf("audit projection = %v, want the derived share x full oracle = %v", est.auditProjected, want)
+	}
+}
+
+// auditSample truncates the hash-ordered pool at the savings-derived
+// depth: twenty narrowed survivors modeling ~57s of savings each
+// against a 60s unit derive share 2 — a collapse to the constant
+// floor (or to the fixed ceiling) moves the sampled count. The
+// selection is content-stable: two calls over the same window return
+// identical picks (REQ-exec-oracle-run's savings-derived audit
+// bound).
+func TestAuditSampleDerivesDepthFromSavings(t *testing.T) {
+	const pkg, coverPkg = "example.com/p", "example.com/p"
+	w := scheduleTestWork(pkg, coverPkg, []string{"TestA", "TestB", "TestC", "TestD"})
+	reach := engine.CoverageForTest(map[string][]engine.CoverSpanForTest{coverPkg + "/f.go": {{StartLine: 9, StartCol: 1, EndLine: 20, EndCol: 1}}})
+	store := newScheduleStore()
+	store.byKey[coverageKey(w.groups[0], coverPkg)] = &groupSchedule{batches: []scheduleBatch{
+		{fns: []string{"TestA", "TestB"}, cov: reach, dur: 3 * time.Second},
+		{fns: []string{"TestC", "TestD"}, cov: engine.CoverageForTest(nil), dur: 5 * time.Second},
+	}}
+	repl := []engine.Replacement{{File: "f.go"}}
+	for i := 0; i < 20; i++ {
+		w.candidates = append(w.candidates, engine.Candidate{Symbol: "S", Operator: "op", Position: fmt.Sprintf("f.go:10:%d", i+2), Extent: "10:2-12:3", Replacements: repl})
+	}
+	baseline := func(group) (time.Duration, bool) { return time.Minute, true }
+	all := func(int, int) bool { return true }
+	sym := func(int) string { return "example.com/p.S" }
+
+	picks := auditSample([]work{w}, sym, all, store, baseline)
+	if len(picks) != 2 {
+		t.Fatalf("audit depth = %d, want the derived share 2 — neither the floor nor the ceiling", len(picks))
+	}
+	again := auditSample([]work{w}, sym, all, store, baseline)
+	if len(again) != 2 || again[0] != picks[0] || again[1] != picks[1] {
+		t.Fatalf("selection not content-stable: %v vs %v", again, picks)
+	}
+	// No narrowed survivor, no audit.
+	if got := auditSample([]work{w}, sym, func(int, int) bool { return false }, store, baseline); len(got) != 0 {
+		t.Fatalf("empty pool sampled %d", len(got))
 	}
 }
 
@@ -173,6 +226,73 @@ func TestNextReadyWindowOrdersByCost(t *testing.T) {
 	mixed := []readyWindow{{priced: false}, {cost: time.Hour, priced: true}}
 	if got := nextReadyWindow(mixed); got != 1 {
 		t.Fatalf("pick = %d — an expensive PRICED window still outranks an unpriced one", got)
+	}
+}
+
+// The audit cap derives from the narrowing's own modeled savings
+// (REQ-exec-oracle-run's narrowed-survivor clause): at most
+// savings/auditShareDivisor full-oracle re-runs, floored at one
+// sample so the disagreement rate is measured in every narrowing
+// window, ceilinged at the fixed per-window cap; an unpriced unit
+// derives the floor, never a fabricated share.
+func TestDerivedAuditCapSharesSavings(t *testing.T) {
+	unit := 21 * time.Minute
+	if got := derivedAuditCap(0, unit); got != 1 {
+		t.Fatalf("zero savings cap = %d, want the floor 1 — the rate stays measured", got)
+	}
+	if got := derivedAuditCap(auditShareDivisor*2*unit, unit); got != 2 {
+		t.Fatalf("cap = %d, want savings/(%d×unit) = 2", got, auditShareDivisor)
+	}
+	if got := derivedAuditCap(1000*unit, unit); got != auditNarrowedCap {
+		t.Fatalf("cap = %d, want the ceiling %d", got, auditNarrowedCap)
+	}
+	if got := derivedAuditCap(time.Hour, 0); got != 1 {
+		t.Fatalf("unpriced unit cap = %d, want the floor — no fabricated share", got)
+	}
+}
+
+// candidateNarrowingSavings models full minus covering and fabricates
+// nothing: an unpriced batch or baseline yields zero, and a candidate
+// whose groups all ran whole saved nothing.
+func TestCandidateNarrowingSavingsFabricatesNothing(t *testing.T) {
+	const pkg, coverPkg = "example.com/p", "example.com/p"
+	w := scheduleTestWork(pkg, coverPkg, []string{"TestA", "TestB", "TestC", "TestD"})
+	reach := engine.CoverageForTest(map[string][]engine.CoverSpanForTest{coverPkg + "/f.go": {{StartLine: 9, StartCol: 1, EndLine: 20, EndCol: 1}}})
+	store := newScheduleStore()
+	store.byKey[coverageKey(w.groups[0], coverPkg)] = &groupSchedule{batches: []scheduleBatch{
+		{fns: []string{"TestA", "TestB"}, cov: reach, dur: 3 * time.Second},
+		{fns: []string{"TestC", "TestD"}, cov: engine.CoverageForTest(nil), dur: 5 * time.Second},
+	}}
+	w.candidates = []engine.Candidate{{Symbol: "S", Operator: "op", Position: "f.go:10:2", Extent: "10:2-12:3", Replacements: []engine.Replacement{{File: "f.go"}}}}
+	baseline := func(group) (time.Duration, bool) { return time.Minute, true }
+
+	if got := candidateNarrowingSavings(w, 0, store, baseline); got != time.Minute-3*time.Second {
+		t.Fatalf("savings = %v, want full − covering = %v", got, time.Minute-3*time.Second)
+	}
+	if got := candidateNarrowingSavings(w, 0, store, nil); got != 0 {
+		t.Fatalf("unpriced baseline savings = %v, want 0 — never fabricated", got)
+	}
+	// A selectively-unpriced group refuses the WHOLE candidate: with a
+	// second, unpriced group the priced one must not leak a fabricated
+	// positive saving (full would undercount while covering keeps the
+	// priced batches).
+	twoGroups := w
+	twoGroups.groups = append(append([]group(nil), w.groups...), group{pkgs: []string{"example.com/q"}, runRegex: "^(TestQ)$"})
+	selective := func(g group) (time.Duration, bool) {
+		if g.pkgs[0] == pkg {
+			return time.Minute, true
+		}
+		return 0, false
+	}
+	if got := candidateNarrowingSavings(twoGroups, 0, store, selective); got != 0 {
+		t.Fatalf("selectively-unpriced savings = %v, want 0 — never fabricated", got)
+	}
+	if got := candidateNarrowingSavings(w, 0, newScheduleStore(), baseline); got != 0 {
+		t.Fatalf("whole-group savings = %v, want 0 — a group run whole saved nothing", got)
+	}
+	store.byKey[coverageKey(w.groups[0], coverPkg)].batches[0].dur = 0
+	if got := candidateNarrowingSavings(w, 0, store, baseline); got != 0 {
+		t.Fatalf("dur-less batch savings = %v, want 0 — never fabricated", got)
 	}
 }
 

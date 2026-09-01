@@ -3322,43 +3322,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, err
 		}
 		// The narrowed-survivor AUDIT (REQ-exec-oracle-run's
-		// narrowed-survivor clause): a deterministic sample of this
-		// window's narrowed survivors re-scores under the full unsplit
-		// oracle. Selection is the lowest FNV hashes of each survivor's
-		// identity — a FIXED-SAMPLE estimator: an unchanged tree
-		// re-audits the same rows and a fully served campaign audits
-		// nothing; coverage widens only as bodies change and re-key the
-		// hashes — capped at auditNarrowedCap full-oracle runs per
-		// window: bounded against the very cost the narrowing removes,
-		// while keeping the residual risk a measured quantity. A
-		// drained window skips the audit (the interrupt asked for less
-		// work, not more).
+		// narrowed-survivor clause): auditSample selects this window's
+		// audit — hash-ordered narrowed survivors truncated at the
+		// savings-derived cap. The selection ORDER is content-stable
+		// (a fully served campaign audits nothing; coverage widens
+		// only as bodies change and re-key the hashes); the DEPTH
+		// follows this run's measured durations, so audited sets nest
+		// across runs of an unchanged tree rather than repeating
+		// identically. A drained window skips the audit (the
+		// interrupt asked for less work, not more).
 		if discard == nil {
-			type auditPick struct {
-				wi, mi int
-				hash   uint64
-			}
-			var pool []auditPick
-			for wi := range window {
-				for mi := range window[wi].candidates {
-					if outcomes[wi][mi] == engine.MutantSurvived && narrowedFlags[wi][mi] {
-						h := fnv.New64a()
-						h.Write([]byte(targets[window[wi].target].Symbol))
-						h.Write([]byte(window[wi].candidates[mi].Position))
-						h.Write([]byte(window[wi].candidates[mi].Operator))
-						pool = append(pool, auditPick{wi: wi, mi: mi, hash: h.Sum64()})
-					}
-				}
-			}
-			sort.Slice(pool, func(i, j int) bool {
-				if pool[i].hash != pool[j].hash {
-					return pool[i].hash < pool[j].hash
-				}
-				return pool[i].wi < pool[j].wi || (pool[i].wi == pool[j].wi && pool[i].mi < pool[j].mi)
-			})
-			if len(pool) > auditNarrowedCap {
-				pool = pool[:auditNarrowedCap]
-			}
+			pool := auditSample(window,
+				func(wi int) string { return targets[window[wi].target].Symbol },
+				func(wi, mi int) bool {
+					return outcomes[wi][mi] == engine.MutantSurvived && narrowedFlags[wi][mi]
+				},
+				opts.scheduleStore, opts.baselineDur)
 			disagreed := 0
 			for _, pick := range pool {
 				if err := ctx.Err(); err != nil {
@@ -3991,14 +3970,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	return findings, nil
 }
 
-// auditNarrowedCap bounds the narrowed-survivor audit to a handful of
-// full-oracle runs per window (REQ-exec-oracle-run's narrowed-survivor
-// clause): the sample must stay small against the very cost the
-// narrowing removes — at suite-scale oracles each audit costs one full
-// linked-suite run. The deterministic lowest-hash selection is a
-// fixed-sample estimator that widens only as bodies change and re-key
-// the hashes. A derived bound, not a knob: its scale argument is this
-// comment.
+// auditNarrowedCap is the CEILING of the savings-derived audit cap
+// (derivedAuditCap): however much a window's narrowing saved, at most
+// this many full-oracle re-runs audit it — the scale argument for the
+// derived cap itself lives with auditShareDivisor.
 const auditNarrowedCap = 4
 
 // ErrInterrupted is the graceful-interrupt run result: an operational
@@ -4249,6 +4224,55 @@ func nextReadyWindow(pool []readyWindow) int {
 		}
 	}
 	return pick
+}
+
+// auditPick is one narrowed survivor selected for the window's
+// full-oracle audit, keyed by its content hash.
+type auditPick struct {
+	wi, mi int
+	hash   uint64
+}
+
+// auditSample assembles the window's narrowed-survivor audit: every
+// narrowed survivor enters the pool with its content hash; the pool
+// sorts by hash (ties by position for determinism), and truncates at
+// the savings-derived cap (derivedAuditCap) — the audit spends a
+// bounded share of what THIS window's narrowing modelled as saved,
+// each re-run priced at the costliest work's full-oracle baseline.
+// The selection ORDER is content-stable; the depth follows this
+// run's measured durations, so across runs of an unchanged tree the
+// audited sets NEST (one is a prefix of the other) rather than being
+// identical (REQ-exec-oracle-run's savings-derived audit bound).
+func auditSample(window []work, symbol func(wi int) string, isNarrowedSurvivor func(wi, mi int) bool, store *scheduleStore, baselineDur func(group) (time.Duration, bool)) []auditPick {
+	var pool []auditPick
+	var savings, unit time.Duration
+	for wi := range window {
+		wf, wfOK := workFullPrice(window[wi], baselineDur)
+		for mi := range window[wi].candidates {
+			if !isNarrowedSurvivor(wi, mi) {
+				continue
+			}
+			h := fnv.New64a()
+			h.Write([]byte(symbol(wi)))
+			h.Write([]byte(window[wi].candidates[mi].Position))
+			h.Write([]byte(window[wi].candidates[mi].Operator))
+			pool = append(pool, auditPick{wi: wi, mi: mi, hash: h.Sum64()})
+			savings += candidateNarrowingSavings(window[wi], mi, store, baselineDur)
+			if wfOK && wf > unit {
+				unit = wf
+			}
+		}
+	}
+	sort.Slice(pool, func(i, j int) bool {
+		if pool[i].hash != pool[j].hash {
+			return pool[i].hash < pool[j].hash
+		}
+		return pool[i].wi < pool[j].wi || (pool[i].wi == pool[j].wi && pool[i].mi < pool[j].mi)
+	})
+	if auditCap := derivedAuditCap(savings, unit); len(pool) > auditCap {
+		pool = pool[:auditCap]
+	}
+	return pool
 }
 
 // advanceDone is the window-boundary true-up of the done counter: it

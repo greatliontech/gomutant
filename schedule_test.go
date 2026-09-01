@@ -268,8 +268,19 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	if narrowedRows == 0 && auditFlips == 0 {
 		t.Fatal("the lie hid nothing — the narrowing never engaged")
 	}
-	if audited == 0 || audited > auditNarrowedCap {
-		t.Fatalf("audit sampled %d narrowed survivors, want 1..%d", audited, auditNarrowedCap)
+	// The DERIVED cap: this fixture's modeled savings are about
+	// N_narrowed x the full-oracle price (the crafted covering batches
+	// cost microseconds), so the share is N/auditShareDivisor and the
+	// cap floors at exactly ONE audited sample while N stays below
+	// 2 x auditShareDivisor — a fixed count-per-window cap would audit
+	// up to its ceiling here (REQ-exec-oracle-run's savings-derived
+	// audit bound). The premise asserts separately so operator-set
+	// growth is self-diagnosing, not a mystery flake.
+	if narrowedRows+audited >= 2*auditShareDivisor {
+		t.Fatalf("fixture drift: %d narrowed survivors reaches 2 x auditShareDivisor = %d — the derived cap leaves the floor and the exact assertion below needs re-derivation", narrowedRows+audited, 2*auditShareDivisor)
+	}
+	if audited != 1 {
+		t.Fatalf("audit sampled %d narrowed survivors, want exactly the derived floor of 1", audited)
 	}
 	if auditFlips > audited {
 		t.Fatalf("audit disagreed %d of %d", auditFlips, audited)
