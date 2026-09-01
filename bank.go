@@ -87,8 +87,9 @@ type bankedBatch struct {
 	Coverage  engine.PersistedCoverage `json:"coverage"`
 }
 
-// baselineBank is the in-memory bank for one run: loaded once,
-// written back atomically at the run's end when dirty. The campaign
+// baselineBank is the in-memory bank for one run: loaded once, each
+// deposit persisted atomically as it lands (save is the flush
+// backstop). The campaign
 // lock (REQ-exec-exclusivity) serializes findings-producing runs, so
 // two writers never race the file.
 type baselineBank struct {
@@ -138,15 +139,21 @@ func openBaselineBank(moduleDir string) *baselineBank {
 	return b
 }
 
-// save writes the bank back atomically; a write failure is silent —
-// the bank is cache, and the measurements it would have carried are
-// re-measurable.
+// save flushes any unpersisted state — a backstop; deposits already
+// persisted themselves.
 func (b *baselineBank) save() {
 	if b == nil {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.persistLocked()
+}
+
+// persistLocked writes the bank atomically; a write failure is
+// silent — the bank is cache, and the measurements it would have
+// carried are re-measurable. Caller holds b.mu.
+func (b *baselineBank) persistLocked() {
 	if !b.dirty || b.path == "" {
 		return
 	}
@@ -161,7 +168,9 @@ func (b *baselineBank) save() {
 	if os.WriteFile(tmp, data, 0o644) != nil {
 		return
 	}
-	_ = os.Rename(tmp, b.path)
+	if os.Rename(tmp, b.path) == nil {
+		b.dirty = false
+	}
 }
 
 func (b *baselineBank) baseline(key string) (bankedBaseline, bool) {
@@ -185,6 +194,11 @@ func (b *baselineBank) putBaseline(key string, e bankedBaseline) {
 	}
 	b.file.Baselines[key] = e
 	b.dirty = true
+	// Deposits persist IMMEDIATELY: the bank exists to survive killed
+	// campaigns, and an exit-time save dies with the process. Entries
+	// are minutes apart; an atomic rewrite per deposit is noise
+	// beside the probe it records.
+	b.persistLocked()
 }
 
 func (b *baselineBank) coverage(key string) (bankedCoverage, bool) {
@@ -208,6 +222,7 @@ func (b *baselineBank) putCoverage(key string, e bankedCoverage) {
 	}
 	b.file.Coverage[key] = e
 	b.dirty = true
+	b.persistLocked()
 }
 
 // pendingBankDeposit is a really-probed group baseline awaiting its

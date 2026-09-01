@@ -694,11 +694,13 @@ version-skewed, or over-ceiling bank reads as empty (the bank is
 cache with a fixed size ceiling; the
 re-measure is the recovery path). Only a clean, verifiable, PASSING
 probe deposits — an unverifiable observation would re-enter
-unverifiable evidence — and a BASELINE deposit completes when its
-finding COMMITS: the pins are the finding's own attached evidence
-rows (attachment is one-shot), so a campaign killed before its first
-commit banks coverage but not baselines, and the graceful drain's
-capped commits bank normally. The bank rides findings-producing runs
+unverifiable evidence — and a completed deposit PERSISTS
+immediately: the bank exists to survive killed campaigns, and
+persistence deferred to process exit dies with the process. A
+BASELINE deposit completes when its finding COMMITS: the pins are
+the finding's own attached evidence rows (attachment is one-shot),
+so a campaign killed before its first commit banks coverage but not
+baselines, and the graceful drain's capped commits bank normally. The bank rides findings-producing runs
 only, and a forced run bypasses the serve entirely — force is the
 operator's distrust-the-cache control, and the fresh probes it takes
 re-deposit. A served group reports its banked

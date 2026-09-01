@@ -26,18 +26,22 @@ func TestBaselineBankRoundTripAndCorruptionReadsEmpty(t *testing.T) {
 	if _, ok := b.baseline("k"); ok {
 		t.Fatal("empty bank served an entry")
 	}
+	// EACH deposit persists IMMEDIATELY — no save() call, reopened
+	// after every verb: a killed process must lose nothing already
+	// deposited.
 	b.putBaseline("k", bankedBaseline{Manifest: "m", Digest: "d", RawMillis: 1234, MeasuredAtUnix: 5})
-	b.putCoverage("c", bankedCoverage{Batches: []bankedBatch{{Fns: []string{"TestA"}, DurMillis: 7}}})
-	b.save()
-
-	again := openBaselineBank(moduleDir)
-	got, ok := again.baseline("k")
+	got, ok := openBaselineBank(moduleDir).baseline("k")
 	if !ok || got.Manifest != "m" || got.RawMillis != 1234 {
-		t.Fatalf("round trip lost the baseline: %+v ok=%v", got, ok)
+		t.Fatalf("the baseline deposit did not persist immediately: %+v ok=%v", got, ok)
+	}
+	b.putCoverage("c", bankedCoverage{Batches: []bankedBatch{{Fns: []string{"TestA"}, DurMillis: 7}}})
+	again := openBaselineBank(moduleDir)
+	if _, ok := again.baseline("k"); !ok {
+		t.Fatal("the coverage deposit dropped the persisted baseline")
 	}
 	cov, ok := again.coverage("c")
 	if !ok || len(cov.Batches) != 1 || cov.Batches[0].DurMillis != 7 {
-		t.Fatalf("round trip lost the coverage: %+v ok=%v", cov, ok)
+		t.Fatalf("the coverage deposit did not persist immediately: %+v ok=%v", cov, ok)
 	}
 
 	path, err := bankPath(moduleDir)
@@ -64,6 +68,52 @@ func TestBaselineBankRoundTripAndCorruptionReadsEmpty(t *testing.T) {
 	}
 	nilBank.putBaseline("k", bankedBaseline{})
 	nilBank.save()
+}
+
+// A FAILED persist keeps the deposit dirty on EVERY failing branch —
+// the directory guard and the rename commit point alike — so the
+// next deposit or the exit flush retries and a transient write
+// failure never silently drops a completed measurement
+// (REQ-result-baseline-bank).
+func TestBaselineBankFailedPersistStaysDirty(t *testing.T) {
+	retryTarget := filepath.Join(t.TempDir(), "clean")
+	if err := os.MkdirAll(retryTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Branch 1: the path's parent is a FILE — the MkdirAll guard fails.
+	parentFile := filepath.Join(t.TempDir(), "notadir")
+	if err := os.WriteFile(parentFile, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &baselineBank{path: filepath.Join(parentFile, "baselines.json"), file: baselineBankFile{Version: bankVersion}}
+	b.putBaseline("k", bankedBaseline{Manifest: "m"})
+	if !b.dirty {
+		t.Fatal("a failed MkdirAll cleared dirty — the deposit would be silently lost")
+	}
+
+	// Branch 2: the path IS a non-empty directory — MkdirAll and the
+	// tmp write succeed, the RENAME commit point fails (ENOTEMPTY).
+	dirPath := filepath.Join(t.TempDir(), "x", "baselines.json")
+	if err := os.MkdirAll(filepath.Join(dirPath, "occupant"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b.path = dirPath
+	b.putBaseline("k2", bankedBaseline{Manifest: "m2"})
+	if !b.dirty {
+		t.Fatal("a failed rename cleared dirty — the deposit would be silently lost")
+	}
+
+	// The retried flush against a healthy path lands everything.
+	b.path = filepath.Join(retryTarget, "baselines.json")
+	b.save()
+	if b.dirty {
+		t.Fatal("the retried flush did not persist")
+	}
+	data, err := os.ReadFile(b.path)
+	if err != nil || len(data) == 0 {
+		t.Fatalf("retried flush wrote nothing: %v", err)
+	}
 }
 
 // The bank and the findings overlay share one machine-local home per

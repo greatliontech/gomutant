@@ -750,7 +750,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-baseline-bank"
-  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  content_hash: "9fbb244485f2080bc372a74e9588503b0f2e4db54a4711232857086dd59c522a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestBaselineBankRoundTripAndCorruptionReadsEmpty"
   role: BINDING_ROLE_TESTS
@@ -759,7 +759,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-baseline-bank"
-  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  content_hash: "9fbb244485f2080bc372a74e9588503b0f2e4db54a4711232857086dd59c522a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestBankPathSharesOverlayKeying"
   role: BINDING_ROLE_TESTS
@@ -768,7 +768,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-baseline-bank"
-  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  content_hash: "9fbb244485f2080bc372a74e9588503b0f2e4db54a4711232857086dd59c522a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunServesBankedBaselinesAcrossRuns"
   role: BINDING_ROLE_TESTS
@@ -777,7 +777,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-baseline-bank"
-  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  content_hash: "9fbb244485f2080bc372a74e9588503b0f2e4db54a4711232857086dd59c522a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestPersistedCoverageRoundTrip"
   role: BINDING_ROLE_TESTS
@@ -786,9 +786,18 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-baseline-bank"
-  content_hash: "a2a87a9fe2c7950ceda87efaea406067822040c9c0bb322165476b69265e4757"
+  content_hash: "9fbb244485f2080bc372a74e9588503b0f2e4db54a4711232857086dd59c522a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.openBaselineBank"
   role: BINDING_ROLE_IMPLEMENTS
   shape_hash: "d33361e23c43f65a917070abbd0ee16477d08d06a78f48e81beecce8510b195f"
+}
+
+bindings {
+  requirement_id: "REQ-result-baseline-bank"
+  content_hash: "9fbb244485f2080bc372a74e9588503b0f2e4db54a4711232857086dd59c522a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestBaselineBankFailedPersistStaysDirty"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "24d876ba5a75ac603df24e0b68657ead1cd47febd2f164e4fa46add9dad98ffb"
 }

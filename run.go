@@ -1717,9 +1717,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	opts.scheduleStore = newScheduleStore()
 	// The bank rides findings-producing runs only (OwnWrites is their
 	// marker, and the campaign lock they hold serializes the file);
-	// library embeddings and probes stay bank-less. It persists on
-	// EVERY exit — success, error, interrupt: a deposit is verified
-	// measurement the next run wants regardless of how this one ended
+	// library embeddings and probes stay bank-less. Deposits persist
+	// as they land — an exit-time save dies with a killed process —
+	// and the deferred save is only the flush backstop
 	// (REQ-result-baseline-bank).
 	if len(opts.OwnWrites) > 0 {
 		opts.baselineBank = openBaselineBank(t.dir)
