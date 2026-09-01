@@ -196,6 +196,9 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 
 	var audited, auditFlips int
 	var flipKillers []string
+	var estimates []ExecutionEvent
+	var executingEvents, ticks, lastTickDone int
+	tickMonotonic := true
 	var emu sync.Mutex
 	markerActive.Store(true)
 	scheduled, err := tr.Run(ctx, []Target{target}, Options{Executing: func(e ExecutionEvent) {
@@ -207,6 +210,16 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 			auditFlips += e.AuditDisagreed
 		case "audit-flip":
 			flipKillers = append(flipKillers, e.FlipKiller)
+		case "executing":
+			executingEvents++
+		case "estimate":
+			estimates = append(estimates, e)
+		case "tick":
+			ticks++
+			if e.CandidatesDone <= lastTickDone || e.CandidatesDone > e.CandidatesTotal {
+				tickMonotonic = false
+			}
+			lastTickDone = e.CandidatesDone
 		}
 	}})
 	if err != nil {
@@ -284,6 +297,28 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	}
 	if markerRows != audited {
 		t.Fatalf("%d audited rows but %d carry the full run's evidence marker — the audit's authority must replace the narrowed measurement's evidence channels: %+v", audited, markerRows, s.CandidateEvidence)
+	}
+
+	// The window cost model (REQ-exec-run-status's estimate class):
+	// one estimate per window, priced from the measured baselines and
+	// batch probes — and its candidate classes count exactly the
+	// dispatched candidates, which the completion ticks then walk
+	// monotonically.
+	if executingEvents == 0 || len(estimates) != executingEvents {
+		t.Fatalf("%d estimate events for %d windows — want one per window", len(estimates), executingEvents)
+	}
+	classed := 0
+	for _, e := range estimates {
+		classed += e.EstimateNarrowed + e.EstimateFull + e.EstimateUnknown
+		if e.EstimateProjected == "" && e.EstimateUnknown == 0 {
+			t.Fatalf("estimate event carries no bound and no unpriced count: %+v", e)
+		}
+	}
+	if ticks == 0 || !tickMonotonic {
+		t.Fatalf("completion ticks = %d monotonic=%v — done must advance candidate by candidate", ticks, tickMonotonic)
+	}
+	if classed != ticks {
+		t.Fatalf("estimate classified %d candidates but %d completion ticks fired — the model must price the dispatched selection exactly", classed, ticks)
 	}
 
 	// The schedule engaged: both batch patterns were probed, and the
@@ -503,7 +538,13 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 	}
 	const pkg = "example.com/p"
 	w := scheduleTestWork(pkg, pkg, []string{"TestA", "TestB", "TestC", "TestD", "TestE", "TestF", "TestG", "TestH", "TestI"})
+	// Runnable candidates: the amortization gate counts the executing
+	// selection, and a pre-execution discard (no replacements) is not
+	// in it.
 	w.candidates = make([]engine.Candidate, 5)
+	for i := range w.candidates {
+		w.candidates[i].Replacements = []engine.Replacement{{File: "f.go"}}
+	}
 	ctx := context.Background()
 
 	// A served work with one flagged candidate never probes.
@@ -540,6 +581,9 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 	calls.Store(0)
 	campaignCoveredPositions = func(_ context.Context, _, _, _, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView) (engine.Coverage, error) {
 		calls.Add(1)
+		// A measurable probe duration for the batch-price assertion —
+		// an instant stub could round to zero on a coarse clock.
+		time.Sleep(time.Millisecond)
 		return engine.CoverageForTest(nil), nil
 	}
 	healthy := newScheduleStore()
@@ -549,8 +593,16 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 	if calls.Load() != 3 {
 		t.Fatalf("9 tests probed as %d batches, want ceil(sqrt(9)) = 3", calls.Load())
 	}
-	if entry := healthy.get(coverageKey(w.groups[0], pkg)); entry == nil || len(entry.batches) != 3 {
+	entry := healthy.get(coverageKey(w.groups[0], pkg))
+	if entry == nil || len(entry.batches) != 3 {
 		t.Fatalf("healthy probe stored %+v", entry)
+	}
+	// Each batch records its probe's wall-clock — the window cost
+	// model's per-batch price (REQ-exec-run-status's estimate class).
+	for i, b := range entry.batches {
+		if b.dur <= 0 {
+			t.Fatalf("batch %d recorded no duration: %+v", i, b)
+		}
 	}
 }
 

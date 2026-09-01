@@ -849,7 +849,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-run-status"
-  content_hash: "ba4e497781a45bb11166115529d71f16fd32f0d81e36e269be4d361d9d2b4065"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestConfirmWindowKillsNamesConfirmationMode"
   role: BINDING_ROLE_TESTS
@@ -858,7 +858,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-run-status"
-  content_hash: "ba4e497781a45bb11166115529d71f16fd32f0d81e36e269be4d361d9d2b4065"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestReportConfirmationFlipCarriesThePayload"
   role: BINDING_ROLE_TESTS
@@ -867,7 +867,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-run-status"
-  content_hash: "ba4e497781a45bb11166115529d71f16fd32f0d81e36e269be4d361d9d2b4065"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunExecutingEventsAdvisory"
   role: BINDING_ROLE_TESTS
@@ -876,7 +876,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-run-status"
-  content_hash: "ba4e497781a45bb11166115529d71f16fd32f0d81e36e269be4d361d9d2b4065"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunJoinsPreparationOnEarlyReturn"
   role: BINDING_ROLE_TESTS
@@ -885,7 +885,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-run-status"
-  content_hash: "ba4e497781a45bb11166115529d71f16fd32f0d81e36e269be4d361d9d2b4065"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPipelinesPreparationWithExecution"
   role: BINDING_ROLE_TESTS
@@ -894,7 +894,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-run-status"
-  content_hash: "ba4e497781a45bb11166115529d71f16fd32f0d81e36e269be4d361d9d2b4065"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPlanOnlyStopsBeforeExecution"
   role: BINDING_ROLE_TESTS
@@ -903,7 +903,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-run-status"
-  content_hash: "ba4e497781a45bb11166115529d71f16fd32f0d81e36e269be4d361d9d2b4065"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRefusesVanishedTargetOnceInOrder"
   role: BINDING_ROLE_TESTS
@@ -912,7 +912,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-run-status"
-  content_hash: "ba4e497781a45bb11166115529d71f16fd32f0d81e36e269be4d361d9d2b4065"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRenderExecutionEventFlipLine"
   role: BINDING_ROLE_TESTS
@@ -1223,4 +1223,49 @@ bindings {
   symbol: "github.com/greatliontech/gomutant.TestRunNarrowsSurvivorsToCoveringTests"
   role: BINDING_ROLE_TESTS
   shape_hash: "85d4c792bdf35b8e44402228ff06a8eb935d97330658699a6a454f734a1ea03a"
+}
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEstimateWindowPricesOnlyMeasuredDurations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "172cc03e050fb63d9277f96e3a3c584758bd1e278a13c79bf42e92068a169ce0"
+}
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEstimateWindowMirrorsExecutingSelection"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "da12ec5245bf4ae296b7aef2313ea89a2ac417fd916c13cfe929793a1652e76c"
+}
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestProgressLinePaceAndEstimateRendering"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "54d90efb8d4205bedf63e8f6ef0578adbe772028362151e3e3136121dd17e569"
+}
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestAdvanceDoneNeverRegresses"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "16a92e775edd9bdec80da455852dc010344919ed60e06f33a00a9a2e603c1d25"
+}
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "69bffb9cfa5be69d2db0fc91de8f97df6a90ea934cb3c11b9a9531a844eb8a31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEstimateRenderStringsFabricateNothing"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fd3b4771ed14cc82e3597f20d78768b1ee6b7d15db6c86fa4e0ebcf74730de61"
 }

@@ -76,10 +76,15 @@ var runMutantObservedEnv = engine.RunMutantObservedEnv
 var phaseBaselineProbe = engine.TestProbeObservedEnv
 
 // scheduleBatch is one probe batch: the test function names it ran
-// (package-local, sorted) and the coverage they produced together.
+// (package-local, sorted), the coverage they produced together, and
+// the probe's own wall-clock — the batch's measured cost, the window
+// cost model's per-batch price (coverage instrumentation makes it a
+// mild over-estimate of the plain run — a known bias of the
+// projection, stated rather than corrected).
 type scheduleBatch struct {
 	fns []string
 	cov engine.Coverage
+	dur time.Duration
 }
 
 // groupSchedule is one oracle group's probed schedule signal: fewer
@@ -201,22 +206,41 @@ func groupTestFns(oracle []string, pkg string) []string {
 	return fns
 }
 
-// executingCandidates counts the candidates this work will actually
-// run — a served record re-executes only its flagged indexes, an
-// extension only its unmeasured suffix, a drift serve only its
-// re-measure set — so a near-empty window never pays a probe pass it
+// executesCandidate is the ONE candidate selection: whether this work
+// dispatches candidate mi — a served record re-executes only its
+// flagged indexes, an extension only its unmeasured suffix, a drift
+// serve only its re-measure set, and a pre-execution discard (no
+// replacements) never dispatches. The dispatch loop and the window
+// cost model share exactly this predicate.
+func executesCandidate(w work, mi int) bool {
+	switch {
+	case w.serve != nil && !w.flagged[mi]:
+		return false
+	case w.extend != nil && mi < w.extendFrom:
+		return false
+	case w.drift != nil && !w.driftRemeasure[mi]:
+		return false
+	}
+	_, runnable := w.candidates[mi].Mutant()
+	return runnable
+}
+
+// executingIndexes lists executesCandidate's indexes in order.
+func executingIndexes(w work) []int {
+	var out []int
+	for mi := range w.candidates {
+		if executesCandidate(w, mi) {
+			out = append(out, mi)
+		}
+	}
+	return out
+}
+
+// executingCandidates counts executingIndexes — the probe-pass
+// amortization gate: a near-empty window never pays a probe pass it
 // cannot amortize.
 func executingCandidates(w work) int {
-	switch {
-	case w.serve != nil:
-		return len(w.flagged)
-	case w.extend != nil:
-		return len(w.candidates) - w.extendFrom
-	case w.drift != nil:
-		return len(w.driftRemeasure)
-	default:
-		return len(w.candidates)
-	}
+	return len(executingIndexes(w))
 }
 
 // probeScheduleCoverage populates the store for every group of w that
@@ -251,6 +275,7 @@ func (t *Tree) probeScheduleCoverage(ctx context.Context, w work, opts Options, 
 		}
 		entry := &groupSchedule{}
 		for _, batch := range scheduleBatches(fns) {
+			probeStart := time.Now()
 			cov, err := campaignCoveredPositions(ctx, t.dir, g.pkgs[0], testRunRegex(batch), coverPkg, opts.OracleTimeout, g.flags, runEnv, t.eng.DirectiveCoverage())
 			if err != nil {
 				if ctx.Err() != nil {
@@ -259,7 +284,7 @@ func (t *Tree) probeScheduleCoverage(ctx context.Context, w work, opts Options, 
 				entry = &groupSchedule{}
 				break
 			}
-			entry.batches = append(entry.batches, scheduleBatch{fns: batch, cov: cov})
+			entry.batches = append(entry.batches, scheduleBatch{fns: batch, cov: cov, dur: time.Since(probeStart)})
 		}
 		store.mu.Lock()
 		store.byKey[key] = entry
@@ -322,38 +347,55 @@ func (t *Tree) scheduleSteps(w work, m engine.Mutant, opts Options) []scheduleSt
 	var out []scheduleStep
 	for _, g := range w.groups {
 		budget := stepBudget(g, opts)
-		entry := store.get(coverageKey(g, coverPkg))
-		if entry == nil || len(entry.batches) < 2 {
+		reaching, ok := narrowingBatches(store.get(coverageKey(g, coverPkg)), coverPkg, probe)
+		if !ok {
 			out = append(out, scheduleStep{first: g, budget: budget})
 			continue
 		}
-		var reaching, rest []string
-		sound := true
-		for _, b := range entry.batches {
-			covered, ok := survivorCovered(b.cov, coverPkg, probe)
-			if !ok {
-				// Unsound file or unparseable position: no coverage
-				// verdict exists, so no schedule either — the group
-				// runs unordered (the advisory posture).
-				sound = false
-				break
-			}
-			if covered {
-				reaching = append(reaching, b.fns...)
-			} else {
-				rest = append(rest, b.fns...)
-			}
+		var fns []string
+		for _, b := range reaching {
+			fns = append(fns, b.fns...)
 		}
-		if !sound || len(reaching) == 0 || len(rest) == 0 {
-			out = append(out, scheduleStep{first: g, budget: budget})
-			continue
-		}
-		sort.Strings(reaching)
+		sort.Strings(fns)
 		gFirst := g
-		gFirst.runRegex = testRunRegex(reaching)
+		gFirst.runRegex = testRunRegex(fns)
 		out = append(out, scheduleStep{first: gFirst, narrowed: true, budget: budget})
 	}
 	return out
+}
+
+// narrowingBatches is the ONE covering/exempt decision: the recorded
+// batches whose coverage reaches the mutant's extent, and whether the
+// split is sound and non-trivial — a nil or single-batch entry, any
+// batch without a sound coverage verdict, an all-reaching or
+// none-reaching partition all answer false, and the group runs whole
+// (the advisory posture). The schedule transform and the window cost
+// model both consume this decision, so an estimate can never disagree
+// with the schedule about what would execute
+// (REQ-exec-oracle-run's narrowed-survivor clause).
+func narrowingBatches(entry *groupSchedule, coverPkg string, probe Survivor) ([]scheduleBatch, bool) {
+	if entry == nil || len(entry.batches) < 2 {
+		return nil, false
+	}
+	var reaching []scheduleBatch
+	rest := 0
+	for _, b := range entry.batches {
+		covered, ok := survivorCovered(b.cov, coverPkg, probe)
+		if !ok {
+			// Unsound file or unparseable position: no coverage
+			// verdict exists, so no schedule either.
+			return nil, false
+		}
+		if covered {
+			reaching = append(reaching, b)
+		} else {
+			rest++
+		}
+	}
+	if len(reaching) == 0 || rest == 0 {
+		return nil, false
+	}
+	return reaching, true
 }
 
 // phaseKillVouched reports whether a narrowed phase's test-attributed

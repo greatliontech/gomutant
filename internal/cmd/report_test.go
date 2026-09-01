@@ -55,6 +55,60 @@ func TestProgressLineRendersCumulativeState(t *testing.T) {
 	}
 }
 
+// The pace estimate anchors at the FIRST completion tick and
+// extrapolates over the remaining prepared candidates; before any
+// tick the line states nothing — it never estimates what it has not
+// measured (REQ-exec-run-status's estimate class). The estimate
+// window line renders the model's bound and classes; ticks render no
+// human line at all — the cadence progress line is their surface.
+func TestProgressLinePaceAndEstimateRendering(t *testing.T) {
+	var out bytes.Buffer
+	rep := newRunReporter(&out, false, 85)
+	rep.progressLine()
+	if strings.Contains(out.String(), "est ~") {
+		t.Fatalf("progress line estimates before any completion tick: %q", out.String())
+	}
+	// A fixed clock: the first tick anchors at t0, the render reads
+	// t0+10s — the pace arithmetic is pinned by VALUE with no
+	// wall-clock race.
+	t0 := time.Now()
+	rep.now = func() time.Time { return t0 }
+	rep.executing(gomutant.ExecutionEvent{Phase: "tick", CandidatesDone: 1, CandidatesTotal: 6})
+	rep.now = func() time.Time { return t0.Add(10 * time.Second) }
+	rep.executing(gomutant.ExecutionEvent{Phase: "tick", CandidatesDone: 5, CandidatesTotal: 6})
+	out.Reset()
+	rep.progressLine()
+	line := out.String()
+	// The VALUE is the pin, not the prefix: 5 completions over
+	// exactly 10s anchored at the first tick is 2s per candidate, and
+	// one remaining candidate extrapolates to ~2s — a shifted anchor,
+	// a wrong divisor, or a wrong remainder all move it.
+	if !strings.Contains(line, "est ~2s remaining (pace)") {
+		t.Fatalf("progress line %q, want the measured pace extrapolation 'est ~2s remaining (pace)'", line)
+	}
+	if !strings.Contains(line, "candidates 5/6") {
+		t.Fatalf("progress line %q — ticks must advance the candidate tally between window boundaries", line)
+	}
+
+	out.Reset()
+	renderExecutionEvent(&out, gomutant.ExecutionEvent{Phase: "tick", Symbol: "p.F", CandidatesDone: 5, CandidatesTotal: 100}, "", "")
+	if out.String() != "" {
+		t.Fatalf("tick rendered a human line: %q", out.String())
+	}
+
+	renderExecutionEvent(&out, gomutant.ExecutionEvent{
+		Phase: "estimate", TargetIndex: 1, TargetCount: 2, Symbol: "p.F",
+		EstimateProjected: "12m30s", EstimateAudit: "1h24m0s",
+		EstimateNarrowed: 280, EstimateFull: 40, EstimateUnknown: 3,
+	}, " (of 85 selected)", "")
+	line = out.String()
+	for _, want := range []string{"estimate", "p.F", "(of 85 selected)", "window ~12m30s", "280 narrowed", "40 full", "3 unpriced", "audit ~1h24m0s"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("estimate line %q missing %q", line, want)
+		}
+	}
+}
+
 // The structured face emits one JSON object per line with the event
 // kind stitched in — machine-readable without scraping the human
 // rendering.

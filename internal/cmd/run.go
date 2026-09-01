@@ -639,19 +639,42 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 }
 
 func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent, selectionNote, modeSuffix string) {
-	if event.Phase == "audit-flip" {
+	switch event.Phase {
+	case "tick":
+		// Per-candidate completion ticks feed the reporter's pace and
+		// the JSONL face; a human line per candidate would be noise —
+		// the cadence progress line carries the pace instead.
+		return
+	case "estimate":
+		// The window cost model, before any budget is spent: the
+		// priced projection at measured-baseline pace, the candidate
+		// classes, and the audit's worst case — unpriced candidates
+		// are counted, never folded into the projection.
+		line := fmt.Sprintf("estimate  target %d/%d %s%s", event.TargetIndex, event.TargetCount, event.Symbol, selectionNote)
+		if event.EstimateProjected != "" {
+			line += fmt.Sprintf("  window ~%s", event.EstimateProjected)
+		}
+		line += fmt.Sprintf("  (%d narrowed, %d full", event.EstimateNarrowed, event.EstimateFull)
+		if event.EstimateUnknown > 0 {
+			line += fmt.Sprintf(", %d unpriced", event.EstimateUnknown)
+		}
+		line += ")"
+		if event.EstimateAudit != "" {
+			line += fmt.Sprintf("  audit ~%s", event.EstimateAudit)
+		}
+		fmt.Fprintln(w, line)
+		return
+	case "audit-flip":
 		// A false survivor is never silent: the audit's full-oracle
 		// re-run killed a narrowed survivor.
 		fmt.Fprintf(w, "audit FLIP: %s %s - narrowed survivor killed by %s under the full oracle; verdict re-scored\n",
 			event.Symbol, event.FlipPosition, event.FlipKiller)
 		return
-	}
-	if event.Phase == "audit" {
+	case "audit":
 		fmt.Fprintf(w, "audit     %d narrowed survivor(s) re-scored under the full oracle, %d disagreed\n",
 			event.AuditedNarrowed, event.AuditDisagreed)
 		return
-	}
-	if event.Phase == "confirmation-flip" {
+	case "confirmation-flip":
 		// A demoted kill is never silent: the serial re-run re-scored
 		// this mutant a survivor and withdrew its provisional killer.
 		fmt.Fprintf(w, "confirmation FLIP: %s %s - provisional kill by %s re-scored survivor on serial re-run\n",

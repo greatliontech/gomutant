@@ -4434,8 +4434,8 @@ func TestRunExecutingEventsAdvisory(t *testing.T) {
 	if len(findings) != 1 || findings[0].Mutants == 0 {
 		t.Fatalf("findings = %+v", findings)
 	}
-	var executing, confirming int
-	lastConfirmed := -1
+	var executing, confirming, estimates, ticks int
+	lastConfirmed, lastTick := -1, 0
 	for _, e := range events {
 		switch e.Phase {
 		case "executing":
@@ -4443,6 +4443,25 @@ func TestRunExecutingEventsAdvisory(t *testing.T) {
 			if e.TargetIndex != 1 || e.TargetCount != 1 || e.Symbol != "example.com/fixture/lib.Add" {
 				t.Fatalf("executing event = %+v", e)
 			}
+		case "estimate":
+			// The window cost model rides the same advisory class:
+			// classes always count the dispatched selection, and a
+			// bound-less estimate must say what it could not price.
+			estimates++
+			if e.EstimateNarrowed+e.EstimateFull+e.EstimateUnknown == 0 {
+				t.Fatalf("estimate event classifies nothing: %+v", e)
+			}
+			if e.EstimateProjected == "" && e.EstimateUnknown == 0 {
+				t.Fatalf("estimate event carries no bound and no unpriced count: %+v", e)
+			}
+		case "tick":
+			// Completion ticks advance done candidate by candidate,
+			// monotonically, never past the prepared total.
+			ticks++
+			if e.CandidatesDone <= lastTick || e.CandidatesDone > e.CandidatesTotal {
+				t.Fatalf("tick = %+v after done=%d, want monotonic within the total", e, lastTick)
+			}
+			lastTick = e.CandidatesDone
 		case "confirming":
 			confirming++
 			if e.CandidatesDone != e.CandidatesTotal || e.CandidatesTotal == 0 {
@@ -4462,6 +4481,9 @@ func TestRunExecutingEventsAdvisory(t *testing.T) {
 	}
 	if executing == 0 || confirming == 0 {
 		t.Fatalf("phases = %d executing, %d confirming, want both reported", executing, confirming)
+	}
+	if estimates != executing || ticks == 0 {
+		t.Fatalf("advisory stream = %d estimates for %d windows, %d ticks — want one estimate per window and per-candidate ticks", estimates, executing, ticks)
 	}
 	if confirming < 2 {
 		t.Fatalf("confirming events = %d, want per-confirmation events", confirming)

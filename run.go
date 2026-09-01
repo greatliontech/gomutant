@@ -286,6 +286,11 @@ type Options struct {
 	// group's derived budget in derive mode, the explicit timeout
 	// otherwise; nil (probes, external callers) means OracleTimeout.
 	groupBudget func(g group) time.Duration
+	// baselineDur answers a group's measured passing-baseline
+	// wall-clock — the window cost model's whole-group price; nil or
+	// a false answer prices nothing, never fabricates
+	// (REQ-exec-run-status's estimate class).
+	baselineDur func(g group) (time.Duration, bool)
 	// probeGate is the run's producer-probe gate: the phase-baseline
 	// vouch holds it shared exactly like every other producer-side
 	// oracle probe, so it never shares a window with a serial
@@ -365,6 +370,28 @@ type ExecutionEvent struct {
 	// clause).
 	AuditedNarrowed int `json:"auditedNarrowed,omitempty"`
 	AuditDisagreed  int `json:"auditDisagreed,omitempty"`
+	// The estimate event (Phase "estimate", one per window after its
+	// coverage probes, before dispatch) carries the window cost
+	// model: EstimateProjected is the priced PROJECTION of scheduled
+	// oracle time at measured-baseline pace (absent when nothing
+	// priced) — a pace anchor, not a bound in either direction: a
+	// timing-out candidate costs up to its derived budget, and
+	// confirmations, bucket probes, and build overlay are excluded —
+	// EstimateAudit the narrowed-survivor audit's price (its count
+	// is capped, its per-run cost is the same baseline-pace
+	// projection), and the three counts classify the executing
+	// candidates — unpriced candidates are NEVER folded into the
+	// projection, they are counted (REQ-exec-run-status's estimate
+	// class). Phase "tick" events carry per-candidate completion:
+	// CandidatesDone advances monotonically as workers finish,
+	// truing up to the prepared totals at window boundaries — the
+	// pace ground for estimated-remaining, advisory like every
+	// execution-phase event.
+	EstimateProjected string `json:"estimateProjected,omitempty"`
+	EstimateAudit     string `json:"estimateAudit,omitempty"`
+	EstimateNarrowed  int    `json:"estimateNarrowed,omitempty"`
+	EstimateFull      int    `json:"estimateFull,omitempty"`
+	EstimateUnknown   int    `json:"estimateUnknown,omitempty"`
 }
 
 // PreparationEvent reports one operation before it begins. Symbol is set for
@@ -2025,15 +2052,25 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// group first probes, read by pipelined workers — the mutex covers
 	// that overlap (REQ-exec-oracle-run's derived campaign budget).
 	var groupBudgetMu sync.Mutex
-	groupBudgets := map[baselineKey]time.Duration{}
+	// groupBaselines keys each group's ONE baseline measurement: the
+	// raw passing wall-clock (the window cost model's whole-group
+	// price, recorded in every budget mode — an explicit timeout
+	// changes the budget, not what the baseline measured) and the
+	// budget derived from it (derive mode only). One entry per probe
+	// makes "a group with a budget has a raw duration" structural.
+	type groupBaseline struct {
+		raw    time.Duration
+		budget time.Duration
+	}
+	groupBaselines := map[baselineKey]groupBaseline{}
 	budgetFor := func(g group) time.Duration {
 		if !deriveOracleBudgets {
 			return opts.OracleTimeout
 		}
 		groupBudgetMu.Lock()
 		defer groupBudgetMu.Unlock()
-		if b, ok := groupBudgets[keyFor(g)]; ok {
-			return b
+		if b, ok := groupBaselines[keyFor(g)]; ok && b.budget > 0 {
+			return b.budget
 		}
 		// A group never baselined under this run (a narrowed
 		// confirmation scope, a probe): the leash — a generous bound
@@ -2041,6 +2078,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		return opts.OracleTimeout
 	}
 	opts.groupBudget = budgetFor
+	opts.baselineDur = func(g group) (time.Duration, bool) {
+		groupBudgetMu.Lock()
+		defer groupBudgetMu.Unlock()
+		b, ok := groupBaselines[keyFor(g)]
+		return b.raw, ok
+	}
 	// probeGroupBaselines fills w.baselines for the target's oracle
 	// groups. A non-cancellation baseline condition - a probe failure,
 	// an empty match, a failing test - is the target's own condition:
@@ -2091,17 +2134,21 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					baselineFailures[key] = reason
 					return reason, nil
 				}
+				// Only a PASSING baseline reaches here — a failing or
+				// refused one returned above and records nothing (a
+				// baseline dying at the leash must not register a
+				// leash-multiple budget for its group's siblings, and
+				// prices nothing). The raw wall-clock records in every
+				// budget mode; the derived budget only in derive mode.
+				entry := groupBaseline{raw: baselineElapsed}
 				if deriveOracleBudgets {
-					// The measurement is the PASSING baseline's own
-					// wall-clock — a failing or refused baseline
-					// returned above and derives nothing (a baseline
-					// dying at the leash must not register a
-					// leash-multiple budget for its group's siblings).
-					budget := derivedOracleBudget(baselineElapsed)
-					groupBudgetMu.Lock()
-					groupBudgets[key] = budget
-					groupBudgetMu.Unlock()
-					reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: budget.String()})
+					entry.budget = derivedOracleBudget(baselineElapsed)
+				}
+				groupBudgetMu.Lock()
+				groupBaselines[key] = entry
+				groupBudgetMu.Unlock()
+				if deriveOracleBudgets {
+					reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: entry.budget.String()})
 				}
 				state = observed
 				if err := ctx.Err(); err != nil {
@@ -2929,10 +2976,19 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		committed[w.target] = true
 		return t.emitOracleGuidance(ctx, f, w, targets[w.target].Symbol, opts, runEnv, guidanceCache)
 	}
-	// Advisory execution progress rides window boundaries: totals are
-	// exact, per-window timing is not part of the deterministic sequence
-	// (REQ-exec-run-status's advisory classes).
-	dispatchedTargets, mutantsDone := 0, 0
+	// Advisory execution progress rides window boundaries and
+	// per-candidate ticks: totals are exact, per-window timing is not
+	// part of the deterministic sequence (REQ-exec-run-status's
+	// advisory classes). mutantsDone is atomic because workers tick it
+	// as candidates finish; windows execute serially, so the boundary
+	// true-up (Store) never races a tick.
+	dispatchedTargets := 0
+	var mutantsDone atomic.Int64
+	// tickMu serializes the counter advance WITH its event delivery:
+	// without it two workers can Add in one order and deliver in the
+	// other, and the tick stream — pinned monotone — regresses.
+	// Ordering is tickMu → the callback lock, never inverted.
+	var tickMu sync.Mutex
 	type executedWindow struct {
 		window       []work
 		observations [][]runtimeinput.Observation
@@ -2966,11 +3022,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			memoryDecided[wi] = make([]bool, len(window[wi].candidates))
 			narrowedFlags[wi] = make([]bool, len(window[wi].candidates))
 		}
+		windowBase := mutantsDone.Load()
 		reportExecuting(opts.Executing, ExecutionEvent{
 			Phase:       "executing",
 			TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
 			Symbol:         targets[window[0].target].Symbol,
-			CandidatesDone: mutantsDone, CandidatesTotal: int(preparedCandidates.Load()),
+			CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
 		})
 		// The schedule probes run serially before the pool dispatches:
 		// one batched coverage pass per qualifying group, cached for the
@@ -2984,6 +3041,18 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				return nil, err
 			}
 		}
+		// The window's cost model, priced AFTER the probes so the
+		// narrowing decision is the schedule's own — advisory, before
+		// any budget is spent (REQ-exec-run-status's estimate class).
+		est := estimateWindow(window, opts.scheduleStore, opts.baselineDur, auditNarrowedCap)
+		reportExecuting(opts.Executing, ExecutionEvent{
+			Phase:       "estimate",
+			TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
+			Symbol:         targets[window[0].target].Symbol,
+			CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
+			EstimateNarrowed: est.narrowed, EstimateFull: est.full, EstimateUnknown: est.unknown,
+			EstimateProjected: est.projectedString(), EstimateAudit: est.auditString(),
+		})
 		jobCh := make(chan job)
 		poolCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -3023,6 +3092,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					narrowedFlags[j.wi][j.mi] = narrowedSurvivor
 					killers[j.wi][j.mi] = killer
 					outcomes[j.wi][j.mi] = outcome
+					// The completion tick: done advances candidate by
+					// candidate instead of window by window, the pace
+					// ground a multi-hour window would otherwise hide
+					// (REQ-exec-run-status's estimate class). tickMu
+					// binds the Add to its delivery — without it a
+					// preempted worker delivers a smaller done AFTER a
+					// sibling's larger one and the pinned-monotone
+					// stream regresses.
+					tickMu.Lock()
+					reportExecuting(opts.Executing, ExecutionEvent{
+						Phase:       "tick",
+						TargetIndex: dispatchedTargets + j.wi + 1, TargetCount: int(preparedTargets.Load()),
+						Symbol:         w.candidates[j.mi].Symbol,
+						CandidatesDone: int(mutantsDone.Add(1)), CandidatesTotal: int(preparedCandidates.Load()),
+					})
+					tickMu.Unlock()
 				}
 			}()
 		}
@@ -3040,7 +3125,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		}
 	dispatching:
 		for wi := range window {
-			for mi, candidate := range window[wi].candidates {
+			for mi := range window[wi].candidates {
 				select {
 				case <-opts.SoftStop:
 					softStopped = true
@@ -3048,31 +3133,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					break dispatching
 				default:
 				}
-				if _, runnable := candidate.Mutant(); !runnable {
-					continue
-				}
-				if window[wi].serve != nil && !window[wi].flagged[mi] {
-					// A served record's covered candidates keep their recorded
-					// outcomes; only the flagged ones re-execute
-					// (REQ-result-stale).
-					continue
-				}
-				if window[wi].extend != nil && mi < window[wi].extendFrom {
-					// An extended record's measured prefix keeps its recorded
-					// outcomes; only the unmeasured suffix executes
-					// (REQ-mut-budget, REQ-result-stale's budget-extension
-					// carve-out).
-					continue
-				}
-				if window[wi].drift != nil && !window[wi].driftRemeasure[mi] {
-					// A drifted record's kills keyed to unmoved oracles and its
-					// unflagged discards stand; only moved-killer kills,
-					// set-wide kills under any movement, survivors under any
-					// movement or growth, and flagged candidates re-execute —
-					// kills and flagged candidates against the full current
-					// oracle, unflagged survivors narrowed to the added and
-					// moved tests via the scoped job below
-					// (REQ-result-stale's killer-drift carve-out).
+				// executesCandidate is the ONE candidate selection —
+				// serve/extension/drift carve-outs (REQ-result-stale)
+				// and pre-execution discards — shared with the window
+				// cost model; the walk still visits every index so the
+				// drain prefix can land on a skipped candidate exactly
+				// as it always has.
+				if !executesCandidate(window[wi], mi) {
 					continue
 				}
 				if opts.dispatched != nil {
@@ -3142,9 +3209,15 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// interference from a sibling never reads as a kill. Timeout kills
 		// are excluded: confirming one costs the full timeout again, and the
 		// hang bound is the caller's own budget - the named residual.
+		// Boundary true-up: worker ticks counted executed candidates;
+		// skipped, non-runnable, and served ones join here so done
+		// converges on the prepared totals at every window boundary
+		// (windows execute serially — the Store never races a tick).
+		windowTotal := int64(0)
 		for wi := range window {
-			mutantsDone += len(window[wi].candidates)
+			windowTotal += int64(len(window[wi].candidates))
 		}
+		mutantsDone.Store(advanceDone(windowBase, windowTotal, mutantsDone.Load()))
 		if jobs > 1 {
 			// Each confirmation re-runs a full oracle, so per-confirmation
 			// events are naturally sparse; a window with nothing to
@@ -3204,7 +3277,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						// symbol changes underneath it.
 						TargetIndex: dispatchedTargets + wi + 1, TargetCount: int(preparedTargets.Load()),
 						Symbol:         targets[window[wi].target].Symbol,
-						CandidatesDone: mutantsDone, CandidatesTotal: int(preparedCandidates.Load()),
+						CandidatesDone: int(mutantsDone.Load()), CandidatesTotal: int(preparedCandidates.Load()),
 						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
 						ConfirmationMode: confirmMode,
 					})
@@ -4069,6 +4142,19 @@ func reportExecuting(callback func(ExecutionEvent), event ExecutionEvent) {
 	if callback != nil {
 		callback(event)
 	}
+}
+
+// advanceDone is the window-boundary true-up of the done counter: it
+// trues up to base+total — the window's own candidate lens — but never
+// below cur, because a drained window nils its discarded works'
+// candidates before the true-up, and candidates that already ticked
+// must not un-happen on any advisory face (REQ-exec-run-status's
+// estimate class: ticks are monotone).
+func advanceDone(base, total, cur int64) int64 {
+	if next := base + total; next > cur {
+		return next
+	}
+	return cur
 }
 
 func mergeFindingObservations(root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {

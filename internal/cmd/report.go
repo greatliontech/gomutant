@@ -38,16 +38,26 @@ type runReporter struct {
 	// audit's per-window events for the run-summary rate line.
 	auditedNarrowed int
 	auditDisagreed  int
-	lastMode        map[string]string // symbol -> last confirmation mode rendered
-	stopCadence     chan struct{}
-	cadenceDone     chan struct{}
-	cadenceClosed   sync.Once
-	writeErr        error // first structured-face write failure, surfaced at exit
+	// paceStart/paceBase/paceDone anchor the measured execution pace:
+	// first completion tick to latest, so the progress line's
+	// estimated-remaining reflects mutant execution alone —
+	// preparation and baselines never dilute it.
+	paceStart time.Time
+	paceBase  int
+	paceDone  int
+	// now is the reporter's clock — a field so the pace arithmetic is
+	// testable against a fixed instant instead of a wall-clock race.
+	now           func() time.Time
+	lastMode      map[string]string // symbol -> last confirmation mode rendered
+	stopCadence   chan struct{}
+	cadenceDone   chan struct{}
+	cadenceClosed sync.Once
+	writeErr      error // first structured-face write failure, surfaced at exit
 }
 
 func newRunReporter(out io.Writer, jsonl bool, selected int) *runReporter {
 	return &runReporter{
-		out: out, jsonl: jsonl, start: time.Now(), selected: selected,
+		out: out, jsonl: jsonl, start: time.Now(), selected: selected, now: time.Now,
 		lastMode: map[string]string{}, stopCadence: make(chan struct{}),
 	}
 }
@@ -127,6 +137,16 @@ func (r *runReporter) decision(d gomutant.RunDecision) {
 func (r *runReporter) executing(e gomutant.ExecutionEvent) {
 	r.mu.Lock()
 	r.lastExec = e
+	if e.Phase == "tick" {
+		// The pace anchor: elapsed-per-candidate measures from the
+		// FIRST completion, so preparation and baseline time never
+		// dilute the pace the estimate reconciles against.
+		if r.paceStart.IsZero() {
+			r.paceStart = r.now()
+			r.paceBase = e.CandidatesDone - 1
+		}
+		r.paceDone = e.CandidatesDone
+	}
 	if e.Phase == "audit" {
 		r.auditedNarrowed += e.AuditedNarrowed
 		r.auditDisagreed += e.AuditDisagreed
@@ -197,6 +217,12 @@ type progressPayload struct {
 	Killed          int    `json:"killed"`
 	Open            int    `json:"open"`
 	Elapsed         string `json:"elapsed"`
+	// EstRemaining extrapolates the measured execution pace (first
+	// completion tick to the latest) over the remaining prepared
+	// candidates — advisory, absent until at least one candidate
+	// completed, and honest about its denominator: the prepared
+	// total grows while preparation pipelines.
+	EstRemaining string `json:"estRemaining,omitempty"`
 }
 
 func (r *runReporter) progressSnapshot() progressPayload {
@@ -214,16 +240,38 @@ func (r *runReporter) progressSnapshot() progressPayload {
 		Selected:    r.selected, Served: r.served, Skipped: r.skipped,
 		CandidatesDone: r.lastExec.CandidatesDone, CandidatesTotal: r.lastExec.CandidatesTotal,
 		Killed: r.bankedKilled, Open: r.bankedOpen,
-		Elapsed: time.Since(r.start).Round(time.Second).String(),
+		Elapsed:      time.Since(r.start).Round(time.Second).String(),
+		EstRemaining: r.estRemainingLocked(),
 	}
+}
+
+// estRemainingLocked extrapolates the measured execution pace over
+// the remaining prepared candidates; empty until a completion tick
+// anchored the pace — the line states nothing it has not measured.
+// Caller holds r.mu.
+func (r *runReporter) estRemainingLocked() string {
+	done := r.paceDone - r.paceBase
+	if r.paceStart.IsZero() || done <= 0 {
+		return ""
+	}
+	remaining := r.lastExec.CandidatesTotal - r.paceDone
+	if remaining <= 0 {
+		return ""
+	}
+	perCandidate := r.now().Sub(r.paceStart) / time.Duration(done)
+	return (perCandidate * time.Duration(remaining)).Round(time.Second).String()
 }
 
 func (r *runReporter) progressLine() {
 	p := r.progressSnapshot()
 	r.line("progress", p, func(w io.Writer) {
-		fmt.Fprintf(w, "progress  %d/%d targets committed (%d served, %d skipped), candidates %d/%d, %d killed, %d open, elapsed %s\n",
+		line := fmt.Sprintf("progress  %d/%d targets committed (%d served, %d skipped), candidates %d/%d, %d killed, %d open, elapsed %s",
 			p.TargetsDone, p.Selected, p.Served, p.Skipped,
 			p.CandidatesDone, p.CandidatesTotal, p.Killed, p.Open, p.Elapsed)
+		if p.EstRemaining != "" {
+			line += ", est ~" + p.EstRemaining + " remaining (pace)"
+		}
+		fmt.Fprintln(w, line)
 	})
 }
 

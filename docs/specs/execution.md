@@ -660,7 +660,32 @@ selected candidates, carried and non-runnable ones included, exactly as the
 decisions count them, growing to the campaign-wide totals as pipelined
 preparation completes — timing-dependent by nature, outside the
 deterministic sequence, never entering a decision or finding, so an
-operator can read phase and progress from the log alone. The CLI
+operator can read phase and progress from the log alone. The same
+class carries the WINDOW COST MODEL: after a window's coverage probes
+and before its first mutant dispatches, the run reports the window's
+estimate — a projection of scheduled oracle time at measured-baseline
+pace, derived entirely from measurements the run already made
+(passing-baseline wall-clocks and coverage-probe batch wall-clocks),
+the executing candidates classified as narrowed, whole-group, or
+unpriced, and the narrowed-survivor audit priced
+separately — an unpriced candidate is counted and NEVER folded into
+the projection: the model fabricates no duration; the projection is a
+pace anchor, not a bound in either direction — its named exclusions
+are a timing-out candidate (which costs up to its derived budget, a
+multiple of the priced baseline), serial confirmation runs, the
+once-per-group survivor bucket probes, and per-mutant build overlay
+cost, all reconciled by the live pace instead of predicted. The
+separately-priced audit is the same kind of anchor: its COUNT is a
+true cap (at most the per-window sample bound of full-oracle
+re-runs), but each re-run is priced at passing-baseline pace and a
+mutated tree can run slower or time out at its derived budget — the
+audit price is a projection, never a bound; and
+per-candidate completion events, delivered monotonically, so the
+done tally advances candidate by candidate instead of window by
+window (a multi-hour window must not read as a stuck campaign),
+truing up to the prepared totals at each window boundary and never
+regressing — a drained window's discarded work must not un-happen
+completions on any face. The CLI
 additionally renders, in the same advisory class: the requested
 selection size beside the prepared-target denominator whenever the
 two differ or serves and skips have offset an equality (a resumed
@@ -669,7 +694,11 @@ never a different campaign, and the context must not vanish exactly
 when equality is coincidental); a cumulative progress line on a
 fixed cadence — commits (cached serves included) against the
 SELECTION, the served and skipped splits, candidate tallies, kills,
-and elapsed time — with the cadence an operator flag defaulting on;
+elapsed time, and once at least one candidate completed an
+estimated-remaining extrapolation of the measured execution pace
+(anchored at the first completion, so preparation and baseline time
+never dilute it; absent until measured — the line states nothing it
+has not measured) — with the cadence an operator flag defaulting on;
 and a structured JSON-lines face as an option, carrying every event,
 decision, per-target result row, and summary as one JSON object per
 line with an event-kind field, human prose wrapped as note events —
