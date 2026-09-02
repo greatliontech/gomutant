@@ -27,4 +27,12 @@ treat the result as the declared surface for every module's
 oracles; the machine-local disqualifier then never fires for an
 in-tree file spelled relatively.
 
+Rider (field report 2026-09-02): `--bracket-path` refuses an absolute
+directory outright ("declare it module-relative or declare the files
+it contains"), so a replace module outside the repository — every
+file of which the compiler reads — cannot be declared as one
+legitimate external surface without enumerating its files. An
+absolute directory declares a surface exactly as a module-relative
+one does; the bracket walks it the same way.
+
 Lands: cross-tool train chunk 138 (gofresh docs/plans/cross-tool-train.md).
