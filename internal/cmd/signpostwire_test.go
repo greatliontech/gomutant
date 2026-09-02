@@ -16,6 +16,9 @@ import (
 // stale and the re-measure move - the run face carries the signpost,
 // not only the library (REQ-target-changed).
 func TestRunCommandChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	// isolatedFixture is already a committed git repo; the uncommitted
 	// test edit below is the changed surface.
 	fixture := isolatedFixture(t)

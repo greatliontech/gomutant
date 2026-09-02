@@ -15,6 +15,9 @@ import (
 // build-excluded source or a data file), whose mutation could never be
 // exercised - the run would report a false survivor.
 func TestEphemeralRefusesUnloadedPackageAndUncompiledFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
 		t.Fatal(err)

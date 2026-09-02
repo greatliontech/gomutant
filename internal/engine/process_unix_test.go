@@ -63,6 +63,9 @@ func TestCommandContextKillsProcessGroup(t *testing.T) {
 // after the spawn, before the oracle's real work begins. The sleep
 // outwaits the parent's start-to-Setpriority window.
 func TestOracleRunsAtLowPriority(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	if own := processNiceness(t, os.Getpid()); own >= oracleNiceness {
 		t.Skipf("already running at niceness %d; lowering to %d needs privileges", own, oracleNiceness)
 	}

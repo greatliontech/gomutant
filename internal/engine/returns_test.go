@@ -7,6 +7,9 @@ import (
 )
 
 func TestReturnSubstitutionCatalog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	for _, test := range []struct {
 		symbol string
@@ -56,6 +59,9 @@ func TestReturnSubstitutionCatalog(t *testing.T) {
 }
 
 func TestReturnSubstitutionSourcesRanksAndSiblings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	const source = "package lib\n\nfunc ReturnBoolean(value bool) bool { return value }\nfunc ReturnNumber(value int) int    { return value }\nfunc ReturnString(value string) string {\n\treturn value\n}\nfunc ReturnPointer(value *int) *int { return value }\n"
 	for _, test := range []struct {
@@ -140,6 +146,9 @@ func TestReturnSubstitutionSourcesRanksAndSiblings(t *testing.T) {
 }
 
 func TestReturnSubstitutionPrunesOrphanedImport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.ReturnImportedError", 0)
 	if err != nil {

@@ -7,6 +7,9 @@ import (
 )
 
 func TestScalarLiteralCatalog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	for _, test := range []struct {
 		symbol string
@@ -46,6 +49,9 @@ func TestScalarLiteralCatalog(t *testing.T) {
 }
 
 func TestScalarLiteralMappingSourcesAndRanks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	const source = "package lib\n\nfunc LiteralInteger() int          { return 0x0f }\nfunc LiteralRune() rune            { return '\\x61' }\nfunc LiteralFloat() float64        { return 1e2 }\nfunc LiteralImaginary() complex128 { return 2i }\nfunc LiteralTrue() bool            { return true }\nfunc LiteralFalse() bool           { return false }\nfunc LiteralNonempty() string      { return `value` }\nfunc LiteralEmpty() string         { return \"\" }\n"
 	for _, test := range []struct {
@@ -99,6 +105,9 @@ func TestScalarLiteralMappingSourcesAndRanks(t *testing.T) {
 }
 
 func TestIntegerLiteralArbitraryPrecisionAndLexicalSign(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.IntegerLiteralForms", 0)
 	if err != nil {
@@ -120,6 +129,9 @@ func TestIntegerLiteralArbitraryPrecisionAndLexicalSign(t *testing.T) {
 }
 
 func TestRuneLiteralByteEscapeUsesRuneValue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.RuneLiteralForms", 0)
 	if err != nil {

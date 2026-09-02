@@ -18,6 +18,9 @@ import (
 // (REQ-inputs-absolute-identities, gofresh's cross-module merge
 // contract).
 func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tree, err := Load("internal/engine/testdata/workspacemod")
 	if err != nil {
 		t.Fatal(err)

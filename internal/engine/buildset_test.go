@@ -16,6 +16,9 @@ import (
 // test package itself while omitting the synthesized test main
 // (REQ-exec-ephemeral's linkage gate).
 func TestLinkedTestPackagesResolvesNestedWorkspaceMember(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr, err := Load("testdata/workspacemod")
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +40,9 @@ func TestLinkedTestPackagesResolvesNestedWorkspaceMember(t *testing.T) {
 // the linked set must follow it — a derivation that dropped the tree
 // env would silently judge the unselected build.
 func TestLinkedTestPackagesFollowsTagSelection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	plain, err := Load("testdata/workspacemod")
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +73,9 @@ func TestLinkedTestPackagesFollowsTagSelection(t *testing.T) {
 // builds residual keeps its direct-importer coverage
 // (REQ-exec-property-oracles).
 func TestPropertyRuntimesDirectScanCoversUnresolvableClosure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr, err := Load("testdata/fixturemod")
 	if err != nil {
 		t.Fatal(err)

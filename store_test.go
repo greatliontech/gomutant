@@ -320,6 +320,9 @@ func loadSymbols(t *testing.T, store *Store) map[string]Finding {
 // while an entry exactly at the ceiling remains served evidence
 // (REQ-result-layers).
 func TestOverlayEvictsEntriesOverTheEvidenceCeiling(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)

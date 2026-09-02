@@ -14,6 +14,9 @@ import (
 // only calls naming the selection that loaded it, while repeat calls
 // under one selection reuse the cache (REQ-target-selection).
 func TestTreeCacheKeyedBySelection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	s := serverAt(t)
 	gated := filepath.Join(s.dir, "gatedpkg", "gated.go")
 	if err := os.MkdirAll(filepath.Dir(gated), 0o755); err != nil {

@@ -26,6 +26,9 @@ func observedSubjectViews(t *testing.T, tree *Tree, symbols []string) *subjectVi
 }
 
 func TestSubjectViewsBatchByModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	symbols := []string{
 		"example.com/fixture/lib.Add",
@@ -79,6 +82,9 @@ func TestSubjectViewsBatchByModule(t *testing.T) {
 }
 
 func TestMutantsContextEnumeratesMethods(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tree, err := Load(".")
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +101,9 @@ func TestMutantsContextEnumeratesMethods(t *testing.T) {
 }
 
 func TestSubjectViewsPartitionWorkspaceModules(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tree, err := Load("internal/engine/testdata/workspacemod")
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +237,9 @@ func TestRunPreparationDoesNotMemoizeCancellation(t *testing.T) {
 }
 
 func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tree := fixtureTree(t)
 	views := observedSubjectViews(t, tree, []string{
 		"example.com/fixture/lib.Add",
@@ -305,6 +317,9 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 }
 
 func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tree := fixtureTree(t)
 	views := observedSubjectViews(t, tree, []string{"example.com/fixture/lib.Add"})
 	target := views.bySymbol["example.com/fixture/lib.Add"]
@@ -328,6 +343,9 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 }
 
 func TestLoadStoresAbsoluteRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr, err := Load(fixtureDir)
 	if err != nil {
 		t.Fatal(err)
@@ -342,6 +360,9 @@ func TestLoadStoresAbsoluteRoot(t *testing.T) {
 // lags the on-disk test files — here forced by editing a test file after the
 // load — refuses before measuring anything, naming the lag.
 func TestRunRefusesLaggingEnumeration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":    "module example.com/lagrun\n\ngo 1.26\n",
@@ -609,6 +630,9 @@ func TestFresh(t *testing.T) {
 }
 
 func TestInspectFindingStates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	initialViews := observedSubjectViews(t, tr, []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"})
 	target := initialViews.bySymbol["example.com/fixture/lib.Add"]
@@ -749,6 +773,9 @@ func TestSortedSubjectEvidence(t *testing.T) {
 // persistable but never reusable, and its explicit disposition must agree with
 // the manifest.
 func TestIncompleteObservationCannotBeFresh(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	view := observedSubjectViews(t, tr, []string{"example.com/fixture/lib.Add"}).bySymbol["example.com/fixture/lib.Add"]
 	state, err := runtimeinput.Incomplete(view.moduleDir, "timed-out-test", "test process timed out")
@@ -783,6 +810,9 @@ func TestIncompleteObservationCannotBeFresh(t *testing.T) {
 // package loading, mutation execution, and freshness analysis all use the
 // tree's explicit workspace mode rather than an enclosing ambient workspace.
 func TestFreshnessUsesTreeWorkspaceMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	t.Setenv("GOFLAGS", "")
 	t.Setenv("GOWORK", filepath.Join(t.TempDir(), "missing.work"))
 	tr := fixtureTree(t)
@@ -798,6 +828,9 @@ func TestFreshnessUsesTreeWorkspaceMode(t *testing.T) {
 }
 
 func TestRunUsesEnvironmentFrozenAtLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	t.Setenv("GOMUTANT_FROZEN_INPUT", "loaded")
 	tr := fixtureTree(t)
 	t.Setenv("GOMUTANT_FROZEN_INPUT", "changed-after-load")

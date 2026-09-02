@@ -55,6 +55,9 @@ func TestRunCommandReportsSkipsOnceWithClassSummary(t *testing.T) {
 // An inline JSON document handed to --targets names the fix instead of
 // a bare file-not-found.
 func TestRunCommandNamesTheTargetsPathMistake(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	err := runCommand(context.Background(), runOptions{dir: fixtureDir, targetsFile: `{"targets":[]}`, findingsFile: "findings.json"})
 	if err == nil || !strings.Contains(err.Error(), "looks like an inline JSON document") {
 		t.Fatalf("inline-JSON --targets = %v, want the named mistake", err)
@@ -66,6 +69,9 @@ func TestRunCommandNamesTheTargetsPathMistake(t *testing.T) {
 // the document emptied (REQ-target-filtering's vacuity clause, the CLI
 // face).
 func TestRunCommandEmptyDocumentWithFiltersIsNotAFilterError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	empty := filepath.Join(t.TempDir(), "empty.json")
 	if err := os.WriteFile(empty, []byte(`{"targets":[]}`), 0o644); err != nil {
 		t.Fatal(err)

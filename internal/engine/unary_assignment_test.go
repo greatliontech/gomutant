@@ -7,6 +7,9 @@ import (
 )
 
 func TestUnaryAssignmentCatalog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	want := map[string]int{
 		"unary: + -> -": 4, "unary: - -> +": 4,
@@ -77,6 +80,9 @@ func assertOperatorCounts(t *testing.T, family string, got, want map[string]int)
 }
 
 func TestUnaryAssignmentMappingSourcesAndRanks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	tests := []struct {
 		symbol, operator, old, replacement string
@@ -158,6 +164,9 @@ func TestUnaryAssignmentMappingSourcesAndRanks(t *testing.T) {
 }
 
 func TestCompoundAssignmentPlaces(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	got := map[string]int{}
 	for _, symbol := range []string{"CompoundPlaces", "CompoundHolder.add"} {

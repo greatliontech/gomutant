@@ -198,6 +198,9 @@ func TestAnalysisPhraseVocabulary(t *testing.T) {
 // on its way out instead of ending on a bare context error — the exit
 // paths (budget, signal, abort) share this cancellation route.
 func TestRunCommandInterruptRendersBankedState(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":       "module example.com/banked\n\ngo 1.26.5\n",
@@ -275,6 +278,9 @@ func (w *triggerCancelWriter) Write(p []byte) (int, error) {
 // A full run under the structured face emits ONLY JSON objects — no
 // human line leaks into a stream a consumer parses.
 func TestRunCommandJSONLEmitsOnlyJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":       "module example.com/jl\n\ngo 1.26.5\n",
@@ -324,6 +330,9 @@ func TestRunCommandJSONLEmitsOnlyJSON(t *testing.T) {
 // unwritable store makes every commit fail while measurement
 // succeeds.
 func TestBankedStateExcludesFailedCommits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":       "module example.com/fc\n\ngo 1.26.5\n",
@@ -373,6 +382,9 @@ func TestBankedStateExcludesFailedCommits(t *testing.T) {
 // The structured face stays pure on the paths the main purity test's
 // fixture never reaches: plan mode and the no-targets path.
 func TestRunCommandJSONLPlanAndNoTargetsStayPure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":       "module example.com/jp\n\ngo 1.26.5\n",
@@ -427,6 +439,9 @@ func TestRunCommandJSONLPlanAndNoTargetsStayPure(t *testing.T) {
 // goroutine joins at stop: after runCommand returns, the writer
 // receives nothing further.
 func TestProgressCadenceEmitsAndJoins(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":       "module example.com/cd\n\ngo 1.26.5\n",

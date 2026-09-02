@@ -18,6 +18,9 @@ func fixtureTree(t *testing.T) *Tree {
 }
 
 func TestValidateOracleRejectsAmbiguousTestVariants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/ambiguous\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -41,6 +44,9 @@ func TestValidateOracleRejectsAmbiguousTestVariants(t *testing.T) {
 }
 
 func TestPackageContextSupportsTestOnlyPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/testonly\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -68,6 +74,9 @@ func TestPackageContextSupportsTestOnlyPackage(t *testing.T) {
 // resolutions, distinct across distinct bodies, 64 hex characters, and
 // insensitive to formatting because it hashes canonical text.
 func TestBodyHash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	h1, err := tr.BodyHash("example.com/fixture/lib.Add")
 	if err != nil {
@@ -161,6 +170,9 @@ func TestCanonText(t *testing.T) {
 // the failure modes — a missing identifier, a missing package, a non-function
 // symbol.
 func TestResolveSymbols(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	for _, sym := range []string{
 		"example.com/fixture/lib.Add",
@@ -201,6 +213,9 @@ func TestResolveSymbols(t *testing.T) {
 // resolve, and a member escaping the tree is refused — hermeticity, never
 // bent.
 func TestLoadWorkspace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr, err := Load("testdata/workspacemod")
 	if err != nil {
 		t.Fatal(err)

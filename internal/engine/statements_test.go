@@ -7,6 +7,9 @@ import (
 )
 
 func TestStatementCatalogContexts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	for _, test := range []struct {
 		symbol, operator string
@@ -66,6 +69,9 @@ func TestStatementCatalogContexts(t *testing.T) {
 }
 
 func TestStatementSourcesRanksAndSpans(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.StatementDropStores", 0)
 	if err != nil {

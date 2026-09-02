@@ -15,6 +15,9 @@ import (
 // aliased and dot-imported testing packages, and constraint-excluded files
 // all verify clean.
 func TestVerifyTestEnumerationDetectsLag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	const pkg = "example.com/lag"
 	files := map[string]string{
@@ -117,6 +120,9 @@ func TestVerifyTestEnumerationDetectsLag(t *testing.T) {
 // the double-dash form the go command equally accepts — is lag under that
 // configuration and constraint-excluded noise without it.
 func TestVerifyTestEnumerationHonorsEffectiveBuildTags(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	t.Setenv("GOFLAGS", "--tags=integrationlag")
 	dir := t.TempDir()
 	files := map[string]string{

@@ -8,6 +8,9 @@ import (
 )
 
 func TestControlCatalog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	assertOperators := func(symbol string, want []string) Generation {
 		t.Helper()
@@ -105,6 +108,9 @@ func TestControlCatalog(t *testing.T) {
 // saw was the stale-offset drift splice, refused target-locally since
 // the source-digest pin).
 func TestInlineInterfaceAssertConditionGenerates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.InlineAssertCondition", 0)
 	if err != nil {
@@ -126,6 +132,9 @@ func TestInlineInterfaceAssertConditionGenerates(t *testing.T) {
 }
 
 func TestLoopControlLegality(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	for _, test := range []struct {
 		symbol, operator string
@@ -185,6 +194,9 @@ func TestLoopControlLegality(t *testing.T) {
 }
 
 func TestConditionlessForLexingAndImportClassification(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	const source = "package lib\n\nfunc SemicolonStringCondition() {\n\tfor value := \";\"; ; value = \"\" {\n\t\t_ = value\n\t\tbreak\n\t}\n}\n\nfunc SemicolonCommentCondition() {\n\tfor value := 0; ; /* ; */ value++ {\n\t\tbreak\n\t}\n}\n\nfunc ConditionlessOnly() {\n\tfor {\n\t\treturn\n\t}\n}\n"
 	for _, test := range []struct {
@@ -229,6 +241,9 @@ func TestConditionlessForLexingAndImportClassification(t *testing.T) {
 }
 
 func TestControlOrderingSpans(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	for _, test := range []struct {
 		symbol, operator, span string
@@ -262,6 +277,9 @@ func TestControlOrderingSpans(t *testing.T) {
 }
 
 func TestConditionlessForIgnoresNestedSemicolons(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.SemicolonNestedCondition", 0)
 	if err != nil {
@@ -284,6 +302,9 @@ func TestConditionlessForIgnoresNestedSemicolons(t *testing.T) {
 }
 
 func TestBooleanOperandAndRangeSources(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	const mappingSource = "package lib\n\nfunc MappingEQ(a, b int) bool   { return a == b }\nfunc MappingNEQ(a, b int) bool  { return a != b }\nfunc MappingLT(a, b int) bool   { return a < b }\nfunc MappingLE(a, b int) bool   { return a <= b }\nfunc MappingGT(a, b int) bool   { return a > b }\nfunc MappingGE(a, b int) bool   { return a >= b }\nfunc MappingAND(a, b bool) bool { return a && b }\nfunc MappingOR(a, b bool) bool  { return a || b }\n"
 	for _, test := range []struct {

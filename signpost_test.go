@@ -15,6 +15,9 @@ import (
 // changed-scope discovery alone would never re-measure them
 // (REQ-target-changed).
 func TestOracleClosureSignpostNamesStaleFindingsBeyondTheTargetSet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":    "module example.com/closure\n\ngo 1.26.4\n",

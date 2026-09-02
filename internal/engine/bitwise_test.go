@@ -7,6 +7,9 @@ import (
 )
 
 func TestBitwiseCatalog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	want := map[string]int{
 		"bitwise: & -> |":  4,
@@ -39,6 +42,9 @@ func TestBitwiseCatalog(t *testing.T) {
 }
 
 func TestBitwiseMappingSourcesAndRanks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	const source = "package lib\n\nfunc BitwiseAnd(a, b int) int   { return a & b }\nfunc BitwiseOr(a, b int) int    { return a | b }\nfunc BitwiseXor(a, b int) int   { return a ^ b }\nfunc BitwiseClear(a, b int) int { return a &^ b }\nfunc ShiftLeft(a, b uint) uint  { return a << b }\nfunc ShiftRight(a, b uint) uint { return a >> b }\n"
 	for _, test := range []struct {

@@ -369,6 +369,9 @@ func TestRenderExecutionEventDropsSaturatedCandidatesWhileConfirming(t *testing.
 }
 
 func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	fixture := isolatedFixture(t)
 	tmp := t.TempDir()
 	targetsPath := filepath.Join(tmp, "targets.json")
@@ -492,6 +495,9 @@ func TestRunCommandStatesMachineLocalRouting(t *testing.T) {
 }
 
 func TestRunCommandCancellationLinearizesAtFindingsCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":         "module example.com/cancel\n\ngo 1.26.5\n",

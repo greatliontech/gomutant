@@ -64,6 +64,9 @@ func lifecycleFinding(symbol string) Finding {
 // resolves, echoes their dispositions, and previews under check without
 // touching the document (REQ-result-lifecycle).
 func TestPruneRemovesOnlyResolvedDeadRecords(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	live := lifecycleFinding("example.com/life.F")
 	dead := lifecycleFinding("example.com/life.Gone")
 	dead.TargetEvidence.Symbol = dead.Symbol
@@ -103,6 +106,9 @@ func TestPruneRemovesOnlyResolvedDeadRecords(t *testing.T) {
 // while attestations ride by their own anchors; a rewrite must resolve,
 // a collision refuses whole, and check previews (REQ-result-lifecycle).
 func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	renamed := lifecycleFinding("example.com/old.F")
 	renamed.OracleEvidence[0].Symbol = "example.com/old.TestF"
 	renamed.OracleEvidence[0].ObservationSubjectPackage = "example.com/old"
@@ -379,6 +385,9 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 // symbol layer - so prune refuses instead of destroying live records
 // (REQ-result-lifecycle).
 func TestPruneRefusesAnUnhealthyLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	live := lifecycleFinding("example.com/life.F")
 	tree, store := lifecycleModule(t, live)
 	ctx := context.Background()

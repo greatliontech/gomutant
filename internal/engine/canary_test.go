@@ -18,6 +18,9 @@ import (
 // every test; the inline-interface parse failure cost one field
 // session already.
 func TestLanguageShapeCanaries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a temp module per shape-corpus entry (the full tier and the rc leg run it)")
+	}
 	for _, entry := range shapecorpus.Entries() {
 		t.Run(entry.Name, func(t *testing.T) {
 			dir := t.TempDir()

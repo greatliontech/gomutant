@@ -202,6 +202,9 @@ func TestAll(t *testing.T) {
 // file:line anchors — and a directive spelling a *_test.go name does
 // not reclassify a production file out of the target surface.
 func TestLineDirectiveTargetsKeepOnDiskIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := writeLineDirectiveModule(t)
 	tr, err := Load(dir)
 	if err != nil {

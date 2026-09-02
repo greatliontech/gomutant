@@ -14,6 +14,9 @@ import (
 )
 
 func TestEphemeralPreparationCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tree := fixtureTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -228,6 +231,9 @@ func TestEphemeral(t *testing.T) {
 }
 
 func TestEphemeralRejectsEscapingFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	parent := t.TempDir()
 	root := filepath.Join(parent, "module")
 	if err := os.CopyFS(root, os.DirFS(fixtureDir)); err != nil {

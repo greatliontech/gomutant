@@ -153,6 +153,9 @@ func TestIncompleteProcessDoesNotAssertPartialLogComplete(t *testing.T) {
 }
 
 func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	mutants, err := tr.Mutants("example.com/fixture/lib.Add", 1)
 	if err != nil || len(mutants) != 1 {
@@ -188,6 +191,9 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 }
 
 func TestNamedTestPanicIsIncompleteEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	mutants, err := tr.Mutants("example.com/fixture/lib.PanicValue", 0)
 	if err != nil {
@@ -368,6 +374,9 @@ func TestRunMutantNoiseIsNeverAKill(t *testing.T) {
 // union must never put the flag in front of a rapid-free binary, which would
 // die on it and read as a false kill.
 func TestSplitRapidPkgs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	lib, plainPkg, ext := "example.com/fixture/lib", "example.com/fixture/plain", "example.com/fixture/extprop"
 
@@ -513,6 +522,9 @@ func TestProbeBaseline(t *testing.T) {
 
 //gofresh:pure
 func TestProbeBaselineRecordsRuntimeInputDriftAsUnverifiable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
 	if err != nil {
@@ -542,6 +554,9 @@ func TestProbeBaselineRecordsRuntimeInputDriftAsUnverifiable(t *testing.T) {
 // pre-existing input keeps its own unverifiable pin in the sibling test
 // above.
 func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	moduleDir, err := filepath.Abs("testdata/fixturemod")
 	if err != nil {
 		t.Fatal(err)
@@ -702,6 +717,9 @@ func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
 }
 
 func TestProbeBaselineRejectsTestCountDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/unstable")
 	if err != nil {
@@ -717,6 +735,9 @@ func TestProbeBaselineRejectsTestCountDrift(t *testing.T) {
 
 //gofresh:pure
 func TestProbeBaselineRejectsResultDrift(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
 	if err != nil {

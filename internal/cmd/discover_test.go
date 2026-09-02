@@ -8,6 +8,9 @@ import (
 )
 
 func TestDiscoverTargetsResolvesEffectiveOracle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir})
 	if err != nil {
 		t.Fatal(err)
@@ -24,6 +27,9 @@ func TestDiscoverTargetsResolvesEffectiveOracle(t *testing.T) {
 }
 
 func TestDiscoverTargetsLoadsExplicitDocument(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	path := filepath.Join(t.TempDir(), "targets.json")
 	data := []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestWeak","example.com/fixture/lib.TestAdd"],"labels":["z","a"]}]}`)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -42,6 +48,9 @@ func TestDiscoverTargetsLoadsExplicitDocument(t *testing.T) {
 }
 
 func TestDiscoverTargetsLoadsExplicitEmptyOracle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	path := filepath.Join(t.TempDir(), "targets.json")
 	data := []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"labels":["REQ-empty"],"oracleExplicit":true}]}`)
 	if err := os.WriteFile(path, data, 0o644); err != nil {
@@ -58,6 +67,9 @@ func TestDiscoverTargetsLoadsExplicitEmptyOracle(t *testing.T) {
 }
 
 func TestDiscoverTargetsFiltersEveryProducer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	view, err := discoverTargets(context.Background(), discoverOptions{
 		dir: fixtureDir, packages: []string{"example.com/fixture/methods"}, symbols: []string{"example.com/fixture/methods.Counter.*"},
 	})

@@ -16,6 +16,9 @@ import (
 // resolved-dead records echoing their dispositions, retarget rewrites
 // symbol identity, both with check previews (REQ-mcp-lifecycle).
 func TestToolPruneAndRetarget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":    "module example.com/life\n\ngo 1.26.4\n",
@@ -78,6 +81,9 @@ func TestToolPruneAndRetarget(t *testing.T) {
 // - while retarget's echo caps with the remainder counted
 // (REQ-mcp-lifecycle).
 func TestToolLifecycleEchoBounds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	var src strings.Builder
 	src.WriteString("package life\n")
@@ -147,6 +153,9 @@ func TestServerOptionsCarryKeepalive(t *testing.T) {
 // BOTH explain arms - the symbol row and the promotion triage grouping
 // (REQ-mcp-explain).
 func TestToolExplainRollsUpSameRootInputs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/roll\n\ngo 1.26.4\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -212,6 +221,9 @@ func TestToolExplainRollsUpSameRootInputs(t *testing.T) {
 // operations stay available while a campaign holds it
 // (REQ-exec-exclusivity).
 func TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":    "module example.com/life\n\ngo 1.26.4\n",

@@ -113,6 +113,9 @@ func TestMergeWholeFindingsPrunesAbsentSymbols(t *testing.T) {
 // because the merge runs against the re-read document under the lock; a lock
 // held elsewhere is surfaced with its path, never silently overwritten.
 func TestUpdateDocument(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	path := filepath.Join(t.TempDir(), "findings.json")
 	evidence := func(symbol string) SubjectEvidence {
 		return SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",

@@ -46,6 +46,9 @@ func TestRunStreamsLeaveThePayloadWhenStreamed(t *testing.T) {
 // (REQ-mcp-envelope): the count fields precede every row field in the
 // serialized response by declaration order.
 func TestDiscoverCountsLeadAndRowsCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	s := New(fixtureDir)
 	_, out, err := s.toolDiscover(t.Context(), nil, discoverIn{})
 	if err != nil {

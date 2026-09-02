@@ -45,6 +45,9 @@ func TestSiteHashDiscriminatesSameShapedSites(t *testing.T) {
 // test-variant, or helper-driven), gopter via its own direct use,
 // plain packages absent (REQ-exec-property-oracles).
 func TestPropertyRuntimesContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	got, err := tr.PropertyRuntimesContext(context.Background(), []string{
 		"example.com/fixture/lib", "example.com/fixture/plain",

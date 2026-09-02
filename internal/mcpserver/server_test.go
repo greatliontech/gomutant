@@ -53,6 +53,9 @@ func seededFinding(symbol string) gomutant.Finding {
 // records by failing clause; an unknown symbol refuses naming the
 // findings roster.
 func TestToolExplainAnswersSymbolAndTriage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/current\n\ngo 1.26.4\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -162,6 +165,9 @@ func TestToolExplainAnswersSymbolAndTriage(t *testing.T) {
 // REQ-mcp-envelope): open survivors, the portable-line clause list,
 // triage clause groups, and per-group symbols.
 func TestToolExplainCapsEveryRowSet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/current\n\ngo 1.26.4\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -286,6 +292,9 @@ func TestToolTimeoutInputsNameIndependentLimits(t *testing.T) {
 }
 
 func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":       "module example.com/slow\n\ngo 1.26.4\n",
@@ -322,6 +331,9 @@ func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
 }
 
 func TestToolRunCommandTimeoutPreservesOrdinaryErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	s := serverAt(t)
 	_, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{`, TimeoutSec: seconds(10)})
 	if err == nil || errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "parse targets document") {
@@ -957,6 +969,9 @@ func TestToolEphemeralEdits(t *testing.T) {
 // TestToolDiscover pins discovery over the handler: the whole tree targets
 // every declared body and no test symbol.
 func TestToolDiscover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	s := serverAt(t)
 	_, out, err := s.toolDiscover(context.Background(), nil, discoverIn{})
 	if err != nil {
@@ -1094,6 +1109,9 @@ func TestDiscoverSchemaExplainsOracleReferences(t *testing.T) {
 }
 
 func TestToolRunPropagatesUpdateFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	s := serverAt(t)
 	want := errors.New("update failed")
 	s.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error { return want }
@@ -1106,6 +1124,9 @@ func TestToolRunPropagatesUpdateFailure(t *testing.T) {
 }
 
 func TestToolRunCancellationAtUpdateLeavesDocumentUntouched(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	s := serverAt(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	called := false
@@ -1135,6 +1156,9 @@ func TestMCPBuilds(t *testing.T) {
 // reuse: byte-identical loader inputs. A non-loader file never invalidates,
 // and any source edit must reload rather than serve the stale tree.
 func TestServerReusesLoadedTreeUntilSourceChanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	s := serverAt(t)
 	ctx := context.Background()
 	first, err := s.loadTreeContext(ctx, gomutant.Selection{})
@@ -1256,6 +1280,9 @@ func TestCommandTimeoutDefaultsWhenOmitted(t *testing.T) {
 // run request carrying a progress token receives preparation and decision
 // progress notifications; results are unchanged (spec mcp.md).
 func TestToolRunForwardsProgressNotifications(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	s := serverAt(t)
 	ctx := context.Background()
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()

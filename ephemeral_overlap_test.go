@@ -11,6 +11,9 @@ import (
 // ambiguous even when the non-overlapping count is one: applying it at
 // a guessed start measures the wrong mutant (REQ-exec-ephemeral).
 func TestEditUniquenessCountsOverlappingStarts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	cases := []struct {
 		s, pattern string
 		want       int

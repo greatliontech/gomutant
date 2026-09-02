@@ -15,6 +15,9 @@ import (
 // the SELECTION-APPLIED environment — the declared toolchain
 // directive is what gets witnessed (REQ-exec-provenance).
 func TestLoadRefusesToolchainSkewUnderSelectionEnv(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	var sampledDir string
 	var sampledEnv []string
 	restore := SwapGoVersionSamplerForTest(func(_ context.Context, dir string, env []string) (string, error) {

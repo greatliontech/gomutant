@@ -7,6 +7,9 @@ import (
 )
 
 func TestComprehensiveCatalogInventory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	symbols := []string{
 		"MappingEQ", "MappingNEQ", "MappingLT", "MappingLE", "MappingGT", "MappingGE", "MappingAND", "MappingOR",

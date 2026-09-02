@@ -846,6 +846,9 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 }
 
 func TestRunCancellationAtBatchedFreshness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var preparation []PreparationEvent
@@ -871,6 +874,9 @@ func TestRunCancellationAtBatchedFreshness(t *testing.T) {
 }
 
 func TestRunCancellationAtMutantPreparation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var preparation []PreparationEvent
@@ -1580,6 +1586,9 @@ func TestAttestationShedsAcrossSourceDrift(t *testing.T) {
 // (REQ-result-record keys by symbol): two targets naming one symbol are
 // refused up front rather than one silently shadowing the other.
 func TestRunDuplicateTargetRefused(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	_, err := tr.Run(context.Background(), []Target{
 		{Symbol: "example.com/fixture/lib.Add"},
@@ -1681,6 +1690,9 @@ func TestRunSkipsBrokenTargetLocally(t *testing.T) {
 // same evidence env - a raw-env stand-in would read the record as
 // moved and re-measure on every run (REQ-exec-oracle-parallelism).
 func TestWidthReadingOracleEvidenceServes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	ctx := context.Background()
 	// Explicit oracle pair: the width-reading member plus the plain one,
@@ -1719,6 +1731,9 @@ func TestWidthReadingOracleEvidenceServes(t *testing.T) {
 // witness cheap; jobs at the host width makes the installed value
 // unmistakable.
 func TestRunInstallsOracleParallelism(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	prior := engine.SnapshotOracleParallelism()
 	t.Cleanup(func() { engine.RestoreOracleParallelism(prior) })
@@ -1735,6 +1750,9 @@ func TestRunInstallsOracleParallelism(t *testing.T) {
 }
 
 func TestRunRejectsNegativeBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	_, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add"}}, Options{Budget: -1})
 	if err == nil || !strings.Contains(err.Error(), "budget must be non-negative") {
@@ -1748,6 +1766,9 @@ func TestRunRejectsNegativeBudget(t *testing.T) {
 // and its target never mutates - a target-local refusal with the named
 // cause, never a campaign abort (REQ-exec-quiescence).
 func TestRunRejectsAmbiguousOracle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":           "module example.com/ambiguous\n\ngo 1.26\n",
@@ -1783,6 +1804,9 @@ func TestRunRejectsAmbiguousOracle(t *testing.T) {
 // TestRunNoOracle pins the no-oracle skip: a target in a test-less package
 // derives an empty oracle and is reported, never measured, never dropped.
 func TestRunNoOracle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	symbol := "example.com/fixture/methods.Counter.Inc"
 	var preparation []PreparationEvent
@@ -3171,6 +3195,9 @@ func TestRunCallerDeclaredBracketPathBindsExternalInput(t *testing.T) {
 // observation, and a tool-excluded path would be silently uncovered
 // (REQ-exec-observation).
 func TestRunRefusesUnhonorableBracketPaths(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
 	if _, err := tr.Run(context.Background(), []Target{target}, Options{BracketPaths: []string{t.TempDir()}}); err == nil ||
@@ -5219,6 +5246,9 @@ func TestWired(t *testing.T) {
 // Positional init refusals are target-local and name their cause: an
 // out-of-range ordinal, a test-file init, and a malformed identity.
 func TestInitTargetRefusalsNameTheirCause(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	ctx := context.Background()
 	for _, tc := range []struct{ symbol, want string }{

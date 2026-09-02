@@ -13,6 +13,9 @@ import (
 // load installs it, and the cached hit returns a tree installed at its
 // own load - concurrent tool calls always judge under the server's set.
 func TestServerInstallsVouchesOnLoadedTrees(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	s := serverAt(t)
 	want := []string{"a.example/dep.Var"}
 	s.vouches = append([]string(nil), want...)

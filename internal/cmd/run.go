@@ -166,12 +166,17 @@ func runCommand(ctx context.Context, o runOptions) error {
 	docPath := findingsAt(o.dir, o.findingsFile)
 	// The campaign lock spans measurement through the final merge:
 	// a second campaign against the same document refuses immediately
-	// instead of interleaving (REQ-exec-exclusivity).
-	releaseCampaign, err := gomutant.AcquireCampaignLock(docPath)
-	if err != nil {
-		return err
+	// instead of interleaving (REQ-exec-exclusivity). A plan persists
+	// nothing and measures nothing, so it takes no lock: it must not
+	// mint the lock file a killed run leaves behind, and it reads the
+	// document beside a running campaign exactly as findings does.
+	if !o.plan {
+		releaseCampaign, err := gomutant.AcquireCampaignLock(docPath)
+		if err != nil {
+			return err
+		}
+		defer releaseCampaign()
 	}
-	defer releaseCampaign()
 	exemptions, err := gomutant.LoadExemptions(gomutant.ExemptionsPathFor(docPath))
 	if err != nil {
 		return err

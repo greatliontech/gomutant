@@ -16,6 +16,9 @@ import (
 // closure signpost like the CLI's (REQ-target-changed, spec mcp.md's
 // same-shell rule).
 func TestToolRunChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	s := serverAt(t)
 	runGit := func(args ...string) {
 		t.Helper()

@@ -54,6 +54,9 @@ func fixtureTree(t *testing.T) *Tree {
 }
 
 func TestTargetPreparationContextCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	if tree, err := LoadContext(cancelled, fixtureDir); !errors.Is(err, context.Canceled) || tree != nil {
@@ -108,6 +111,9 @@ func TestTargetPreparationContextCancellation(t *testing.T) {
 // non-test, non-generated function and method is a target with the default
 // oracle; test functions and generated symbols are not.
 func TestDiscover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	targets, err := tr.DiscoverContext(context.Background())
 	if err != nil {
@@ -140,6 +146,9 @@ func TestDiscover(t *testing.T) {
 }
 
 func TestFilterTargets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	targets, err := tr.DiscoverContext(context.Background())
 	if err != nil {
@@ -208,6 +217,9 @@ func TestFilterTargets(t *testing.T) {
 }
 
 func TestSelfHostTargetsResolve(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	data, err := os.ReadFile("testdata/self-host-targets.json")
 	if err != nil {
 		t.Fatal(err)
@@ -262,6 +274,9 @@ func TestSelfHostTargetsResolve(t *testing.T) {
 // (REQ-target-changed): only changed bodies target; every changed-but-
 // untargeted path carries its engine-level reason.
 func TestDiscoverChanged(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	libSrc, err := os.ReadFile(filepath.Join(fixtureDir, "lib", "lib.go"))
 	if err != nil {
@@ -420,6 +435,9 @@ func TestParseTargets(t *testing.T) {
 }
 
 func TestDescribeTargetsResolvesEffectiveOracles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	descriptions, err := tr.DescribeTargets([]Target{
 		{Symbol: "example.com/fixture/lib.Weak", Labels: []string{"z", "a"}},
@@ -458,6 +476,9 @@ func TestDescribeTargetsResolvesEffectiveOracles(t *testing.T) {
 // REQ-target-default): explicit oracles pass through untouched; an empty
 // oracle derives the tests of the symbol's own package, both variants.
 func TestResolveOracle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
 	tr := fixtureTree(t)
 	explicit := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/plain.TestPlain"}}
 	if got := tr.resolveOracle(explicit); !reflect.DeepEqual(got, explicit.Oracle) {
@@ -520,6 +541,9 @@ func TestPkgRuns(t *testing.T) {
 // and the bare unreferencable name refuses pointing at the positional
 // grammar (REQ-target-changed).
 func TestInitFunctionsTargetPositionally(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tmp := t.TempDir()
 	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
 		t.Fatal(err)
@@ -657,6 +681,9 @@ func TestInitFunctionsTargetPositionally(t *testing.T) {
 // match the freshness producer's unadjusted naming
 // (REQ-target-changed).
 func TestInitIdentityFileScopedAndDirectiveImmune(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tmp := t.TempDir()
 	if err := os.CopyFS(tmp, os.DirFS(fixtureDir)); err != nil {
 		t.Fatal(err)

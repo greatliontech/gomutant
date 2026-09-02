@@ -7,6 +7,9 @@ import (
 )
 
 func TestArithmeticCatalog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	want := map[string]int{
 		"arithmetic: + -> -": 4,
@@ -46,6 +49,9 @@ func TestArithmeticCatalog(t *testing.T) {
 }
 
 func TestArithmeticMappingSources(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	const source = "package lib\n\nfunc ArithmeticAdd(a, b int) int { return a + b }\nfunc ArithmeticSub(a, b int) int { return a - b }\nfunc ArithmeticMul(a, b int) int { return a * b }\nfunc ArithmeticDiv(a, b int) int { return a / b }\nfunc ArithmeticRem(a, b int) int { return a % b }\n"
 	for _, test := range []struct {
@@ -92,6 +98,9 @@ func TestArithmeticMappingSources(t *testing.T) {
 }
 
 func TestArithmeticConstantAliasAndIntersectionDomains(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	for _, test := range []struct {
 		symbol string

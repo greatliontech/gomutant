@@ -41,6 +41,9 @@ func TestShapedTargetValidationArms(t *testing.T) {
 // probed file content, so any moved input re-measures
 // (REQ-result-stale via the shaped pin).
 func TestShapeDigestMovesWithInputs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tmp := writeShapedFixture(t)
 	tree, err := Load(tmp)
 	if err != nil {
@@ -73,6 +76,9 @@ func TestShapeDigestMovesWithInputs(t *testing.T) {
 // Import probes synthesize one blank-importing file per scoped package
 // and refuse degenerate scopes (REQ-target-structural).
 func TestImportProbesSynthesis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tmp := writeShapedFixture(t)
 	tree, err := Load(tmp)
 	if err != nil {
@@ -103,6 +109,9 @@ func TestImportProbesSynthesis(t *testing.T) {
 // satisfaction through embedding (no local declaration) refuses with
 // the stated cause (REQ-target-structural).
 func TestMethodProbesRewriteDeclaration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tmp := writeShapedFixture(t)
 	tree, err := Load(tmp)
 	if err != nil {
@@ -132,6 +141,9 @@ func TestMethodProbesRewriteDeclaration(t *testing.T) {
 // (REQ-target-structural; the drift vocabulary is REQ-exec-quiescence's
 // target-local refusal).
 func TestMethodProbesRefuseMovedDeclaringFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tmp := writeShapedFixture(t)
 	tree, err := Load(tmp)
 	if err != nil {
@@ -159,6 +171,9 @@ func TestMethodProbesRefuseMovedDeclaringFile(t *testing.T) {
 // corrupt the probe (REQ-target-structural; REQ-exec-quiescence's
 // drift vocabulary).
 func TestMethodProbesRefuseContentDriftedDeclaringFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tmp := writeShapedFixture(t)
 	tree, err := Load(tmp)
 	if err != nil {
@@ -237,6 +252,9 @@ func TestRunRefusesShapedTargetOnSourceDrift(t *testing.T) {
 // state, never detachment (REQ-target-structural,
 // REQ-target-manual-recipes).
 func TestPruneKeepsShapedFindings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	shapedFinding := lifecycleFinding("structural:boundary")
 	shapedFinding.Shape = &TargetShape{Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"example.com/life"}, Forbidden: "example.com/other"}}
 	shapedFinding.TargetEvidence = SubjectEvidence{}
@@ -339,6 +357,9 @@ func (Impl) Do() int { return outside.O() }
 // two checkout roots derives the same pin — a shaped record travels
 // exactly as its manifests do (REQ-result-stale, chunk-133 discipline).
 func TestShapeDigestTravelsAcrossCheckoutRoots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	targets := []Target{
 		{Symbol: "recipe:x",
 			Manual: &ManualSpec{File: "guard/guard.go", Edits: []ManualEdit{{Find: `if s == "" {`, Replace: `if false {`}}},
@@ -376,6 +397,9 @@ func TestShapeDigestTravelsAcrossCheckoutRoots(t *testing.T) {
 // the digest through the walked content itself
 // (REQ-target-structural).
 func TestShapeDigestPinsForbiddenLinkage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tmp := writeShapedFixture(t)
 	tree, err := Load(tmp)
 	if err != nil {
@@ -454,6 +478,9 @@ func TestShapeDigestPinsForbiddenLinkage(t *testing.T) {
 // while a local replace directive names source the selection files
 // cannot content-pin (REQ-target-structural).
 func TestShapeDigestRefusesUnpinnableForbiddenLinkage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tmp := writeShapedFixture(t)
 	tree, err := Load(tmp)
 	if err != nil {

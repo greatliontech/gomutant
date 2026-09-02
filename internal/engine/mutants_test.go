@@ -12,6 +12,9 @@ import (
 // REQ-mut-budget): sites in source order, the budget respected, identical
 // runs identical, no two mutants of one symbol rendering the same source.
 func TestMutants(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	if OperatorSet != "go/12" {
 		t.Fatalf("operator set = %q, want go/12", OperatorSet)
 	}
@@ -178,6 +181,9 @@ func TestMutants(t *testing.T) {
 }
 
 func TestComparisonCatalog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	want := map[string]int{
 		"equality: == -> !=":           6,
@@ -289,6 +295,9 @@ func TestComparisonCatalog(t *testing.T) {
 // TestMutantsBodyless pins the no-body edge: a bodyless (assembly) symbol
 // yields no mutants and no error — nothing to mutate is not a failure.
 func TestMutantsBodyless(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/bodyless.Ext", 0)
 	if err != nil || len(ms) != 0 {
@@ -297,6 +306,9 @@ func TestMutantsBodyless(t *testing.T) {
 }
 
 func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	processed := map[string]string{}
 	tr.importProcessor = func(_ context.Context, filename string, source []byte) ([]byte, error) {
@@ -339,6 +351,9 @@ func TestMutantsProcessImportsOnlyForRemovalSites(t *testing.T) {
 }
 
 func TestCandidatesRejectImportProcessingFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	calls := 0
 	tr.importProcessor = func(context.Context, string, []byte) ([]byte, error) {
@@ -354,6 +369,9 @@ func TestCandidatesRejectImportProcessingFailure(t *testing.T) {
 }
 
 func TestCandidatesSelectBeforeEffectiveSourceDeduplication(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	tr.importProcessor = func(context.Context, string, []byte) ([]byte, error) {
 		return []byte("package lib\n"), nil
@@ -376,6 +394,9 @@ func TestCandidatesSelectBeforeEffectiveSourceDeduplication(t *testing.T) {
 }
 
 func TestCandidatesRenderExactSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Exact", 0)
 	if err != nil {
@@ -421,6 +442,9 @@ func TestApplySourceEditsRejectsOverlap(t *testing.T) {
 }
 
 func TestDiscardedCandidateReservesOccurrenceIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("measured heavy under the fast tier (in-process)")
+	}
 	tr := fixtureTree(t)
 	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.Reserved", 4)
 	if err != nil {
@@ -437,6 +461,9 @@ func TestDiscardedCandidateReservesOccurrenceIdentity(t *testing.T) {
 }
 
 func TestMutantsContextCancellationRestoresSyntax(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
 	tr := fixtureTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	tr.importProcessor = func(_ context.Context, _ string, source []byte) ([]byte, error) {

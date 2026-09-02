@@ -1,10 +1,38 @@
 version: "3"
 
 tasks:
-  test:
-    desc: Full suite; the root package's mutation e2es exceed go test's default 10m package timeout (dev-host budget; the runner-class budget lives in .github/workflows/ci.yaml, measured separately)
+  default:
+    deps: [check]
+
+  build:
+    desc: Build all packages
     cmds:
-      - go test -timeout 2700s ./...
+      - go build ./...
+
+  vet:
+    desc: Static analysis
+    cmds:
+      - go vet ./...
+
+  test:short:
+    desc: "The fast tier: the tool's code without go test per mutant (seconds; the inner-loop gate)"
+    cmds:
+      - go test -short -count=1 ./...
+
+  test:
+    desc: "The full tier: the mutation e2es exceed go test's default 10m package timeout (dev-host budget; the runner-class budget lives in .github/workflows/ci.yaml, measured separately)"
+    cmds:
+      - go test -count=1 -timeout 2700s ./...
+
+  test:selfhost-plan:
+    desc: "The self-host preparation pass over the tool's own tree: resolution, oracle derivation, views, candidates, decisions — no probe, no mutant (keeps the self-host path from bit-rotting)"
+    cmds:
+      - go run ./cmd/gomutant run --plan --targets testdata/self-host-targets.json
+
+  check:
+    desc: Vet + the fast tier
+    deps: [vet, test:short]
+
   install:
     desc: Install gomutant to ~/.local/bin with zsh completion
     cmds:
