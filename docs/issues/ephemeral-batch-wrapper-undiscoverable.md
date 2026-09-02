@@ -13,4 +13,4 @@ refusal ("expected an object with an edits array"), or accept the bare
 array as the batch. Reproduction: `gomutant ephemeral --batch f.json`
 with `[{"file":…,"old_string":…,"new_string":…}]`.
 
-Lands: user decision (consumer report from bldc, 2026-09-02 — the tool owner sequences).
+Lands: cross-tool train chunk 140 (gofresh docs/plans/cross-tool-train.md; triaged 2026-09-03).

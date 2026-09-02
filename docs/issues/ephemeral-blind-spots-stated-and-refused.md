@@ -31,4 +31,4 @@ own INPUT (a kind added to the scanned set, an edge added to the
 parsed table), which does link into the binary — is worth stating
 beside them.
 
-Lands: user decision (consumer report from bldc, 2026-09-02 — the tool owner sequences).
+Lands: cross-tool train chunk 140 (gofresh docs/plans/cross-tool-train.md; triaged 2026-09-03).

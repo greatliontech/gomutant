@@ -17,4 +17,4 @@ ephemeral mutants specifically (a probe is never landed code). The
 result should say which happened, so a probe that survived only
 because an import was pruned reads honestly.
 
-Lands: user decision (consumer report from bldc, 2026-09-02 — the tool owner sequences).
+Lands: cross-tool train chunk 140 (gofresh docs/plans/cross-tool-train.md; triaged 2026-09-03).

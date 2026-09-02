@@ -11,4 +11,4 @@ the result "compiler crashed — re-run to confirm", so a transient
 never reads as a verdict. Reproduction: none stable — one occurrence
 in ~30 probes that session.
 
-Lands: user decision (consumer report from bldc, 2026-09-02 — the tool owner sequences).
+Lands: cross-tool train chunk 140 (gofresh docs/plans/cross-tool-train.md; triaged 2026-09-03).
