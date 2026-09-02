@@ -33,4 +33,4 @@ Reachable path: `pathsDirtyContext` answers dirty with
 the root, and `stampProvenance`'s staged arm renders every dirty
 judgment as unstaged drift.
 
-Lands: cross-tool train chunk 146 (gofresh docs/plans/cross-tool-train.md).
+Lands: cross-tool train chunk 156 (gofresh docs/plans/cross-tool-train.md; chunk 146 folded into it).
