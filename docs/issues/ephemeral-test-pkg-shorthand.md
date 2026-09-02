@@ -10,4 +10,4 @@ directory and resolving it against the loaded package set — the
 same resolution `--package` globs already need — would match the
 CLI's own directory default.
 
-Lands: user decision
+Lands: with cross-tool train chunk 138 (rides the workspace path-resolution chunk).

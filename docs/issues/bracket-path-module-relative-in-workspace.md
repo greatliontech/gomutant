@@ -27,4 +27,4 @@ treat the result as the declared surface for every module's
 oracles; the machine-local disqualifier then never fires for an
 in-tree file spelled relatively.
 
-Lands: user decision
+Lands: cross-tool train chunk 138 (gofresh docs/plans/cross-tool-train.md).

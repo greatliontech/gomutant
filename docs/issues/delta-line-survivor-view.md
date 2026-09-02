@@ -20,4 +20,4 @@ remainder), and a run identity on findings rows so an inspection
 can scope to one campaign's records without re-deriving the
 measured set from the log.
 
-Lands: user decision
+Lands: cross-tool train chunk 139 (gofresh docs/plans/cross-tool-train.md; the run-identity/filter split is decided at its triage gate).
