@@ -30,3 +30,4 @@ is deleted (git holds history).
 | [bracket-path-lexical-match](bracket-path-lexical-match.md) | a bracket path matches the observed open's un-cleaned spelling; the clean absolute path of the same file does not | user decision |
 | [never-executed-exemption-unaudited](never-executed-exemption-unaudited.md) | a coverage miss lands a mutant in never-executed — exempt from execution and from the audit sample; an ephemeral probe with an oracle test kills it | user decision |
 | [mcp-session-disconnect-mid-loop](mcp-session-disconnect-mid-loop.md) | the MCP server dropped mid-session with no call in flight and no diagnosable cause; ask a stated exit reason and an idle-liveness witness | user decision |
+| [ephemeral-rapid-failfile-in-tree](ephemeral-rapid-failfile-in-tree.md) | a rapid property test failing under a probe writes its failfile beside the real source; isolate the probe's failfile directory | user decision (bldc consumer report 2026-09-03) |
