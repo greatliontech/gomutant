@@ -20,3 +20,11 @@ into the probe's temp dir (`-rapid.failfile`-class configuration, or
 `TMPDIR`/working-directory isolation for `go test`), or at least
 detect and remove files created under the caller's tree during a
 probe and say so in the result.
+
+Second observation (bldc, 2026-09-04): even where no failfile survives
+the probe, the failfile is written into the caller's `testdata/rapid`
+for the probe's duration — another tool's cache keyed on that
+directory's contents (stipulator's runtime-input fingerprint) saw the
+transient file and re-executed its witnesses. The isolation ask above
+covers this too: a probe's test run should never write under the
+caller's tree, transiently or not.
