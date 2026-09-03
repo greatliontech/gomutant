@@ -29,3 +29,4 @@ is deleted (git holds history).
 | [ephemeral-compiler-crash-retry](ephemeral-compiler-crash-retry.md) | a transient Go compiler SIGSEGV under a probe reads as a broken mutant; retry once or mark it | user decision (bldc consumer report 2026-09-02) |
 | [bracket-path-lexical-match](bracket-path-lexical-match.md) | a bracket path matches the observed open's un-cleaned spelling; the clean absolute path of the same file does not | user decision |
 | [never-executed-exemption-unaudited](never-executed-exemption-unaudited.md) | a coverage miss lands a mutant in never-executed — exempt from execution and from the audit sample; an ephemeral probe with an oracle test kills it | user decision |
+| [mcp-session-disconnect-mid-loop](mcp-session-disconnect-mid-loop.md) | the MCP server dropped mid-session with no call in flight and no diagnosable cause; ask a stated exit reason and an idle-liveness witness | user decision |
