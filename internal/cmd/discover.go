@@ -33,8 +33,8 @@ func newDiscoverCommand() *cobra.Command {
 	}}
 	f := cmd.Flags()
 	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
-	f.StringVar(&o.changed, "changed", "", "inspect symbols whose bodies differ from this git ref")
-	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery")
+	f.StringVar(&o.changed, "changed", "", "inspect symbols whose bodies differ from this git ref; exclusive with --targets")
+	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery, exclusive with --changed")
 	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable targets")
 	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
 	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
@@ -75,14 +75,22 @@ func discoverCommand(ctx context.Context, o discoverOptions) error {
 
 func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, error) {
 	view := discoveryView{Targets: []gomutant.TargetDescription{}, Residue: []gomutant.Residue{}}
+	var sources []string
+	if o.targetsFile != "" {
+		sources = append(sources, "--targets")
+	}
+	if o.changed != "" {
+		sources = append(sources, "--changed")
+	}
+	if err := gomutant.ValidateTargetSources(sources); err != nil {
+		return view, err
+	}
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return view, err
 	}
 	var targets []gomutant.Target
 	switch {
-	case o.targetsFile != "" && o.changed != "":
-		return view, fmt.Errorf("give --targets or --changed, not both")
 	case o.targetsFile != "":
 		data, err := contextio.ReadFile(ctx, o.targetsFile)
 		if err != nil {

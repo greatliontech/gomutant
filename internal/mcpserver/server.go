@@ -533,7 +533,7 @@ type runIn struct {
 	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 derives each oracle group's budget from its measured baseline (an explicit value is the uniform override)"`
 	Jobs              int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
 	BracketPaths      []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
-	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any measurement. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness (RemoveAll before MkdirAll) and expect permission-mangled residue from mutated code"`
+	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any load. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness (RemoveAll before MkdirAll) and expect permission-mangled residue from mutated code"`
 	OracleMemoryMiB   *int64   `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling per oracle process tree in MiB: absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host"`
 	Staged            bool     `json:"staged,omitempty" jsonschema:"measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target"`
 	Force             bool     `json:"force,omitempty" jsonschema:"re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force"`
@@ -648,26 +648,13 @@ type targetSelection struct {
 }
 
 // selectTargets resolves a selection request through the one preamble
-// run and discover share: the exclusive-forms refusal, the source
-// dispatch (targets document, inline document, changed ref, or whole
-// tree), and the filter walk — whose empty-selection discrimination
+// run and discover share — the source dispatch (targets document, inline
+// document, changed ref, or whole tree; their exclusivity was refused at
+// preparation, before the load) and the filter walk — whose empty-selection discrimination
 // lives in the library, so the callers' zero-target notes name the
 // true emptier (REQ-target-filtering, REQ-mcp-envelope).
 func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, targetsPath, targetsJSON, changed string, packages, symbols []string) (targetSelection, error) {
 	var sel targetSelection
-	forms := 0
-	if targetsPath != "" {
-		forms++
-	}
-	if targetsJSON != "" {
-		forms++
-	}
-	if changed != "" {
-		forms++
-	}
-	if forms > 1 {
-		return sel, fmt.Errorf("give targets_path, targets_json, or changed, at most one")
-	}
 	var err error
 	switch {
 	case targetsPath != "":
@@ -779,6 +766,20 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
+	// Every refusal the inputs decide fires here, before the load
+	// (REQ-exec-preparation); the target-source exclusivity counts the
+	// inline document as a targets source.
+	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
+		FindingsPath: s.findingsPath(in.Findings), ModuleDir: s.dir,
+		Budget: in.Budget, OracleTimeout: oracleTimeout,
+		ScratchNamespaces: in.ScratchNamespaces,
+		TargetSources:     targetSourcesGiven(in.TargetsPath, in.TargetsJSON, in.Changed),
+	})
+	if err != nil {
+		return nil, out, err
+	}
+	defer prepared.ReleaseCampaign()
+	scratchNamespaces, exemptions := prepared.ScratchNamespaces, prepared.Exemptions
 	notify := progressNotifier(ctx, req)
 	loading := gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}
 	out.PreparationCount++
@@ -799,10 +800,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	targets, wholeTree = sel.targets, sel.wholeTree
 	out.Residue = sel.residue
-	prior, err := s.loadFindingsContext(ctx, in.Findings)
-	if err != nil {
-		return nil, out, err
-	}
+	prior := prepared.Prior
 	if out.Residue, err = tree.OracleClosureSignpostContext(ctx, out.Residue, prior, targets); err != nil {
 		return nil, out, err
 	}
@@ -838,14 +836,6 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}
-	// The campaign lock spans measurement through the final merge: a
-	// second campaign against the same document refuses immediately
-	// instead of interleaving (REQ-exec-exclusivity).
-	releaseCampaign, err := gomutant.AcquireCampaignLock(s.findingsPath(in.Findings))
-	if err != nil {
-		return nil, out, err
-	}
-	defer releaseCampaign()
 	streams := newRunStreams(&out, notify)
 	var commitSheds []gomutant.AttestationShed
 	// The run-start snapshot of dispositions per symbol makes the merge
@@ -886,14 +876,6 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 	}
 	priorLayer := map[string]string{}
-	scratchNamespaces, err := gomutant.ParseScratchNamespaces(in.ScratchNamespaces)
-	if err != nil {
-		return nil, out, err
-	}
-	exemptions, err := gomutant.LoadExemptions(gomutant.ExemptionsPathFor(s.findingsPath(in.Findings)))
-	if err != nil {
-		return nil, out, err
-	}
 	options := gomutant.Options{
 		Budget:            in.Budget,
 		OracleTimeout:     oracleTimeout,
@@ -1057,10 +1039,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	out.Summary = gomutant.SummarizeRun(rendered)
-	runStore, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
-	if err != nil {
-		return nil, out, withDrop(shedsRidingAbort(err, out.AttestationSheds))
-	}
+	runStore := prepared.Store
 	for _, f := range prior {
 		priorLayer[f.Symbol], _ = runStore.Layer(f)
 	}
@@ -1195,6 +1174,9 @@ type discoverOut struct {
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
 	var out discoverOut
+	if err := gomutant.ValidateTargetSources(targetSourcesGiven(in.TargetsPath, in.TargetsJSON, in.Changed)); err != nil {
+		return nil, out, err
+	}
 	notify := progressNotifier(ctx, req)
 	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
 	if err != nil {
@@ -1773,6 +1755,9 @@ type retargetOut struct {
 
 func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
 	out := retargetOut{Rewritten: []gomutant.RetargetedRecord{}, Document: s.findingsPath(in.Findings)}
+	if err := gomutant.ValidateRetargetPair(in.From, in.To); err != nil {
+		return nil, out, err
+	}
 	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
@@ -1882,8 +1867,13 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	if in.TestPkg == "" || in.Run == "" {
 		return nil, nil, fmt.Errorf("ephemeral needs test_pkg and run")
 	}
-	if in.Runs < 0 || in.Runs > gomutant.MaxEphemeralRuns {
-		return nil, nil, fmt.Errorf("runs %d is outside 1-%d (omitted means 1)", in.Runs, gomutant.MaxEphemeralRuns)
+	if err := gomutant.ValidateEphemeralRuns(in.Runs); err != nil {
+		return nil, nil, err
+	}
+	if in.Attest != "" {
+		if err := gomutant.ValidateAttestationReason(in.Attest); err != nil {
+			return nil, nil, err
+		}
 	}
 	forms := 0
 	if in.Replacement != "" {
@@ -2010,4 +2000,20 @@ func (s *Server) toolGuidance(ctx context.Context, req *mcp.CallToolRequest, in 
 		return nil, nil, fmt.Errorf("%w; empty verb serves the decision map, which names every verb", err)
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: long}}}, nil, nil
+}
+
+// targetSourcesGiven names the run's supplied target sources in the
+// wire's spelling.
+func targetSourcesGiven(targetsPath, targetsJSON, changed string) []string {
+	var given []string
+	if targetsPath != "" {
+		given = append(given, "targets_path")
+	}
+	if targetsJSON != "" {
+		given = append(given, "targets_json")
+	}
+	if changed != "" {
+		given = append(given, "changed")
+	}
+	return given
 }

@@ -28,7 +28,10 @@ external producer's document are parsed onto the same target set, never three
 code paths downstream of the parse. An external producer emits the
 gomutant-owned config-file document below — one schema, one parse, no
 producer privileged over another — keeping producers ignorant of mutation
-semantics while gomutant stays complete standalone.
+semantics while gomutant stays complete standalone. A run or an inspection
+names at most one target source — a targets document (by path or inline) or a
+changed ref; two given refuse together, naming both, before any load
+(REQ-exec-preparation in [execution.md](execution.md)).
 
 The gomutant-owned config-file encoding is one valid UTF-8 JSON object with a required,
 non-null `targets` array. Each array entry is a non-null object with required

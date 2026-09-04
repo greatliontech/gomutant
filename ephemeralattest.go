@@ -98,8 +98,8 @@ func LoadEphemeralAttestations(path string) ([]EphemeralAttestation, error) {
 // exercise. The provenance stamp records commit and dirty over the
 // replaced files, fail-closed dirty when it cannot be established.
 func AttestEphemeralEquivalence(ctx context.Context, dir string, res *EphemeralResult, reason string) (EphemeralAttestation, error) {
-	if strings.TrimSpace(reason) == "" {
-		return EphemeralAttestation{}, fmt.Errorf("gomutant: an equivalence attestation needs its reasoning on the record")
+	if err := ValidateAttestationReason(reason); err != nil {
+		return EphemeralAttestation{}, err
 	}
 	if res == nil || res.EditDigest == "" {
 		return EphemeralAttestation{}, fmt.Errorf("gomutant: the probe result carries no edit digest; nothing identifiable to attest")

@@ -138,7 +138,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-target-producers"
-  content_hash: "198c26673b8e24409965aca2ae7bc928d24f21f276cefa57ea3a9c31ae391cfc"
+  content_hash: "c6179ca149af8413a5ccb02ef63636fa4ca90e9e28d8230f9e455a0ddc5f3bbc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDiscover"
   role: BINDING_ROLE_TESTS
@@ -147,7 +147,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-target-producers"
-  content_hash: "198c26673b8e24409965aca2ae7bc928d24f21f276cefa57ea3a9c31ae391cfc"
+  content_hash: "c6179ca149af8413a5ccb02ef63636fa4ca90e9e28d8230f9e455a0ddc5f3bbc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestLoadTargetsSniffs"
   role: BINDING_ROLE_TESTS
@@ -156,7 +156,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-target-producers"
-  content_hash: "198c26673b8e24409965aca2ae7bc928d24f21f276cefa57ea3a9c31ae391cfc"
+  content_hash: "c6179ca149af8413a5ccb02ef63636fa4ca90e9e28d8230f9e455a0ddc5f3bbc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestParseTargets"
   role: BINDING_ROLE_TESTS
@@ -368,4 +368,13 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestMethodDeclarationRewriteRefusesShiftedOffsets"
   role: BINDING_ROLE_TESTS
   shape_hash: "cec1fdff0d9b15438f867977c1b4d2f33fc9ff16e22ad006aa399c66154943c0"
+}
+
+bindings {
+  requirement_id: "REQ-target-producers"
+  content_hash: "c6179ca149af8413a5ccb02ef63636fa4ca90e9e28d8230f9e455a0ddc5f3bbc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestDiscoverRefusesTwoTargetSourcesBeforeAnyLoad"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "68fb882a532220d4dd74f1f26e6c7c4312a3907e21ea2f92aade2321799e543e"
 }

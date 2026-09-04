@@ -1566,17 +1566,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if opts.Budget < 0 {
-		return nil, fmt.Errorf("gomutant: budget must be non-negative")
+	if err := validateRunBounds(opts.Budget, opts.OracleTimeout); err != nil {
+		return nil, err
 	}
 	if opts.PlanOnly {
 		// The plan clause's no-write guarantee is the run's own: even a
 		// cached serve's incremental commit is suppressed here, so no
 		// caller has to re-implement the suppression.
 		opts.Commit = nil
-	}
-	if opts.OracleTimeout < 0 {
-		return nil, fmt.Errorf("gomutant: oracle timeout must be non-negative")
 	}
 	if err := validateBracketPaths(opts.BracketPaths); err != nil {
 		return nil, err

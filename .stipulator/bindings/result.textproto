@@ -801,3 +801,12 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "24d876ba5a75ac603df24e0b68657ead1cd47febd2f164e4fa46add9dad98ffb"
 }
+
+bindings {
+  requirement_id: "REQ-result-exemptions"
+  content_hash: "aa888ff926c7786ffebc9c1eca5555989cad0ba7038af2d446de68417179d1fd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestPrepareCampaignCarriesTheExemptionRecord"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "75c772fdd79f107e07cd7f3ae9b624b2d13950101be83141beb390f7c5428da3"
+}

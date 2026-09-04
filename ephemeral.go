@@ -354,8 +354,8 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	if runs == 0 {
 		runs = 1
 	}
-	if runs < 1 || runs > MaxEphemeralRuns {
-		return nil, fmt.Errorf("runs must be between 1 and %d - each run is a full oracle process", MaxEphemeralRuns)
+	if err := ValidateEphemeralRuns(runs); err != nil {
+		return nil, err
 	}
 	// The build ignores what it does not compile: an overlay of a
 	// build-excluded or non-Go file measures a mutant that was never

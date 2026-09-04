@@ -767,10 +767,22 @@ routes to the local overlay never reads as a healthy repo-document write.
 Open survivors remain
 advisory and do not change successful exit semantics.
 
+**REQ-exec-preparation** (behavior): Every verb MUST fire each refusal
+its inputs alone decide — the bounds' signs, the run count, the target
+sources' exclusivity, a declaration's shape (scratch namespaces, vouches,
+a retarget pair, an attestation's reasoning), the tree root's existence,
+the exemptions document, the findings document (unreadable, or a version
+this binary does not read), and last the campaign lock — before its first
+tree load, so a refused verb pays nothing it could have refused earlier.
+The lock comes last because its acquisition persists state (the
+document's directory, the lock file) that a refusal after it would
+strand. The preparation is one stage per verb, in one order, the same on
+both faces.
+
 **REQ-exec-plan-only** (behavior): A plan-only run MUST perform the full
-deterministic preparation
-sequence and deliver every target decision exactly as an executing run
-would — mutants enumerated, candidate counts and reasons exact — then
+deterministic preparation sequence — every refusal REQ-exec-preparation
+places before the first load included — and deliver every target decision
+exactly as an executing run would — mutants enumerated, candidate counts and reasons exact — then
 stop: no baseline probes, no mutant executes, and nothing new persists
 (a cached serve's incremental commit is suppressed alongside the final
 merge; re-merging existing records was already idempotent, and the
@@ -919,7 +931,8 @@ findings document against the announced roster.
 
 **REQ-exec-exclusivity** (behavior): A findings-producing run MUST hold an
 advisory campaign lock on its findings document for its whole duration —
-measurement through final merge — acquired fail-fast: a second campaign
+measurement through final merge — acquired fail-fast at the run's
+preparation, before any tree load: a second campaign
 against the same document refuses immediately, naming the holder,
 instead of interleaving measurements whose merges race. The lock
 releases with the holding process, so a crashed campaign never leaves a

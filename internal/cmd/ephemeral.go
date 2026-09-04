@@ -60,6 +60,18 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	if o.testPkg == "" || o.runPat == "" {
 		return fmt.Errorf("ephemeral needs --test-pkg and --run")
 	}
+	// The runs count and the attestation's reasoning are the caller's
+	// inputs: refused here, before the form checks, the batch document's
+	// read, the load, and the probe (REQ-exec-preparation) — the one
+	// order both faces keep.
+	if err := gomutant.ValidateEphemeralRuns(o.runs); err != nil {
+		return err
+	}
+	if o.attest != "" {
+		if err := gomutant.ValidateAttestationReason(o.attest); err != nil {
+			return err
+		}
+	}
 	forms := 0
 	if o.replacement != "" {
 		forms++

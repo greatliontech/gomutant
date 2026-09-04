@@ -329,48 +329,10 @@ func retargetFinding(f Finding, from, to string) (rewritten Finding, symbolChang
 // with an existing record refuses whole; under check the store is
 // untouched and the result previews the rewrites.
 func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to string, check bool) (RetargetResult, error) {
-	if from == "" || to == "" {
-		return RetargetResult{}, fmt.Errorf("retarget needs a non-empty from and to prefix")
-	}
-	if from == to {
-		return RetargetResult{}, fmt.Errorf("retarget needs distinct prefixes - from and to are both %q", from)
-	}
-	// The observation-subject halves rewrite under independent
-	// projections of the pair; a structurally asymmetric pair (one half
-	// package-shaped, the other symbol-shaped) would mangle the local
-	// half into an identity that names nothing, durably
-	// (REQ-result-lifecycle).
-	fromPkg, fromLocal := retargetPrefixParts(from)
-	toPkg, toLocal := retargetPrefixParts(to)
-	if (fromLocal == "") != (toLocal == "") {
-		return RetargetResult{}, fmt.Errorf("retarget prefixes must be structurally alike - %q and %q split package and symbol differently; use a package pair or a full-symbol pair", from, to)
-	}
-	// A symbol pair renames within its package: the destination carries
-	// no stored fact to validate a package move against, and a dotted
-	// destination remainder may continue a package instead of naming a
-	// local - so the package halves must agree and the local halves map
-	// segment for segment (REQ-result-lifecycle).
-	if fromLocal != "" {
-		if fromPkg != toPkg {
-			return RetargetResult{}, fmt.Errorf("retarget: a symbol pair renames within its package - %q and %q name different packages; move a surface across packages with a package pair", from, to)
-		}
-		if strings.Count(fromLocal, ".") != strings.Count(toLocal, ".") {
-			return RetargetResult{}, fmt.Errorf("retarget: %q -> %q restructures the local name - a rename maps segments one to one, and a dotted remainder may continue a package instead of naming a local; a package move takes a package pair, and a promotion or demotion that reshapes the name re-measures under the new shape", from, to)
-		}
-	}
-	// Unlike-terminated pairs splice across unlike edges: with from
-	// "example.com/old." and to "example.com/new", the matched dot is
-	// consumed and never re-emitted, writing example.com/newTestF
-	// durably. The terminator is part of the claim - both prefixes
-	// carry the same one, or neither (REQ-result-lifecycle).
-	terminator := func(p string) byte {
-		if c := p[len(p)-1]; c == '.' || c == '/' {
-			return c
-		}
-		return 0
-	}
-	if terminator(from) != terminator(to) {
-		return RetargetResult{}, fmt.Errorf("retarget prefixes must be like-terminated - %q and %q end differently, and splicing across unlike edges corrupts identities; terminate both with the same separator or neither", from, to)
+	// The pair's shape is decided before any load by the faces; the
+	// library entry keeps the same judgment for callers that skipped it.
+	if err := ValidateRetargetPair(from, to); err != nil {
+		return RetargetResult{}, err
 	}
 	declared, err := t.eng.DeclaredSymbolsContext(ctx)
 	if err != nil {

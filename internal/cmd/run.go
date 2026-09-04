@@ -57,12 +57,12 @@ func newRunCommand() *cobra.Command {
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling per oracle process tree in MiB (GOMEMLIMIT plus a hard data-segment cap): 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host")
 	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
 	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "external surface the oracle legitimately reads (module-relative path or absolute file, repeatable; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run")
-	f.StringArrayVar(&o.scratchNamespaces, "scratch-namespace", nil, "in-module run-scratch namespace DIR:PATTERN (repeatable): DIR is module-relative, PATTERN a single-component os.MkdirTemp-style name pattern; oracle scratch minted and removed inside the namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches - the caller's assertion; malformed declarations refuse before any measurement")
+	f.StringArrayVar(&o.scratchNamespaces, "scratch-namespace", nil, "in-module run-scratch namespace DIR:PATTERN (repeatable): DIR is module-relative, PATTERN a single-component os.MkdirTemp-style name pattern; oracle scratch minted and removed inside the namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches - the caller's assertion; malformed declarations refuse before any load")
 	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence")
 	f.BoolVar(&o.staged, "staged", false, "measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target (stage or stash it)")
 	f.BoolVar(&o.force, "force", false, "re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without --force")
-	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref")
-	f.StringVar(&o.targetsFile, "targets", "", "path to a JSON targets document (gomutant's or a producer's export); overrides discovery")
+	f.StringVar(&o.changed, "changed", "", "target only symbols whose bodies differ from this git ref; exclusive with --targets")
+	f.StringVar(&o.targetsFile, "targets", "", "path to a JSON targets document (gomutant's or a producer's export); overrides discovery, exclusive with --changed")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read and update")
 	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
 	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
@@ -100,6 +100,31 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	rep := newRunReporter(out, o.jsonl, 0)
 	defer rep.stop()
+	// Every refusal the inputs decide fires here, before the load: the
+	// bounds, the declarations, the target sources, the campaign lock,
+	// the exemptions, the store (REQ-exec-preparation).
+	docPath := findingsAt(o.dir, o.findingsFile)
+	if trimmed := strings.TrimSpace(o.targetsFile); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		return fmt.Errorf("--targets expects a file path; the value looks like an inline JSON document - write it to a file first")
+	}
+	var sources []string
+	if o.targetsFile != "" {
+		sources = append(sources, "--targets")
+	}
+	if o.changed != "" {
+		sources = append(sources, "--changed")
+	}
+	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
+		FindingsPath: docPath, ModuleDir: o.dir, Plan: o.plan,
+		Budget: o.budget, OracleTimeout: o.oracleTimeout,
+		ScratchNamespaces: o.scratchNamespaces, Vouches: o.vouches,
+		TargetSources: sources,
+	})
+	if err != nil {
+		return err
+	}
+	defer prepared.ReleaseCampaign()
+	scratchNamespaces, exemptions, docStore, prior := prepared.ScratchNamespaces, prepared.Exemptions, prepared.Store, prepared.Prior
 	if o.jsonl {
 		rep.emit("prepare", gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	} else {
@@ -109,16 +134,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if err != nil {
 		return err
 	}
-	scratchNamespaces, err := gomutant.ParseScratchNamespaces(o.scratchNamespaces)
-	if err != nil {
-		return err
-	}
-	if len(o.vouches) > 0 {
-		identities, err := gomutant.ParseDynamicStateVouches(o.vouches)
-		if err != nil {
-			return err
-		}
-		tree.SetDynamicStateVouches(identities...)
+	if len(prepared.Vouches) > 0 {
+		tree.SetDynamicStateVouches(prepared.Vouches...)
 	}
 	var targets []gomutant.Target
 	var residue []gomutant.Residue
@@ -126,9 +143,6 @@ func runCommand(ctx context.Context, o runOptions) error {
 	case o.targetsFile != "":
 		data, err := contextio.ReadFile(ctx, o.targetsFile)
 		if err != nil {
-			if trimmed := strings.TrimSpace(o.targetsFile); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-				return fmt.Errorf("--targets expects a file path; the value looks like an inline JSON document - write it to a file first: %w", err)
-			}
 			return err
 		}
 		if err := ctx.Err(); err != nil {
@@ -162,32 +176,6 @@ func runCommand(ctx context.Context, o runOptions) error {
 	rep.setSelected(len(targets))
 	if !o.plan {
 		rep.startCadence(o.progressEvery)
-	}
-	docPath := findingsAt(o.dir, o.findingsFile)
-	// The campaign lock spans measurement through the final merge:
-	// a second campaign against the same document refuses immediately
-	// instead of interleaving (REQ-exec-exclusivity). A plan persists
-	// nothing and measures nothing, so it takes no lock: it must not
-	// mint the lock file a killed run leaves behind, and it reads the
-	// document beside a running campaign exactly as findings does.
-	if !o.plan {
-		releaseCampaign, err := gomutant.AcquireCampaignLock(docPath)
-		if err != nil {
-			return err
-		}
-		defer releaseCampaign()
-	}
-	exemptions, err := gomutant.LoadExemptions(gomutant.ExemptionsPathFor(docPath))
-	if err != nil {
-		return err
-	}
-	docStore, err := gomutant.OpenStore(docPath, o.dir)
-	if err != nil {
-		return err
-	}
-	prior, err := loadFindingsContext(ctx, o.dir, docPath)
-	if err != nil {
-		return err
 	}
 	if residue, err = tree.OracleClosureSignpostContext(ctx, residue, prior, targets); err != nil {
 		return err

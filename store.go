@@ -106,6 +106,10 @@ func OpenStore(path, moduleDir string) (*Store, error) {
 	return &Store{path: path, moduleDir: abs, overlayDir: overlay, exemptions: exemptions, cache: map[string]overlayCacheEntry{}}, nil
 }
 
+// Exemptions is the exemption record the store opened beside its
+// document (REQ-result-exemptions).
+func (s *Store) Exemptions() []Exemption { return append([]Exemption(nil), s.exemptions...) }
+
 // portableLineWalk is the one derivation of the portable line
 // (REQ-result-layers): dirty or absent commit provenance, each subject
 // with runtime-unverifiable evidence or an unreadable runtime manifest,

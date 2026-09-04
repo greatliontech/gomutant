@@ -134,10 +134,10 @@ func TestEphemeral(t *testing.T) {
 	}
 
 	// runs is bounded: each run is a full oracle process.
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, 11); err == nil || !strings.Contains(err.Error(), "runs must be between") {
+	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, 11); err == nil || !strings.Contains(err.Error(), "is outside 1-") {
 		t.Fatalf("unbounded runs accepted: %v", err)
 	}
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, -1); err == nil || !strings.Contains(err.Error(), "runs must be between") {
+	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, -1); err == nil || !strings.Contains(err.Error(), "is outside 1-") {
 		t.Fatalf("negative runs accepted: %v", err)
 	}
 	res, err = tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestFrozenEnvironment$", time.Minute, 1)

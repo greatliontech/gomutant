@@ -87,6 +87,11 @@ func newRetargetCommand() *cobra.Command {
 }
 
 func retargetCommand(ctx context.Context, o retargetOptions, out io.Writer) error {
+	// The pair's shape is two strings' business: refused before the
+	// store and the load (REQ-exec-preparation).
+	if err := gomutant.ValidateRetargetPair(o.from, o.to); err != nil {
+		return err
+	}
 	store, err := gomutant.OpenStore(findingsAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err

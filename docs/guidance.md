@@ -7,14 +7,14 @@
 **knobs:**
 - `targets_path` (mcp, cli as `targets`) — path to a targets document (gomutant's or a producer's export); overrides discovery.
 - `targets_json` (mcp) — an inline targets document, same formats as targets_path.
-- `changed` (mcp, cli) — target only symbols whose bodies differ from this git ref (requires git).
+- `changed` (mcp, cli) — target only symbols whose bodies differ from this git ref (requires git). At most one target source: two of targets_path, targets_json, and changed refuse together, naming them, before any load.
 - `budget` (mcp, cli) — candidates per symbol; 0 means exhaustive.
 - `timeout_sec` (mcp, cli as `timeout`) — cancel work before the final findings commit; on mcp omitted means 300 seconds and an explicit 0 unlimited, on the cli a duration defaulting to unlimited.
 - `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of each oracle process; 0 (the default on both faces) derives each oracle group's budget from its measured baseline — an explicit value is the uniform override, and the record pins the loosest bound any verdict ran under.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling per oracle process tree in MiB (GOMEMLIMIT plus a hard data-segment cap): absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host.
 - `jobs` (mcp, cli) — concurrent mutant runs; 0 means half the CPUs.
 - `bracket_paths` (mcp, cli as `bracket-path`) — external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run.
-- `scratch_namespaces` (mcp, cli as `scratch-namespace`) — in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any measurement. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness and expect permission-mangled residue.
+- `scratch_namespaces` (mcp, cli as `scratch-namespace`) — in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any load. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness and expect permission-mangled residue.
 - `staged` (mcp, cli) — measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target (stage or stash it).
 - `force` (mcp, cli) — re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json), read and updated.
@@ -53,7 +53,7 @@ first when the target decision set is in doubt.
 **knobs:**
 - `targets_path` (mcp, cli as `targets`) — path to a targets document; overrides discovery.
 - `targets_json` (mcp) — inline targets document; overrides discovery.
-- `changed` (mcp, cli) — changed-scope vs this git ref; empty means the whole tree.
+- `changed` (mcp, cli) — changed-scope vs this git ref; empty means the whole tree. At most one target source, as on run.
 - `packages` (mcp, cli as `package`) — complete package import-path glob filters; alternatives.
 - `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters; alternatives.
 - `detail` (mcp) — return every target, oracle-set, and residue row; the default caps each list at 50 with the remainder counted.
@@ -183,7 +183,7 @@ to=example.com/new. after a package rename, then for real.
 - `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of the baseline and mutant oracle processes; 0 (the default on both faces) derives the budget from the measured baseline — an explicit value is the override, and the result reports the effective budget and the measured baseline. The advisory coverage probe (an instrumented whole-closure rebuild) shares the derive-mode baseline's measurement leash in both modes.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling for the probe's oracle process tree in MiB: absent inherits the server's installed ceiling (mcp), 0 derives RAM/2 floored at 1 GiB, -1 disables; refused while a run is in flight — the campaign owns the process ceiling.
 - `runs` (mcp, cli) — run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed — N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result.
-- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document (`ephemeral-attestations.json`); refused when the probe killed, was mixed, or never exercised the edit.
+- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document (`ephemeral-attestations.json`); a blank reasoning refuses before any load or probe; refused after the probe when it killed, was mixed, or never exercised the edit.
 - `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes (default .gomutant/findings.json).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
