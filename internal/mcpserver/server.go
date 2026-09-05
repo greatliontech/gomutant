@@ -135,13 +135,14 @@ func WithDynamicStateVouches(identities ...string) Option {
 	}
 }
 
-func (s *Server) update(ctx context.Context, path string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
+// updateStore commits through the one store a verb opened: a run's
+// per-target commits and its final merge share the store's caches and
+// the exemptions record the run was prepared with (a store opened per
+// commit would re-read the document and re-judge every row against a
+// possibly changed record). The test seam, when set, takes the path.
+func (s *Server) updateStore(ctx context.Context, store *gomutant.Store, path string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
 	if s.updateDocument != nil {
 		return s.updateDocument(ctx, path, change)
-	}
-	store, err := gomutant.OpenStore(path, s.dir)
-	if err != nil {
-		return err
 	}
 	return store.Update(ctx, change)
 }
@@ -533,22 +534,6 @@ func localPath(name, p string) error {
 	return fmt.Errorf("%s %q escapes the tree", name, p)
 }
 
-func (s *Server) loadFindings(override string) ([]gomutant.Finding, error) {
-	return s.loadFindingsContext(context.Background(), override)
-}
-
-func (s *Server) loadFindingsContext(ctx context.Context, override string) ([]gomutant.Finding, error) {
-	store, err := gomutant.OpenStore(s.findingsPath(override), s.dir)
-	if err != nil {
-		return nil, err
-	}
-	findings, err := store.Load(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return findings, ctx.Err()
-}
-
 // selectionIn is the build-selection surface every tree-consuming tool
 // shares: declared tags and a toolchain directive rewrite the tree's
 // one frozen environment at load, so discovery, resolution, oracle
@@ -865,7 +850,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		out.Note = selectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed)
 		if wholeTree {
 			dropped := 0
-			err := s.update(ctx, out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			err := s.updateStore(ctx, prepared.Store, out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -969,7 +954,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		// final merge below remains the authority (REQ-exec-cancellation).
 		Commit: func(finding gomutant.Finding) error {
 			var dropped []gomutant.AttestationShed
-			err := s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			err := s.updateStore(ctx, prepared.Store, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -1022,7 +1007,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// the run is in both or in neither (REQ-mcp-findings-doc).
 	var attestationSheds []gomutant.AttestationShed
 	reconcileDropped := 0
-	err = s.update(ctx, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+	err = s.updateStore(ctx, prepared.Store, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -1665,7 +1650,11 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 		}
 	}
 	var attested gomutant.Finding
-	err := s.update(ctx, s.findingsPath(in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	if err != nil {
+		return nil, out, err
+	}
+	err = s.updateStore(ctx, store, s.findingsPath(in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		for i := range all {
 			if all[i].Symbol == in.Symbol {
 				if err := all[i].Attest(in.Position, in.Operator, in.Reason); err != nil {
@@ -1686,13 +1675,9 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	// as it stands: a disposition on a record whose pins moved is
 	// judged afresh - and shed if rejected - by the next measure
 	// (REQ-attest-survivor). The disposition is already recorded, so
-	// echo failures demote to warnings - a hard error here would read
-	// as a failed write that in fact landed.
-	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
-	if err != nil {
-		out.Warning = "record state unavailable: " + err.Error()
-		return nil, out, nil
-	}
+	// the tree load and inspection below demote their failures to
+	// warnings - a hard error there would read as a failed write that
+	// in fact landed.
 	out.Layer, out.LayerReason = store.Layer(attested)
 	notify := progressNotifier(ctx, req)
 	tree, err := s.loadTreeReporting(ctx, notify, in.selection())

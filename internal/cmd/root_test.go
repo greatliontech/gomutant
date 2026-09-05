@@ -16,6 +16,16 @@ import (
 	gomutant "github.com/greatliontech/gomutant"
 )
 
+// loadFindings reads the merged findings view through one store, for
+// assertions on what a command persisted.
+func loadFindings(dir, path string) ([]gomutant.Finding, error) {
+	store, err := gomutant.OpenStore(path, dir)
+	if err != nil {
+		return nil, err
+	}
+	return store.Load(context.Background())
+}
+
 func testStore(t *testing.T, dir string) *gomutant.Store {
 	t.Helper()
 	store, err := gomutant.OpenStore(filepath.Join(dir, defaultFindings), dir)

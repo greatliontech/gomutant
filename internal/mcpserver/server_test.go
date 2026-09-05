@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -18,6 +19,16 @@ import (
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// loadFindings reads the merged findings view through one store, for
+// assertions on what a call persisted.
+func (s *Server) loadFindings(override string) ([]gomutant.Finding, error) {
+	store, err := gomutant.OpenStore(s.findingsPath(override), s.dir)
+	if err != nil {
+		return nil, err
+	}
+	return store.Load(context.Background())
+}
 
 const fixtureDir = "../engine/testdata/fixturemod"
 
@@ -1484,5 +1495,43 @@ func TestCapRowsCountsTheRemainder(t *testing.T) {
 	capped, omitted = capRows(rows[:50])
 	if len(capped) != 50 || omitted != 0 {
 		t.Fatalf("capRows(50) = %d rows, %d omitted", len(capped), omitted)
+	}
+}
+
+// A malformed exemptions record refuses attest before the write, the
+// way it refuses every verb's store (REQ-result-exemptions): the
+// disposition is not recorded and then reported unclassifiable.
+func TestToolAttestRefusesAMalformedExemptionsRecordBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	path := filepath.Join(dir, defaultFindings)
+	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		seeded := seededFinding("example.com/empty.Old")
+		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
+		seeded.CandidateCount, seeded.Generated, seeded.Mutants = 1, 1, 1
+		seeded.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}}
+		return []gomutant.Finding{seeded}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(path), []byte("{ torn"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := s.toolAttest(context.Background(), nil, attestIn{Symbol: "example.com/empty.Old", Position: "p.go:1:1", Operator: "zero return", Reason: "r"})
+	if err == nil || !strings.Contains(err.Error(), "exemption") {
+		t.Fatalf("attest over a torn exemptions record: %v, %+v; want the record's refusal", err, out)
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("a refused attest changed the document: %v", err)
 	}
 }
