@@ -540,8 +540,12 @@ test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
 and read as a fabricated kill — the flattering direction
 REQ-core-attributed-kills refuses — so either probe result refuses the run
-rather than scoring it. Without an explicit oracle timeout the mutant
-budget is DERIVED from that baseline: the baseline run is itself a
+rather than scoring it, the failing-baseline refusal naming the failing
+tests (a reported failure, or a run the process never closed) and
+carrying their own output — what the oracle saw, so a baseline
+disagreeing with the caller's plain run is diagnosable from the
+refusal. Without an explicit oracle timeout the mutant budget is DERIVED
+from that baseline: the baseline run is itself a
 measurement of the oracle's cost on this tree under this load, so it
 executes under a generous measurement leash and the mutant budget
 follows as a multiple with a floor — instead of a fixed knob that dies

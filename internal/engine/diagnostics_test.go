@@ -27,7 +27,7 @@ func TestProbeBuildFailureNamesCompilerDiagnostic(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, _, err := TestProbe(context.Background(), dir, "example.com/broken", "^TestValue$", time.Minute, nil)
+	_, _, _, err := TestProbe(context.Background(), dir, "example.com/broken", "^TestValue$", time.Minute, nil)
 	if err == nil || !strings.Contains(err.Error(), "failed to build") {
 		t.Fatalf("broken test package probe = %v, want a build refusal", err)
 	}
@@ -97,4 +97,102 @@ func TestRunMutantExecutesExactlyOnce(t *testing.T) {
 	if got := strings.Count(string(data), "\n"); got != 1 {
 		t.Fatalf("oracle executed %d times, want exactly once", got)
 	}
+}
+
+// The failing-baseline diagnostic renders what the oracle saw: each
+// failing top-level test's name and its own output (subtests folded
+// under their parent), a test the process never closed — a crash — as
+// a failure with its output, package-level output only when no test's
+// output explains the failure, never a passing test's output, and a
+// bounded rendering.
+func TestFailedTestsDiagnosticRendersWhatTheOracleSaw(t *testing.T) {
+	render := func(t *testing.T, stream string) (*testStream, string) {
+		t.Helper()
+		ts, err := parseTestStream([]byte(stream))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ts, failedTestsDiagnostic(ts)
+	}
+	t.Run("failing test with a subtest", func(t *testing.T) {
+		ts, got := render(t, `{"Action":"run","Test":"TestA"}
+{"Action":"output","Test":"TestA","Output":"=== RUN   TestA\n"}
+{"Action":"output","Test":"TestA/sub","Output":"    a_test.go:9: sub broke\n"}
+{"Action":"fail","Test":"TestA/sub"}
+{"Action":"output","Test":"TestA","Output":"--- FAIL: TestA (0.00s)\n"}
+{"Action":"fail","Test":"TestA"}
+{"Action":"run","Test":"TestB"}
+{"Action":"output","Test":"TestB","Output":"--- PASS: TestB (0.00s)\n"}
+{"Action":"pass","Test":"TestB"}
+{"Action":"output","Output":"FAIL\texample.com/p\t0.01s\n"}
+`)
+		if ts.ran != 2 || !slices.Equal(ts.failed, []string{"TestA"}) || len(ts.truncated) != 0 {
+			t.Fatalf("stream = ran %d failed %v truncated %v", ts.ran, ts.failed, ts.truncated)
+		}
+		if !strings.HasPrefix(got, "TestA:\n") || !strings.Contains(got, "sub broke") || strings.Contains(got, "TestB") || strings.Contains(got, "example.com/p") {
+			t.Fatalf("diagnostic = %q", got)
+		}
+	})
+	t.Run("crash-truncated test beside a passing one", func(t *testing.T) {
+		// A goroutine panic aborts the binary: the harness attributes
+		// the panic text to the running test and never closes it, and
+		// the package reports the failure alone.
+		ts, got := render(t, `{"Action":"run","Test":"TestOK"}
+{"Action":"output","Test":"TestOK","Output":"--- PASS: TestOK (0.00s)\n"}
+{"Action":"pass","Test":"TestOK"}
+{"Action":"run","Test":"TestCrash"}
+{"Action":"output","Test":"TestCrash","Output":"=== RUN   TestCrash\n"}
+{"Action":"output","Test":"TestCrash","Output":"panic: goroutine boom marker\n"}
+{"Action":"output","Output":"FAIL\texample.com/p\t0.01s\n"}
+{"Action":"fail"}
+`)
+		if ts.ran != 2 || len(ts.failed) != 0 || !slices.Equal(ts.truncated, []string{"TestCrash"}) {
+			t.Fatalf("stream = ran %d failed %v truncated %v", ts.ran, ts.failed, ts.truncated)
+		}
+		if !strings.HasPrefix(got, "TestCrash:\n") || !strings.Contains(got, "goroutine boom marker") || strings.Contains(got, "TestOK") {
+			t.Fatalf("diagnostic = %q", got)
+		}
+		if ts, _ := render(t, `{"Action":"run","Test":"TestCrash"}
+{"Action":"output","Test":"TestCrash","Output":"panic: boom\n"}
+`); ts.ran != 1 || !slices.Equal(ts.truncated, []string{"TestCrash"}) {
+			t.Fatalf("a lone crash = ran %d truncated %v", ts.ran, ts.truncated)
+		}
+	})
+	t.Run("package-level output when no test explains the failure", func(t *testing.T) {
+		_, got := render(t, `{"Action":"run","Test":"TestOK"}
+{"Action":"output","Test":"TestOK","Output":"--- PASS: TestOK (0.00s)\n"}
+{"Action":"pass","Test":"TestOK"}
+{"Action":"output","Output":"panic: boom outside any test\n"}
+{"Action":"output","Output":"FAIL\texample.com/p\t0.01s\n"}
+`)
+		if !strings.Contains(got, "boom outside any test") || strings.Contains(got, "TestOK") {
+			t.Fatalf("package-level fallback = %q", got)
+		}
+	})
+	t.Run("a test counts once however many terminal events name it", func(t *testing.T) {
+		ts, _ := render(t, `{"Action":"run","Test":"TestA"}
+{"Action":"pass","Test":"TestA"}
+{"Action":"pass","Test":"TestA"}
+{"Action":"fail","Test":"TestA"}
+`)
+		if ts.ran != 1 || !slices.Equal(ts.failed, []string{"TestA"}) {
+			t.Fatalf("duplicate terminal events: ran %d failed %v", ts.ran, ts.failed)
+		}
+	})
+	t.Run("skipped tests did not run", func(t *testing.T) {
+		ts, _ := render(t, `{"Action":"run","Test":"TestSkipped"}
+{"Action":"skip","Test":"TestSkipped"}
+`)
+		if ts.ran != 0 || len(ts.truncated) != 0 {
+			t.Fatalf("a skipped test counted as run: %+v", ts)
+		}
+	})
+	t.Run("bounded", func(t *testing.T) {
+		_, got := render(t, `{"Action":"output","Test":"TestA","Output":"`+strings.Repeat("x", 5000)+`\n"}
+{"Action":"fail","Test":"TestA"}
+`)
+		if !strings.HasSuffix(got, "[diagnostic truncated]") || len(got) > 4096+len("\n[diagnostic truncated]") {
+			t.Fatalf("unbounded diagnostic: %d bytes", len(got))
+		}
+	})
 }

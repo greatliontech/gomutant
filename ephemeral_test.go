@@ -169,7 +169,7 @@ func TestEphemeral(t *testing.T) {
 	probes := 0
 	probe := testProbe
 	defer func() { testProbe = probe }()
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, error) {
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, string, error) {
 		probes++
 		return probe(ctx, dir, testPkg, run, timeout, binFlags, env)
 	}
@@ -187,6 +187,16 @@ func TestEphemeral(t *testing.T) {
 	if probes != 2 {
 		t.Fatalf("baseline probes launched = %d; want exactly the two selecting patterns'", probes)
 	}
+	// A failing baseline with nothing rendered (an output-less failure)
+	// refuses on one line — no dangling diagnostic separator.
+	counting := testProbe
+	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string) (int, bool, string, error) {
+		return 1, false, "", nil
+	}
+	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") || strings.HasSuffix(err.Error(), "\n") {
+		t.Fatalf("output-less failing baseline: %q; want the one-line refusal", err)
+	}
+	testProbe = counting
 	// The failing-clean pairing edits the failing package's OWN test
 	// file: the linkage gate admits it (the oracle's own files are in
 	// its linked set), so the baseline probe is what refuses.
@@ -198,8 +208,12 @@ func TestEphemeral(t *testing.T) {
 	if failingMutant == string(failingSrc) {
 		t.Fatal("failing fixture edit failed")
 	}
-	if _, err := tr.Ephemeral(ctx, "failing/failing_test.go", []byte(failingMutant), "example.com/fixture/failing", "^TestAlwaysFails$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") {
-		t.Fatalf("failing-clean probe scored: %v", err)
+	// The refusal names the failing test and carries its own output —
+	// what the oracle saw, so a baseline disagreeing with the caller's
+	// plain run is diagnosable from the refusal alone.
+	if _, err := tr.Ephemeral(ctx, "failing/failing_test.go", []byte(failingMutant), "example.com/fixture/failing", "^TestAlwaysFails$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") ||
+		!strings.Contains(err.Error(), "TestAlwaysFails:") || !strings.Contains(err.Error(), "by design") {
+		t.Fatalf("failing-clean probe scored, or refused without the oracle's own output: %v", err)
 	}
 
 	// A replacement that does not compile measured nothing: an error, never
@@ -441,7 +455,7 @@ func TestEphemeralBaselineRunsUnderLeash(t *testing.T) {
 	}
 	restore := testProbe
 	var bounds []time.Duration
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, error) {
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, string, error) {
 		bounds = append(bounds, timeout)
 		return restore(ctx, dir, testPkg, run, timeout, binFlags, env)
 	}

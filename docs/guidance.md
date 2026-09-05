@@ -195,7 +195,13 @@ equivalence judgment is the one durable output, written to the
 committed record, never to a finding); an observed
 probe executes the named test once, bracketing runtime-input
 observation, and a kill carries the killing test's bounded output
-head. Give exactly one mutation form.
+head. Give exactly one mutation form. The named package's test binary
+runs under the oracle's own flags — `-rapid.nofailfile` and
+`-rapid.seed=1` when the binary links pgregory.net/rapid — so a test
+that reads the process arguments itself (a cobra command handed a nil
+argument list) sees flags the plain run never passes; a
+failing-baseline refusal shows the failing tests' own output, so such
+a disagreement reads from the refusal.
 **example:** ephemeral with a batch edit neutering one guard and
 run naming the test that must notice.
 

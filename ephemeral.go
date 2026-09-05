@@ -498,7 +498,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 
 	env := t.eng.GoEnv()
 	baselineStart := time.Now()
-	ran, passed, err := testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env)
+	ran, passed, diagnostic, err := testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env)
 	if err != nil {
 		if derive {
 			return nil, derivedBaselineRefusal(err)
@@ -509,7 +509,15 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		return nil, fmt.Errorf("%q matched no tests in %s: nothing can attribute the mutant", run, testPkg)
 	}
 	if !passed {
-		return nil, fmt.Errorf("the named test does not pass on the unmutated tree in %s: a kill against it would be fabricated", testPkg)
+		// The refusal carries what the oracle saw: a baseline that
+		// fails under the probe but passes for the caller's own go test
+		// is otherwise undiagnosable from either side
+		// (REQ-exec-ephemeral).
+		refusal := fmt.Sprintf("the named test does not pass on the unmutated tree in %s: a kill against it would be fabricated", testPkg)
+		if diagnostic != "" {
+			refusal += "\n" + diagnostic
+		}
+		return nil, errors.New(refusal)
 	}
 	measuredBaseline := time.Since(baselineStart).Round(time.Millisecond)
 	mutantBudget := oracleTimeout

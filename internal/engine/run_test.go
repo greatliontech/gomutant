@@ -432,8 +432,8 @@ func TestFirstFailingTest(t *testing.T) {
 		t.Fatalf("malformed tail accepted as %q: %v", got, err)
 	}
 	countStream := []byte(`{"Action":"pass","Test":"TestA"}` + "\nnot-json\n")
-	if count, err := countTopTests(countStream); err == nil || count != 0 {
-		t.Fatalf("malformed count stream accepted: count=%d err=%v", count, err)
+	if ts, err := parseTestStream(countStream); err == nil || ts != nil {
+		t.Fatalf("malformed count stream accepted: %+v err=%v", ts, err)
 	}
 	normalFailure := []byte(`{"Action":"output","Test":"TestA","Output":"--- FAIL: TestA (0.00s)\n"}` + "\n")
 	if !testFailureCompleted(normalFailure, "TestA") {
@@ -468,23 +468,23 @@ func TestProbeBaseline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test")
 	}
-	ran, passed, err := TestProbe(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", 60*time.Second, nil)
+	ran, passed, _, err := TestProbe(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", 60*time.Second, nil)
 	if err != nil || ran != 1 || !passed {
 		t.Fatalf("probe TestAdd: ran=%d passed=%v err=%v", ran, passed, err)
 	}
-	ran, _, err = TestProbe(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestNoSuch$", 60*time.Second, nil)
+	ran, _, _, err = TestProbe(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestNoSuch$", 60*time.Second, nil)
 	if err != nil || ran != 0 {
 		t.Fatalf("probe no-match: ran=%d err=%v", ran, err)
 	}
 	// A test failing on the clean tree would fail against any mutant too —
 	// a fabricated kill unless the probe reports it (REQ-exec-ephemeral).
-	ran, passed, err = TestProbe(context.Background(), "testdata/fixturemod", "example.com/fixture/failing", "^TestAlwaysFails$", 60*time.Second, nil)
+	ran, passed, _, err = TestProbe(context.Background(), "testdata/fixturemod", "example.com/fixture/failing", "^TestAlwaysFails$", 60*time.Second, nil)
 	if err != nil || ran != 1 || passed {
 		t.Fatalf("probe failing-clean: ran=%d passed=%v err=%v, want ran=1 passed=false", ran, passed, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := TestProbe(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", 60*time.Second, nil); !errors.Is(err, context.Canceled) {
+	if _, _, _, err := TestProbe(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", 60*time.Second, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled probe = %v", err)
 	}
 	tr := fixtureTree(t)
@@ -907,7 +907,7 @@ func TestParentDeadlineIsCancellationNotTimeoutKill(t *testing.T) {
 
 	// The oracle bound firing on the baseline probe is the typed
 	// refusal naming the bound.
-	_, _, err := TestProbeEnv(context.Background(), dir, "example.com/fixture/lib", "^TestBaselineStall$", 3*time.Second, nil, env)
+	_, _, _, err := TestProbeEnv(context.Background(), dir, "example.com/fixture/lib", "^TestBaselineStall$", 3*time.Second, nil, env)
 	var bt *BaselineTimeoutError
 	if !errors.As(err, &bt) {
 		t.Fatalf("oracle-bound expiry = %v, want the baseline-timeout refusal", err)
@@ -917,7 +917,7 @@ func TestParentDeadlineIsCancellationNotTimeoutKill(t *testing.T) {
 	// cancellation, never the oracle bound's refusal.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_, _, err = TestProbeEnv(ctx, dir, "example.com/fixture/lib", "^TestBaselineStall$", 10*time.Minute, nil, env)
+	_, _, _, err = TestProbeEnv(ctx, dir, "example.com/fixture/lib", "^TestBaselineStall$", 10*time.Minute, nil, env)
 	if err == nil {
 		t.Fatal("parent-deadline baseline probe returned no error")
 	}

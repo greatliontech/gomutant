@@ -890,20 +890,24 @@ func addRuntimeEvidenceReasonContext(ctx context.Context, root string, env []str
 // ephemeral run needs before scoring anything (REQ-exec-ephemeral): a -run
 // matching zero tests, or a test already failing on the clean tree, cannot
 // attribute a mutant, so a verdict against it would be a fabricated finding.
-func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string) (ran int, passed bool, err error) {
+func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string) (ran int, passed bool, diagnostic string, err error) {
 	return TestProbeEnv(ctx, dir, testPkg, run, timeout, binFlags, GoEnv(dir))
 }
 
 // TestProbeEnv is TestProbe under an already-frozen complete environment.
-func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (ran int, passed bool, err error) {
-	ran, passed, _, _, err = testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, nil, env)
-	return ran, passed, err
+// When the probe ran and failed, diagnostic carries the failing tests'
+// names and their own output, so a refusal built on the failure can
+// show what the oracle saw.
+func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (ran int, passed bool, diagnostic string, err error) {
+	result, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, nil, env)
+	return result.ran, result.passed, result.diagnostic, err
 }
 
 // TestProbeObservedEnv is TestProbe under a frozen environment with a
 // runtime-input observation rooted at moduleDir and packageDir.
 func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, failed []string, state runtimeinput.Observation, err error) {
-	ran, passed, failed, first, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+	once, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+	ran, passed, failed, first := once.ran, once.passed, once.failed, once.state
 	if err != nil {
 		return ran, passed, failed, first, err
 	}
@@ -938,7 +942,8 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if !first.Unverifiable && first.State == empty.State {
 		return ran, passed, nil, first, nil
 	}
-	secondRan, secondPassed, secondFailed, second, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+	again, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+	secondRan, secondPassed, secondFailed, second := again.ran, again.passed, again.failed, again.state
 	if err != nil {
 		return secondRan, secondPassed, secondFailed, second, err
 	}
@@ -954,7 +959,19 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	return secondRan, secondPassed, nil, second, nil
 }
 
-func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, failed []string, state runtimeinput.Observation, err error) {
+// probeResult is one baseline probe's outcome: the top-level tests that
+// ran, whether the run passed, the failing tests (a reported failure or
+// a crash-truncated run), the diagnostic rendering what the oracle saw
+// when it failed, and the runtime-input observation.
+type probeResult struct {
+	ran        int
+	passed     bool
+	failed     []string
+	diagnostic string
+	state      runtimeinput.Observation
+}
+
+func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (probeResult, error) {
 	// The oracle bound carries its own cause exactly as the mutant
 	// run's: a parent expiry must read as cancellation, never as the
 	// oracle bound firing (REQ-exec-attribution).
@@ -962,7 +979,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	defer cancel()
 	scratchEnv, scratchRoot, sweepScratch, removeScratch, err := oracleScratch(env)
 	if err != nil {
-		return 0, false, nil, runtimeinput.Observation{}, err
+		return probeResult{}, err
 	}
 	defer removeScratch()
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
@@ -974,7 +991,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if capture {
 		tmp, err := os.MkdirTemp("", "gomutant-probe-*")
 		if err != nil {
-			return 0, false, nil, runtimeinput.Observation{}, err
+			return probeResult{}, err
 		}
 		defer os.RemoveAll(tmp)
 		testlog = filepath.Join(tmp, "baseline.testlog")
@@ -997,36 +1014,37 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), ctx2) {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, "baseline test process timed out", env, scratchRoot, capture, oracleFrame, namespaces)
 		if observationErr != nil {
-			return 0, false, nil, runtimeinput.Observation{}, observationErr
+			return probeResult{}, observationErr
 		}
-		return 0, false, nil, state, &BaselineTimeoutError{Bound: timeout}
+		return probeResult{state: state}, &BaselineTimeoutError{Bound: timeout}
 	}
 	if oracleRunCancelled(runErr, ctx2) {
 		state, _, observationErr := processObservationContext(ctx, testlog, moduleDir, "baseline test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces)
 		if observationErr != nil {
-			return 0, false, nil, runtimeinput.Observation{}, observationErr
+			return probeResult{}, observationErr
 		}
-		return 0, false, nil, state, ctx2.Err()
+		return probeResult{state: state}, ctx2.Err()
 	}
 	if strings.Contains(buf.String(), "[build failed]") {
 		if diagnostic := compileDiagnostics(buf.Bytes(), nil); diagnostic != "" {
-			return 0, false, nil, runtimeinput.Observation{}, fmt.Errorf("baseline test failed to build:\n%s", diagnostic)
+			return probeResult{}, fmt.Errorf("baseline test failed to build:\n%s", diagnostic)
 		}
-		return 0, false, nil, runtimeinput.Observation{}, fmt.Errorf("baseline test failed to build")
+		return probeResult{}, fmt.Errorf("baseline test failed to build")
 	}
-	ran, err = countTopTests(buf.Bytes())
+	stream, err := parseTestStream(buf.Bytes())
 	if err != nil {
-		return 0, false, nil, runtimeinput.Observation{}, fmt.Errorf("parse baseline test output: %w", err)
+		return probeResult{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
-	state, _, err = processObservationContext(ctx, testlog, moduleDir, "", env, scratchRoot, capture, oracleFrame, namespaces)
+	state, _, err := processObservationContext(ctx, testlog, moduleDir, "", env, scratchRoot, capture, oracleFrame, namespaces)
 	if err != nil {
-		return 0, false, nil, runtimeinput.Observation{}, err
+		return probeResult{}, err
 	}
-	failedNames := []string(nil)
+	result := probeResult{ran: stream.ran, passed: runErr == nil, state: state}
 	if runErr != nil {
-		failedNames = FailedTopTests(buf.Bytes())
+		result.failed = append(append([]string(nil), stream.failed...), stream.truncated...)
+		result.diagnostic = failedTestsDiagnostic(stream)
 	}
-	return ran, runErr == nil, failedNames, state, nil
+	return result, nil
 }
 
 // compileDiagnostics extracts the compiler's own text from a failed
@@ -1061,7 +1079,13 @@ func compileDiagnostics(stdout, stderr []byte) string {
 			add(e.Output)
 		}
 	}
-	out := strings.TrimSpace(b.String())
+	return capDiagnostic(b.String())
+}
+
+// capDiagnostic bounds a diagnostic for error surfacing: trimmed, and
+// cut at a rune boundary with the truncation marked.
+func capDiagnostic(out string) string {
+	out = strings.TrimSpace(out)
 	const limit = 4096
 	if len(out) > limit {
 		cut := limit
@@ -1208,51 +1232,106 @@ func testFailureCompleted(stream []byte, failingTest string) bool {
 	}
 }
 
-// FailedTopTests names the distinct top-level tests the -json stream
-// reports failed — the baseline refusal's evidence: "does not pass"
-// without the failing test's name sends the operator back to a rerun
-// for what the runner already knew.
-func FailedTopTests(stream []byte) []string {
-	type event struct{ Action, Test string }
-	seen := map[string]bool{}
-	var out []string
-	dec := json.NewDecoder(bytes.NewReader(stream))
-	for {
-		var e event
-		if err := dec.Decode(&e); err != nil {
-			return out
-		}
-		if e.Test == "" || strings.Contains(e.Test, "/") || e.Action != "fail" {
-			continue
-		}
-		if !seen[e.Test] {
-			seen[e.Test] = true
-			out = append(out, e.Test)
-		}
-	}
+// testStream is one walk over a go test -json stream of one package
+// under -run (the only stream the probe produces — no benchmarks, one
+// package, so top-level names are distinct): the distinct top-level
+// tests that ran (a pass or fail reported, or a run the process never
+// closed — a crash), those that failed, those left without a terminal
+// event, each top-level test's own output with its subtests folded in,
+// and the package's output outside any test.
+type testStream struct {
+	ran       int
+	failed    []string
+	truncated []string
+	outputs   map[string]*strings.Builder
+	pkg       strings.Builder
 }
 
-// countTopTests counts the distinct top-level tests (excluding subtests)
-// that reported a pass or fail in a go test -json stream.
-func countTopTests(stream []byte) (int, error) {
-	type event struct{ Action, Test string }
-	seen := map[string]bool{}
+// parseTestStream reads the stream once; a malformed stream is an error
+// (a probe whose output cannot be read has no verdict).
+func parseTestStream(stream []byte) (*testStream, error) {
+	type event struct{ Action, Test, Output string }
+	ts := &testStream{outputs: map[string]*strings.Builder{}}
+	var order []string
+	started, ended, failed, ran := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	dec := json.NewDecoder(bytes.NewReader(stream))
 	for {
 		var e event
 		if err := dec.Decode(&e); err != nil {
 			if err == io.EOF {
-				return len(seen), nil
+				break
 			}
-			return 0, err
+			return nil, err
+		}
+		if e.Action == "output" {
+			if e.Test == "" {
+				ts.pkg.WriteString(e.Output)
+				continue
+			}
+			top, _, _ := strings.Cut(e.Test, "/")
+			b := ts.outputs[top]
+			if b == nil {
+				b = &strings.Builder{}
+				ts.outputs[top] = b
+			}
+			b.WriteString(e.Output)
+			continue
 		}
 		if e.Test == "" || strings.Contains(e.Test, "/") {
 			continue
 		}
-		if e.Action == "pass" || e.Action == "fail" {
-			seen[e.Test] = true
+		switch e.Action {
+		case "run":
+			if !started[e.Test] {
+				started[e.Test] = true
+				order = append(order, e.Test)
+			}
+		case "pass", "fail", "skip":
+			if !started[e.Test] {
+				started[e.Test] = true
+				order = append(order, e.Test)
+			}
+			ended[e.Test] = true
+			if e.Action == "fail" && !failed[e.Test] {
+				failed[e.Test] = true
+				ts.failed = append(ts.failed, e.Test)
+			}
+			if e.Action != "skip" && !ran[e.Test] {
+				ran[e.Test] = true
+				ts.ran++
+			}
 		}
 	}
+	for _, name := range order {
+		if !ended[name] {
+			ts.truncated = append(ts.truncated, name)
+			ts.ran++
+		}
+	}
+	return ts, nil
+}
+
+// failedTestsDiagnostic renders what the oracle saw when its run failed:
+// each failing top-level test's name (a reported failure, or a run the
+// process never closed — a crash), then the test's own output with its
+// subtests' folded in; when no test's output explains the failure, the
+// package's output outside any test (a panic the harness attributed to
+// nothing). Bounded like a compile diagnostic.
+func failedTestsDiagnostic(ts *testStream) string {
+	var b strings.Builder
+	rendered := false
+	for _, name := range append(append([]string(nil), ts.failed...), ts.truncated...) {
+		b.WriteString(name)
+		b.WriteString(":\n")
+		if out := ts.outputs[name]; out != nil && strings.TrimSpace(out.String()) != "" {
+			b.WriteString(out.String())
+			rendered = true
+		}
+	}
+	if !rendered {
+		b.WriteString(ts.pkg.String())
+	}
+	return capDiagnostic(b.String())
 }
 
 // tail returns the last n bytes of s, for error surfacing.

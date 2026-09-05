@@ -453,7 +453,7 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 				// but only after the clean twin proves the scratch
 				// infrastructure itself builds, or nothing ran and the
 				// kill would be fabricated.
-				ran, passed, cleanErr := engine.TestProbeEnv(ctx, cleanScratch, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, cleanEnv)
+				ran, passed, _, cleanErr := engine.TestProbeEnv(ctx, cleanScratch, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, cleanEnv)
 				if cleanErr == nil && ran > 0 && passed {
 					return engine.MutantKilled, "compile: " + firstLine(diagnostic), false, nil
 				}
