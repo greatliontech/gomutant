@@ -234,19 +234,24 @@ observed request is refused with the cause rather than ingesting a capture that
 silently covers only the last binary. A
 completed observation binds its values through an observation bracket
 fingerprinted over the oracle package's directory before the process spawns
-(tool-owned bookkeeping directories excluded), plus any caller-declared bracket
-paths — module-relative paths (a file or a directory tree) or absolute files an
-oracle legitimately reads outside its package directory, each declared with the
-bracket contract's mutation-free assertion for the span, so an external fixed
-fixture binds instead of sealing the observation. An absolute external
-directory cannot be walked by the bracket's hashing semantics and is refused at
-run start — declaring it would seal every observation, strictly worse than not
-declaring — as is a declared path under a tool-excluded directory, which would
-otherwise be silently uncovered, and a declared path absent or
-unhashable against a measured module's root - the base each spawn's
-capture resolves against - checked before that module's first spawn: a
-surface the oracle reads exists before the run, and a transient
-per-test path belongs to a scratch namespace, not a bracket path; a spawn whose bracket could not
+(tool-owned bookkeeping directories excluded), anchored at the tree root — the
+repository, the workspace root when there is one — so every in-tree identity an
+oracle reads records tree-relative whichever member module it lives in, plus any
+caller-declared bracket paths — tree-relative paths (a file or a directory tree),
+resolved against the invocation's tree root as one declared surface for every
+module's oracles, or absolute files or directories an oracle legitimately reads
+outside the tree (a replace module outside the repository is one declared
+surface, walked by the bracket, never an enumeration of its files), each declared
+with the bracket contract's mutation-free assertion for the span, so an external
+fixed fixture binds instead of sealing the observation. A relative path that
+escapes the tree root is refused at run start (declare a surface outside the tree
+absolute), as is a declared path under a tool-excluded directory, which would
+otherwise be silently uncovered, and a declared path absent, or one the bracket
+cannot fingerprint (an unhashable object, a root under or containing a volatile
+OS root), checked once against the tree root — the base every spawn's capture
+resolves against — before the first spawn: a surface the oracle reads exists
+before the run, and a transient per-test path belongs to a scratch namespace,
+not a bracket path; a spawn whose bracket could not
 be captured finalizes as an incomplete observation carrying the capture's
 stated reason, never as a completed one - the values the run read cannot bind. When
 the completed states agree with one coherent current view, their deterministic
@@ -526,8 +531,12 @@ two valid starts is ambiguous even when its non-overlapping count is one — is
 refused rather than guessed: a mutation applied somewhere the
 caller did not mean is a measurement of the wrong mutant. The run refuses
 inputs the build would silently ignore before any process launches: a test
-package that is not a loaded package import path (a flag-shaped value would
-otherwise change the invocation being measured); a run pattern that selects
+package that is neither a loaded package import path nor a package directory
+spelled the way `go test` spells one — `.` or a `./`-prefixed path, resolved
+against the invocation's tree root, so a module-local caller need not spell the
+full import path per probe (a flag-shaped value would otherwise change the
+invocation being measured; a directory escaping the tree or holding no loaded
+package refuses); a run pattern that selects
 none of the package's tests, fuzz targets, or examples (nothing could
 attribute the mutant); a replacement of a file
 the loaded build does not compile — a build-constraint-excluded source or a
@@ -1049,8 +1058,10 @@ gomutant hands it, so an oracle's reads beneath them record no identity
 and seal nothing.
 
 **REQ-exec-scratch-namespace** (behavior): gomutant MUST accept caller
-scratch-namespace declarations - a module-relative directory and a
-single-component `os.MkdirTemp`-style name pattern - and declare each
+scratch-namespace declarations - a tree-relative directory (resolved against
+the invocation's tree root, the base every spawn's observation is anchored at,
+exactly as a bracket path is) and a single-component `os.MkdirTemp`-style name
+pattern - and declare each
 to observation ingest as a runtime-input scratch namespace, validating
 the declaration's grammar when the run starts and refusing a malformed
 one before any measurement. The declaration carries the caller's

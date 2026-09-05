@@ -35,7 +35,7 @@ func newEphemeralCommand() *cobra.Command {
 	selectionFlags(f, &o.tags, &o.toolchain)
 	f.StringVar(&o.replacement, "replacement", "", "path to the whole replacement source")
 	f.StringVar(&o.batch, "batch", "", "JSON edit-batch path, or - for stdin: {\"edits\":[{\"file\",\"old_string\",\"new_string\"},…]}, every match resolving against the original file")
-	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill")
+	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill: an import path, or a package directory spelled like go test does (. or ./x) resolved against --dir")
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
 	progressIntervalFlag(f, &o.progressEvery, "cadence of the progress line naming the phase in flight (loading, baseline, mutant run, coverage) and the elapsed time; 0 disables")

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -54,28 +53,20 @@ type subjectView struct {
 	symbol    string
 	subject   gofresh.Subject
 	moduleDir string
-	// moduleBase is moduleDir relative to the tree root in slash form
-	// ("" for the root module): the machine-portable base persisted on
-	// evidence so the store's portable-line walk resolves each subject's
-	// manifest against that subject's own module (REQ-result-layers).
-	moduleBase  string
+	// evidenceDir is the tree root every subject's runtime-input
+	// evidence is anchored at — the base its manifest is recorded
+	// relative to and re-hashed under — so a workspace member's record
+	// names a root-module input tree-relative, portable in the committed
+	// document, and the store's portable-line walk resolves it at the
+	// tree (REQ-result-layers). The persisted module base is absent
+	// for these records; a record from before the anchor carries its
+	// member base and the walk honors it.
+	evidenceDir string
 	env         []string
 	view        *gofresh.View
 	fp          gofresh.Fingerprint
 	sourceFiles []string
 	module      *moduleSubjectView
-}
-
-// treeRelModuleBase computes a subject module's tree-relative slash
-// base: "" for the root module, and "" fail-safe when the module
-// escapes the tree - the walk then falls back to the tree root, the
-// pre-base behavior.
-func treeRelModuleBase(treeDir, moduleDir string) string {
-	rel, err := filepath.Rel(treeDir, moduleDir)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
-		return ""
-	}
-	return filepath.ToSlash(rel)
 }
 
 type moduleSubjectView struct {
@@ -117,19 +108,24 @@ type subjectEngines struct {
 	// mixed run builds one engine set per mode rather than flipping a
 	// shared flag.
 	packageProcess bool
-	byDir          map[string]*gofresh.Engine
+	// treeDir is the evidence root every engine declares: a subject's
+	// runtime-input evidence is anchored at the tree, not its module
+	// (subjectView.evidenceDir), so the engine's own revalidation
+	// re-hashes under the same base the record was made under.
+	treeDir string
+	byDir   map[string]*gofresh.Engine
 }
 
 func (t *Tree) newSubjectEngines(event func(phase, pkg, detail string), packageProcess bool) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, event: event, packageProcess: packageProcess, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, event: event, packageProcess: packageProcess, treeDir: t.dir, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	if engine, ok := e.byDir[dir]; ok {
 		return engine, nil
 	}
-	opts := []gofresh.Option{gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...)}
+	opts := []gofresh.Option{gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir)}
 	if e.packageProcess {
 		opts = append(opts, gofresh.WithPackageProcessExecution())
 	}
@@ -276,9 +272,8 @@ func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []strin
 				continue
 			}
 			set.bySymbol[r.symbol] = &subjectView{
-				symbol: r.symbol, subject: r.subject, moduleDir: r.moduleDir,
-				moduleBase: treeRelModuleBase(t.dir, r.moduleDir),
-				env:        env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
+				symbol: r.symbol, subject: r.subject, moduleDir: r.moduleDir, evidenceDir: t.dir,
+				env: env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
 			}
 		}
 		return nil
@@ -464,9 +459,8 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 				return nil, err
 			}
 			set.bySymbol[resolved.symbol] = &subjectView{
-				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir,
-				moduleBase: treeRelModuleBase(t.dir, resolved.moduleDir),
-				env:        env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
+				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir, evidenceDir: t.dir,
+				env: env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
 			}
 		}
 	}
@@ -546,9 +540,8 @@ func (t *Tree) newObservedUnionViews(ctx context.Context, symbols []string, pack
 				continue
 			}
 			set.bySymbol[resolved.symbol] = &subjectView{
-				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir,
-				moduleBase: treeRelModuleBase(t.dir, resolved.moduleDir),
-				env:        env, view: view, fp: captured, sourceFiles: sourceFiles, module: module,
+				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir, evidenceDir: t.dir,
+				env: env, view: view, fp: captured, sourceFiles: sourceFiles, module: module,
 			}
 		}
 	}
@@ -611,7 +604,7 @@ func (s *subjectViewSet) forTarget(target string, oracle []string, faults map[st
 		narrowed.modules = append(narrowed.modules, siblingModule)
 		for _, sv := range group.views {
 			narrowed.bySymbol[sv.symbol] = &subjectView{
-				symbol: sv.symbol, subject: sv.subject, moduleDir: sv.moduleDir, moduleBase: sv.moduleBase,
+				symbol: sv.symbol, subject: sv.subject, moduleDir: sv.moduleDir, evidenceDir: sv.evidenceDir,
 				env: sv.env, view: sibling, fp: sv.fp, sourceFiles: sv.sourceFiles, module: siblingModule,
 			}
 		}
@@ -658,7 +651,7 @@ func (s *subjectView) evidencePrecheck(ctx context.Context, evidence SubjectEvid
 	if evidence.Symbol != s.symbol || evidence.RuntimeInputs == "" || evidence.RuntimeDigest == "" {
 		return false, nil
 	}
-	state, err := current(ctx, evidence.RuntimeInputs, s.moduleDir, s.env)
+	state, err := current(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
 	if err != nil && ctx.Err() != nil {
 		return false, ctx.Err()
 	}
@@ -756,7 +749,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 	if evidence.RuntimeUnverifiable {
 		return FindingInspection{State: FindingUnverifiable, Reason: evidence.RuntimeReason}, nil
 	}
-	state, err := runtimeinput.CurrentEnvContext(ctx, evidence.RuntimeInputs, s.moduleDir, s.env)
+	state, err := runtimeinput.CurrentEnvContext(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
 	if err != nil || !state.OK {
 		if ctx.Err() != nil {
 			return FindingInspection{}, ctx.Err()
@@ -770,7 +763,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 		return FindingInspection{State: FindingUnverifiable, Reason: state.Reason}, nil
 	}
 	if state.Digest != evidence.RuntimeDigest {
-		return FindingInspection{State: FindingStale, Reason: "runtime inputs changed" + movedInputSuffix(ctx, evidence.RuntimeInputs, s.moduleDir, s.env)}, nil
+		return FindingInspection{State: FindingStale, Reason: "runtime inputs changed" + movedInputSuffix(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)}, nil
 	}
 	if evidence.PurityAssertion != s.fp.PurityAssertion {
 		return FindingInspection{State: FindingStale, Reason: "purity assertion changed"}, nil
@@ -1955,11 +1948,11 @@ var errEvidenceFinalization = errors.New("runtime evidence could not be finalize
 // portableUnion is the persist-boundary form of one merged
 // completed-observation union: the absolute observation stays the
 // in-memory and merge form (REQ-inputs-absolute-identities), and each
-// subject's evidence persists the module-relative conversion against
-// that subject's own module — never a sibling's — so a persisted
-// record is keyed by what was measured, not by the checkout root that
-// measured it (REQ-inputs-relative-identities). Conversions are
-// memoized per module directory; the env is the oracle-evidence env
+// subject's evidence persists the relative conversion against the base
+// its evidence is anchored at — the tree root — so a persisted record
+// is keyed by what was measured, not by the checkout root that measured
+// it (REQ-inputs-relative-identities). Conversions are memoized per
+// base; the env is the oracle-evidence env
 // the union's state was computed under, so revalidation inside the
 // conversion sees the same environment.
 type portableUnion struct {
@@ -2003,7 +1996,7 @@ func attachOracleEvidence(oracle []*subjectView, union *portableUnion) ([]Subjec
 // attachSubjectEvidence stamps one subject's evidence from the union's
 // portable form at that subject's module.
 func attachSubjectEvidence(subject *subjectView, union *portableUnion) (SubjectEvidence, error) {
-	observation, err := union.at(subject.moduleDir)
+	observation, err := union.at(subject.evidenceDir)
 	if err != nil {
 		return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
@@ -2015,9 +2008,7 @@ func attachSubjectEvidence(subject *subjectView, union *portableUnion) (SubjectE
 	if err != nil {
 		return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
-	evidence := evidenceFromFingerprint(subject.symbol, fp, state)
-	evidence.ModuleBase = subject.moduleBase
-	return evidence, nil
+	return evidenceFromFingerprint(subject.symbol, fp, state), nil
 }
 
 func attachEvidence(target *subjectView, oracle []*subjectView, union *portableUnion) (SubjectEvidence, []SubjectEvidence, error) {

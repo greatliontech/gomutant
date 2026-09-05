@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -212,6 +213,31 @@ func (t *Tree) ephemeral(ctx context.Context, file string, mutant []byte, testPk
 // compile is left to go test's own diagnostic, and the post-probe
 // zero-run check keeps guarding what only the harness decides (a
 // selected test excluded by its build constraints).
+// resolveTestPackage accepts the oracle package as an import path or
+// as a package directory spelled the way `go test` spells one — "." or
+// a "./"-prefixed path — resolved against the tree root the invocation
+// named, so a module-local caller need not spell the full import path
+// per probe (REQ-exec-ephemeral). A relative spelling that escapes the
+// tree, or names no loaded package's directory, refuses before any
+// process launches.
+func (t *Tree) resolveTestPackage(testPkg string) (string, error) {
+	if testPkg == "." || testPkg == ".." || strings.HasPrefix(testPkg, "./") || strings.HasPrefix(testPkg, "../") {
+		clean := path.Clean(testPkg)
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			return "", fmt.Errorf("test package directory %q escapes the tree root", testPkg)
+		}
+		importPath, ok := t.eng.PackageAtDir(filepath.Join(t.dir, filepath.FromSlash(clean)))
+		if !ok {
+			return "", fmt.Errorf("test package directory %q holds no loaded package (relative to the tree root %s)", testPkg, t.dir)
+		}
+		return importPath, nil
+	}
+	if !t.eng.HasPackage(testPkg) {
+		return "", fmt.Errorf("test package %q is not a loaded package import path", testPkg)
+	}
+	return testPkg, nil
+}
+
 func (t *Tree) refuseUnselectedRun(ctx context.Context, testPkg, run string) error {
 	var patterns []*regexp.Regexp
 	for _, first := range runPatternFirstElements(run) {
@@ -487,8 +513,9 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	// present, and a test package in a go test option position changes
 	// the invocation being measured - both refuse before any process
 	// launches (REQ-exec-ephemeral).
-	if !t.eng.HasPackage(testPkg) {
-		return nil, fmt.Errorf("test package %q is not a loaded package import path", testPkg)
+	testPkg, err := t.resolveTestPackage(testPkg)
+	if err != nil {
+		return nil, err
 	}
 	for _, replacement := range replacements {
 		if !t.eng.BuildCompilesFile(replacement.Abs) {

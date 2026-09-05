@@ -43,6 +43,8 @@ func TestRunToolRefusesItsInputsBeforeAnyLoad(t *testing.T) {
 	refuses("inline targets and changed", runIn{TargetsJSON: "[]", Changed: "HEAD"}, "targets_json and changed were given")
 	refuses("two targets documents", runIn{TargetsPath: doc, TargetsJSON: "[]"}, "targets_path and targets_json were given")
 	refuses("malformed scratch namespace", runIn{ScratchNamespaces: []string{"no-colon"}}, "scratch")
+	refuses("bracket path escaping the tree", runIn{BracketPaths: []string{"../outside"}}, "escapes the tree root")
+	refuses("absent bracket path", runIn{BracketPaths: []string{"no-such-surface"}}, "does not exist at run start")
 	missingRoot := filepath.Join(t.TempDir(), "missing")
 	if _, _, err := New(missingRoot).toolRun(context.Background(), nil, runIn{}); err == nil || !strings.Contains(err.Error(), "tree root") {
 		t.Fatalf("missing root: %v; want the root refusal before any lock or load", err)

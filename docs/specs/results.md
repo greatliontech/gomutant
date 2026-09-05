@@ -400,15 +400,16 @@ stamps them: the proof that licensed the serve validated every subject's
 evidence and runtime manifest against the current tree, so a record
 measured under dirty provenance becomes portable (REQ-result-layers) the
 first time it serves with those paths clean, its attestations riding the
-promotion. Each subject's manifest resolves against that subject's own
-module directory — the base its validation used; an unreadable manifest,
+promotion. Each subject's manifest resolves against the base its
+evidence is anchored at — the tree root, or a pre-anchor record's member
+module base — the base its validation used; an unreadable manifest,
 or evidence naming a subject the run carries no view for, stamps dirty,
 fail-closed. Persisted evidence is the PORTABLE form: each subject's
-runtime-input manifest converts to module-relative identities against
-that subject's own module before it is stamped (gofresh
-`REQ-inputs-relative-identities`), the in-memory merge world staying
-absolute (gofresh `REQ-inputs-absolute-identities`) with a recorded manifest
-re-absolutized against its module base whenever it re-enters a merge —
+runtime-input manifest converts to tree-relative identities before it is
+stamped (gofresh `REQ-inputs-relative-identities`), the in-memory merge
+world staying absolute (gofresh `REQ-inputs-absolute-identities`) with a
+recorded manifest re-absolutized against its own base whenever it
+re-enters a merge —
 so a committed document is keyed by what was measured, never by the
 checkout root or the file times that measured it, and a clone of the
 same content serves it. An absolute-era record keeps revalidating on
@@ -537,12 +538,13 @@ disposition with its reason, and the per-operator disposition summary. A version
 it does not understand. A list the document requires — a record's
 oracle evidence and operator summaries, a manual shape's edit list — is
 written present (empty, never null); a list the document omits when
-empty is absent. Each subject's evidence carries its module's tree-relative base
-(absent means the tree root), the base the portable-line containment
-resolves that subject's manifest against; the field narrows layer
-routing, so it rides the version bump that introduced it - an older
-consumer re-splitting the document without it could promote a
-workspace member's machine-local record. A subject's recorded dynamic-state vouches ride the evidence as audit and
+empty is absent. A subject's evidence may carry a tree-relative module base
+(absent means the tree root, the base every record made since evidence
+anchored at the tree resolves against; a record from before it carries its
+member module), the base the portable-line containment resolves that
+subject's manifest against; the field narrows layer routing, so it rode the
+version bump that introduced it - an older consumer re-splitting the
+document without it could promote a member-anchored machine-local record. A subject's recorded dynamic-state vouches ride the evidence as audit and
 never narrow reuse — an old consumer dropping the field changes no
 verdict — so the field rides the current version without a bump, the
 kill-attribution precedent; the recorded package-process discharges are
@@ -581,10 +583,11 @@ layers by committability. The repo document (the findings path, under version
 control) carries only portable records: clean commit provenance (not dirty,
 commit present), no runtime-unverifiable subject evidence outside a reviewed
 exemption (REQ-result-exemptions), and no runtime-input
-path outside the subject's own module directory - each subject's manifest
-resolves against its recorded tree-relative module base, so a workspace
-member's containment line is its member module, and a record without a
-base keeps the tree-root line - evidence a reviewer on another machine can
+path outside the tree root - every subject's evidence is anchored at the
+tree, the repository git vouches for, so a workspace member's record names
+a root-module input tree-relative and its containment line is the tree; a
+record from before the anchor carries its member module's tree-relative
+base and resolves against it - evidence a reviewer on another machine can
 inherit soundly. Dirty provenance means git-visible drift: an identity
 outside the repository is not git's to vouch for and does not stamp
 dirty - it keeps the record machine-local, named in the portable line

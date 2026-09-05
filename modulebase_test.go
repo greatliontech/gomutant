@@ -7,9 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 func relManifest(paths ...string) string {
@@ -20,27 +23,12 @@ func relManifest(paths ...string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(`{"v":1,"paths":[` + strings.Join(entries, ",") + `]}`))
 }
 
-// The recorded base is the module's tree-relative slash path: "" for
-// the root module and fail-safe "" for a module escaping the tree.
-func TestTreeRelModuleBase(t *testing.T) {
-	root := t.TempDir()
-	if got := treeRelModuleBase(root, root); got != "" {
-		t.Fatalf("root module base = %q", got)
-	}
-	if got := treeRelModuleBase(root, filepath.Join(root, "m", "n")); got != "m/n" {
-		t.Fatalf("member module base = %q", got)
-	}
-	if got := treeRelModuleBase(root, filepath.Dir(root)); got != "" {
-		t.Fatalf("escaping module base = %q", got)
-	}
-}
-
-// The portable line is drawn at each subject's own module: a recorded
-// module base resolves that subject's manifest against its member
-// module, so an identity escaping the member refuses committability
-// even when it stays inside the tree, a member-local identity passes,
-// and a record without a base keeps the tree-root behavior
-// (REQ-result-layers).
+// A record from before evidence anchored at the tree carries its
+// member module base, and the portable line honors it: that subject's
+// manifest resolves against the member, so an identity escaping the
+// member refuses committability even inside the tree, a member-local
+// identity passes; a record without a base — every record anchored at
+// the tree — resolves at the tree root (REQ-result-layers).
 func TestCommittableResolvesEachSubjectAgainstItsModuleBase(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "m"), 0o755); err != nil {
@@ -68,14 +56,20 @@ func TestCommittableResolvesEachSubjectAgainstItsModuleBase(t *testing.T) {
 		t.Fatalf("member-escaping identity = committable=%v reason=%q, want the machine-local refusal", ok, reason)
 	}
 
-	// Without a recorded base the same identity resolves at the tree
-	// root and lands inside it - the pre-base behavior a grandfathered
-	// record keeps.
-	grandfathered := storeFinding("p.A", func(f *Finding) {
-		f.TargetEvidence.RuntimeInputs = storeManifest(filepath.Join(dir, "shared.txt"))
+	// Without a base the manifest is tree-anchored: a tree-relative
+	// identity anywhere in the tree is repo evidence, an absolute one
+	// outside the tree is machine-local.
+	anchored := storeFinding("p.A", func(f *Finding) {
+		f.TargetEvidence.RuntimeInputs = relManifest("m/data.txt", "shared.txt")
 	})
-	if ok, reason := Committable(grandfathered, dir, nil); !ok {
-		t.Fatalf("baseless record lost the tree-root behavior: %s", reason)
+	if ok, reason := Committable(anchored, dir, nil); !ok {
+		t.Fatalf("tree-anchored record refused: %s", reason)
+	}
+	external := storeFinding("p.A", func(f *Finding) {
+		f.TargetEvidence.RuntimeInputs = storeManifest(filepath.Join(t.TempDir(), "outside.txt"))
+	})
+	if ok, reason := Committable(external, dir, nil); ok || !strings.Contains(reason, "machine-local runtime input") {
+		t.Fatalf("external identity = committable=%v reason=%q, want the machine-local refusal", ok, reason)
 	}
 }
 
@@ -143,11 +137,19 @@ func TestFreshMeasureStampsDirtyForUntrackedInputBelowRepositoryRoot(t *testing.
 	if !findings[0].Dirty {
 		t.Fatal("untracked runtime input below the repository root stamped clean - the false-clean portable row")
 	}
-	// The workspace member records its tree-relative base on every
-	// subject's evidence: the store-side portable line resolves against
-	// it (REQ-result-layers).
-	if findings[0].TargetEvidence.ModuleBase != "mod" || findings[0].OracleEvidence[0].ModuleBase != "mod" {
-		t.Fatalf("workspace member base not recorded: %q/%q", findings[0].TargetEvidence.ModuleBase, findings[0].OracleEvidence[0].ModuleBase)
+	// Evidence is anchored at the tree: the member's input records
+	// tree-relative (mod/data.txt) with no module base, so the portable
+	// line and every revalidation resolve it at the tree root
+	// (REQ-result-layers).
+	if findings[0].TargetEvidence.ModuleBase != "" || findings[0].OracleEvidence[0].ModuleBase != "" {
+		t.Fatalf("tree-anchored evidence carries a module base: %q/%q", findings[0].TargetEvidence.ModuleBase, findings[0].OracleEvidence[0].ModuleBase)
+	}
+	paths, err := runtimeinput.Paths(findings[0].OracleEvidence[0].RuntimeInputs, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths, filepath.Join(root, "mod", "data.txt")) {
+		t.Fatalf("the member's input is not recorded tree-relative: %v", paths)
 	}
 }
 

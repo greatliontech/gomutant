@@ -3190,23 +3190,28 @@ func TestRunCallerDeclaredBracketPathBindsExternalInput(t *testing.T) {
 	}
 }
 
-// Bracket-path declarations the bracket cannot honor refuse loudly at
-// run start: an absolute external directory would seal every
-// observation, and a tool-excluded path would be silently uncovered
-// (REQ-exec-observation).
+// A bracket path the observation bracket cannot honor is refused loudly
+// before any measurement: a relative path escaping the tree root names
+// nothing under the base every spawn resolves against, and a
+// tool-excluded path — spelled relative or as its in-tree absolute form
+// — would be silently uncovered (REQ-exec-observation).
 func TestRunRefusesUnhonorableBracketPaths(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
 	tr := fixtureTree(t)
 	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
-	if _, err := tr.Run(context.Background(), []Target{target}, Options{BracketPaths: []string{t.TempDir()}}); err == nil ||
-		!strings.Contains(err.Error(), "absolute directory the observation bracket cannot walk") {
-		t.Fatalf("absolute-directory declaration = %v, want a loud refusal", err)
+	if _, err := tr.Run(context.Background(), []Target{target}, Options{BracketPaths: []string{"../outside"}}); err == nil ||
+		!strings.Contains(err.Error(), "escapes the tree root") {
+		t.Fatalf("tree-escaping declaration = %v, want a loud refusal", err)
 	}
 	if _, err := tr.Run(context.Background(), []Target{target}, Options{BracketPaths: []string{".gomutant/targets.json"}}); err == nil ||
 		!strings.Contains(err.Error(), "tool-excluded") {
 		t.Fatalf("tool-excluded declaration = %v, want a loud refusal", err)
+	}
+	if _, err := tr.Run(context.Background(), []Target{target}, Options{BracketPaths: []string{filepath.Join(tr.dir, ".gomutant", "targets.json")}}); err == nil ||
+		!strings.Contains(err.Error(), "tool-excluded") {
+		t.Fatalf("absolute tool-excluded declaration = %v, want a loud refusal", err)
 	}
 }
 

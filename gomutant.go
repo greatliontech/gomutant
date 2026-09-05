@@ -305,7 +305,7 @@ func (t *Tree) DynamicStateVouches() []string {
 }
 
 // ParseScratchNamespaces parses DIR:PATTERN scratch-namespace
-// declarations (REQ-exec-scratch-namespace): DIR module-relative,
+// declarations (REQ-exec-scratch-namespace): DIR tree-relative,
 // PATTERN a single-component os.MkdirTemp-style name pattern. Each
 // parsed declaration passes gofresh's namespace grammar here, so a
 // malformed one refuses at the boundary - before a measurement whose

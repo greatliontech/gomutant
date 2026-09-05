@@ -220,11 +220,12 @@ func TestF(t *testing.T) {
 	}
 }
 
-// Bracket-path preflight resolves against the measured module's root -
-// the base each spawn's capture uses - so a workspace member's
-// module-relative declaration passes although no such path exists at
-// the workspace root (REQ-exec-observation).
-func TestWorkspaceMemberBracketPathPreflightsAgainstModuleRoot(t *testing.T) {
+// A bracket path is tree-relative — resolved against the workspace root,
+// the base every spawn's capture uses — so a workspace member's surface
+// is declared by its tree-relative path, and the member-relative
+// spelling names nothing at the root and refuses before measurement
+// (REQ-exec-observation).
+func TestWorkspaceMemberBracketPathIsTreeRelative(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
@@ -249,9 +250,14 @@ func TestWorkspaceMemberBracketPathPreflightsAgainstModuleRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings, err := tree.Run(context.Background(), []Target{{Symbol: "example.com/m.F", Oracle: []string{"example.com/m.TestF"}, OracleExplicit: true}},
-		Options{Budget: 1, OracleTimeout: 2 * time.Minute, BracketPaths: []string{"fixtures"}})
+	target := Target{Symbol: "example.com/m.F", Oracle: []string{"example.com/m.TestF"}, OracleExplicit: true}
+	findings, err := tree.Run(context.Background(), []Target{target},
+		Options{Budget: 1, OracleTimeout: 2 * time.Minute, BracketPaths: []string{"m/fixtures"}})
 	if err != nil || len(findings) != 1 {
-		t.Fatalf("member-module declaration refused: %+v, %v", findings, err)
+		t.Fatalf("tree-relative declaration refused: %+v, %v", findings, err)
+	}
+	if _, err := tree.Run(context.Background(), []Target{target},
+		Options{Budget: 1, OracleTimeout: 2 * time.Minute, BracketPaths: []string{"fixtures"}}); err == nil || !strings.Contains(err.Error(), "does not exist at run start") {
+		t.Fatalf("member-relative spelling = %v; want the absent-surface refusal", err)
 	}
 }

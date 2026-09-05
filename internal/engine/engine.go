@@ -234,6 +234,32 @@ func (t *Tree) PackageContextContext(ctx context.Context, pkgPath string) (modul
 	return "", "", fmt.Errorf("package %s has no loaded module context", pkgPath)
 }
 
+// PackageAtDir names the loaded non-test package whose files live in
+// dir (the `go test .` spelling of a package): the import path, or
+// false when no loaded package is rooted there. dir is compared in
+// its symlink-resolved form, as the loader reports directories.
+func (t *Tree) PackageAtDir(dir string) (string, bool) {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", false
+	}
+	// A test-only package has no plain variant with files: its test
+	// variant carries the directory and names the import path.
+	fallback := ""
+	for _, pkg := range t.pkgs {
+		if len(pkg.GoFiles) == 0 || filepath.Dir(pkg.GoFiles[0]) != resolved {
+			continue
+		}
+		if pkg.ForTest == "" {
+			return pkg.PkgPath, true
+		}
+		if fallback == "" {
+			fallback = pkg.ForTest
+		}
+	}
+	return fallback, fallback != ""
+}
+
 // workspaceMembers returns the tree's Go module directories, relative to
 // dir: the go.work members when a workspace file is present, the root alone
 // otherwise. Package patterns are module-scoped even in workspace mode, so

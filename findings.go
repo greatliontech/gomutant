@@ -75,12 +75,13 @@ type SubjectEvidence struct {
 	// verdicts under semantics it was not computed by. A measured pin,
 	// never zeroed from the attestation-pin view.
 	DynamicStateStrategy string `json:"dynamicStateStrategy,omitempty"`
-	// ModuleBase is the subject module's tree-relative slash base ("" =
-	// the tree root): manifest identities are module-relative, and the
-	// store has no views at write time, so committability resolves each
-	// subject's manifest against Join(storeDir, ModuleBase). Absent on
-	// records predating the field - those resolve at the store root,
-	// the prior behavior (REQ-result-layers).
+	// ModuleBase is the tree-relative slash base a record's manifest is
+	// anchored at when that base is not the tree root: records made
+	// since evidence anchored at the tree carry none (their identities
+	// are tree-relative and resolve at the store root); a record from
+	// the member-anchored era carries its member module, and the store,
+	// with no views at write time, resolves that subject's manifest
+	// against Join(storeDir, ModuleBase) (REQ-result-layers).
 	ModuleBase          string `json:"moduleBase,omitempty"`
 	RuntimeInputs       string `json:"runtimeInputs"`
 	RuntimeDigest       string `json:"runtimeDigest"`

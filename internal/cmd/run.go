@@ -56,8 +56,8 @@ func newRunCommand() *cobra.Command {
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "maximum duration of each oracle process; 0 derives each oracle group's budget from its measured baseline (an explicit value is the uniform override)")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling per oracle process tree in MiB (GOMEMLIMIT plus a hard data-segment cap): 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host")
 	f.IntVar(&o.jobs, "jobs", 0, "concurrent mutant runs; 0 = half the CPUs")
-	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "external surface the oracle legitimately reads (module-relative path or absolute file, repeatable; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run")
-	f.StringArrayVar(&o.scratchNamespaces, "scratch-namespace", nil, "in-module run-scratch namespace DIR:PATTERN (repeatable): DIR is module-relative, PATTERN a single-component os.MkdirTemp-style name pattern; oracle scratch minted and removed inside the namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches - the caller's assertion; malformed declarations refuse before any load")
+	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "external surface the oracle legitimately reads (tree-relative path resolved against --dir, or absolute file or directory, repeatable; a path escaping the tree or under a tool-excluded directory is refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run")
+	f.StringArrayVar(&o.scratchNamespaces, "scratch-namespace", nil, "in-tree run-scratch namespace DIR:PATTERN (repeatable): DIR is tree-relative (resolved against --dir), PATTERN a single-component os.MkdirTemp-style name pattern; oracle scratch minted and removed inside the namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches - the caller's assertion; malformed declarations refuse before any load")
 	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence")
 	f.BoolVar(&o.staged, "staged", false, "measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target (stage or stash it), and an input outside the repository refuses it at preparation, before any probe (measure unstaged)")
 	f.BoolVar(&o.force, "force", false, "re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without --force")
@@ -121,7 +121,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: docPath, ModuleDir: o.dir, Plan: o.plan,
 		Budget: o.budget, OracleTimeout: o.oracleTimeout,
-		ScratchNamespaces: o.scratchNamespaces, Vouches: o.vouches,
+		ScratchNamespaces: o.scratchNamespaces, Vouches: o.vouches, BracketPaths: o.bracketPaths,
 		TargetSources: sources,
 	})
 	if err != nil {

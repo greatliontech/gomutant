@@ -134,13 +134,14 @@ type Options struct {
 	// or what the caller must ensure (REQ-exec-property-oracles).
 	PropertyOracle func(PropertyOracleNote)
 	// BracketPaths declares external surfaces the oracle legitimately
-	// reads — module-relative paths (a file or a directory tree) or
-	// absolute files — extending each spawn's observation bracket beyond
-	// the oracle package directory (REQ-exec-observation). An absolute
-	// external directory cannot be walked and is refused at run start,
-	// as is a path under a tool-excluded directory. Declaring a path
-	// carries the bracket contract's mutation-free assertion for the
-	// span.
+	// reads — tree-relative paths (a file or a directory tree),
+	// resolved against the tree root as one declared surface for every
+	// module's oracles, or absolute files or directories outside the
+	// tree — extending each spawn's observation bracket beyond the
+	// oracle package directory (REQ-exec-observation). A relative path
+	// escaping the tree, or one under a tool-excluded directory, is
+	// refused at run start. Declaring a path carries the bracket
+	// contract's mutation-free assertion for the span.
 	BracketPaths []string
 	// Staged pins the run to the git index snapshot
 	// (REQ-result-staged): staged-but-uncommitted content is the
@@ -163,9 +164,9 @@ type Options struct {
 	// re-reads the record itself, so revocation bites every later
 	// classification.
 	Exemptions []Exemption
-	// ScratchNamespaces declares in-module run-scratch namespaces for
+	// ScratchNamespaces declares in-tree run-scratch namespaces for
 	// observation ingest (REQ-exec-scratch-namespace): each is a
-	// module-relative directory plus a single-component os.MkdirTemp
+	// tree-relative directory plus a single-component os.MkdirTemp
 	// name pattern, becoming a gofresh scratch namespace
 	// (REQ-inputs-scratch-namespace) over every oracle observation. The
 	// declaration forfeits exactly the appearance-pin of absence-probes
@@ -1515,7 +1516,7 @@ func overlayBypassedRead(f *Finding, w work) bool {
 	if len(mutated) == 0 {
 		return false
 	}
-	paths, err := runtimeinput.Paths(f.TargetEvidence.RuntimeInputs, w.targetView.moduleDir)
+	paths, err := runtimeinput.Paths(f.TargetEvidence.RuntimeInputs, evidenceBase(w.targetView.evidenceDir, f.TargetEvidence))
 	if err != nil {
 		return false
 	}
@@ -1544,20 +1545,34 @@ func splitSurvivorPosition(position string) (file string, line, col int, ok bool
 }
 
 // validateBracketPaths refuses declarations the observation bracket
-// cannot honor, loudly and before any measurement: an absolute external
-// directory cannot be walked by the bracket's hashing semantics (its
-// capture would seal every observation in the run - strictly worse than
-// not declaring), and a path under a tool-excluded directory would be
-// silently uncovered (REQ-exec-observation).
-func validateBracketPaths(paths []string) error {
+// cannot honor, loudly and before any measurement. A relative path is
+// tree-relative — resolved against the invocation's tree root, one
+// declared surface for every module's oracles — so one that escapes
+// the tree names nothing the bracket can cover (declare it absolute),
+// and one under a tool-excluded directory would be silently uncovered.
+// An absolute path, file or directory, declares an external surface
+// as it is: a replace module outside the repository is one surface,
+// walked by the bracket, never an enumeration of its files
+// (REQ-exec-observation).
+func validateBracketPaths(treeDir string, paths []string) error {
 	for _, p := range paths {
 		if filepath.IsAbs(p) {
-			if info, err := os.Stat(p); err == nil && info.IsDir() {
-				return fmt.Errorf("gomutant: bracket path %s is an absolute directory the observation bracket cannot walk; declare it module-relative or declare the files it contains", p)
+			// The in-tree absolute spelling is the relative declaration:
+			// judged as one, so a tool-excluded path refuses under either
+			// spelling instead of recording excluded and uncovered. The
+			// tree root is judged in both its given and its resolved form
+			// (moduleRelInputs keeps the same pair): a repository reached
+			// through a symlinked prefix spells its own files either way.
+			rel, ok := treeRelative(treeDir, p)
+			if !ok {
+				continue
 			}
-			continue
+			p = rel
 		}
 		clean := path.Clean(filepath.ToSlash(p))
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("gomutant: bracket path %s escapes the tree root; a relative path resolves against the tree, declare a surface outside it absolute", p)
+		}
 		for _, excluded := range []string{".git", ".stipulator", ".gomutant"} {
 			if clean == excluded || strings.HasPrefix(clean, excluded+"/") {
 				return fmt.Errorf("gomutant: bracket path %s lies under tool-excluded %s and would be silently uncovered", p, excluded)
@@ -1567,20 +1582,19 @@ func validateBracketPaths(paths []string) error {
 	return nil
 }
 
-// preflightBracketPaths proves each declared bracket path exists and
-// hashes against one measured module's root - the same base the
-// per-spawn capture resolves against - refusing before that module's
-// first spawn instead of burning a campaign whose every observation
-// would seal at finalization: the field failure this guards against
-// declared a transient per-test directory that test cleanup deleted
-// before end-bracket hashing (REQ-exec-observation). A surface the
-// oracle reads exists before the run; a path that legitimately churns
-// wants a scratch namespace, not a bracket path.
-func preflightBracketPaths(ctx context.Context, moduleDir string, paths []string) error {
+// bracketPathsExist proves each declared bracket path exists under the
+// tree root - the base every spawn's frame resolves against - the
+// input-decidable half of the preflight, fired before the lock and the
+// load on both faces (REQ-exec-preparation): the field failure this
+// guards against declared a transient per-test directory that test
+// cleanup deleted before end-bracket hashing. A surface the oracle
+// reads exists before the run; a path that legitimately churns wants a
+// scratch namespace, not a bracket path.
+func bracketPathsExist(ctx context.Context, treeDir string, paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	root, err := filepath.EvalSymlinks(moduleDir)
+	root, err := filepath.EvalSymlinks(treeDir)
 	if err != nil {
 		return fmt.Errorf("gomutant: bracket path preflight: %w", err)
 	}
@@ -1595,23 +1609,30 @@ func preflightBracketPaths(ctx context.Context, moduleDir string, paths []string
 		if _, err := os.Stat(full); err != nil {
 			return fmt.Errorf("gomutant: bracket path %s does not exist at run start (%v); a transient per-test path wants --scratch-namespace, not a bracket path", p, err)
 		}
-		// Hashability preflight mirrors the bracket's tolerance classes
-		// (regular files, directories, symlinks hash; anything else is
-		// recorded unhashable and seals at ingest) - capture itself
-		// tolerates unhashable entries, so the walk is the only place a
-		// refusal can happen before the campaign burns.
-		err := filepath.WalkDir(full, func(entry string, d iofs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if kind := d.Type(); !d.IsDir() && !kind.IsRegular() && kind&iofs.ModeSymlink == 0 {
-				return fmt.Errorf("irregular entry %s (%s)", entry, kind)
-			}
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("gomutant: bracket path %s preflight failed (%v); refusing before measurement rather than sealing every observation", p, err)
-		}
+	}
+	return nil
+}
+
+// preflightBracketPaths is the loaded-set half of the preflight, once
+// per run before the first spawn: the declared paths exist, and a
+// bracket captured under the tree root with the spawn's own option set
+// fingerprints every one of them — an unhashable object, a root under
+// or containing a volatile OS root, the filesystem root refuse here
+// instead of sealing every observation of a burned campaign
+// (REQ-exec-observation).
+func preflightBracketPaths(ctx context.Context, treeDir string, paths []string) error {
+	if err := bracketPathsExist(ctx, treeDir, paths); err != nil {
+		return err
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	root, err := filepath.EvalSymlinks(treeDir)
+	if err != nil {
+		return fmt.Errorf("gomutant: bracket path preflight: %w", err)
+	}
+	if err := engine.PreflightBracket(ctx, root, paths); err != nil {
+		return fmt.Errorf("gomutant: bracket path preflight refused (%v); refusing before measurement rather than sealing every observation", err)
 	}
 	return nil
 }
@@ -1629,7 +1650,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// caller has to re-implement the suppression.
 		opts.Commit = nil
 	}
-	if err := validateBracketPaths(opts.BracketPaths); err != nil {
+	if err := validateBracketPaths(t.dir, opts.BracketPaths); err != nil {
 		return nil, err
 	}
 	for _, namespace := range opts.ScratchNamespaces {
@@ -2099,29 +2120,20 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 	}
-	// Bracket-path preflight is per measured module — the base each
-	// oracle package's spawn capture resolves against — memoized, and
-	// fired at a target's measure decision before its observed union
-	// (REQ-exec-preparation's loaded-set stage): a served target never
-	// preflights, a plan reaches it, and nothing costly precedes it.
-	bracketPreflights := map[string]error{}
+	// Bracket-path preflight is once per run at the tree root — the base
+	// every spawn's frame resolves against — fired at the first target's
+	// measure decision before its observed union (REQ-exec-preparation's
+	// loaded-set stage): a run serving every target never captures the
+	// preflight bracket (the faces proved the paths exist before the
+	// load), a plan reaches it, and nothing costly precedes it.
+	preflightBracket := sync.OnceValue(func() error {
+		return preflightBracketPaths(ctx, t.dir, opts.BracketPaths)
+	})
 	preflightOracleModules := func(oracle []string) error {
 		if len(opts.BracketPaths) == 0 {
 			return nil
 		}
-		for _, run := range pkgRuns(oracle) {
-			moduleDir, _, err := preparation.packageContext(ctx, run.pkg)
-			if err != nil {
-				return err
-			}
-			if _, seen := bracketPreflights[moduleDir]; !seen {
-				bracketPreflights[moduleDir] = preflightBracketPaths(ctx, moduleDir, opts.BracketPaths)
-			}
-			if err := bracketPreflights[moduleDir]; err != nil {
-				return err
-			}
-		}
-		return nil
+		return preflightBracket()
 	}
 	// producerViewsFor builds a target's observed producer views: the
 	// shared union's subset for the target or, on a fault the campaign
@@ -2262,7 +2274,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						return "", ctx.Err()
 					}
 					if herr == nil && held {
-						adopted, aerr := runtimeinput.AdoptEnv(banked.Manifest, group.moduleDir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
+						adopted, aerr := runtimeinput.AdoptEnv(banked.Manifest, t.dir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
 						if aerr == nil && adopted.Digest == banked.Digest {
 							reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0], Banked: true})
 							raw := time.Duration(banked.RawMillis) * time.Millisecond
@@ -4799,12 +4811,14 @@ func (t *Tree) externalInputs(ctx context.Context, repository repositoryState, t
 // stamp-time cannot-derive state exists; nil for symbol targets) - and
 // runtime-input paths
 // derived from the finding's own subject evidence (attached before any
-// stamp on every path). Manifest identities are module-relative, so
-// each subject's manifest resolves against that subject's own module
-// directory - under a repository root above the module, resolving at
-// the root would materialize local-but-nonexistent paths whose
-// dirtiness git never reports, letting a false-clean portable row land
-// (REQ-result-stale, REQ-result-layers). A record measured under dirty
+// stamp on every path). Manifest identities are tree-relative — every
+// subject's evidence is anchored at the tree root
+// (subjectView.evidenceDir) — so each manifest resolves at the tree; a
+// record from before the anchor carries its member base and resolves
+// there, never at a root that would materialize local-but-nonexistent
+// paths whose dirtiness git never reports and let a false-clean
+// portable row land (REQ-result-stale, REQ-result-layers). A record
+// measured under dirty
 // provenance becomes portable the first time it stamps with those paths
 // clean, its attestations riding the promotion. An unreadable evidence
 // manifest, or evidence naming a subject no view carries, stamps dirty
@@ -4828,14 +4842,11 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 	// already refused at resolve), so a dirty probed file never stamps
 	// clean provenance.
 	sourceFiles = append(sourceFiles, shapedFiles...)
-	moduleDirs := map[string]string{}
 	viewEnvs := map[string][]string{}
 	if targetView != nil {
-		moduleDirs[targetView.symbol] = targetView.moduleDir
 		viewEnvs[targetView.symbol] = targetView.env
 	}
 	for _, oracleView := range oracleViews {
-		moduleDirs[oracleView.symbol] = oracleView.moduleDir
 		viewEnvs[oracleView.symbol] = oracleView.env
 	}
 	var evidenceFaults []string
@@ -4846,7 +4857,10 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		if evidence.RuntimeInputs == "" {
 			continue
 		}
-		base := moduleDirs[evidence.Symbol]
+		base := ""
+		if _, viewed := viewEnvs[evidence.Symbol]; viewed {
+			base = evidenceBase(t.dir, evidence)
+		}
 		if base == "" {
 			// Terminal: later evidence goes unexamined, fail-closed. A
 			// staged run refuses here — its records never persist dirty
@@ -5530,13 +5544,13 @@ func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Fin
 		return splicedEvidence{}, err
 	}
 	if foldRecorded {
-		union, err = t.foldRecordedUnion(ctx, env, rec, targetView.moduleDir, union)
+		union, err = t.foldRecordedUnion(ctx, env, rec, evidenceBase(t.dir, rec.TargetEvidence), union)
 		if err != nil {
 			return splicedEvidence{}, err
 		}
 	}
 	portable := newPortableUnion(union, engine.OracleEvidenceEnv(env))
-	union, rec, err = t.applySplicedUnion(ctx, env, rec, union, portable, targetView.moduleDir)
+	union, rec, err = t.applySplicedUnion(ctx, env, rec, union, portable, evidenceBase(t.dir, rec.TargetEvidence))
 	if err != nil {
 		return splicedEvidence{}, err
 	}
@@ -5573,8 +5587,8 @@ func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding,
 		}
 		return union, nil
 	}
-	// Persisted evidence is module-relative
-	// (REQ-inputs-relative-identities); the merge world is absolute, so
+	// Persisted evidence is relative to the base its record is anchored
+	// at (REQ-inputs-relative-identities); the merge world is absolute, so
 	// the adopted record converts before it re-enters
 	// (REQ-inputs-absolute-identities). An absolute-era record converts
 	// as the identity map.
@@ -5701,16 +5715,17 @@ func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Findin
 // into the union and stamps every subject's evidence with the resulting
 // unverifiable state, so the spliced finding is preserved but never reusable
 // (REQ-result-stale's fail-closed bound).
-func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding, union runtimeinput.Observation, portable *portableUnion, targetModuleDir string) (runtimeinput.Observation, Finding, error) {
+func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding, union runtimeinput.Observation, portable *portableUnion, recordBase string) (runtimeinput.Observation, Finding, error) {
 	state, err := runtimeinput.CompletedState(union)
 	if err != nil {
 		return runtimeinput.Observation{}, Finding{}, err
 	}
-	// The record's union is judged in its own persisted form: the
-	// module-relative one this era writes, or the absolute one an
-	// older record carries — either matching means nothing diverged
+	// The record's union is judged in its own persisted form: relative
+	// to the base the record is anchored at (the tree, or a pre-anchor
+	// record's member base), or the absolute one an older record
+	// carries — either matching means nothing diverged
 	// (REQ-inputs-relative-identities).
-	relObservation, err := portable.at(targetModuleDir)
+	relObservation, err := portable.at(recordBase)
 	if err != nil {
 		return runtimeinput.Observation{}, Finding{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
@@ -5749,11 +5764,7 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 	// (REQ-inputs-relative-identities).
 	*portable = *newPortableUnion(union, portable.env)
 	stampAt := func(evidence SubjectEvidence) (SubjectEvidence, error) {
-		base := t.dir
-		if evidence.ModuleBase != "" {
-			base = filepath.Join(t.dir, filepath.FromSlash(evidence.ModuleBase))
-		}
-		stamped, err := portable.at(base)
+		stamped, err := portable.at(evidenceBase(t.dir, evidence))
 		if err != nil {
 			return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 		}
@@ -5787,24 +5798,74 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 // carry. Best-effort - ok reports whether the manifest decoded; a
 // decodable manifest with no tree-local entries returns an empty set,
 // which is a statement, not an absence.
-func moduleRelInputs(encoded, treeDir string) (paths []string, ok bool) {
+// evidenceBase is the directory a subject's recorded manifest is
+// anchored at: the tree root, or — for a record from before evidence
+// anchored at the tree — the member module base it carries
+// (REQ-result-layers).
+func evidenceBase(treeDir string, evidence SubjectEvidence) string {
+	if evidence.ModuleBase == "" {
+		return treeDir
+	}
+	return filepath.Join(treeDir, filepath.FromSlash(evidence.ModuleBase))
+}
+
+// treeRelative is p's slash-form path relative to the tree root, judged
+// over every pairing of the root and p as given and as symlink-resolved
+// (a repository reached through a symlinked prefix spells its own files
+// either way, on either side); a p that does not yet exist resolves
+// through its deepest existing ancestor. False when p lies outside the
+// tree under every pairing.
+func treeRelative(treeDir, p string) (string, bool) {
 	bases := []string{treeDir}
 	if resolved, err := filepath.EvalSymlinks(treeDir); err == nil && resolved != treeDir {
 		bases = append(bases, resolved)
 	}
+	forms := []string{p}
+	if resolved, ok := resolveThroughAncestor(p); ok && resolved != p {
+		forms = append(forms, resolved)
+	}
+	for _, base := range bases {
+		for _, form := range forms {
+			rel, err := filepath.Rel(base, form)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				continue
+			}
+			return filepath.ToSlash(rel), true
+		}
+	}
+	return "", false
+}
+
+// resolveThroughAncestor symlink-resolves p, or — when p does not exist
+// — its deepest existing ancestor with the unresolved remainder joined
+// back on; false when nothing on the chain resolves.
+func resolveThroughAncestor(p string) (string, bool) {
+	rest := ""
+	for dir := p; ; {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			if rest == "" {
+				return resolved, true
+			}
+			return filepath.Join(resolved, rest), true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+	}
+}
+
+func moduleRelInputs(encoded, treeDir string) (paths []string, ok bool) {
 	abs, err := runtimeinput.Paths(encoded, treeDir)
 	if err != nil {
 		return nil, false
 	}
 	out := []string{}
 	for _, p := range abs {
-		for _, base := range bases {
-			rel, rerr := filepath.Rel(base, p)
-			if rerr != nil || rel == ".." || strings.HasPrefix(rel, "../") {
-				continue
-			}
-			out = append(out, filepath.ToSlash(rel))
-			break
+		if rel, ok := treeRelative(treeDir, p); ok {
+			out = append(out, rel)
 		}
 	}
 	return out, true

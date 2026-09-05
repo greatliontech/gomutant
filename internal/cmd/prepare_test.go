@@ -55,6 +55,8 @@ func TestRunRefusesItsInputsBeforeAnyLoad(t *testing.T) {
 	refuses("targets and changed", runOptions{targetsFile: doc, changed: "HEAD"}, "--targets and --changed were given")
 	refuses("inline targets document", runOptions{targetsFile: "{\"targets\":[]}"}, "looks like an inline JSON document")
 	refuses("malformed scratch namespace", runOptions{scratchNamespaces: []string{"no-colon"}}, "scratch")
+	refuses("bracket path escaping the tree", runOptions{bracketPaths: []string{"../outside"}}, "escapes the tree root")
+	refuses("absent bracket path", runOptions{bracketPaths: []string{"no-such-surface"}}, "does not exist at run start")
 	refuses("malformed vouch", runOptions{vouches: []string{"not-an-identity"}}, "vouch")
 	// A missing root refuses before the lock, whose file would have
 	// created it: the findings path lies under the root, so creation

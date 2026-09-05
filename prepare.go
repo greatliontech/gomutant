@@ -26,10 +26,14 @@ type CampaignInputs struct {
 	// Budget and OracleTimeout are the run's bounds, sign-checked here.
 	Budget        int
 	OracleTimeout time.Duration
-	// ScratchNamespaces and Vouches are the caller's declarations,
-	// parsed here so a malformed one refuses before any load.
+	// ScratchNamespaces, Vouches, and BracketPaths are the caller's
+	// declarations, parsed here so a malformed one refuses before any
+	// load; a bracket path is also proven present and capturable under
+	// the tree root here, the base every spawn's bracket resolves
+	// against.
 	ScratchNamespaces []string
 	Vouches           []string
+	BracketPaths      []string
 	// TargetSources names the target sources the caller supplied, in
 	// the caller's own spelling — the flags or parameters given; at most
 	// one may be given.
@@ -110,6 +114,16 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("gomutant: tree root %s is not a directory", in.ModuleDir)
+	}
+	// A bracket path's shape and presence are decidable from the tree
+	// root alone (REQ-exec-observation) — refused here, before the lock
+	// and the load; whether the bracket can fingerprint it is the run's
+	// once-per-run capture at the loaded-set stage.
+	if err := validateBracketPaths(in.ModuleDir, in.BracketPaths); err != nil {
+		return nil, err
+	}
+	if err := bracketPathsExist(ctx, in.ModuleDir, in.BracketPaths); err != nil {
+		return nil, err
 	}
 	// The store opens the exemptions record beside the document; the
 	// document itself is read now, so its refusals fire before any load.

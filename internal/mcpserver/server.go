@@ -560,8 +560,8 @@ type runIn struct {
 	TimeoutSec        *int     `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before the final findings commit after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
 	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 derives each oracle group's budget from its measured baseline (an explicit value is the uniform override)"`
 	Jobs              int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
-	BracketPaths      []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (module-relative paths or absolute files; absolute directories and tool-excluded paths are refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
-	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-module run-scratch namespaces DIR:PATTERN (DIR module-relative, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any load. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness (RemoveAll before MkdirAll) and expect permission-mangled residue from mutated code"`
+	BracketPaths      []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (tree-relative paths resolved against the tree root, or absolute files or directories; a path escaping the tree or under a tool-excluded directory is refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
+	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-tree run-scratch namespaces DIR:PATTERN (DIR tree-relative, resolved against the tree root, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any load. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness (RemoveAll before MkdirAll) and expect permission-mangled residue from mutated code"`
 	OracleMemoryMiB   *int64   `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling per oracle process tree in MiB: absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host"`
 	Staged            bool     `json:"staged,omitempty" jsonschema:"measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target, and an input outside the repository refuses it at preparation, before any probe"`
 	Force             bool     `json:"force,omitempty" jsonschema:"re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force"`
@@ -822,8 +822,8 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: s.findingsPath(in.Findings), ModuleDir: s.dir,
 		Budget: in.Budget, OracleTimeout: oracleTimeout,
-		ScratchNamespaces: in.ScratchNamespaces,
-		TargetSources:     targetSourcesGiven(in.TargetsPath, in.TargetsJSON, in.Changed),
+		ScratchNamespaces: in.ScratchNamespaces, BracketPaths: in.BracketPaths,
+		TargetSources: targetSourcesGiven(in.TargetsPath, in.TargetsJSON, in.Changed),
 	})
 	if err != nil {
 		return nil, out, err
@@ -1810,7 +1810,7 @@ type ephemeralIn struct {
 	Replacement      string               `json:"replacement,omitempty" jsonschema:"the whole replacement source; give exactly one mutation form"`
 	Edits            []gomutant.Edit      `json:"edits,omitempty" jsonschema:"exact-match edits applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file"`
 	BatchEdits       []gomutant.BatchEdit `json:"batch_edits,omitempty" jsonschema:"atomic file-scoped exact-match edits; every match resolves against the original file snapshot"`
-	TestPkg          string               `json:"test_pkg" jsonschema:"go package path whose named test decides the kill"`
+	TestPkg          string               `json:"test_pkg" jsonschema:"package whose named test decides the kill: an import path, or a package directory spelled like go test does (. or ./x) resolved against the tree root"`
 	Run              string               `json:"run" jsonschema:"-run pattern naming the deciding test"`
 	TimeoutSec       *int                 `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before attributed result completion after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
 	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of the baseline and mutant oracle processes in seconds; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way; the result reports the effective budget"`
