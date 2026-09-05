@@ -180,8 +180,8 @@ to=example.com/new. after a package rename, then for real.
 **knobs:**
 - `file` (mcp, cli) — tree-relative source file for replacement or edits; omit for batch edits.
 - `replacement` (mcp, cli) — the whole replacement source: inline content on mcp, a path to it on the cli.
-- `edits` (mcp) — exact-match edits applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file.
-- `batch_edits` (mcp, cli as `batch`) — atomic file-scoped exact-match edits ({file, old_string, new_string}); every match resolves against the original file snapshot. Inline on mcp; a JSON path or - for stdin on the cli.
+- `edits` (mcp) — exact-match edits ({old, new}) applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file.
+- `batch_edits` (mcp, cli as `batch`) — atomic file-scoped exact-match edits ({file, old_string, new_string}; on the cli a JSON file `{"edits":[…]}` or - for stdin); every match resolves against the original file snapshot. Inline on mcp; a JSON path or - for stdin on the cli.
 - `test_pkg` (mcp, cli as `test-pkg`) — go package path whose named test decides the kill.
 - `run` (mcp, cli) — -run pattern naming the deciding test.
 - `timeout_sec` (mcp, cli as `timeout`) — cancel work before attributed result completion; on mcp omitted means 300 seconds and an explicit 0 unlimited, on the cli a duration defaulting to unlimited.
@@ -253,18 +253,19 @@ orientation.
 
 ## decision map
 
-gomutant measures whether tests notice mutations. The loop: run measures
-targets (whole tree, changed vs a git ref, or a targets document) and
-maintains the findings document incrementally — prior findings with
-matching pins are served, and each decision line says why; findings
-inspects the document (survivors with execution buckets, candidate
-evidence, repo/local layer) without running anything — recorded facts by
-default, cheap at any size; the judge knob re-derives freshness states
-(current, stale, unverifiable, detached) against the tree, one pass over
-the records' shared subject views, seconds-class where it was
-minutes-class, and a state filter or a tags/toolchain selection implies
-it; attest_survivor dispositions an equivalent mutant with the reasoning
-on record; prune removes resolved-dead records after a refactor and
+gomutant measures whether tests notice mutations. The entry call is run
+over the tree (or changed=REF at a gate). The loop: run measures targets
+(whole tree, changed vs a git ref, or a targets document) and maintains
+the findings document incrementally — prior findings with matching pins
+are served, and each decision line says why; findings inspects the
+document (survivors with execution buckets, candidate evidence,
+repo/local layer) without running anything — recorded facts by default,
+cheap at any size; the judge knob re-derives freshness states (current,
+stale, unverifiable, detached) against the tree, one pass over the
+records' shared subject views, seconds-class where it was minutes-class,
+and a state filter or a tags/toolchain selection implies it;
+attest_survivor dispositions an equivalent mutant with the reasoning on
+record; prune removes resolved-dead records after a refactor and
 retarget follows a rename (both with check previews); ephemeral probes
 one hand-written mutant without persisting a finding — its attest knob
 records a judged equivalence in the committed record beside the

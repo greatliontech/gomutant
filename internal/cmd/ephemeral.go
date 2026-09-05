@@ -34,7 +34,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.file, "file", "", "tree-relative source file to replace")
 	selectionFlags(f, &o.tags, &o.toolchain)
 	f.StringVar(&o.replacement, "replacement", "", "path to the whole replacement source")
-	f.StringVar(&o.batch, "batch", "", "JSON edit-batch path, or - for stdin")
+	f.StringVar(&o.batch, "batch", "", "JSON edit-batch path, or - for stdin: {\"edits\":[{\"file\",\"old_string\",\"new_string\"},…]}, every match resolving against the original file")
 	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill")
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")

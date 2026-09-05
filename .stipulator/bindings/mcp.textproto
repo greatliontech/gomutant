@@ -297,3 +297,30 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "873bb614bacb4f68c88c716944bbb759ee280ac1dc411eec4e2d1ab72ff30c3f"
 }
+
+bindings {
+  requirement_id: "REQ-mcp-surfaces"
+  content_hash: "6c55183991ebcf372cf17c79f26fa94464df9cc1d4744e165dadd6d4af01d49a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableTracksTheGuidanceVerbs"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6df27b58b3c60a07de8fefd3bb8e07b046dea8a715bbaaf2b1caaba41169e30c"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-surfaces"
+  content_hash: "6c55183991ebcf372cf17c79f26fa94464df9cc1d4744e165dadd6d4af01d49a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableStatesTheHeldBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "95b4dce2a5a026cc2549d41c4a8e3a936c95908831742a47eaf2ee30ae8a3a83"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-guidance"
+  content_hash: "eda0b1def26054c1175069bd6405d7d715203bff69028adb6f1264941143c37e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestBatchShapeIsStatedWhereItIsRead"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "33657b8038e2b9e831919e8dc86290d89f9cbd5fc41956d7615c302b83a5978c"
+}

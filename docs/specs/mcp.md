@@ -77,6 +77,28 @@ or execution stretch stays silent past a client's deadline. The server's
 instructions and each tool's description teach when to use what and what
 the caps mean.
 
+**REQ-mcp-surfaces** (behavior): Each verb's default behaviour, output,
+and values MUST be the ones its surface's reader is served by — the MCP
+face an agent paying per token, the CLI face a person at a terminal — as
+the table below records. The table's verbs and faces are the guidance
+document's, and every bound and timeout it states is the one the
+envelope policy and the command deadline hold (enforced by the
+surface-table pin).
+
+| verb | faces | CLI default | MCP default | shared values |
+| --- | --- | --- | --- | --- |
+| run | mcp, cli | a human progress line on the shared cadence, then the report; `--json` the JSON-lines stream; `--plan` the preflight; the command timeout unlimited | counts lead; finding rows capped at 50 with open survivors at 20 per record; preparation events and decisions as notifications under a progress token (a heartbeat on the shared cadence), inline and capped without one; the command timeout 300 seconds | oracle timeout 0 derives each group's budget from its measured baseline; vouches per call on the CLI, per server on MCP |
+| discover | mcp, cli | a human table; `--json` the target document | counts lead; target, oracle-set, and residue rows capped at 50 unless `detail`; oracle sets referenced by id | one target source: the tree, `changed`, or a targets document |
+| findings | mcp, cli | a human summary with the ephemeral-attestation count and the layer counts; `--json` the complete finding rows (the ephemeral-attestation record is the file beside the document, which a CLI reader has) | one summary row per record capped at 50; the ephemeral attestations inline (an MCP reader has no file) capped at 50; the layer counts | `detail` for full rows on both faces; `judge` re-derives freshness (a state filter or a selection implies it); filters by state, symbol, label |
+| explain | mcp | — | a symbol's causal record, or the document's promotion triage; groups capped at 50, symbols per group at 10, open survivors and clauses at 20 | — |
+| attest_survivor (CLI `attest`) | mcp, cli | the recorded echo with the record's layer and its judged state | the same | symbol, position, operator, reason |
+| prune | mcp, cli | the removals; `--check` previews | the removals, never truncated (the lifecycle exception to the row bound, REQ-mcp-lifecycle); `check` previews | the selection decides which records are dead |
+| retarget | mcp, cli | the rewrites; `--check` previews | the rewrites capped at 50; `check` previews | `from` and `to` terminated alike |
+| ephemeral | mcp, cli | `--file` with a `--replacement` path, or `--batch` a JSON file `{"edits":[{"file","old_string","new_string"},…]}`; a progress line on the shared cadence; the command timeout unlimited | inline `replacement`, `edits`, or `batch_edits`; notifications and a heartbeat under a token; the command timeout 300 seconds | exactly one mutation form; runs 1–10; oracle timeout 0 derives the budget; `attest` records a judged equivalence |
+| guidance | mcp, cli | a verb's section, or the orientation | the same | — |
+| mcp | cli | serves the tools over stdio | — | per-server vouches |
+| version | cli | the binary and document versions | — | — |
+
 **REQ-mcp-guidance** (behavior): Tool-level served prose MUST be the
 embedded guidance document's projections (`docs/guidance.md`, in the
 fleet format gofresh's guidance spec defines): every tool description

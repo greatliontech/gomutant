@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -71,4 +72,49 @@ func TestProgressCadenceIsOnePolicy(t *testing.T) {
 	if verbProgressInterval != gomutant.ProgressCadence {
 		t.Fatalf("verb line cadence = %s; want %s", verbProgressInterval, gomutant.ProgressCadence)
 	}
+}
+
+// The CLI edit-batch shape is stated where its readers look — the
+// batch flag's help and the guidance document's knob — and both state
+// the same wrapper the parser accepts.
+func TestBatchShapeIsStatedWhereItIsRead(t *testing.T) {
+	const shape = `{"edits":[`
+	usage := newEphemeralCommand().Flags().Lookup("batch").Usage
+	if !strings.Contains(usage, shape) {
+		t.Fatalf("--batch help %q does not state the file shape", usage)
+	}
+	doc, err := gomutant.GuidanceDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range doc.Verbs {
+		if v.Name != "ephemeral" {
+			continue
+		}
+		knobs := map[string]string{}
+		for _, k := range v.Knobs {
+			knobs[k.Name] = k.Text
+		}
+		// The field names each knob states are the types' own wire names.
+		for knob, typ := range map[string]reflect.Type{"batch_edits": reflect.TypeOf(gomutant.BatchEdit{}), "edits": reflect.TypeOf(gomutant.Edit{})} {
+			text, ok := knobs[knob]
+			if !ok {
+				t.Fatalf("no %s knob in the guidance document", knob)
+			}
+			for i := 0; i < typ.NumField(); i++ {
+				name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+				if !strings.Contains(text, name) {
+					t.Fatalf("the %s knob %q does not name the field %q", knob, text, name)
+				}
+			}
+		}
+		if !strings.Contains(knobs["batch_edits"], shape) {
+			t.Fatalf("the batch_edits knob %q does not state the file shape", knobs["batch_edits"])
+		}
+		if _, err := gomutant.ParseEditBatch([]byte(`{"edits":[{"file":"a.go","old_string":"a","new_string":"b"}]}`)); err != nil {
+			t.Fatalf("the stated shape does not parse: %v", err)
+		}
+		return
+	}
+	t.Fatal("no ephemeral verb in the guidance document")
 }
