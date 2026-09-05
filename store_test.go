@@ -1,11 +1,13 @@
 package gomutant
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -677,7 +679,7 @@ func TestStoreUpdateRewritesOnlyChangedEntries(t *testing.T) {
 	}
 	before := map[string]string{"p.A": identity("p.A"), "p.B": identity("p.B"), "p.C": identity("p.C")}
 	var walked []string
-	store.walkHook = func(symbol string) { walked = append(walked, symbol) }
+	store.hooks.walk = func(symbol string) { walked = append(walked, symbol) }
 	changedB := local("p.B")
 	changedB.BodyHash = "h2"
 	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
@@ -793,5 +795,539 @@ func TestStoreDeletesTheEntryWhenAnUnchangedRecordBecomesCommittable(t *testing.
 	repo, _ := ParseFindings(repoData)
 	if len(repo) != 1 || repo[0].Symbol != "p.A" {
 		t.Fatalf("repo layer = %+v; want the exempted record", repo)
+	}
+}
+
+// The repo document is parsed once per distinct content: the store's
+// own commits fill the cache with the rows they wrote, so a run's
+// incremental commits and the reads between them parse nothing; the key
+// is the content itself, so a foreign rewrite a stat identity could not
+// tell apart (same size, same modification time) is still re-parsed —
+// the document is every commit's merge base, and a stale prior there
+// would lose the foreign rows — while identical bytes rewritten are
+// served (REQ-result-layers).
+func TestStoreParsesTheDocumentOncePerContent(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "findings.json")
+	store, err := OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+		return []Finding{storeFinding("p.A", nil), storeFinding("p.B", nil)}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parses := 0
+	store.hooks.documentParse = func() { parses++ }
+	for range 2 {
+		if _, err := store.Load(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changed := storeFinding("p.B", func(f *Finding) { f.BodyHash = "h2" })
+	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		next := append([]Finding(nil), current...)
+		for i := range next {
+			if next[i].Symbol == "p.B" {
+				next[i] = changed
+			}
+		}
+		return next, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if merged := loadSymbols(t, store); merged["p.B"].BodyHash != "h2" {
+		t.Fatalf("the committed change is not served: %+v", merged["p.B"])
+	}
+	if parses != 0 {
+		t.Fatalf("document parses after the store's own writes = %d; want none", parses)
+	}
+	// A foreign rewrite of the same size at the same modification time.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := bytes.Replace(data, []byte(`"bodyHash": "h2"`), []byte(`"bodyHash": "h3"`), 1)
+	if bytes.Equal(foreign, data) || len(foreign) != len(data) {
+		t.Fatal("the foreign rewrite must differ in content only")
+	}
+	if err := os.WriteFile(path, foreign, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := os.Stat(path); err != nil || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
+		t.Fatalf("the foreign rewrite must keep the stat identity: %v, %v", after, err)
+	}
+	if merged := loadSymbols(t, store); merged["p.B"].BodyHash != "h3" {
+		t.Fatalf("a foreign rewrite of the same stat identity served stale: %+v", merged["p.B"])
+	}
+	if parses != 1 {
+		t.Fatalf("document parses after the foreign rewrite = %d; want one", parses)
+	}
+	// Identical bytes rewritten under a new modification time are served.
+	if err := os.WriteFile(path, foreign, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime().Add(time.Second), info.ModTime().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	loadSymbols(t, store)
+	if parses != 1 {
+		t.Fatalf("document parses after an identical rewrite = %d; want still one", parses)
+	}
+}
+
+// The cached document is exactly what a parse of the file yields, over
+// every record shape the format canonicalizes (absent and empty lists,
+// the optional shape and ledger tables, shared evidence) and across
+// changed, unchanged, and skipped rows — so a store write, which
+// re-parses only the rows it changed, leaves a readable document
+// (REQ-result-export) and serves the same records a fresh reader sees.
+func TestStoreCachedDocumentEqualsAFreshParse(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "findings.json")
+	store, err := OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	shapes := []func(*Finding){
+		nil,
+		func(f *Finding) {
+			f.Operators = nil
+			f.CandidateCount, f.Generated, f.Mutants, f.Killed = 0, 0, 0, 0
+		},
+		func(f *Finding) {
+			f.Operators = []OperatorSummary{}
+			f.CandidateCount, f.Generated, f.Mutants, f.Killed = 0, 0, 0, 0
+		},
+		func(f *Finding) { f.Kills, f.Survivors, f.Attested, f.CandidateEvidence, f.Labels = []Kill{}, []Survivor{}, []Attestation{}, []CandidateEvidence{}, []string{} },
+		func(f *Finding) {
+			f.Mutants, f.Killed = 2, 1
+			f.Operators = []OperatorSummary{{Operator: "zero return", Generated: 2, Killed: 1, Survived: 1}}
+			f.Generated, f.CandidateCount = 2, 2
+			f.Survivors = []Survivor{{Operator: "zero return", Position: "p.go:1:1"}}
+			f.Kills = []Kill{{Operator: "zero return", Position: "p.go:2:1", Killer: "TestA"}}
+		},
+		func(f *Finding) {
+			f.Shape = &TargetShape{Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}}
+			f.TargetEvidence = SubjectEvidence{}
+		},
+		func(f *Finding) {
+			f.Shape = &TargetShape{Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}}
+			f.TargetEvidence, f.Labels = SubjectEvidence{}, []string{}
+		},
+		func(f *Finding) { f.CompartmentLedger = &CompartmentLedger{} },
+		func(f *Finding) { f.CompartmentLedger = &CompartmentLedger{Declarations: []CompartmentDeclaration{{File: "p.go", Kind: "func", Name: "A", Hash: "h"}}, FileHeaders: []CompartmentFileHeader{}} },
+		func(f *Finding) { f.OracleEvidence = append(f.OracleEvidence, cleanEvidence("p.ATest"), cleanEvidence("q.BTest")) },
+		func(f *Finding) { f.Cached = true },
+		func(f *Finding) { f.Exempted = []Exemption{} },
+		func(f *Finding) { f.Exempted = []Exemption{{Subject: "p", Reason: "r", Rationale: "why"}} },
+		func(f *Finding) {
+			f.Shape = &TargetShape{Manual: &ManualSpec{File: "p.go", Edits: []ManualEdit{{Find: "a", Replace: "b"}}}}
+			f.TargetEvidence = SubjectEvidence{}
+		},
+		func(f *Finding) {
+			f.Shape = &TargetShape{Manual: &ManualSpec{File: "p.go"}}
+			f.TargetEvidence = SubjectEvidence{}
+		},
+	}
+	documentParses, recordParses := 0, 0
+	var lastParsed string
+	store.hooks.documentParse = func() { documentParses++ }
+	store.hooks.recordParse = func(symbol string) { recordParses++; lastParsed = symbol }
+	check := func(step string) {
+		t.Helper()
+		if documentParses != 0 {
+			t.Fatalf("%s: the store re-parsed its own document %d times", step, documentParses)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fresh, err := ParseFindings(data)
+		if err != nil {
+			t.Fatalf("%s: the written document does not parse: %v", step, err)
+		}
+		if bytes.Contains(data, []byte(`"edits": null`)) {
+			t.Fatalf("%s: a manual shape's required edit list was written absent; the export writes it present like every required list", step)
+		}
+		served, err := store.Load(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(served, fresh) {
+			t.Fatalf("%s: the cached document differs from a fresh parse\nserved: %+v\nfresh:  %+v", step, served, fresh)
+		}
+	}
+	var records []Finding
+	for i, shape := range shapes {
+		records = append(records, storeFinding(fmt.Sprintf("p.S%d", i), shape))
+	}
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return records, nil }); err != nil {
+		t.Fatal(err)
+	}
+	check("first commit")
+	if recordParses != len(records) {
+		t.Fatalf("first commit parsed %d records; want every new record (%d)", recordParses, len(records))
+	}
+	// Each record changed in turn, the rest unchanged and re-supplied
+	// as served: exactly the changed record is re-parsed. A skipped
+	// record persists nothing: the symbol keeps its row.
+	for i := range records {
+		changed := records[i]
+		changed.BodyHash = "h2"
+		if i == 0 {
+			changed.Skipped = "no tests"
+		}
+		recordParses = 0
+		if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+			next := append([]Finding(nil), current...)
+			for j := range next {
+				if next[j].Symbol == changed.Symbol {
+					next[j] = changed
+				} else {
+					// An unchanged record re-supplied as served: the
+					// never-persisted flag must not reach the cache.
+					next[j].Cached = true
+				}
+			}
+			return next, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		check(fmt.Sprintf("commit changing %s", changed.Symbol))
+		want := 1
+		if changed.Skipped != "" {
+			want = 0
+		}
+		if recordParses != want || (want == 1 && lastParsed != changed.Symbol) {
+			t.Fatalf("commit changing %s parsed %d records (last %s); want %d, the changed one", changed.Symbol, recordParses, lastParsed, want)
+		}
+		if served := loadSymbols(t, store)[changed.Symbol]; changed.Skipped != "" && served.BodyHash != "h" {
+			t.Fatalf("a skipped record replaced its symbol's row: %+v", served)
+		} else if changed.Skipped == "" && served.BodyHash != "h2" {
+			t.Fatalf("the changed record was not committed: %+v", served)
+		}
+	}
+	// A commit re-supplying the merged view unchanged parses nothing;
+	// so does one re-supplying the records in their original in-memory
+	// form (absent lists, the served flag) — the persisted-form key
+	// treats a parsed row as a fixed point.
+	inMemory := append([]Finding(nil), records...)
+	for i := range inMemory {
+		if i > 0 {
+			inMemory[i].BodyHash = "h2"
+		}
+	}
+	for _, leg := range []struct {
+		name   string
+		supply func([]Finding) []Finding
+	}{
+		{"merged view", func(current []Finding) []Finding { return current }},
+		{"in-memory", func([]Finding) []Finding { return inMemory }},
+	} {
+		recordParses = 0
+		if err := store.Update(ctx, func(current []Finding) ([]Finding, error) { return leg.supply(current), nil }); err != nil {
+			t.Fatal(err)
+		}
+		check("unchanged commit from the " + leg.name)
+		if recordParses != 0 {
+			t.Fatalf("an unchanged commit from the %s parsed %d records", leg.name, recordParses)
+		}
+	}
+}
+
+// A skipped record measured nothing, so a commit carrying one persists
+// nothing for its symbol and evicts nothing: the repo row and the
+// overlay entry it would have replaced stay, and a skipped new symbol
+// leaves no record (REQ-result-export's exclusion, per layer).
+func TestStoreSkippedRecordPersistsNothing(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	local := storeFinding("p.B", func(f *Finding) { f.Dirty = true })
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.A", nil), local}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := os.ReadFile(store.entryPath("p.B"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipped := func(f Finding) Finding {
+		f.BodyHash, f.Skipped = "h2", "no tests"
+		return f
+	}
+	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		next := []Finding{skipped(storeFinding("p.C", nil))}
+		for _, f := range current {
+			next = append(next, skipped(f))
+		}
+		return next, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merged := loadSymbols(t, store)
+	if len(merged) != 2 || merged["p.A"].BodyHash != "h" || merged["p.B"].BodyHash != "h" {
+		t.Fatalf("skipped records changed the persisted set: %+v", merged)
+	}
+	if after, err := os.ReadFile(store.entryPath("p.B")); err != nil || !bytes.Equal(after, entry) {
+		t.Fatalf("a skipped record rewrote its symbol's overlay entry: %v", err)
+	}
+	if _, err := os.Stat(store.entryPath("p.C")); !os.IsNotExist(err) {
+		t.Fatalf("a skipped new symbol left an overlay entry: %v", err)
+	}
+	// The serializer itself refuses a skipped record: no caller can
+	// persist nothing-measured by another route.
+	if _, _, err := persistRecord(skipped(storeFinding("p.D", nil))); err == nil || !strings.Contains(err.Error(), "skipped") {
+		t.Fatalf("persistRecord on a skipped record: %v; want the refusal", err)
+	}
+}
+
+// The document served through the content-keyed cache is isolated from
+// its callers: a caller's in-place edit of a merged view, or of a
+// record it retained from an update's view after the commit, never
+// reaches a later read — the store holds the parse for its lifetime,
+// so one leak would corrupt every read after it.
+func TestStoreDocumentViewIsIsolatedFromCallerMutation(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	record := storeFinding("p.A", func(f *Finding) {
+		f.Mutants, f.Killed, f.Generated, f.CandidateCount = 2, 1, 2, 2
+		f.Operators = []OperatorSummary{{Operator: "zero return", Generated: 2, Killed: 1, Survived: 1}}
+		f.Survivors = []Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
+		f.Exempted = []Exemption{{Subject: "p", Reason: "r", Rationale: "why"}}
+	})
+	var retained []Finding
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{record}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		retained = current
+		return current, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	retained[0].Survivors[0].Operator = "leaked through the update's view"
+	retained[0].Exempted[0].Subject = "leaked"
+	// The record is repo-only here, so a read serves the document
+	// cache itself, not an overlay entry shadowing it.
+	served, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	served[0].Survivors[0].Operator = "leaked through a read"
+	served[0].Exempted[0].Subject = "leaked"
+	again, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again[0].Survivors[0].Operator != "zero return" || again[0].Exempted[0].Subject != "p" {
+		t.Fatalf("a caller's edit reached a later read: %+v", again[0])
+	}
+	// A repo row kept in place of a machine-local successor is the
+	// same path with the row taken from the prior document.
+	var kept []Finding
+	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		kept = current
+		local := cloneFinding(current[0])
+		local.Dirty = true
+		return []Finding{local}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	kept[0].Survivors[0].Operator = "leaked through the kept row"
+	if row := store.document.findings[0]; row.Survivors[0].Operator != "zero return" {
+		t.Fatalf("a caller's edit reached the cached document through a kept repo row: %+v", row)
+	}
+}
+
+// A store write validates the rows it changed: a changed record that
+// is not serializable refuses the commit with the export's wording and
+// leaves the document untouched (REQ-result-export).
+func TestStoreWriteRefusesAnInvalidChangedRecord(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "findings.json")
+	store, err := OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.A", nil)}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := storeFinding("p.A", func(f *Finding) { f.Killed = 5 })
+	err = store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{invalid}, nil })
+	if err == nil || !strings.Contains(err.Error(), "export invalid findings") {
+		t.Fatalf("invalid changed record: %v; want the export refusal", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("a refused commit changed the document")
+	}
+}
+
+// mutateEveryList walks a record and edits every list it reaches —
+// each string element, and the first string field of each element
+// struct — through pointers and nested structs, so a list-bearing
+// field added to Finding is covered without a hand-maintained table.
+// It returns the number of lists edited.
+func mutateEveryList(v reflect.Value) int {
+	edited := 0
+	switch v.Kind() {
+	case reflect.Pointer:
+		if !v.IsNil() {
+			edited += mutateEveryList(v.Elem())
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() {
+				edited += mutateEveryList(v.Field(i))
+			}
+		}
+	case reflect.Slice:
+		if v.Len() == 0 {
+			return 0
+		}
+		edited++
+		for i := 0; i < v.Len(); i++ {
+			elem := v.Index(i)
+			switch elem.Kind() {
+			case reflect.String:
+				elem.SetString("mutated")
+			case reflect.Struct:
+				for j := 0; j < elem.NumField(); j++ {
+					if elem.Field(j).Kind() == reflect.String && elem.Type().Field(j).IsExported() {
+						elem.Field(j).SetString("mutated")
+						break
+					}
+				}
+				edited += mutateEveryList(elem)
+			default:
+				edited += mutateEveryList(elem)
+			}
+		}
+	}
+	return edited
+}
+
+// A served record shares no list with the store's caches, over every
+// list the record carries — the caches now outlive a call, so one
+// shared list would corrupt every later read; the walk is reflective so
+// a list-bearing field added to Finding without its clone fails here
+// rather than passing unnoticed.
+func TestStoreServedRecordsShareNoListWithTheCache(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "findings.json")
+	store, err := OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	full := func(f *Finding) {
+		f.Labels = []string{"l"}
+		f.Mutants, f.Killed, f.Generated, f.CandidateCount, f.Discarded = 3, 1, 4, 4, 1
+		f.Operators = []OperatorSummary{{Operator: "zero return", Generated: 4, Discarded: 1, Killed: 1, Survived: 2}}
+		f.Kills = []Kill{{Position: "p.go:2:1", Operator: "zero return", Killer: "TestA"}}
+		f.Survivors = []Survivor{{Position: "p.go:1:1", Operator: "zero return"}, {Position: "p.go:3:1", Operator: "zero return"}}
+		f.Attested = []Attestation{{Position: "p.go:3:1", Operator: "zero return", Reason: "equivalent"}}
+		f.CandidateEvidence = []CandidateEvidence{{Position: "p.go:4:1", Operator: "zero return", Reason: "mutant test process timed out", Disposition: "killed"}}
+		f.Exempted = []Exemption{{Subject: "p", Reason: "r", Rationale: "why"}}
+		f.CompartmentLedger = &CompartmentLedger{Declarations: []CompartmentDeclaration{{File: "p.go", Kind: "func", Name: "A", Hash: "h"}}, FileHeaders: []CompartmentFileHeader{{File: "p.go", Hash: "h"}}}
+	}
+	records := []Finding{
+		storeFinding("p.Structural", func(f *Finding) {
+			full(f)
+			f.Shape = &TargetShape{Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}}
+			f.TargetEvidence = SubjectEvidence{}
+		}),
+		storeFinding("p.Manual", func(f *Finding) {
+			full(f)
+			f.Shape = &TargetShape{Manual: &ManualSpec{File: "p.go", Edits: []ManualEdit{{Find: "a", Replace: "b"}}}}
+			f.TargetEvidence = SubjectEvidence{}
+		}),
+		storeFinding("p.Local", func(f *Finding) { full(f); f.Dirty = true }),
+	}
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return records, nil }); err != nil {
+		t.Fatal(err)
+	}
+	// Both caches warm: the document's from the write, the overlay's
+	// from the install; a second read serves them.
+	if _, err := store.Load(ctx); err != nil {
+		t.Fatal(err)
+	}
+	served, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range served {
+		if n := mutateEveryList(reflect.ValueOf(&served[i]).Elem()); n < 10 {
+			t.Fatalf("%s: the fixture reaches only %d lists; every list-bearing field must be populated", served[i].Symbol, n)
+		}
+	}
+	again, err := store.Load(ctx)
+	if err != nil || len(again) != len(records) {
+		t.Fatalf("merged read = %d records, %v; want %d", len(again), err, len(records))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := ParseFindings(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]Finding{}
+	for _, f := range fresh {
+		want[f.Symbol] = f
+	}
+	for _, f := range again {
+		if f.Symbol == "p.Local" {
+			continue
+		}
+		if !reflect.DeepEqual(f, want[f.Symbol]) {
+			t.Fatalf("%s: a caller's edit reached the document cache:\nserved: %+v\nfile:   %+v", f.Symbol, f, want[f.Symbol])
+		}
+	}
+	entry, err := os.ReadFile(store.entryPath("p.Local"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	local, err := ParseFindings(entry)
+	if err != nil || len(local) != 1 {
+		t.Fatal(err)
+	}
+	for _, f := range again {
+		if f.Symbol == "p.Local" && !reflect.DeepEqual(f, local[0]) {
+			t.Fatalf("a caller's edit reached the overlay cache:\nserved: %+v\nentry:  %+v", f, local[0])
+		}
 	}
 }

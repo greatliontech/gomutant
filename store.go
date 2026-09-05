@@ -59,9 +59,41 @@ type Store struct {
 	// against are fixed for the store's lifetime, so one content judges
 	// one way.
 	judged map[string]judgedRecord
-	// walkHook observes each portable-line walk the store pays — a
-	// test seam for the once-per-content claim.
-	walkHook func(symbol string)
+	// hooks observes the costs the store pays — the test seam for the
+	// once-per-content claims.
+	hooks storeHooks
+	// document is the repo document's cached parse, keyed by the
+	// content it parsed (mu guards it). The key is the content itself,
+	// not a stat identity, because the document is the merge base of
+	// every commit: a stale prior served for a foreign rewrite the key
+	// could not distinguish would write the merge back over the foreign
+	// rows — a lost record, which the overlay's stale-winner tolerance
+	// never covers. Hashing the bytes a read consumes anyway costs a
+	// fraction of the parse they would otherwise pay. The store's own
+	// writes fill it with the rows they wrote — each a parsed form, so
+	// the cache holds exactly what a parse of the file yields
+	// (REQ-result-layers). The store holds the parse for its lifetime,
+	// the way it holds the overlay's: a long-lived server pays the
+	// document's memory once per distinct content, never its parse per
+	// call.
+	document documentCache
+}
+
+// storeHooks are the store's cost observers: walk fires per
+// portable-line walk, documentParse per parse of the repo document,
+// recordParse per record-sized parse of a changed row. Nil is off.
+type storeHooks struct {
+	walk          func(symbol string)
+	documentParse func()
+	recordParse   func(symbol string)
+}
+
+// documentCache is the repo document's parse with the hash of the
+// bytes it stands for; a zero value holds nothing.
+type documentCache struct {
+	sum      [sha256.Size]byte
+	findings []Finding
+	held     bool
 }
 
 // overlayCacheEntry is one overlay file's cached parse, valid while the
@@ -314,7 +346,7 @@ func (s *Store) Load(ctx context.Context) ([]Finding, error) {
 	case err != nil:
 		return nil, err
 	default:
-		if repo, err = ParseFindings(data); err != nil {
+		if repo, err = s.readDocument(data); err != nil {
 			return nil, err
 		}
 	}
@@ -323,6 +355,46 @@ func (s *Store) Load(ctx context.Context) ([]Finding, error) {
 		return nil, err
 	}
 	return mergeLayers(repo, overlay), nil
+}
+
+// readDocument parses the repo document's bytes through the
+// content-keyed cache, serving clones — a caller's in-place edit of a
+// merged view must never leak into a later read.
+func (s *Store) readDocument(data []byte) ([]Finding, error) {
+	sum := sha256.Sum256(data)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.document.held && s.document.sum == sum {
+		return cloneFindings(s.document.findings), nil
+	}
+	if s.hooks.documentParse != nil {
+		s.hooks.documentParse()
+	}
+	findings, err := ParseFindings(data)
+	if err != nil {
+		return nil, err
+	}
+	s.document = documentCache{sum: sum, findings: findings, held: true}
+	return cloneFindings(findings), nil
+}
+
+// cacheDocument records the rows a store write put in the document
+// under the hash of the bytes it wrote. Every row is the store's own
+// copy — a persisted-form clone of a served record or a fresh parse —
+// so no caller holds an alias into the cache.
+func (s *Store) cacheDocument(written []byte, rows []Finding) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.document = documentCache{sum: sha256.Sum256(written), findings: rows, held: true}
+}
+
+// cloneFindings clones every record of a slice.
+func cloneFindings(findings []Finding) []Finding {
+	out := make([]Finding, len(findings))
+	for i, f := range findings {
+		out[i] = cloneFinding(f)
+	}
+	return out
 }
 
 // mergeLayers merges the two persistence layers, the overlay winning per
@@ -348,7 +420,7 @@ func (s *Store) installEntry(f Finding) error {
 	if err := os.MkdirAll(s.overlayDir, 0o755); err != nil {
 		return err
 	}
-	doc, err := Export([]Finding{f})
+	doc, row, err := persistRecord(f)
 	if err != nil {
 		return err
 	}
@@ -376,10 +448,10 @@ func (s *Store) installEntry(f Finding) error {
 		return err
 	}
 	if statErr == nil {
-		// The cache must hold what a parse of the written bytes yields:
-		// the record's persisted form.
+		// The cache holds what a parse of the written bytes yields — the
+		// row the install's own validating parse produced.
 		s.mu.Lock()
-		s.cache[filepath.Base(s.entryPath(f.Symbol))] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: persistedForm(f)}
+		s.cache[filepath.Base(s.entryPath(f.Symbol))] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: row}
 		s.mu.Unlock()
 	}
 	return nil
@@ -401,15 +473,57 @@ func (s *Store) installEntry(f Finding) error {
 // lost record. The update callback runs under the document lock and
 // must not call Store or document methods on the same document — a
 // nested writer waits out the lock retries and errors.
-// persistedForm is a record as a parse of its persisted bytes yields
-// it: the never-persisted run metadata (Cached, Skipped) zeroed. The
-// overlay cache holds it, the committability memo keys by it, and a
-// commit's change comparison reads it — one notion of "the same
-// record" on the write path.
+// persistedForm is the write path's cheap key for "the same record":
+// the never-persisted run metadata (Cached, Skipped) zeroed and every
+// list shaped as the encoding round-trips it — an omitted-when-empty
+// list absent, a required list present. Equal persisted forms encode
+// to equal bytes, so the committability memo and the change comparison
+// key by it without a parse, and a parsed row (what the caches hold)
+// is a fixed point of it, so a record re-supplied from a merged view
+// or in its original in-memory form compares unchanged. Should the
+// encoding ever normalize something this key does not mirror, the
+// miss costs a needless re-parse or rewrite of one record, never a
+// wrong row.
 func persistedForm(f Finding) Finding {
 	form := cloneFinding(f)
 	form.Cached, form.Skipped = false, ""
+	form.Labels = absentWhenEmpty(form.Labels)
+	form.Kills = absentWhenEmpty(form.Kills)
+	form.Survivors = absentWhenEmpty(form.Survivors)
+	form.Attested = absentWhenEmpty(form.Attested)
+	form.CandidateEvidence = absentWhenEmpty(form.CandidateEvidence)
+	form.Exempted = absentWhenEmpty(form.Exempted)
+	form.OracleEvidence = presentWhenAbsent(form.OracleEvidence)
+	form.Operators = presentWhenAbsent(form.Operators)
+	if form.CompartmentLedger != nil {
+		form.CompartmentLedger.Declarations = absentWhenEmpty(form.CompartmentLedger.Declarations)
+		form.CompartmentLedger.FileHeaders = absentWhenEmpty(form.CompartmentLedger.FileHeaders)
+	}
+	if form.Shape != nil {
+		if form.Shape.Structural != nil {
+			form.Shape.Structural.Packages = absentWhenEmpty(form.Shape.Structural.Packages)
+		}
+		if form.Shape.Manual != nil {
+			form.Shape.Manual.Edits = presentWhenAbsent(form.Shape.Manual.Edits)
+		}
+	}
 	return form
+}
+
+// absentWhenEmpty is an omitted-when-empty list as a parse yields it.
+func absentWhenEmpty[T any](list []T) []T {
+	if len(list) == 0 {
+		return nil
+	}
+	return list
+}
+
+// presentWhenAbsent is a required list as a parse yields it.
+func presentWhenAbsent[T any](list []T) []T {
+	if list == nil {
+		return []T{}
+	}
+	return list
 }
 
 // committable judges a record's committability once per distinct
@@ -419,8 +533,8 @@ func (s *Store) committable(f, form Finding) bool {
 	if memo, ok := s.judged[f.Symbol]; ok && reflect.DeepEqual(memo.finding, form) {
 		return memo.committable
 	}
-	if s.walkHook != nil {
-		s.walkHook(f.Symbol)
+	if s.hooks.walk != nil {
+		s.hooks.walk(f.Symbol)
 	}
 	ok, _ := Committable(f, s.moduleDir, s.exemptions)
 	s.judged[f.Symbol] = judgedRecord{finding: form, committable: ok}
@@ -449,12 +563,12 @@ func (s *Store) committable(f, form Finding) bool {
 // on the same document — a nested writer waits out the lock retries
 // and errors.
 func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Finding, error)) error {
-	var next []Finding
+	var next, rows []Finding
 	var pruned []string
 	committable := map[string]bool{}
 	held := map[string]Finding{}
 	forms := map[string]Finding{}
-	if err := updateDocumentContext(ctx, s.path, func(repoPrior []Finding) ([]Finding, error) {
+	if err := updateDocument(ctx, s.path, documentUpdate{parse: s.readDocument, update: func(repoPrior []Finding) ([]Finding, error) {
 		overlay, err := s.loadOverlay(ctx)
 		if err != nil {
 			return nil, err
@@ -462,15 +576,28 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		for _, f := range overlay {
 			held[f.Symbol] = f
 		}
-		next, err = update(mergeLayers(repoPrior, overlay))
+		current := mergeLayers(repoPrior, overlay)
+		view := make(map[string]Finding, len(current))
+		for _, f := range current {
+			view[f.Symbol] = f
+		}
+		next, err = update(current)
 		if err != nil {
 			return nil, err
 		}
 		nextSymbols := make(map[string]bool, len(next))
 		for _, f := range next {
+			nextSymbols[f.Symbol] = true
+			// A skipped record measured nothing: it persists nothing and
+			// evicts nothing — the symbol keeps whatever record it holds
+			// in whichever layer (the merge rule that nothing-measured
+			// never overwrites something-measured, REQ-result-export's
+			// exclusion applied per layer).
+			if f.Skipped != "" {
+				continue
+			}
 			forms[f.Symbol] = persistedForm(f)
 			committable[f.Symbol] = s.committable(f, forms[f.Symbol])
-			nextSymbols[f.Symbol] = true
 		}
 		byRepo := make(map[string]Finding, len(repoPrior))
 		for _, f := range repoPrior {
@@ -481,14 +608,37 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			// it would commit a row the layer contract forbids
 			// (REQ-result-layers, REQ-result-exemptions). Its successor
 			// lands in whichever layer its own classification earns.
-			if s.committable(f, persistedForm(f)) {
-				byRepo[f.Symbol] = f
+			if form := persistedForm(f); s.committable(f, form) {
+				// The store's own copy: the callback holds the view this
+				// row came from, and the cache outlives the commit.
+				byRepo[f.Symbol] = form
 			}
 		}
+		// Every document row is a parsed form: a record unchanged from
+		// the merged view keeps the view's record, which came from a
+		// parse — the repo document's, an overlay entry's, or the
+		// entry's own validating install; a changed or new record is
+		// validated and canonicalized through its own parse, one
+		// record's cost. The write below then needs no whole-document
+		// self-check: each record's semantics were checked by its parse,
+		// the symbol map admits no duplicate, and the interned shape is
+		// this binary's own construction.
 		for _, f := range next {
-			if committable[f.Symbol] {
-				byRepo[f.Symbol] = f
+			if !committable[f.Symbol] {
+				continue
 			}
+			if prior, held := view[f.Symbol]; held && reflect.DeepEqual(persistedForm(prior), forms[f.Symbol]) {
+				byRepo[f.Symbol] = persistedForm(prior)
+				continue
+			}
+			if s.hooks.recordParse != nil {
+				s.hooks.recordParse(f.Symbol)
+			}
+			row, err := parsedForm(f)
+			if err != nil {
+				return nil, err
+			}
+			byRepo[f.Symbol] = row
 		}
 		// A symbol removed from the set entirely (a pruned target)
 		// leaves the repo document too, and its overlay entry goes with
@@ -509,7 +659,12 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
 		return out, nil
-	}, func() error {
+	}, export: func(next []Finding) ([]byte, error) {
+		data, kept, err := exportDocument(next)
+		rows = kept
+		return data, err
+	}, after: func(written []byte) error {
+		s.cacheDocument(written, rows)
 		// The overlay follows the repo write, under the same lock: an
 		// entry is deleted when its record is committable and the
 		// overlay holds one, written when its record is not committable
@@ -518,6 +673,9 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		for _, f := range next {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if f.Skipped != "" {
+				continue
 			}
 			prior, holds := held[f.Symbol]
 			switch {
@@ -542,7 +700,7 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			}
 		}
 		return nil
-	}); err != nil {
+	}}); err != nil {
 		return err
 	}
 	return nil

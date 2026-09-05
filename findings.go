@@ -448,6 +448,7 @@ type Finding struct {
 // the other.
 func cloneFinding(f Finding) Finding {
 	f.Labels = slices.Clone(f.Labels)
+	f.Exempted = slices.Clone(f.Exempted)
 	f.OracleEvidence = slices.Clone(f.OracleEvidence)
 	f.Operators = slices.Clone(f.Operators)
 	f.Kills = slices.Clone(f.Kills)
@@ -455,20 +456,22 @@ func cloneFinding(f Finding) Finding {
 	f.Attested = slices.Clone(f.Attested)
 	f.CandidateEvidence = slices.Clone(f.CandidateEvidence)
 	if f.CompartmentLedger != nil {
-		f.CompartmentLedger = &CompartmentLedger{
-			Declarations: slices.Clone(f.CompartmentLedger.Declarations),
-			FileHeaders:  slices.Clone(f.CompartmentLedger.FileHeaders),
-		}
+		ledger := *f.CompartmentLedger
+		ledger.Declarations = slices.Clone(ledger.Declarations)
+		ledger.FileHeaders = slices.Clone(ledger.FileHeaders)
+		f.CompartmentLedger = &ledger
 	}
 	if f.Shape != nil {
-		shape := TargetShape{}
-		if f.Shape.Structural != nil {
-			structural := *f.Shape.Structural
+		// A field-wise copy, so a shape field added later rides along;
+		// only the pointers beneath are re-pointed at copies.
+		shape := *f.Shape
+		if shape.Structural != nil {
+			structural := *shape.Structural
 			structural.Packages = slices.Clone(structural.Packages)
 			shape.Structural = &structural
 		}
-		if f.Shape.Manual != nil {
-			manual := *f.Shape.Manual
+		if shape.Manual != nil {
+			manual := *shape.Manual
 			manual.Edits = slices.Clone(manual.Edits)
 			shape.Manual = &manual
 		}
@@ -793,9 +796,57 @@ func expandV11(doc documentV11) ([]Finding, error) {
 
 // Export serializes findings to the versioned document gomutant owns
 // (REQ-result-export), skipped results excluded (nothing was measured),
-// deterministically ordered by symbol.
+// deterministically ordered by symbol, and re-parses what it wrote as
+// the self-check that the document is readable.
 func Export(findings []Finding) ([]byte, error) {
-	kept := make([]Finding, 0, len(findings))
+	data, _, err := exportDocument(findings)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := ParseFindings(data); err != nil {
+		return nil, fmt.Errorf("gomutant: export invalid findings: %w", err)
+	}
+	return data, nil
+}
+
+// persistRecord is one record's persisted bytes — a one-record
+// document — beside the record exactly as a parse of those bytes yields
+// it: validated and canonicalized (absent lists made empty, the
+// never-persisted run metadata dropped) in one record-sized step. The
+// overlay installs entries through it and caches the parsed row; the
+// store's document write canonicalizes each row it changed through it,
+// so the document cache holds what a reader of the file sees. A record
+// that fails is not serializable (REQ-result-export) and refuses with
+// Export's wording; a skipped record has no persisted form and refuses
+// (REQ-result-export excludes nothing-measured).
+func persistRecord(f Finding) ([]byte, Finding, error) {
+	if f.Skipped != "" {
+		return nil, Finding{}, fmt.Errorf("gomutant: skipped record %s has no persisted form (nothing was measured)", f.Symbol)
+	}
+	data, _, err := exportDocument([]Finding{f})
+	if err != nil {
+		return nil, Finding{}, err
+	}
+	parsed, err := ParseFindings(data)
+	if err != nil {
+		return nil, Finding{}, fmt.Errorf("gomutant: export invalid findings: %w", err)
+	}
+	return data, parsed[0], nil
+}
+
+// parsedForm is the record persistRecord's parse yields.
+func parsedForm(f Finding) (Finding, error) {
+	_, row, err := persistRecord(f)
+	return row, err
+}
+
+// exportDocument is Export without the self-check, returning the rows
+// it wrote in document order beside the bytes. The store's document
+// write uses it over rows that are each a parsed form already, where
+// the check would only re-read what a parse produced (Store.Update
+// carries the argument); every other writer goes through Export.
+func exportDocument(findings []Finding) (data []byte, kept []Finding, err error) {
+	kept = make([]Finding, 0, len(findings))
 	for _, f := range findings {
 		if f.Skipped != "" {
 			continue
@@ -806,21 +857,25 @@ func Export(findings []Finding) ([]byte, error) {
 		if f.Operators == nil {
 			f.Operators = []OperatorSummary{}
 		}
+		if f.Shape != nil && f.Shape.Manual != nil && f.Shape.Manual.Edits == nil {
+			manual := *f.Shape.Manual
+			manual.Edits = []ManualEdit{}
+			shape := *f.Shape
+			shape.Manual = &manual
+			f.Shape = &shape
+		}
 		kept = append(kept, f)
 	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Symbol < kept[j].Symbol })
 	interned, err := internDocument(kept)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	data, err := json.MarshalIndent(interned, "", "  ")
+	data, err = json.MarshalIndent(interned, "", "  ")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if _, err := ParseFindings(data); err != nil {
-		return nil, fmt.Errorf("gomutant: export invalid findings: %w", err)
-	}
-	return data, nil
+	return data, kept, nil
 }
 
 // ParseFindings loads a finding document: an unknown version is refused
@@ -1780,14 +1835,32 @@ func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)
 // the atomic replacement: cancellation that wins before commit leaves the
 // prior document byte-for-byte unchanged.
 func UpdateDocumentContext(ctx context.Context, path string, update func(prior []Finding) ([]Finding, error)) error {
-	return updateDocumentContext(ctx, path, update, nil)
+	return updateDocument(ctx, path, documentUpdate{update: update})
 }
 
-// updateDocumentContext is UpdateDocumentContext with an after hook run
-// once the document is written, still under the document lock — the
+// documentUpdate is one atomic replacement of a findings document with
+// the store's seams: parse reads the prior document's bytes (nil is
+// ParseFindings), export encodes the successor (nil is Export, with its
+// whole-document self-check), and after runs with the bytes written
+// once the replacement is visible, still under the document lock — the
 // store's overlay writes follow the repo write there, so nothing
 // between the two is observable to another session.
-func updateDocumentContext(ctx context.Context, path string, update func(prior []Finding) ([]Finding, error), after func() error) error {
+type documentUpdate struct {
+	parse  func(data []byte) ([]Finding, error)
+	update func(prior []Finding) ([]Finding, error)
+	export func(next []Finding) ([]byte, error)
+	after  func(written []byte) error
+}
+
+// updateDocument is UpdateDocumentContext over a documentUpdate.
+func updateDocument(ctx context.Context, path string, u documentUpdate) error {
+	parse, export := u.parse, u.export
+	if parse == nil {
+		parse = ParseFindings
+	}
+	if export == nil {
+		export = Export
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1810,15 +1883,15 @@ func updateDocumentContext(ctx context.Context, path string, update func(prior [
 		} else {
 			mode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
 		}
-		if prior, err = ParseFindings(data); err != nil {
+		if prior, err = parse(data); err != nil {
 			return err
 		}
 	}
-	next, err := update(prior)
+	next, err := u.update(prior)
 	if err != nil {
 		return err
 	}
-	doc, err := Export(next)
+	doc, err := export(next)
 	if err != nil {
 		return err
 	}
@@ -1859,7 +1932,8 @@ func updateDocumentContext(ctx context.Context, path string, update func(prior [
 		}
 		return tmpPath, nil
 	}
-	tmpPath, err := writeTemp(append(doc, '\n'), mode)
+	written := append(doc, '\n')
+	tmpPath, err := writeTemp(written, mode)
 	if err != nil {
 		return err
 	}
@@ -1870,8 +1944,8 @@ func updateDocumentContext(ctx context.Context, path string, update func(prior [
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
-	if after != nil {
-		return after()
+	if u.after != nil {
+		return u.after(written)
 	}
 	return nil
 }

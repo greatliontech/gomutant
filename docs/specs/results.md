@@ -529,7 +529,10 @@ inverse of candidate evidence's narrowing precedent), each survivor's
 position and operator, the candidate-evidence
 list when any candidate carries one, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
-it does not understand. Each subject's evidence carries its module's tree-relative base
+it does not understand. A list the document requires — a record's
+oracle evidence and operator summaries, a manual shape's edit list — is
+written present (empty, never null); a list the document omits when
+empty is absent. Each subject's evidence carries its module's tree-relative base
 (absent means the tree root), the base the portable-line containment
 resolves that subject's manifest against; the field narrows layer
 routing, so it rides the version bump that introduced it - an older
@@ -634,7 +637,20 @@ record) and rewrites an overlay entry only when its record's persisted
 form changed (an entry is still deleted the moment its record
 is committable) — an unchanged machine-local record keeps its entry
 without a re-judgment or a rewrite — so a campaign's per-target commits
-cost the changed record, never the document's size. Stat identity is deliberately approximate in the
+cost the changed record, never the document's size. The repo document
+itself is parsed once per distinct content: a reading store re-parses it
+only when its bytes differ from the last content it parsed or wrote,
+keyed by the content itself rather than a stat identity — the document
+is every commit's merge base, so a stale prior served there would write
+the merge back over another session's rows, a lost record the
+stale-winner tolerance below never covers — and a commit validates at
+write only the rows it changed, each through its own record-sized
+parse; every other row was validated by a parse already — the
+document's, an overlay entry's, or the entry's own validating install —
+and the store's own write leaves the document cached as exactly what a
+fresh parse of the file yields. A skipped record in a commit persists
+nothing and evicts nothing in either layer: nothing-measured never
+overwrites something-measured. Stat identity is deliberately approximate in the
 already-tolerated direction: a rewrite it cannot distinguish — same size,
 same modification time — serves the prior parse, a stale winner exactly like
 the install-order races above, costing at most a re-measure and never a
