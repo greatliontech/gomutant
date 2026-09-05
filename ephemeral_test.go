@@ -20,13 +20,13 @@ func TestEphemeralPreparationCancellation(t *testing.T) {
 	tree := fixtureTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if result, err := tree.Ephemeral(ctx, "missing.go", nil, "p", "T", time.Minute, 1); !errors.Is(err, context.Canceled) || result != nil {
+	if result, err := tree.RunEphemeral(ctx, EphemeralRequest{File: "missing.go", Mutant: []byte("package p\n"), TestPkg: "p", Run: "T", OracleTimeout: time.Minute, Runs: 1}); !errors.Is(err, context.Canceled) || result != nil {
 		t.Fatalf("cancelled replacement = %+v, %v", result, err)
 	}
-	if result, err := tree.EphemeralBatch(ctx, []BatchEdit{{File: "missing.go"}}, "p", "T", time.Minute, 1); !errors.Is(err, context.Canceled) || result != nil {
+	if result, err := tree.RunEphemeral(ctx, EphemeralRequest{BatchEdits: []BatchEdit{{File: "missing.go"}}, TestPkg: "p", Run: "T", OracleTimeout: time.Minute, Runs: 1}); !errors.Is(err, context.Canceled) || result != nil {
 		t.Fatalf("cancelled batch = %+v, %v", result, err)
 	}
-	if result, err := tree.EphemeralEdits(ctx, "missing.go", []Edit{{Old: "x", New: "y"}}, "p", "T", time.Minute, 1); !errors.Is(err, context.Canceled) || result != nil {
+	if result, err := tree.RunEphemeral(ctx, EphemeralRequest{File: "missing.go", Edits: []Edit{{Old: "x", New: "y"}}, TestPkg: "p", Run: "T", OracleTimeout: time.Minute, Runs: 1}); !errors.Is(err, context.Canceled) || result != nil {
 		t.Fatalf("cancelled edits = %+v, %v", result, err)
 	}
 	if result, err := ApplyEditsContext(ctx, []byte("x"), []Edit{{Old: "x", New: "y"}}); !errors.Is(err, context.Canceled) || result != nil {
@@ -60,7 +60,7 @@ func TestEphemeral(t *testing.T) {
 
 	// Breaking Add's tested arm: TestAdd kills, attributed.
 	broken := strings.Replace(string(orig), "return a + b", "return a + b + 1", 1)
-	res, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1)
+	res, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestEphemeral(t *testing.T) {
 
 	// runs:N - a deterministic kill kills every run: the consecutive-kill
 	// claim that splits it from a property generator's draw luck.
-	res, err = tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, 3)
+	res, err = tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,13 +96,13 @@ func TestEphemeral(t *testing.T) {
 	marker := filepath.Join(os.TempDir(), markerName)
 	_ = os.Remove(marker)
 	t.Cleanup(func() { _ = os.Remove(marker) })
-	flaky, err := tr.EphemeralBatch(ctx, []BatchEdit{
+	flaky, err := tr.RunEphemeral(ctx, EphemeralRequest{BatchEdits: []BatchEdit{
 		// The marker path is baked in absolute: each oracle run has its
 		// own scratch TMPDIR (REQ-exec-oracle-scratch), so the mutant's
 		// cross-run channel must live outside it.
 		{File: "lib/doc.go", OldString: "package lib", NewString: "package lib\n\nimport \"os\"\n\nfunc addFlaky(a, b int) int {\n\tmarker := \"" + marker + "\"\n\tif _, err := os.Stat(marker); err != nil {\n\t\t_ = os.WriteFile(marker, []byte(\"x\"), 0o644)\n\t\treturn a + b + 1\n\t}\n\treturn a + b\n}"},
 		{File: "lib/lib.go", OldString: "return a + b", NewString: "return addFlaky(a, b)"},
-	}, "example.com/fixture/lib", "^TestAdd$", time.Minute, 2)
+	}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestEphemeral(t *testing.T) {
 	// A hanging mutant's timeout verdict names the option governing the
 	// bound.
 	hung := strings.Replace(string(orig), "return a + b", "for {\n\t}\n\treturn a + b", 1)
-	res, err = tr.Ephemeral(ctx, "lib/lib.go", []byte(hung), "example.com/fixture/lib", "^TestAdd$", 2*time.Second, 1)
+	res, err = tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(hung), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: 2 * time.Second, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,18 +129,18 @@ func TestEphemeral(t *testing.T) {
 
 	// A baseline probe exceeding the oracle timeout refuses naming the
 	// governing option.
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Nanosecond, 1); err == nil || !strings.Contains(err.Error(), "oracle_timeout_sec") {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Nanosecond, Runs: 1}); err == nil || !strings.Contains(err.Error(), "oracle_timeout_sec") {
 		t.Fatalf("probe timeout does not name its governing option: %v", err)
 	}
 
 	// runs is bounded: each run is a full oracle process.
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, 11); err == nil || !strings.Contains(err.Error(), "is outside 1-") {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 11}); err == nil || !strings.Contains(err.Error(), "is outside 1-") {
 		t.Fatalf("unbounded runs accepted: %v", err)
 	}
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, -1); err == nil || !strings.Contains(err.Error(), "is outside 1-") {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: -1}); err == nil || !strings.Contains(err.Error(), "is outside 1-") {
 		t.Fatalf("negative runs accepted: %v", err)
 	}
-	res, err = tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestFrozenEnvironment$", time.Minute, 1)
+	res, err = tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestFrozenEnvironment$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestEphemeral(t *testing.T) {
 
 	// Breaking only Weak's untested branch: TestWeak cannot see it.
 	unseen := strings.Replace(string(orig), "return x - 1", "return x - 2", 1)
-	res, err = tr.Ephemeral(ctx, "lib/lib.go", []byte(unseen), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	res, err = tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(unseen), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestEphemeral(t *testing.T) {
 
 	// Refusals: identical content, a pattern matching nothing, a test
 	// failing on the clean tree.
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", orig, "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "identical") {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: orig, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "identical") {
 		t.Fatalf("identical replacement scored: %v", err)
 	}
 	// The zero-match refusal precedes the baseline probe: no oracle
@@ -173,14 +173,14 @@ func TestEphemeral(t *testing.T) {
 		probes++
 		return probe(ctx, dir, testPkg, run, timeout, binFlags, env)
 	}
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestNoSuch$", time.Nanosecond, 1); err == nil || !strings.Contains(err.Error(), "matched no tests") {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestNoSuch$", OracleTimeout: time.Nanosecond, Runs: 1}); err == nil || !strings.Contains(err.Error(), "matched no tests") {
 		t.Fatalf("zero-match probe scored: %v", err)
 	}
 	// A top-level match under a subtest element, and a match in the
 	// second alternative of a pattern whose first names nothing, both
 	// reach the probe — the harness's own split.
 	for _, run := range []string{"^TestAdd$/nothing", "^TestNoSuch$/x|^TestAdd$"} {
-		if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", run, time.Nanosecond, 1); err == nil || !strings.Contains(err.Error(), "oracle_timeout_sec") {
+		if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: run, OracleTimeout: time.Nanosecond, Runs: 1}); err == nil || !strings.Contains(err.Error(), "oracle_timeout_sec") {
 			t.Fatalf("%q selects TestAdd and must reach the probe: %v", run, err)
 		}
 	}
@@ -193,7 +193,7 @@ func TestEphemeral(t *testing.T) {
 	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string) (int, bool, string, error) {
 		return 1, false, "", nil
 	}
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") || strings.HasSuffix(err.Error(), "\n") {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") || strings.HasSuffix(err.Error(), "\n") {
 		t.Fatalf("output-less failing baseline: %q; want the one-line refusal", err)
 	}
 	testProbe = counting
@@ -211,7 +211,7 @@ func TestEphemeral(t *testing.T) {
 	// The refusal names the failing test and carries its own output —
 	// what the oracle saw, so a baseline disagreeing with the caller's
 	// plain run is diagnosable from the refusal alone.
-	if _, err := tr.Ephemeral(ctx, "failing/failing_test.go", []byte(failingMutant), "example.com/fixture/failing", "^TestAlwaysFails$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") ||
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "failing/failing_test.go", Mutant: []byte(failingMutant), TestPkg: "example.com/fixture/failing", Run: "^TestAlwaysFails$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") ||
 		!strings.Contains(err.Error(), "TestAlwaysFails:") || !strings.Contains(err.Error(), "by design") {
 		t.Fatalf("failing-clean probe scored, or refused without the oracle's own output: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestEphemeral(t *testing.T) {
 	// A replacement that does not compile measured nothing: an error, never
 	// a survivor — and the refusal carries the compiler's own diagnostic so
 	// the caller repairs the edit from the compiler's reason, not a guess.
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte("package lib\nfunc Broken( {"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "did not compile") {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte("package lib\nfunc Broken( {"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "did not compile") {
 		t.Fatalf("uncompilable replacement scored: %v", err)
 	} else if !strings.Contains(err.Error(), "syntax error") {
 		t.Fatalf("compile refusal lacks the compiler diagnostic: %v", err)
@@ -227,20 +227,20 @@ func TestEphemeral(t *testing.T) {
 
 	// The edits form measures identically to the whole replacement
 	// (REQ-exec-ephemeral): state the change, not the file.
-	res, err = tr.EphemeralEdits(ctx, "lib/lib.go", []Edit{{Old: "return a + b", New: "return a + b + 1"}}, "example.com/fixture/lib", "^TestAdd$", time.Minute, 1)
+	res, err = tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Edits: []Edit{{Old: "return a + b", New: "return a + b + 1"}}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Killed || res.Killer != "example.com/fixture/lib.TestAdd" {
 		t.Fatalf("edits mutant = %+v, want killed by TestAdd", res)
 	}
-	if _, err := tr.EphemeralEdits(ctx, "lib/lib.go", []Edit{{Old: "no such text", New: "x"}}, "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Edits: []Edit{{Old: "no such text", New: "x"}}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil {
 		t.Fatal("zero-match edit scored")
 	}
-	res, err = tr.EphemeralBatch(ctx, []BatchEdit{
+	res, err = tr.RunEphemeral(ctx, EphemeralRequest{BatchEdits: []BatchEdit{
 		{File: "lib/lib.go", OldString: "return a + b", NewString: "return a + b + manualDelta()"},
 		{File: "lib/doc.go", OldString: "package lib", NewString: "package lib\n\nfunc manualDelta() int { return 1 }"},
-	}, "example.com/fixture/lib", "^TestAdd$", time.Minute, 1)
+	}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,10 +286,10 @@ func TestEphemeralRejectsEscapingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range []string{"../outside.go", outside, `C:\outside.go`, "link.go"} {
-		if _, err := tree.Ephemeral(context.Background(), file, []byte("package changed\n"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || (!strings.Contains(err.Error(), "tree-relative") && !strings.Contains(err.Error(), "escapes")) {
+		if _, err := tree.RunEphemeral(context.Background(), EphemeralRequest{File: file, Mutant: []byte("package changed\n"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || (!strings.Contains(err.Error(), "tree-relative") && !strings.Contains(err.Error(), "escapes")) {
 			t.Fatalf("whole replacement accepted %q: %v", file, err)
 		}
-		if _, err := tree.EphemeralEdits(context.Background(), file, []Edit{{Old: "package", New: "package"}}, "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || (!strings.Contains(err.Error(), "tree-relative") && !strings.Contains(err.Error(), "escapes")) {
+		if _, err := tree.RunEphemeral(context.Background(), EphemeralRequest{File: file, Edits: []Edit{{Old: "package", New: "package"}}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || (!strings.Contains(err.Error(), "tree-relative") && !strings.Contains(err.Error(), "escapes")) {
 			t.Fatalf("sequential edits accepted %q: %v", file, err)
 		}
 	}
@@ -338,7 +338,7 @@ func TestEphemeralLabelsUnexercisedReplacement(t *testing.T) {
 	if mutated == string(linkedIdle) {
 		t.Fatal("fixture edit failed")
 	}
-	res, err := tr.Ephemeral(ctx, "genp/gen.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	res, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestEphemeralLabelsUnexercisedReplacement(t *testing.T) {
 	if inMutated == string(inside) {
 		t.Fatal("fixture edit failed")
 	}
-	res, err = tr.Ephemeral(ctx, "lib/lib.go", []byte(inMutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	res, err = tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(inMutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutated := strings.Replace(string(linkedIdle), "type G struct{}", "type G struct{ X int }", 1)
-	res, err := tr.Ephemeral(context.Background(), "genp/gen.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", time.Minute, 1)
+	res, err := tr.RunEphemeral(context.Background(), EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestEphemeralCoverageProbeRunsUnderMeasurementLeash(t *testing.T) {
 	}
 	mutated := strings.Replace(string(linkedIdle), "type G struct{}", "type G struct{ X int }", 1)
 	for _, timeout := range []time.Duration{0, time.Minute} {
-		res, err := tr.Ephemeral(context.Background(), "genp/gen.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", timeout, 1)
+		res, err := tr.RunEphemeral(context.Background(), EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: timeout, Runs: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -467,10 +467,10 @@ func TestEphemeralBaselineRunsUnderLeash(t *testing.T) {
 	}
 	mutated := strings.Replace(string(inside), "return x - 1", "return x - 2", 1)
 	ctx := context.Background()
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 0, 1); err != nil {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: 0, Runs: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 90*time.Second, 1); err != nil {
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: 90 * time.Second, Runs: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if len(bounds) != 2 || bounds[0] != ephemeralBaselineLeash || bounds[1] != 90*time.Second {
@@ -493,7 +493,7 @@ func TestEphemeralDerivesOracleBudgetFromBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutated := strings.Replace(string(inside), "return x - 1", "return x - 2", 1)
-	res, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 0, 1)
+	res, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: 0, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +510,7 @@ func TestEphemeralDerivesOracleBudgetFromBaseline(t *testing.T) {
 	if derived != derivedOracleBudget(measured) {
 		t.Fatalf("derived budget %v != derivedOracleBudget(%v) = %v — the reported budget did not come from the reported measurement", derived, measured, derivedOracleBudget(measured))
 	}
-	explicit, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 90*time.Second, 1)
+	explicit, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: 90 * time.Second, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

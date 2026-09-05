@@ -53,7 +53,7 @@ func TestEditUniquenessCountsOverlappingStarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = tr.EphemeralBatch(t.Context(), []BatchEdit{{File: "lib/lib.go", OldString: "zz", NewString: "qq"}}, "example.com/fixture/lib", "^TestAdd$", 0, 1)
+	_, err = tr.RunEphemeral(t.Context(), EphemeralRequest{BatchEdits: []BatchEdit{{File: "lib/lib.go", OldString: "zz", NewString: "qq"}}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: 0, Runs: 1})
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("overlapping batch edit = %v, want an ambiguity refusal", err)
 	}

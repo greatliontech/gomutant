@@ -124,14 +124,14 @@ func TestEphemeralAttestEndToEnd(t *testing.T) {
 	if mutated == string(inside) {
 		t.Fatal("fixture edit failed")
 	}
-	res, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 0, 1)
+	res, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: 0, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Killed || len(res.UnexercisedFiles) != 0 || res.EditDigest == "" {
 		t.Fatalf("probe = %+v, want an exercised survivor carrying its digest", res)
 	}
-	again, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(mutated), "example.com/fixture/lib", "^TestWeak$", 0, 1)
+	again, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: 0, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

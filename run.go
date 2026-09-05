@@ -322,6 +322,11 @@ const (
 	// derived campaign budget) — the campaign face's parity with the
 	// ephemeral face's effective-budget report.
 	PreparationOracleBudget PreparationStage = "oracle-budget"
+	// PreparationMutantRun precedes each of an ephemeral probe's mutant
+	// runs (Symbol carries "i/N"); PreparationCoverage precedes its
+	// advisory coverage probe (REQ-exec-run-status's ephemeral phases).
+	PreparationMutantRun PreparationStage = "mutant-run"
+	PreparationCoverage  PreparationStage = "coverage"
 )
 
 // ExecutionEvent is one advisory execution-phase progress report: the
@@ -411,6 +416,22 @@ type PreparationEvent struct {
 	// the observation re-entered through adoption
 	// (REQ-result-baseline-bank).
 	Banked bool `json:"banked,omitempty"`
+}
+
+// Text renders the event as both faces print it after their own
+// prefix: the stage, then the symbol, package, and oracle budget it
+// carries, and "(banked)" for a baseline served from the bank.
+func (e PreparationEvent) Text() string {
+	parts := []string{string(e.Stage)}
+	for _, part := range []string{e.Symbol, e.Package, e.OracleBudget} {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if e.Banked {
+		parts = append(parts, "(banked)")
+	}
+	return strings.Join(parts, " ")
 }
 
 // RunDecision explains whether one target is cached, skipped, or measured.

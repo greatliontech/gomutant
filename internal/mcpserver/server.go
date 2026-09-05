@@ -173,6 +173,16 @@ func serverOptions() *mcp.ServerOptions {
 // a variable so the emission is testable without a 20-second test.
 var heartbeatInterval = 20 * time.Second
 
+// loadTreeReporting is every tool's typed load: `loading` announced at
+// once when a token listens (REQ-exec-run-status), then the load under
+// the heartbeat.
+func (s *Server) loadTreeReporting(ctx context.Context, notify func(string), sel gomutant.Selection) (*gomutant.Tree, error) {
+	if notify != nil {
+		notify("prepare loading")
+	}
+	return withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, sel) })
+}
+
 // withHeartbeat runs fn while a bounded ticker tells a progress-token
 // client the labeled stretch is still working - no compile, load, or
 // oracle stretch stays silent when the client asked for progress
@@ -181,6 +191,12 @@ var heartbeatInterval = 20 * time.Second
 // MCP requires the value to increase per token, and a fresh counter per
 // stretch would regress it. A nil notifier (no token) is exactly fn.
 func withHeartbeat[T any](ctx context.Context, notify func(string), label string, fn func(context.Context) (T, error)) (T, error) {
+	return withHeartbeatLabel(ctx, notify, func() string { return label }, fn)
+}
+
+// withHeartbeatLabel is withHeartbeat whose label is read at each beat —
+// a verb with phases of its own names the one in flight.
+func withHeartbeatLabel[T any](ctx context.Context, notify func(string), label func() string, fn func(context.Context) (T, error)) (T, error) {
 	if notify == nil {
 		return fn(ctx)
 	}
@@ -195,7 +211,7 @@ func withHeartbeat[T any](ctx context.Context, notify func(string), label string
 			case <-stop:
 				return
 			case <-ticker.C:
-				notify(fmt.Sprintf("still working: %s (%s elapsed)", label, time.Since(started).Round(time.Second)))
+				notify(fmt.Sprintf("still working: %s (%s elapsed)", label(), time.Since(started).Round(time.Second)))
 			}
 		}
 	}()
@@ -430,22 +446,7 @@ func progressNotifier(ctx context.Context, req *mcp.CallToolRequest) func(messag
 }
 
 func preparationMessage(event gomutant.PreparationEvent) string {
-	message := "prepare " + string(event.Stage)
-	if event.Symbol != "" {
-		message += " " + event.Symbol
-	}
-	if event.Package != "" {
-		message += " " + event.Package
-	}
-	if event.OracleBudget != "" {
-		message += " " + event.OracleBudget
-	}
-	if event.Banked {
-		// A cross-run serve from the measurement bank is never silent
-		// on any face (REQ-result-baseline-bank).
-		message += " (banked)"
-	}
-	return message
+	return "prepare " + event.Text()
 }
 
 func decisionMessage(decision gomutant.RunDecision) string {
@@ -781,14 +782,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	defer prepared.ReleaseCampaign()
 	scratchNamespaces, exemptions := prepared.ScratchNamespaces, prepared.Exemptions
 	notify := progressNotifier(ctx, req)
-	loading := gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}
+	// The loading event rides the inline face when no token listens;
+	// with one, the load itself announces it (loadTreeReporting).
 	out.PreparationCount++
-	if notify != nil {
-		notify(preparationMessage(loading))
-	} else {
-		out.Preparation = append(out.Preparation, loading)
+	if notify == nil {
+		out.Preparation = append(out.Preparation, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	}
-	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {
 		return nil, out, err
 	}
@@ -976,24 +976,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// The heartbeat keeps long compile and execution stretches audible
 	// under the client's deadline: no phase goes silent longer than the
 	// cadence while a token listens (REQ-mcp-envelope).
-	if notify != nil {
-		stop := make(chan struct{})
-		defer close(stop)
-		go func() {
-			started := time.Now()
-			ticker := time.NewTicker(20 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-stop:
-					return
-				case <-ticker.C:
-					notify(fmt.Sprintf("still working: %s (%s elapsed)", streams.lastPhase.Load(), time.Since(started).Round(time.Second)))
-				}
-			}
-		}()
-	}
-	findings, err := tree.Run(ctx, targets, options)
+	findings, err := withHeartbeatLabel(ctx, notify, func() string { return streams.lastPhase.Load().(string) }, func(ctx context.Context) ([]gomutant.Finding, error) {
+		return tree.Run(ctx, targets, options)
+	})
 	var drift *gomutant.TreeDriftError
 	if err != nil && !errors.As(err, &drift) {
 		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
@@ -1178,7 +1163,7 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 		return nil, out, err
 	}
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {
 		return nil, out, err
 	}
@@ -1356,7 +1341,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	judge := in.judged()
 	var tree *gomutant.Tree
 	if judge {
-		tree, err = withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+		tree, err = s.loadTreeReporting(ctx, notify, in.selection())
 		if err != nil {
 			return nil, out, err
 		}
@@ -1502,7 +1487,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 				continue
 			}
 			notify := progressNotifier(ctx, req)
-			tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+			tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 			if err != nil {
 				return nil, explainOut{}, err
 			}
@@ -1674,7 +1659,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	}
 	out.Layer, out.LayerReason = store.Layer(attested)
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {
 		out.Warning = "record state unavailable: " + err.Error()
 		return nil, out, nil
@@ -1715,7 +1700,7 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 		return nil, out, err
 	}
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {
 		return nil, out, err
 	}
@@ -1763,7 +1748,7 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 		return nil, out, err
 	}
 	notify := progressNotifier(ctx, req)
-	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {
 		return nil, out, err
 	}
@@ -1905,28 +1890,34 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 			}
 		}
 	}
-	// The ephemeral library path exposes no per-step callbacks, so progress
-	// is limited to the two coarse boundaries the tool itself crosses.
 	notify := progressNotifier(ctx, req)
-	if notify != nil {
-		notify("prepare loading")
-	}
-	tree, err := withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, in.selection()) })
+	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {
 		return nil, nil, err
 	}
 	if notify != nil {
 		notify("running " + in.TestPkg)
 	}
-	res, err := withHeartbeat(ctx, notify, "ephemeral oracle", func(ctx context.Context) (*gomutant.EphemeralResult, error) {
-		switch {
-		case len(in.BatchEdits) > 0:
-			return tree.EphemeralBatch(ctx, in.BatchEdits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
-		case len(in.Edits) > 0:
-			return tree.EphemeralEdits(ctx, in.File, in.Edits, in.TestPkg, in.Run, oracleTimeout, in.Runs)
-		default:
-			return tree.Ephemeral(ctx, in.File, []byte(in.Replacement), in.TestPkg, in.Run, oracleTimeout, in.Runs)
+	// The probe's phases ride the notifications as preparation events
+	// and name the heartbeat's stretch (REQ-exec-run-status).
+	var phase atomic.Value
+	phase.Store("ephemeral oracle")
+	probe := gomutant.EphemeralRequest{File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, Progress: func(event gomutant.PreparationEvent) {
+		phase.Store(event.Text())
+		if notify != nil {
+			notify(preparationMessage(event))
 		}
+	}}
+	switch {
+	case len(in.BatchEdits) > 0:
+		probe.BatchEdits = in.BatchEdits
+	case len(in.Edits) > 0:
+		probe.Edits = in.Edits
+	default:
+		probe.Mutant = []byte(in.Replacement)
+	}
+	res, err := withHeartbeatLabel(ctx, notify, func() string { return phase.Load().(string) }, func(ctx context.Context) (*gomutant.EphemeralResult, error) {
+		return tree.RunEphemeral(ctx, probe)
 	})
 	if err != nil {
 		return nil, nil, err

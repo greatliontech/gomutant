@@ -16,11 +16,12 @@ import (
 type ephemeralOptions struct {
 	dir, file, replacement, batch, testPkg, runPat string
 	attest, findingsFile                           string
-	timeout, oracleTimeout                         time.Duration
+	timeout, oracleTimeout, progressEvery          time.Duration
 	oracleMemoryMiB                                int64
 	runs                                           int
 	tags                                           []string
 	toolchain                                      string
+	output                                         io.Writer
 }
 
 func newEphemeralCommand() *cobra.Command {
@@ -37,6 +38,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill")
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
+	f.DurationVar(&o.progressEvery, "progress-interval", 30*time.Second, "cadence of the progress line naming the phase in flight (loading, baseline, mutant run, coverage) and the elapsed time; 0 disables")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "maximum duration of the baseline and mutant oracle processes; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
 	f.IntVar(&o.runs, "runs", 1, "run the mutant this many times (1-10): killed means every run killed - consecutive kills split deterministic kills from a property generator's draw luck")
@@ -106,33 +108,58 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 		}
 	}
 	gomutant.SetOracleMemoryLimit(oracleMemoryBytes(o.oracleMemoryMiB), 1)
-	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
-	if err != nil {
+	// The reporter names every phase as it begins and keeps a cadenced
+	// progress line through the long stretches (the load, the baseline
+	// probe, each mutant run, the coverage probe) so an interrupted
+	// probe names the phase it was in (REQ-exec-run-status).
+	out := o.output
+	if out == nil {
+		out = os.Stdout
+	}
+	// The cadence goroutine and the verb share the writer: serialized,
+	// as the run verb's is.
+	out = &syncWriter{w: out}
+	rep := newRunReporter(out, false, 0)
+	defer rep.stop()
+	// Primed before the cadence starts: a tick never precedes the
+	// loading line with run-shaped tallies a probe does not have.
+	rep.phase("loading")
+	rep.startCadence(o.progressEvery)
+	// An interruption names the stretch it cut short, after the cadence
+	// has stopped, so nothing trails the verdict or the refusal.
+	interrupted := func(err error) error {
+		if ctx.Err() != nil {
+			rep.stop()
+			rep.interrupted(ctx.Err().Error())
+		}
 		return err
 	}
-	var res *gomutant.EphemeralResult
+	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
+	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
+	if err != nil {
+		return interrupted(err)
+	}
+	req := gomutant.EphemeralRequest{TestPkg: o.testPkg, Run: o.runPat, OracleTimeout: o.oracleTimeout, Runs: o.runs, Progress: rep.preparation}
 	if o.batch != "" {
-		res, err = tree.EphemeralBatch(ctx, batchEdits, o.testPkg, o.runPat, o.oracleTimeout, o.runs)
-		if err != nil {
-			return err
-		}
+		req.BatchEdits = batchEdits
 	} else {
 		if err := ctx.Err(); err != nil {
-			return err
+			return interrupted(err)
 		}
 		mutant, err := readFileContext(ctx, o.replacement)
 		if err != nil {
-			return err
+			return interrupted(err)
 		}
 		if err := ctx.Err(); err != nil {
-			return err
+			return interrupted(err)
 		}
-		res, err = tree.Ephemeral(ctx, o.file, mutant, o.testPkg, o.runPat, o.oracleTimeout, o.runs)
-		if err != nil {
-			return err
-		}
+		req.File, req.Mutant = o.file, mutant
 	}
-	renderEphemeralVerdict(os.Stdout, res)
+	res, err := tree.RunEphemeral(ctx, req)
+	if err != nil {
+		return interrupted(err)
+	}
+	rep.epilogue(func(w io.Writer) { renderEphemeralVerdict(w, res) })
 	if o.attest != "" {
 		att, err := gomutant.AttestEphemeralEquivalence(ctx, o.dir, res, o.attest)
 		if err != nil {
@@ -142,7 +169,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 		if err := gomutant.RecordEphemeralAttestation(ctx, path, att); err != nil {
 			return err
 		}
-		fmt.Fprintf(os.Stdout, "equivalence recorded  %s  %s — %s\n", att.EditDigest[:min(12, len(att.EditDigest))], path, att.Reason)
+		fmt.Fprintf(out, "equivalence recorded  %s  %s — %s\n", att.EditDigest[:min(12, len(att.EditDigest))], path, att.Reason)
 	}
 	return nil
 }

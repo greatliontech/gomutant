@@ -183,6 +183,7 @@ to=example.com/new. after a package rename, then for real.
 - `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of the baseline and mutant oracle processes; 0 (the default on both faces) derives the budget from the measured baseline — an explicit value is the override, and the result reports the effective budget and the measured baseline. The advisory coverage probe (an instrumented whole-closure rebuild) shares the derive-mode baseline's measurement leash in both modes.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling for the probe's oracle process tree in MiB: absent inherits the server's installed ceiling (mcp), 0 derives RAM/2 floored at 1 GiB, -1 disables; refused while a run is in flight — the campaign owns the process ceiling.
 - `runs` (mcp, cli) — run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed — N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result.
+- `progress-interval` (cli) — cadence of the progress line naming the phase in flight and the elapsed time; 0 disables.
 - `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document (`ephemeral-attestations.json`); a blank reasoning refuses before any load or probe; refused after the probe when it killed, was mixed, or never exercised the edit.
 - `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes (default .gomutant/findings.json).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
@@ -202,6 +203,13 @@ that reads the process arguments itself (a cobra command handed a nil
 argument list) sees flags the plain run never passes; a
 failing-baseline refusal shows the failing tests' own output, so such
 a disagreement reads from the refusal.
+Both faces report the probe's phases as they begin — the baseline
+probe with its leash, each mutant run with its budget, the coverage
+probe — the cli as `prepare` lines with a cadenced progress line naming
+the phase in flight (`progress-interval`), the mcp face as progress
+notifications with a heartbeat naming the phase; an interrupted cli
+probe reports the phase it cut short (the load included) after its
+cadence stops.
 **example:** ephemeral with a batch edit neutering one guard and
 run naming the test that must notice.
 

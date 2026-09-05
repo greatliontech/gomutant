@@ -186,7 +186,7 @@ func TestEphemeralDeliversPinnedRapidFlags(t *testing.T) {
 	if broken == string(orig) {
 		t.Fatal("fixture edit failed")
 	}
-	res, err := tr.Ephemeral(context.Background(), "extprop/extprop.go", []byte(broken), "example.com/fixture/extprop", "^TestExtProp$", time.Minute, 1)
+	res, err := tr.RunEphemeral(context.Background(), EphemeralRequest{File: "extprop/extprop.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/extprop", Run: "^TestExtProp$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

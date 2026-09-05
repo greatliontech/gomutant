@@ -174,7 +174,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-tools"
-  content_hash: "2140d790c0c4c34b457c6647641a53d160245bcb1f5bf4a23a2b894977941b86"
+  content_hash: "bd90826a445070b4f1b644b50ed0196cc2504e41f0842007ce89e1adeb10f297"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestMCPRosterExposesExplain"
   role: BINDING_ROLE_TESTS
@@ -183,7 +183,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-tools"
-  content_hash: "2140d790c0c4c34b457c6647641a53d160245bcb1f5bf4a23a2b894977941b86"
+  content_hash: "bd90826a445070b4f1b644b50ed0196cc2504e41f0842007ce89e1adeb10f297"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunFindingsAttest"
   role: BINDING_ROLE_TESTS

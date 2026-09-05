@@ -28,7 +28,9 @@ additionally receives progress notifications forwarded from the preparation
 events, target decisions, and advisory freshness-analysis events — the
 keep-alives and the payload-bearing diagnostics alike (the analysis-event
 class in [execution.md](execution.md): subscribing delivers both kinds);
-an ephemeral request's notifications are coarse tool-boundary messages.
+an ephemeral request's notifications carry its preparation events — the
+baseline probe, each mutant run, the coverage probe — and the heartbeat
+names the phase in flight.
 Notification delivery is advisory and never changes tool results or errors.
 Discovery encodes exact effective oracles without repeating them: the result
 contains canonical top-level `oracleSets` with zero-based integer `id` values,

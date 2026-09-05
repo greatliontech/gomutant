@@ -35,6 +35,12 @@ func pruneCommand(ctx context.Context, o pruneOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	out = &syncWriter{w: out}
+	rep := newRunReporter(out, false, 0)
+	defer rep.stop()
+	rep.phase("loading")
+	rep.startCadence(verbProgressInterval)
+	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
@@ -43,7 +49,7 @@ func pruneCommand(ctx context.Context, o pruneOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	renderPrune(out, result)
+	rep.epilogue(func(w io.Writer) { renderPrune(w, result) })
 	return nil
 }
 
@@ -96,6 +102,12 @@ func retargetCommand(ctx context.Context, o retargetOptions, out io.Writer) erro
 	if err != nil {
 		return err
 	}
+	out = &syncWriter{w: out}
+	rep := newRunReporter(out, false, 0)
+	defer rep.stop()
+	rep.phase("loading")
+	rep.startCadence(verbProgressInterval)
+	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
@@ -104,21 +116,25 @@ func retargetCommand(ctx context.Context, o retargetOptions, out io.Writer) erro
 	if err != nil {
 		return err
 	}
+	rep.epilogue(func(w io.Writer) { renderRetarget(w, result) })
+	return nil
+}
+
+func renderRetarget(w io.Writer, result gomutant.RetargetResult) {
 	verb := "retargeted"
 	if result.Check {
 		verb = "would retarget"
 	}
 	for _, record := range result.Rewritten {
-		fmt.Fprintf(out, "%s %s -> %s\n", verb, record.From, record.To)
+		fmt.Fprintf(w, "%s %s -> %s\n", verb, record.From, record.To)
 	}
 	// The touched surface owes no resolution, so the preview is the one
 	// audit point - each field rewrite is echoed (REQ-result-lifecycle).
 	for _, move := range result.TouchedRewrites {
-		fmt.Fprintf(out, "%s on %s: %s -> %s\n", verb, move.Record, move.From, move.To)
+		fmt.Fprintf(w, "%s on %s: %s -> %s\n", verb, move.Record, move.From, move.To)
 	}
 	if result.Touched > 0 {
-		fmt.Fprintf(out, "%s %d further record(s) whose oracle or killer identities carry the rename\n", verb, result.Touched)
+		fmt.Fprintf(w, "%s %d further record(s) whose oracle or killer identities carry the rename\n", verb, result.Touched)
 	}
-	fmt.Fprintf(out, "%s %d record(s)\n", verb, len(result.Rewritten))
-	return nil
+	fmt.Fprintf(w, "%s %d record(s)\n", verb, len(result.Rewritten))
 }

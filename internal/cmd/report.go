@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
@@ -53,7 +54,65 @@ type runReporter struct {
 	cadenceDone   chan struct{}
 	cadenceClosed sync.Once
 	writeErr      error // first structured-face write failure, surfaced at exit
+	// phaseLabel names the stretch in flight before any execution
+	// event — loading, an ephemeral probe's phase, a judged record —
+	// so the cadence line says what the process is doing while the
+	// run-shaped tallies are all zero (REQ-exec-run-status).
+	phaseLabel atomic.Value
+	// decided marks the first decision: from then on the tallies are the
+	// cadence line, whatever stretch a later preparation event names.
+	decided atomic.Bool
 }
+
+// phase names the stretch now in flight for the cadence line; the
+// label yields to the run tallies at the first decision — from then
+// on the served, skipped, and committed counts are the forward-progress
+// signal, whatever stretch is in flight.
+func (r *runReporter) phase(label string) { r.phaseLabel.Store(label) }
+
+// phaseInFlight is the primed label while no decision has been
+// reported, else empty.
+func (r *runReporter) phaseInFlight() string {
+	if r.decided.Load() {
+		return ""
+	}
+	label, _ := r.phaseLabel.Load().(string)
+	return label
+}
+
+// preparation reports a preparation event on the reporter's face — the
+// structured record, or the human prepare line — and primes the phase
+// label with it (REQ-exec-run-status).
+func (r *runReporter) preparation(event gomutant.PreparationEvent) {
+	r.phase(event.Text())
+	r.line("prepare", event, func(w io.Writer) { renderPreparation(w, event) })
+}
+
+// epilogue renders a verb's result rows: the cadence stops and joins
+// first, so no progress line can trail them — a result cannot be
+// rendered without ending the cadence.
+func (r *runReporter) epilogue(render func(io.Writer)) {
+	r.stop()
+	render(r.out)
+}
+
+// interrupted reports the stretch an interruption cut short, on the
+// reporter's face, after the cadence has stopped.
+func (r *runReporter) interrupted(cause string) {
+	label := r.phaseInFlight()
+	elapsed := time.Since(r.start).Round(time.Second)
+	r.line("interrupted", map[string]string{"cause": cause, "phase": label, "elapsed": elapsed.String()}, func(w io.Writer) {
+		fmt.Fprintf(w, "interrupted  %s during %s after %s\n", cause, label, elapsed)
+	})
+}
+
+// verbProgressInterval is the cadence of the phase-naming progress
+// line on the verbs whose cost is one call (a load, a judged record, a
+// prune, a retarget): the run and ephemeral verbs expose the same
+// cadence as a flag because their stretches are the caller's to size.
+// A variable so a test can lower it — the package's tests run
+// serially, so the swap is race-free.
+var verbProgressInterval = 30 * time.Second
 
 func newRunReporter(out io.Writer, jsonl bool, selected int) *runReporter {
 	return &runReporter{
@@ -122,6 +181,7 @@ func (r *runReporter) setSelected(n int) {
 }
 
 func (r *runReporter) decision(d gomutant.RunDecision) {
+	r.decided.Store(true)
 	r.mu.Lock()
 	switch d.Action {
 	case "cached":
@@ -263,6 +323,13 @@ func (r *runReporter) estRemainingLocked() string {
 }
 
 func (r *runReporter) progressLine() {
+	if label := r.phaseInFlight(); label != "" {
+		elapsed := time.Since(r.start).Round(time.Second)
+		r.line("progress", map[string]string{"phase": label, "elapsed": elapsed.String()}, func(w io.Writer) {
+			fmt.Fprintf(w, "progress  %s, elapsed %s\n", label, elapsed)
+		})
+		return
+	}
 	p := r.progressSnapshot()
 	r.line("progress", p, func(w io.Writer) {
 		line := fmt.Sprintf("progress  %d/%d targets committed (%d served, %d skipped), candidates %d/%d, %d killed, %d open, elapsed %s",

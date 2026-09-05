@@ -69,6 +69,8 @@ func newFindingsCommand() *cobra.Command {
 }
 
 func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) error {
+	// The judge's cadence goroutine shares the writer with the rows.
+	out = &syncWriter{w: out}
 	switch o.state {
 	case "", string(gomutant.FindingCurrent), string(gomutant.FindingStale), string(gomutant.FindingUnverifiable), string(gomutant.FindingDetached):
 	default:
@@ -98,10 +100,22 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	}
 	judge := o.judged()
 	var tree *gomutant.Tree
+	phase, stop := func(string) {}, func() {}
 	if judge {
 		// Judging derives freshness against the current tree — the
 		// expensive truth. The default path loads no tree at all: the
 		// document's recorded facts answer without one.
+		// The human face carries the loading line and the cadence; the
+		// JSON document is the machine face and stays a document.
+		if !o.json {
+			rep := newRunReporter(out, false, 0)
+			defer rep.stop()
+			stop = rep.stop
+			rep.phase("loading")
+			rep.startCadence(verbProgressInterval)
+			rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
+			phase = rep.phase
+		}
 		tree, err = gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 		if err != nil {
 			return err
@@ -114,7 +128,10 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 			tree.SetDynamicStateVouches(identities...)
 		}
 	}
-	views, err := inspectFindings(ctx, tree, store, all, o.label, o.state, o.symbol)
+	views, err := inspectFindings(ctx, tree, store, all, o.label, o.state, o.symbol, phase)
+	// The rows render through the reporter's epilogue when one runs:
+	// the cadence stops and joins before the first row.
+	stop()
 	if err != nil {
 		return err
 	}
@@ -240,7 +257,10 @@ func renderFindingsJSON(w io.Writer, views []findingView) error {
 	return json.NewEncoder(w).Encode(views)
 }
 
-func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.Store, all []gomutant.Finding, label, state, symbol string) ([]findingView, error) {
+func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.Store, all []gomutant.Finding, label, state, symbol string, phase func(string)) ([]findingView, error) {
+	if phase == nil {
+		phase = func(string) {}
+	}
 	views := make([]findingView, 0, len(all))
 	for _, finding := range all {
 		if err := ctx.Err(); err != nil {
@@ -256,6 +276,7 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 		// the record's own facts, state "recorded".
 		inspection := gomutant.RecordedInspection(finding)
 		if tree != nil {
+			phase("judging " + finding.Symbol)
 			judged, err := tree.InspectFindingContext(ctx, finding)
 			if err != nil {
 				return nil, err

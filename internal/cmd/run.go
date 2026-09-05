@@ -100,6 +100,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	rep := newRunReporter(out, o.jsonl, 0)
 	defer rep.stop()
+	// The cadence starts before the load: a long typed load is a
+	// stretch the progress line must name, not a silence.
+	rep.phase("loading")
+	rep.startCadence(o.progressEvery)
 	// Every refusal the inputs decide fires here, before the load: the
 	// bounds, the declarations, the target sources, the campaign lock,
 	// the exemptions, the store (REQ-exec-preparation).
@@ -125,11 +129,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	defer prepared.ReleaseCampaign()
 	scratchNamespaces, exemptions, docStore, prior := prepared.ScratchNamespaces, prepared.Exemptions, prepared.Store, prepared.Prior
-	if o.jsonl {
-		rep.emit("prepare", gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
-	} else {
-		renderPreparation(out, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
-	}
+	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return err
@@ -174,9 +174,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
 	rep.setSelected(len(targets))
-	if !o.plan {
-		rep.startCadence(o.progressEvery)
-	}
+	rep.phase("preparing")
 	if residue, err = tree.OracleClosureSignpostContext(ctx, residue, prior, targets); err != nil {
 		return err
 	}
@@ -318,13 +316,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			}
 			renderRunDecision(out, decision)
 		},
-		Progress: func(event gomutant.PreparationEvent) {
-			if o.jsonl {
-				rep.emit("prepare", event)
-				return
-			}
-			renderPreparation(out, event)
-		},
+		Progress: rep.preparation,
 		// Detail-free events are the analysis keep-alive, time-gated
 		// to a heartbeat: the run's longest silent stretches are
 		// in-process gofresh analysis (the freshness and
@@ -619,23 +611,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 }
 
 func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
-	switch event.Stage {
-	case gomutant.PreparationLoading:
-		fmt.Fprintln(w, "prepare   loading")
-	case gomutant.PreparationBaseline:
-		if event.Banked {
-			// Served from the machine-local measurement bank: pins
-			// re-verified, observation adopted — no probe ran
-			// (REQ-result-baseline-bank).
-			fmt.Fprintf(w, "prepare   %s %s %s (banked)\n", event.Stage, event.Symbol, event.Package)
-			return
-		}
-		fmt.Fprintf(w, "prepare   %s %s %s\n", event.Stage, event.Symbol, event.Package)
-	case gomutant.PreparationOracleBudget:
-		fmt.Fprintf(w, "prepare   %s %s %s %s\n", event.Stage, event.Symbol, event.Package, event.OracleBudget)
-	default:
-		fmt.Fprintf(w, "prepare   %s %s\n", event.Stage, event.Symbol)
-	}
+	fmt.Fprintf(w, "prepare   %s\n", event.Text())
 }
 
 func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent, selectionNote, modeSuffix string) {

@@ -622,7 +622,16 @@ an outcome it cannot attribute is refused (REQ-exec-attribution), so noise
 aborts rather than scoring.
 
 **REQ-exec-run-status** (behavior): CLI and MCP faces MUST report `loading`
-before tree loading; the shared runner reports `resolving` before each target's
+before tree loading (every verb that loads, on its human CLI face and, when
+a token listens, its MCP face; the CLI face keeps a cadenced progress line
+naming the stretch in flight — the load, an ephemeral probe's phase, a
+judged record — until the first decision, after which the line carries the
+served, skipped, and committed tallies, and the structured face's progress
+record carries the phase and elapsed time before that point and the
+tallies after; the MCP heartbeat names the same stretch); the ephemeral
+verb reports
+`baseline` before its probe, `mutant-run` before each run, and `coverage`
+before its advisory probe, on both faces; the shared runner reports `resolving` before each target's
 target and oracle resolution, `freshness` before constructing and checking that
 target's subject views, `mutants` before enumerating a target that requires
 measurement, and `baseline` before each package-scoped oracle group actually

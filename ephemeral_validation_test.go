@@ -34,16 +34,16 @@ func TestEphemeralRefusesUnloadedPackageAndUncompiledFile(t *testing.T) {
 	}
 	valid := []byte("package lib\n")
 
-	if _, err := tr.Ephemeral(t.Context(), "lib/excluded.go", []byte("//go:build never\n\npackage lib\n\nfunc Excluded() int { return 2 }\n"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "not compiled by the loaded build") {
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "lib/excluded.go", Mutant: []byte("//go:build never\n\npackage lib\n\nfunc Excluded() int { return 2 }\n"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "not compiled by the loaded build") {
 		t.Fatalf("build-excluded replacement = %v, want an exclusion refusal", err)
 	}
-	if _, err := tr.Ephemeral(t.Context(), "lib/data.txt", []byte("mutated"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "not compiled by the loaded build") {
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "lib/data.txt", Mutant: []byte("mutated"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "not compiled by the loaded build") {
 		t.Fatalf("data-file replacement = %v, want an exclusion refusal", err)
 	}
-	if _, err := tr.Ephemeral(t.Context(), "lib/lib.go", valid, "-exec=/bin/true", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "not a loaded package import path") {
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "lib/lib.go", Mutant: valid, TestPkg: "-exec=/bin/true", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "not a loaded package import path") {
 		t.Fatalf("flag-shaped test package = %v, want a loaded-package refusal", err)
 	}
-	if _, err := tr.Ephemeral(t.Context(), "lib/lib.go", valid, "example.com/nowhere", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "not a loaded package import path") {
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "lib/lib.go", Mutant: valid, TestPkg: "example.com/nowhere", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "not a loaded package import path") {
 		t.Fatalf("unloaded test package = %v, want a loaded-package refusal", err)
 	}
 }
@@ -65,7 +65,7 @@ func TestEphemeralRefusesReplacementOutsideOracleLinkedSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	const want = "outside example.com/fixture/lib's linked dependency set"
-	if _, err := tr.Ephemeral(t.Context(), "plain/plain.go", []byte("package plain\n\nfunc Ok() bool { return false }\n"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil ||
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "plain/plain.go", Mutant: []byte("package plain\n\nfunc Ok() bool { return false }\n"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil ||
 		!strings.Contains(err.Error(), "never compiles plain/plain.go") || !strings.Contains(err.Error(), want) {
 		t.Fatalf("unlinked replacement = %v, want the linkage refusal naming file and set", err)
 	}
@@ -73,7 +73,7 @@ func TestEphemeralRefusesReplacementOutsideOracleLinkedSet(t *testing.T) {
 	// oracle never builds the broken package, so no compiler diagnostic
 	// exists to prefer — rendering SURVIVED here was the demonstrated
 	// false-evidence channel.
-	if _, err := tr.Ephemeral(t.Context(), "plain/plain.go", []byte("package plain\n\nvar Count int = @@@\n"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil ||
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "plain/plain.go", Mutant: []byte("package plain\n\nvar Count int = @@@\n"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil ||
 		!strings.Contains(err.Error(), want) {
 		t.Fatalf("unparseable unlinked replacement = %v, want the linkage refusal", err)
 	}
@@ -87,7 +87,7 @@ func TestEphemeralRefusesReplacementOutsideOracleLinkedSet(t *testing.T) {
 	// may legitimately mutate the test itself. The edit strips the
 	// external file to its package clause, which measures cleanly
 	// (TestAdd lives in the internal variant).
-	if _, err := tr.Ephemeral(t.Context(), "lib/ext_test.go", []byte("package lib_test\n"), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err != nil {
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "lib/ext_test.go", Mutant: []byte("package lib_test\n"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err != nil {
 		t.Fatalf("external test-variant replacement refused: %v", err)
 	}
 	// A linked dependency's file passes the gate and measures normally.
@@ -102,7 +102,7 @@ func TestEphemeralRefusesReplacementOutsideOracleLinkedSet(t *testing.T) {
 	if mutatedGen == string(genSource) {
 		t.Fatal("gen.go mutation anchor missing")
 	}
-	if _, err := tr.Ephemeral(t.Context(), "genp/gen.go", []byte(mutatedGen), "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err != nil {
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutatedGen), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err != nil {
 		t.Fatalf("linked-dependency replacement refused: %v", err)
 	}
 }
