@@ -70,6 +70,41 @@ func TestExemptionLiftsUnverifiableClauseExactly(t *testing.T) {
 	if ok, _ := Committable(f, dir, drifted); ok {
 		t.Fatal("a drifted reason still lifted the clause")
 	}
+	// The producer's bracketed attribution — which files moved, and
+	// when — is diagnostic detail the clause does not include: an entry
+	// naming the clause accepts a reason carrying one, and a clause
+	// differing before the attribution still does not match.
+	const attributedReason = "observation bracket moved: lib [recently touched: lib/a.go (2026-09-05T10:00:00.123456789Z)]"
+	attributed := f
+	attributed.TargetEvidence.RuntimeReason = attributedReason
+	attributed.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
+	for i := range attributed.OracleEvidence {
+		attributed.OracleEvidence[i].RuntimeReason = attributedReason
+	}
+	moved := []Exemption{{Subject: "example.com/m.TestF", Reason: "observation bracket moved: lib", Rationale: "the member edit is the reviewer's own"}}
+	if ok, reason := Committable(attributed, dir, moved); !ok {
+		t.Fatalf("an attributed reason escaped its clause's entry: %s", reason)
+	}
+	if ok, _ := Committable(attributed, dir, []Exemption{{Subject: "example.com/m.TestF", Reason: "observation bracket moved: lib2", Rationale: "x"}}); ok {
+		t.Fatal("a different clause matched through the attribution")
+	}
+	if got := reasonClause("plain clause"); got != "plain clause" {
+		t.Fatalf("reasonClause without an attribution = %q", got)
+	}
+	// Every other clause ends in a path, and a path may end in a
+	// bracketed segment: only the moved-bracket clause is stripped.
+	if bracketed := "external directory input: /srv/fixtures [2026]"; reasonClause(bracketed) != bracketed {
+		t.Fatalf("a path's bracketed segment was stripped: %q", reasonClause(bracketed))
+	}
+	pathy := f
+	pathy.TargetEvidence.RuntimeReason = "external directory input: /srv/fixtures [2026]"
+	pathy.OracleEvidence = []SubjectEvidence{{Symbol: "example.com/m.TestF", RuntimeUnverifiable: true, RuntimeReason: pathy.TargetEvidence.RuntimeReason}}
+	if ok, _ := Committable(pathy, dir, []Exemption{{Subject: "example.com/m.TestF", Reason: "external directory input: /srv/fixtures", Rationale: "x"}}); ok {
+		t.Fatal("an entry naming the path without its bracketed segment lifted the clause")
+	}
+	if ok, reason := Committable(pathy, dir, []Exemption{{Subject: "example.com/m.TestF", Reason: pathy.TargetEvidence.RuntimeReason, Rationale: "x"}}); !ok {
+		t.Fatalf("the verbatim bracketed path did not match: %s", reason)
+	}
 	other := []Exemption{{Subject: "example.com/m.TestOther", Reason: "runtime input not covered by observation bracket: go.mod", Rationale: "x"}}
 	if ok, _ := Committable(f, dir, other); ok {
 		t.Fatal("an unnamed subject's entry lifted the clause")
@@ -354,5 +389,26 @@ func TestDeltaCountsFoldsConsultExemptions(t *testing.T) {
 	}
 	if !unstableForBuckets(&rec, nil) {
 		t.Fatal("unaccepted record judged stable")
+	}
+}
+
+// An exemption entry pasted with a moved-bracket attribution could
+// never match — the attribution is fresh per measurement — so the
+// record refuses it loudly rather than holding a dead acceptance.
+func TestExemptionRecordRefusesAnAttributedReason(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "exemptions.json")
+	doc := `{"version":1,"exemptions":[{"subject":"example.com/m.TestF","reason":"observation bracket moved: lib [recently touched: lib/a.go (2026-09-05T10:00:00Z)]","rationale":"pasted from the report"}]}`
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), "name the clause alone") {
+		t.Fatalf("attributed entry: %v; want the record's refusal", err)
+	}
+	plain := `{"version":1,"exemptions":[{"subject":"example.com/m.TestF","reason":"observation bracket moved: lib","rationale":"reviewed"}]}`
+	if err := os.WriteFile(path, []byte(plain), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadExemptions(path); err != nil {
+		t.Fatalf("the clause alone: %v", err)
 	}
 }

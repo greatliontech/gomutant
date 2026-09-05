@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Exemption is one reviewed entry of the committed exemption record
@@ -55,6 +56,9 @@ func LoadExemptions(path string) ([]Exemption, error) {
 		return nil, fmt.Errorf("gomutant: exemption record %s: unsupported version %d", path, doc.Version)
 	}
 	for i, e := range doc.Exemptions {
+		if carriesAttribution(e.Reason) {
+			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d names a moved-bracket reason with its attribution %q — the attribution is fresh per measurement; name the clause alone", path, i, e.Reason[strings.LastIndex(e.Reason, " ["):])
+		}
 		if e.Subject == "" || e.Reason == "" || e.Rationale == "" {
 			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d needs subject, reason, and rationale", path, i)
 		}
@@ -63,15 +67,47 @@ func LoadExemptions(path string) ([]Exemption, error) {
 }
 
 // exemptionFor returns the entry accepting (subject, reason) exactly,
-// or nil. Matching is exact on both: a reason drifting even one byte is
-// a different instability the record never reviewed.
+// or nil. Matching is exact on the subject and on the reason's clause:
+// a clause drifting even one byte is a different instability the
+// record never reviewed. The producer may append a bracketed
+// attribution to a clause — which files moved a bracket, and when —
+// that is diagnostic detail, fresh per measurement, which the clause
+// does not include (REQ-result-exemptions).
 func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
+	clause := reasonClause(reason)
 	for i := range exemptions {
-		if exemptions[i].Subject == subject && exemptions[i].Reason == reason {
+		if exemptions[i].Subject == subject && exemptions[i].Reason == clause {
 			return &exemptions[i]
 		}
 	}
 	return nil
+}
+
+// movedBracketClause prefixes the one reason the producer attributes:
+// a moved observation bracket, whose trailing " [...]" names the
+// members that moved. Every other reason ends in a path, and a path may
+// legitimately end in a bracketed segment, so the strip is gated on
+// this prefix and touches no other clause.
+const movedBracketClause = "observation bracket moved: "
+
+// reasonClause is a recorded reason without the producer's trailing
+// bracketed attribution — present only on the moved-bracket clause.
+func reasonClause(reason string) string {
+	if !strings.HasPrefix(reason, movedBracketClause) || !strings.HasSuffix(reason, "]") {
+		return reason
+	}
+	if i := strings.LastIndex(reason, " ["); i > len(movedBracketClause) {
+		return reason[:i]
+	}
+	return reason
+}
+
+// carriesAttribution reports whether an entry's reason is a
+// moved-bracket clause pasted with its attribution: such an entry can
+// never match (the attribution is fresh per measurement), so the record
+// refuses it rather than holding a dead acceptance.
+func carriesAttribution(reason string) bool {
+	return reasonClause(reason) != reason
 }
 
 // coveredExemptions reports whether every runtime-unverifiable subject

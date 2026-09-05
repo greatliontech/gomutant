@@ -1039,9 +1039,14 @@ machinery stats the root to mint per-test subtrees, and an undeclared
 root records as an uncovered runtime input that leaves every
 temp-touching oracle's evidence machine-local and its survivors
 unbucketed. The declaration names exactly the root this run minted,
-never an inherited `TMPDIR` — a fail-safe direction: a missing mint
-declares nothing and evidence degrades to unverifiable, rather than a
-foreign temp root reading as ephemeral.
+never an inherited `TMPDIR` — a fail-safe direction gomutant keeps as
+its own: a captured observation without a minted root is refused at
+the ingest rather than handed to the producer facade, which would stand
+the environment's temp root in for it — a foreign temp root reading as
+ephemeral. Every other classification root (the toolchain, the module
+and build caches) the facade resolves from the process environment
+gomutant hands it, so an oracle's reads beneath them record no identity
+and seal nothing.
 
 **REQ-exec-scratch-namespace** (behavior): gomutant MUST accept caller
 scratch-namespace declarations - a module-relative directory and a

@@ -112,8 +112,8 @@ func TestMissingProcessLogIsIncomplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, incomplete, err := processObservation(filepath.Join(t.TempDir(), "missing.testlog"), moduleDir,
-		"", GoEnv(moduleDir), true)
+	state, incomplete, err := processObservationContext(context.Background(), filepath.Join(t.TempDir(), "missing.testlog"), moduleDir,
+		"", GoEnv(moduleDir), t.TempDir(), true, runtimeinput.ProducerFrame{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,8 +135,8 @@ func TestIncompleteProcessDoesNotAssertPartialLogComplete(t *testing.T) {
 	if err := os.WriteFile(logPath, log, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	state, incomplete, err := processObservation(logPath, moduleDir,
-		"test process timed out", GoEnv(moduleDir), true)
+	state, incomplete, err := processObservationContext(context.Background(), logPath, moduleDir,
+		"test process timed out", GoEnv(moduleDir), t.TempDir(), true, runtimeinput.ProducerFrame{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +800,7 @@ func TestObservationWithoutBracketFailsClosedAsIncomplete(t *testing.T) {
 	if frame.Reason() == "" {
 		t.Fatal("capture of a nonexistent package directory produced a usable frame")
 	}
-	obs, incomplete, err := processObservationContext(context.Background(), log, root, "", os.Environ(), "", true, frame, nil)
+	obs, incomplete, err := processObservationContext(context.Background(), log, root, "", os.Environ(), t.TempDir(), true, frame, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1053,11 +1053,29 @@ func TestOracleFrameExcludesToolBookkeeping(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte("# test log\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	obs, reason, err := processObservationContext(context.Background(), logPath, dir, "", GoEnv(dir), "", true, frame, nil)
+	obs, reason, err := processObservationContext(context.Background(), logPath, dir, "", GoEnv(dir), t.TempDir(), true, frame, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reason != "" || obs.Unverifiable {
 		t.Fatalf("mid-span tool bookkeeping moved the bracket: reason=%q obs=%q", reason, obs.Reason)
+	}
+}
+
+// A captured observation without the minted scratch root refuses at
+// the ingest: the facade would otherwise stand the environment's temp
+// root in for it, a foreign root reading as ephemeral
+// (REQ-exec-oracle-scratch-declared's fail-safe direction).
+func TestObservationWithoutAMintedScratchRootRefuses(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "proc.testlog")
+	if err := os.WriteFile(logPath, []byte("# test log\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := processObservationContext(context.Background(), logPath, t.TempDir(), "", os.Environ(), "", true, runtimeinput.ProducerFrame{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "minted scratch root") {
+		t.Fatalf("capture without a scratch root: %v; want the refusal", err)
+	}
+	if _, _, err := processObservationContext(context.Background(), logPath, t.TempDir(), "", os.Environ(), "", false, runtimeinput.ProducerFrame{}, nil); err != nil {
+		t.Fatalf("an uncaptured observation needs no root: %v", err)
 	}
 }

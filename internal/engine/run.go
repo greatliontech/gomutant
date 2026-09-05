@@ -674,10 +674,6 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	return MutantDiscarded, "", state, diagnostic, "", nil
 }
 
-func processObservation(path, moduleDir, incompleteReason string, env []string, capture bool) (runtimeinput.Observation, string, error) {
-	return processObservationContext(context.Background(), path, moduleDir, incompleteReason, env, "", capture, runtimeinput.ProducerFrame{}, nil)
-}
-
 // captureOracleFrame captures the pre-spawn producer frame a completed
 // observation binds through (mutants run through a build overlay, so
 // the on-disk tree the bracket covers is unmutated and stable across
@@ -695,7 +691,7 @@ func processObservation(path, moduleDir, incompleteReason string, env []string, 
 func captureOracleFrame(ctx context.Context, moduleDir, packageDir string, bracketPaths []string) runtimeinput.ProducerFrame {
 	return runtimeinput.CaptureProducerFrame(ctx, moduleDir, packageDir, runtimeinput.FrameOptions{
 		BracketPaths:  bracketPaths,
-		ExcludedPaths: []string{".stipulator", ".gomutant"},
+		ExcludedPaths: oracleBookkeepingPaths,
 	})
 }
 
@@ -728,6 +724,12 @@ func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame) []string {
 	return oracleCPUEnv(append(out, "PWD="+frame.PkgDir))
 }
 
+// oracleBookkeepingPaths are the module-relative tool-bookkeeping
+// surfaces an oracle's reads never observe — the findings document a
+// campaign rewrites and the verification corpus — excluded from the
+// bracket frame and from the ingest alike.
+var oracleBookkeepingPaths = []string{".stipulator", ".gomutant"}
+
 // processObservationContext finalizes one launched test process's runtime-input
 // observation. The returned reason is the process's effective incompleteness —
 // the caller's incompleteReason, or the missing-log reason discovered here —
@@ -742,13 +744,29 @@ func processObservationContext(ctx context.Context, path, moduleDir, incompleteR
 	if !capture {
 		return runtimeinput.Observation{}, "", nil
 	}
+	// A captured observation without the minted scratch root would let
+	// the facade fall back to the environment's temp root — a foreign
+	// root reading as ephemeral, the flattering direction
+	// REQ-exec-oracle-scratch-declared forbids; the ingest refuses
+	// instead, so the fail-safe is this producer's own.
+	if scratchRoot == "" {
+		return runtimeinput.Observation{}, "", fmt.Errorf("oracle observation without a minted scratch root")
+	}
 	// The facade owns the fold discipline (caller verdict, missing or
 	// unreadable or headerless capture, refused frame, PWD mismatch,
-	// ingestion failure) and the ingest exclusions. The minted oracle
-	// scratch root is declared as an ephemeral temp root: the tool
-	// created it for this process tree and sweeps it after, so its
-	// identity carries no observable state - without the declaration,
-	// testing.TempDir's stat of TMPDIR records the root as an uncovered
+	// ingestion failure), the ingest exclusions (extended below with the
+	// tool-bookkeeping surfaces the frame excludes), and every
+	// classification root but one, resolved from the environment it is
+	// handed. That environment is the spawn environment less two
+	// settings the resolution never reads — the minted TMPDIR (withheld
+	// so the declaration below stands in for it) and the oracle's
+	// GOMEMLIMIT — every other divergence would silently vacate
+	// observation beneath a root the run never used. The minted oracle
+	// scratch root is the one declaration: the tool created it for this
+	// process tree, keeps it out of the environment it ingests, and
+	// sweeps it after, so its identity carries no observable state -
+	// without the declaration, testing.TempDir's stat of TMPDIR records
+	// the root as an uncovered
 	// runtime input and seals verifiability for every temp-touching
 	// oracle (REQ-exec-oracle-scratch-declared).
 	ingestEnv := oracleIngestEnv(env, frame)
@@ -756,7 +774,8 @@ func processObservationContext(ctx context.Context, path, moduleDir, incompleteR
 		Identity:          path,
 		Env:               ingestEnv,
 		IncompleteReason:  incompleteReason,
-		Roots:             runtimeinput.ClassificationRoots{EphemeralTemp: scratchRoot},
+		ScratchRoot:       scratchRoot,
+		ExcludedPaths:     oracleBookkeepingPaths,
 		ScratchNamespaces: namespaces,
 	})
 	if err != nil {

@@ -447,9 +447,14 @@ record still never serves), are untouched. The matched entries are stamped
 onto each finding they cover as audit metadata; classification re-derives
 from the record on every decision, so deleting an entry revokes the
 acceptance for every later classification without a stamp rewrite - never a
-silent global switch. Matching is exact on subject and reason: an
-instability drifting even one byte is a different instability the record
-never reviewed.
+silent global switch. Matching is exact on subject and on the reason's
+clause: an instability drifting even one byte is a different instability
+the record never reviewed. The trailing bracketed attribution the
+producer appends to the moved-bracket clause alone — which files moved
+the bracket, and when — is diagnostic detail, fresh per measurement, that
+the clause does not include; an entry naming it could never match, so
+the record refuses it. Every other clause ends in a path and is matched
+whole, a bracketed segment of the path included.
 
 **REQ-result-ephemeral-attest** (behavior): A committed
 ephemeral-equivalence record beside the findings document

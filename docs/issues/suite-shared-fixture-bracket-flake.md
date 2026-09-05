@@ -16,8 +16,9 @@ fixturemod. The chartered instrumentation LANDED: gofresh's
 moved-bracket refusal now names WHAT moved — members added/removed by
 name, or the most recently touched members with mtimes
 (runtimeinput.bracketMoveAttribution, gofresh > v0.92.0) — so the next
-occurrence carries its lead. gomutant consumes it at its next gofresh
-bump.
+occurrence carries its lead; gomutant consumes it since its bump to
+gofresh v0.95.0 (the attribution rides the recorded reason as a
+trailing bracket the exemption match excludes).
 
 Remaining ask: on the next occurrence, read the named file/mtime,
 identify the writer, then isolate (mutable-fixture users copy to

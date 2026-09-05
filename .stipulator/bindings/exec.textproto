@@ -282,7 +282,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-oracle-scratch-declared"
-  content_hash: "bd1576a44d1b02b7ba5b004e7b2fa92667120119a74d150156a2ba9e8fb4d3e0"
+  content_hash: "31f22837845939c0a7d7a23561ae5ee413943618496ec78593b74f6994e35a48"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestTempTouchingOracleFinalizesVerifiable"
   role: BINDING_ROLE_TESTS
@@ -1700,4 +1700,13 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestProgressCadenceIsOnePolicy"
   role: BINDING_ROLE_TESTS
   shape_hash: "f42749daa0ae52e458b508dc2938e90892af5c2472bd32a1a609975829aa627c"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-scratch-declared"
+  content_hash: "31f22837845939c0a7d7a23561ae5ee413943618496ec78593b74f6994e35a48"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestObservationWithoutAMintedScratchRootRefuses"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8d37e069de11684df426a84d92e76b16cf73f2a3674a4360113a8ef03075f80f"
 }
