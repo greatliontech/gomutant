@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [legacy-overlay-read-deletes-attestations](legacy-overlay-read-deletes-attestations.md) | a below-minimum-version overlay is deleted as corrupt, losing authored equivalence reasoning; only newer versions are preserved | cross-tool train chunk 139 |
 | [mcp-liveness-cancellation-witness](mcp-liveness-cancellation-witness.md) | keepalive config pinned but the ping-failure cancellation propagation has no witness over the SDK transport seam | transport-seam fault injection lands in the mcpserver harness |
 | [windows-process-fact-arms-unexecuted](windows-process-fact-arms-unexecuted.md) | windows process facts (killed flag, job kills, timeout attribution) are compile-checked only; two attribution defects survived to review state walks | when a windows runner enters the CI matrix |
 | [run-scoped-services-through-options](run-scoped-services-through-options.md) | groupBudget/probeGate/scheduleStore ride exported Options as unexported fields; collapse into one explicitly threaded runServices value | with train chunk 136 |
