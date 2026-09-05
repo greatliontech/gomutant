@@ -36,3 +36,4 @@ is deleted (git holds history).
 | [read-verbs-open-the-document-twice](read-verbs-open-the-document-twice.md) | the read-only MCP verbs open the findings store twice per call; one open-and-load helper collapses them | cross-tool train chunk 156.4 |
 | [probe-seam-tuple](probe-seam-tuple.md) | the campaign baseline probe seam returns six values the engine already holds in one result; collapse to the result | the next change to the probe seam's signature |
 | [serve-path-posture-keying](serve-path-posture-keying.md) | the run's serve path hands the judgment views keyed by the current oracle's posture where the judgment keys by the recorded one; attribution text only | the next change to the run's serve-path view keying |
+| [store-report-path-walk](store-report-path-walk.md) | the findings report path re-walks every record's portable line per call, and the store keeps two per-symbol memos of one entry | the next change to the findings report path's classification |

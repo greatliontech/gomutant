@@ -1,0 +1,11 @@
+# The findings report path walks every record's portable line per call
+
+`Store.Committability` (the report path's layer classification) walks
+every merged record's portable line on every call — the same
+O(document) evidence-manifest walk the write path no longer pays per
+commit — and the store keeps two per-symbol memos of one overlay
+entry (the stat-keyed parse cache by entry file, the committability
+memo by symbol). The collapse: one entry-state record carrying stat
+identity, parse, and verdict, consulted by the report path too.
+
+Lands: the next change to the findings report path's classification.

@@ -652,3 +652,146 @@ func TestOverlayVersionAheadRefusesInsteadOfDeleting(t *testing.T) {
 		t.Fatal("garbage overlay entry survived the sweep")
 	}
 }
+
+// A commit rewrites only the entries whose record it changed and
+// judges only the records it changed: the other entries keep their
+// stat identity and pay no portable-line walk (REQ-result-layers).
+func TestStoreUpdateRewritesOnlyChangedEntries(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	local := func(symbol string) Finding { return storeFinding(symbol, func(f *Finding) { f.Dirty = true }) }
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local("p.A"), local("p.B"), local("p.C")}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	identity := func(symbol string) string {
+		info, err := os.Stat(store.entryPath(symbol))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf("%d@%d", info.Size(), info.ModTime().UnixNano())
+	}
+	before := map[string]string{"p.A": identity("p.A"), "p.B": identity("p.B"), "p.C": identity("p.C")}
+	var walked []string
+	store.walkHook = func(symbol string) { walked = append(walked, symbol) }
+	changedB := local("p.B")
+	changedB.BodyHash = "h2"
+	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		next := append([]Finding(nil), current...)
+		for i := range next {
+			if next[i].Symbol == "p.B" {
+				next[i] = changedB
+			}
+		}
+		return next, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if identity("p.A") != before["p.A"] || identity("p.C") != before["p.C"] {
+		t.Fatalf("unchanged entries rewritten: A %s→%s, C %s→%s", before["p.A"], identity("p.A"), before["p.C"], identity("p.C"))
+	}
+	if identity("p.B") == before["p.B"] {
+		t.Fatal("the changed entry was not rewritten")
+	}
+	if len(walked) != 1 || walked[0] != "p.B" {
+		t.Fatalf("portable-line walks = %v; want the changed record alone", walked)
+	}
+	merged, err := store.Load(ctx)
+	if err != nil || len(merged) != 3 {
+		t.Fatalf("merged = %+v, %v", merged, err)
+	}
+	for _, f := range merged {
+		if f.Symbol == "p.B" && f.BodyHash != "h2" {
+			t.Fatalf("changed record not served: %+v", f)
+		}
+	}
+}
+
+// The change comparison reads the record's persisted form: a served
+// record (Cached, never persisted) that is otherwise unchanged rewrites
+// nothing; and an entry deleted from under an unchanged record is
+// reinstalled, the overlay's own state deciding the write.
+func TestStoreUpdateComparesThePersistedForm(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	local := storeFinding("p.A", func(f *Finding) { f.Dirty = true })
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(store.entryPath("p.A"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := local
+	served.Cached = true
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{served}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := os.Stat(store.entryPath("p.A")); err != nil || !again.ModTime().Equal(info.ModTime()) || again.Size() != info.Size() {
+		t.Fatalf("a served, otherwise unchanged record rewrote its entry: %v", err)
+	}
+	if err := os.Remove(store.entryPath("p.A")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store.entryPath("p.A")); err != nil {
+		t.Fatalf("an unchanged record whose entry was deleted was not reinstalled: %v", err)
+	}
+}
+
+// A record that becomes committable without changing content — an
+// exemption now covers its unverifiable evidence — loses its overlay
+// entry the moment it commits, so the repo row is never shadowed.
+func TestStoreDeletesTheEntryWhenAnUnchangedRecordBecomesCommittable(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	path := filepath.Join(dir, "findings.json")
+	store, err := OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	unverifiable := storeFinding("p.A", func(f *Finding) {
+		f.TargetEvidence.RuntimeUnverifiable = true
+		f.TargetEvidence.RuntimeReason = "clock"
+		for i := range f.OracleEvidence {
+			f.OracleEvidence[i].RuntimeUnverifiable = true
+			f.OracleEvidence[i].RuntimeReason = "clock"
+		}
+	})
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{unverifiable}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store.entryPath("p.A")); err != nil {
+		t.Fatalf("unverifiable record not in the overlay: %v", err)
+	}
+	if err := os.WriteFile(ExemptionsPathFor(path), []byte(`{"version":1,"exemptions":[{"subject":"p.A","reason":"clock","rationale":"reviewed"},{"subject":"p.ATest","reason":"clock","rationale":"reviewed"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Update(ctx, func(current []Finding) ([]Finding, error) { return current, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store.entryPath("p.A")); !os.IsNotExist(err) {
+		t.Fatalf("the newly committable record kept its overlay entry: %v", err)
+	}
+	repoData, _ := os.ReadFile(path)
+	repo, _ := ParseFindings(repoData)
+	if len(repo) != 1 || repo[0].Symbol != "p.A" {
+		t.Fatalf("repo layer = %+v; want the exempted record", repo)
+	}
+}

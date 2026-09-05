@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -49,6 +50,18 @@ type Store struct {
 	// costs a re-measure, never a wrong verdict.
 	mu    sync.Mutex
 	cache map[string]overlayCacheEntry
+	// judged memoizes each symbol's committability by the persisted
+	// form of the record it was judged for: a commit re-judges only
+	// the records it changed — the portable-line walk parses every
+	// evidence manifest — and a record that changed back to a judged
+	// content is served too. Written under the document lock only
+	// (Update), like the entries it describes; the exemptions it judges
+	// against are fixed for the store's lifetime, so one content judges
+	// one way.
+	judged map[string]judgedRecord
+	// walkHook observes each portable-line walk the store pays — a
+	// test seam for the once-per-content claim.
+	walkHook func(symbol string)
 }
 
 // overlayCacheEntry is one overlay file's cached parse, valid while the
@@ -57,6 +70,13 @@ type overlayCacheEntry struct {
 	size    int64
 	modTime time.Time
 	finding Finding
+}
+
+// judgedRecord is one symbol's memoized committability with the
+// persisted form of the record it holds for.
+type judgedRecord struct {
+	finding     Finding
+	committable bool
 }
 
 // machineLocalDir derives this machine's per-tree cache home — the
@@ -103,7 +123,7 @@ func OpenStore(path, moduleDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{path: path, moduleDir: abs, overlayDir: overlay, exemptions: exemptions, cache: map[string]overlayCacheEntry{}}, nil
+	return &Store{path: path, moduleDir: abs, overlayDir: overlay, exemptions: exemptions, cache: map[string]overlayCacheEntry{}, judged: map[string]judgedRecord{}}, nil
 }
 
 // Exemptions is the exemption record the store opened beside its
@@ -356,12 +376,10 @@ func (s *Store) installEntry(f Finding) error {
 		return err
 	}
 	if statErr == nil {
-		// The cache must hold what a parse of the written bytes yields, so
-		// the never-persisted run metadata is zeroed before warming.
-		parsed := cloneFinding(f)
-		parsed.Cached, parsed.Skipped = false, ""
+		// The cache must hold what a parse of the written bytes yields:
+		// the record's persisted form.
 		s.mu.Lock()
-		s.cache[filepath.Base(s.entryPath(f.Symbol))] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: parsed}
+		s.cache[filepath.Base(s.entryPath(f.Symbol))] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: persistedForm(f)}
 		s.mu.Unlock()
 	}
 	return nil
@@ -383,14 +401,66 @@ func (s *Store) installEntry(f Finding) error {
 // lost record. The update callback runs under the document lock and
 // must not call Store or document methods on the same document — a
 // nested writer waits out the lock retries and errors.
+// persistedForm is a record as a parse of its persisted bytes yields
+// it: the never-persisted run metadata (Cached, Skipped) zeroed. The
+// overlay cache holds it, the committability memo keys by it, and a
+// commit's change comparison reads it — one notion of "the same
+// record" on the write path.
+func persistedForm(f Finding) Finding {
+	form := cloneFinding(f)
+	form.Cached, form.Skipped = false, ""
+	return form
+}
+
+// committable judges a record's committability once per distinct
+// persisted content: an unchanged record (the common case across a
+// campaign's commits) is served from the memo, never re-walked.
+func (s *Store) committable(f, form Finding) bool {
+	if memo, ok := s.judged[f.Symbol]; ok && reflect.DeepEqual(memo.finding, form) {
+		return memo.committable
+	}
+	if s.walkHook != nil {
+		s.walkHook(f.Symbol)
+	}
+	ok, _ := Committable(f, s.moduleDir, s.exemptions)
+	s.judged[f.Symbol] = judgedRecord{finding: form, committable: ok}
+	return ok
+}
+
+// Update applies update to the merged layer view and writes the split
+// result: committable records to the repo document, the rest to the
+// overlay. The caller's update runs inside the repo document's lock
+// against the in-lock read merged with the overlay, so membership —
+// which rows survive, which symbols prune — is always decided on the
+// freshest state and a concurrent session's committed rows are never
+// silently evicted; a nested Update on the same document surfaces the
+// lock error instead. A repo row is replaced only by a committable
+// successor for its symbol, so portable truth is never evicted by a
+// local measurement; an overlay entry is deleted the moment its symbol
+// gains a committable record. A commit judges the committability of
+// the records it changed and rewrites the overlay entries whose
+// persisted form changed — an unchanged record keeps its entry without
+// a re-judgment or a rewrite — so a campaign's per-target commits cost
+// the changed record, not the document. Overlay writes follow the repo
+// write under the same lock, so a crash between them leaves at worst a
+// stale overlay entry shadowing the newer repo row — cleared by the
+// symbol's next update, never a lost record. The update callback runs
+// under the document lock and must not call Store or document methods
+// on the same document — a nested writer waits out the lock retries
+// and errors.
 func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Finding, error)) error {
 	var next []Finding
 	var pruned []string
 	committable := map[string]bool{}
-	if err := UpdateDocumentContext(ctx, s.path, func(repoPrior []Finding) ([]Finding, error) {
+	held := map[string]Finding{}
+	forms := map[string]Finding{}
+	if err := updateDocumentContext(ctx, s.path, func(repoPrior []Finding) ([]Finding, error) {
 		overlay, err := s.loadOverlay(ctx)
 		if err != nil {
 			return nil, err
+		}
+		for _, f := range overlay {
+			held[f.Symbol] = f
 		}
 		next, err = update(mergeLayers(repoPrior, overlay))
 		if err != nil {
@@ -398,8 +468,8 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		}
 		nextSymbols := make(map[string]bool, len(next))
 		for _, f := range next {
-			ok, _ := Committable(f, s.moduleDir, s.exemptions)
-			committable[f.Symbol] = ok
+			forms[f.Symbol] = persistedForm(f)
+			committable[f.Symbol] = s.committable(f, forms[f.Symbol])
 			nextSymbols[f.Symbol] = true
 		}
 		byRepo := make(map[string]Finding, len(repoPrior))
@@ -411,7 +481,7 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			// it would commit a row the layer contract forbids
 			// (REQ-result-layers, REQ-result-exemptions). Its successor
 			// lands in whichever layer its own classification earns.
-			if ok, _ := Committable(f, s.moduleDir, s.exemptions); ok {
+			if s.committable(f, persistedForm(f)) {
 				byRepo[f.Symbol] = f
 			}
 		}
@@ -439,27 +509,41 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
 		return out, nil
-	}); err != nil {
-		return err
-	}
-	for _, f := range next {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if committable[f.Symbol] {
-			if err := os.Remove(s.entryPath(f.Symbol)); err != nil && !os.IsNotExist(err) {
+	}, func() error {
+		// The overlay follows the repo write, under the same lock: an
+		// entry is deleted when its record is committable and the
+		// overlay holds one, written when its record is not committable
+		// and the overlay holds none or a different persisted form, and
+		// left alone otherwise.
+		for _, f := range next {
+			if err := ctx.Err(); err != nil {
 				return err
 			}
-			continue
+			prior, holds := held[f.Symbol]
+			switch {
+			case committable[f.Symbol]:
+				if !holds {
+					continue
+				}
+				if err := os.Remove(s.entryPath(f.Symbol)); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+			case holds && reflect.DeepEqual(prior, forms[f.Symbol]):
+				// The overlay already holds this record: nothing to rewrite.
+			default:
+				if err := s.installEntry(f); err != nil {
+					return err
+				}
+			}
 		}
-		if err := s.installEntry(f); err != nil {
-			return err
+		for _, symbol := range pruned {
+			if err := os.Remove(s.entryPath(symbol)); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
-	}
-	for _, symbol := range pruned {
-		if err := os.Remove(s.entryPath(symbol)); err != nil && !os.IsNotExist(err) {
-			return err
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }

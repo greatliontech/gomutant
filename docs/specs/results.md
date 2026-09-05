@@ -628,7 +628,13 @@ and modification time of the content a read would consume — differs from the
 last parse the reading store holds, so a run's incremental commits re-parse
 only the entries that moved between commits, never the overlay's total
 bytes; the per-symbol entry layout exists exactly so an unchanged entry
-needs no re-read. Stat identity is deliberately approximate in the
+needs no re-read. A commit likewise judges each record's committability
+once per distinct persisted form (a store's first commit judges every
+record) and rewrites an overlay entry only when its record's persisted
+form changed (an entry is still deleted the moment its record
+is committable) — an unchanged machine-local record keeps its entry
+without a re-judgment or a rewrite — so a campaign's per-target commits
+cost the changed record, never the document's size. Stat identity is deliberately approximate in the
 already-tolerated direction: a rewrite it cannot distinguish — same size,
 same modification time — serves the prior parse, a stale winner exactly like
 the install-order races above, costing at most a re-measure and never a

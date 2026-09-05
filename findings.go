@@ -1780,6 +1780,14 @@ func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)
 // the atomic replacement: cancellation that wins before commit leaves the
 // prior document byte-for-byte unchanged.
 func UpdateDocumentContext(ctx context.Context, path string, update func(prior []Finding) ([]Finding, error)) error {
+	return updateDocumentContext(ctx, path, update, nil)
+}
+
+// updateDocumentContext is UpdateDocumentContext with an after hook run
+// once the document is written, still under the document lock — the
+// store's overlay writes follow the repo write there, so nothing
+// between the two is observable to another session.
+func updateDocumentContext(ctx context.Context, path string, update func(prior []Finding) ([]Finding, error), after func() error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1861,6 +1869,9 @@ func UpdateDocumentContext(ctx context.Context, path string, update func(prior [
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		return err
+	}
+	if after != nil {
+		return after()
 	}
 	return nil
 }
