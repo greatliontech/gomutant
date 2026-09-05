@@ -226,7 +226,14 @@ func findingPackageProcessAttestable(f Finding) bool {
 	return packageProcessAttestable(f.Symbol, oracle)
 }
 
+// subjectViewBuildHook observes each subject-view build with its
+// symbols — a test seam for the batched judge's one-build claim.
+var subjectViewBuildHook func(symbols []string)
+
 func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packageProcess bool) (*subjectViewSet, error) {
+	if subjectViewBuildHook != nil {
+		subjectViewBuildHook(symbols)
+	}
 	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil, packageProcess))
 }
 
@@ -237,6 +244,9 @@ func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packagePro
 // target-locality the observed union carries (REQ-exec-quiescence);
 // only the run's own cancellation aborts.
 func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*subjectViewSet, map[string]error, error) {
+	if subjectViewBuildHook != nil {
+		subjectViewBuildHook(symbols)
+	}
 	faults := map[string]error{}
 	groups, err := t.resolveModuleGroups(ctx, symbols, packageContext, func(symbol string, err error) error {
 		faults[symbol] = err
@@ -810,28 +820,339 @@ func (s *subjectView) checkContext(ctx context.Context, fingerprint gofresh.Fing
 	return s.view.Check(ctx, fingerprint, s.subject)
 }
 
-// InspectFinding classifies a parsed finding against the current tree without
-// running tests (REQ-result-inspection).
+// InspectFinding is InspectFindingContext without caller-owned
+// cancellation.
 func (t *Tree) InspectFinding(f Finding) (FindingInspection, error) {
 	return t.InspectFindingContext(context.Background(), f)
 }
 
-// InspectFindingContext is InspectFinding with caller-owned cancellation.
+// InspectFindingContext is InspectFindingsContext over one record.
 func (t *Tree) InspectFindingContext(ctx context.Context, f Finding) (FindingInspection, error) {
-	inspection, err := t.inspectFindingStateContext(ctx, f, nil)
+	inspections, err := t.InspectFindingsContext(ctx, []Finding{f}, nil)
 	if err != nil {
 		return FindingInspection{}, err
 	}
+	return inspections[0], nil
+}
+
+// InspectFindingsContext judges every record of a document in one pass
+// over the records' shared subject views: each record's view-free
+// pre-checks run first, over one declared-symbol walk and one oracle
+// validation per distinct oracle; the subjects the undecided records'
+// judgments read are built once per package-process posture; and every
+// record is judged against that set — so the cost scales with the
+// distinct subjects the records name, never with the record count
+// (REQ-result-inspection). A record whose judgment fails fails the
+// pass, as a single-record inspection would. progress, when given,
+// names each stage as it begins (the admission, the view build, each
+// record's judgment).
+func (t *Tree) InspectFindingsContext(ctx context.Context, findings []Finding, progress func(stage string)) ([]FindingInspection, error) {
+	inspections, errs, err := t.inspectFindings(ctx, findings, progress, false)
+	if err != nil {
+		return nil, err
+	}
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return inspections, nil
+}
+
+// inspectFindings is the batched judgment with a per-record error
+// boundary: errs[i] is record i's own failure (its inspection then
+// zero), err a failure of the pass itself (cancellation, the tree's
+// declared symbols). A best-effort reader (the closure signpost) takes
+// every record's outcome; a judged view stops at the first record
+// error, as its per-record loop did.
+func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress func(stage string), bestEffort bool) ([]FindingInspection, []error, error) {
+	report := func(stage string) {
+		if progress != nil {
+			progress(stage)
+		}
+	}
+	report(fmt.Sprintf("admitting %d record(s)", len(findings)))
+	shared := t.newAdmissionShared()
+	admissions := make([]judgmentAdmission, len(findings))
+	errs := make([]error, len(findings))
+	subjects := map[bool]map[string]bool{false: {}, true: {}}
+	for i, f := range findings {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		admissions[i], errs[i] = t.admitFindingContext(ctx, f, shared)
+		if errs[i] != nil {
+			if !bestEffort {
+				return nil, errs, nil
+			}
+			continue
+		}
+		for _, symbol := range admissions[i].symbols {
+			subjects[findingPackageProcessAttestable(f)][symbol] = true
+		}
+	}
+	prebuilt := map[bool]*subjectViewSet{}
+	for _, packageProcess := range []bool{false, true} {
+		set := subjects[packageProcess]
+		if len(set) == 0 {
+			continue
+		}
+		symbols := make([]string, 0, len(set))
+		for symbol := range set {
+			symbols = append(symbols, symbol)
+		}
+		sort.Strings(symbols)
+		report(fmt.Sprintf("building views for %d subject(s)", len(symbols)))
+		// Fault-tolerant: a subject the build cannot serve stays out of
+		// the set, and the record reading it builds its own view — the
+		// per-record judgment's own path, failing that record alone.
+		views, _, err := t.newSubjectViewsFaultTolerant(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess))
+		if err != nil {
+			return nil, nil, err
+		}
+		prebuilt[packageProcess] = views
+	}
+	out := make([]FindingInspection, len(findings))
+	for i, f := range findings {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		if errs[i] != nil {
+			continue
+		}
+		report("judging " + f.Symbol)
+		inspection, err := t.judgeAdmittedContext(ctx, f, admissions[i], prebuilt[findingPackageProcessAttestable(f)])
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			errs[i] = err
+			if !bestEffort {
+				return nil, errs, nil
+			}
+			continue
+		}
+		out[i] = withCandidateEvidence(inspection, f)
+	}
+	return out, errs, ctx.Err()
+}
+
+// withCandidateEvidence carries the record's candidate evidence on the
+// inspection: the state answers "can this record be reused as it
+// stands"; flagged candidates mean it cannot — they re-execute before
+// any serve — so a record otherwise current classifies unverifiable
+// with the candidate evidence carrying the specifics
+// (REQ-result-inspection).
+func withCandidateEvidence(inspection FindingInspection, f Finding) FindingInspection {
 	inspection.CandidateEvidence = canonicalCandidateEvidence(f.CandidateEvidence)
-	// The state answers "can this record be reused as it stands"; flagged
-	// candidates mean it cannot — they re-execute before any serve — so a
-	// record otherwise current classifies unverifiable with the candidate
-	// evidence carrying the specifics (REQ-result-inspection).
 	if inspection.State == FindingCurrent && len(inspection.CandidateEvidence) != 0 {
 		inspection.State = FindingUnverifiable
 		inspection.Reason = fmt.Sprintf("%d candidate(s) carry unverifiable runtime evidence and re-execute before reuse", len(inspection.CandidateEvidence))
 	}
-	return inspection, nil
+	return inspection
+}
+
+// admissionShared is what a pass's pre-checks share: the tree's
+// declared symbols, walked once, and each oracle symbol's validity,
+// checked once — the two whole-tree walks a per-record admission would
+// otherwise repeat per record.
+type admissionShared struct {
+	t           *Tree
+	declared    []string
+	walked      bool
+	oracleValid map[string]bool
+}
+
+func (t *Tree) newAdmissionShared() *admissionShared {
+	return &admissionShared{t: t, oracleValid: map[string]bool{}}
+}
+
+// declares walks the declared symbols on first use — a pass of shaped
+// records alone never walks them.
+func (s *admissionShared) declares(ctx context.Context, symbol string) (bool, error) {
+	if !s.walked {
+		declared, err := s.t.eng.DeclaredSymbolsContext(ctx)
+		if err != nil {
+			return false, err
+		}
+		s.declared, s.walked = declared, true
+	}
+	i := sort.SearchStrings(s.declared, symbol)
+	return i < len(s.declared) && s.declared[i] == symbol, nil
+}
+
+func (s *admissionShared) validOracle(ctx context.Context, symbol string) bool {
+	if valid, ok := s.oracleValid[symbol]; ok {
+		return valid
+	}
+	valid := s.t.eng.ValidateOracleContext(ctx, []string{symbol}) == nil
+	s.oracleValid[symbol] = valid
+	return valid
+}
+
+// judgmentAdmission is what a record's view-free pre-checks decide: a
+// final inspection when no view is needed (with the derived-oracle
+// delta's enrichment still owed from the target's ledger), or the
+// subjects whose views decide the record — the mutated symbol (symbol
+// records) and the recorded oracle tests that still validate.
+type judgmentAdmission struct {
+	decided     *FindingInspection
+	enrichDelta []string // the derived oracle's current tests, when the delta enrichment reads the target's ledger
+	target      string
+	oracle      []SubjectEvidence
+	validOracle map[string]bool
+	symbols     []string
+}
+
+// admitFindingContext runs a record's pre-checks over the shared walk —
+// the one admission both the batched pass and the per-record judgment
+// consult, so the views a pass builds are exactly the views its records
+// then read.
+func (t *Tree) admitFindingContext(ctx context.Context, f Finding, shared *admissionShared) (judgmentAdmission, error) {
+	var adm judgmentAdmission
+	decided := func(inspection FindingInspection) (judgmentAdmission, error) {
+		adm.decided = &inspection
+		return adm, nil
+	}
+	if f.Shape != nil {
+		if f.OperatorSet != shapedOperatorSet {
+			return decided(FindingInspection{State: FindingStale, Reason: "shaped operator set changed"})
+		}
+		if _, err := time.ParseDuration(f.OracleTimeout); err != nil {
+			return adm, fmt.Errorf("finding %s has invalid oracle timeout: %w", f.Symbol, err)
+		}
+		_, digest, _, err := t.shapedCandidates(ctx, Target{Symbol: f.Symbol, Structural: f.Shape.Structural, Manual: f.Shape.Manual, Oracle: nil, OracleExplicit: true})
+		if err != nil {
+			if ctx.Err() != nil {
+				return adm, ctx.Err()
+			}
+			return decided(FindingInspection{State: FindingStale, Reason: "shape no longer derives: " + err.Error()})
+		}
+		if digest != f.BodyHash {
+			return decided(FindingInspection{State: FindingStale, Reason: "the declared shape or a probed file moved"})
+		}
+	} else {
+		declared, err := shared.declares(ctx, f.Symbol)
+		if err != nil {
+			return adm, err
+		}
+		if !declared {
+			return decided(FindingInspection{State: FindingDetached, Reason: "mutated symbol no longer resolves - terminal: no re-measure can revive this record; prune removes it, retarget follows a rename"})
+		}
+		if f.OperatorSet != engine.OperatorSet {
+			return decided(FindingInspection{State: FindingStale, Reason: "operator set changed"})
+		}
+		if _, err := time.ParseDuration(f.OracleTimeout); err != nil {
+			return adm, fmt.Errorf("finding %s has invalid oracle timeout: %w", f.Symbol, err)
+		}
+		adm.target = f.Symbol
+		if !f.OracleExplicit {
+			currentOracle, err := t.resolveOracleContext(ctx, Target{Symbol: f.Symbol})
+			if err != nil {
+				return adm, err
+			}
+			recordedOracle := make([]string, len(f.OracleEvidence))
+			for i, evidence := range f.OracleEvidence {
+				recordedOracle[i] = evidence.Symbol
+			}
+			sort.Strings(recordedOracle)
+			if reason := derivedOracleDelta(recordedOracle, currentOracle); reason != "" {
+				// The enrichment reads the target's ledger only when the
+				// record carries one and some recorded oracle test is still
+				// in the derived set — otherwise it names nothing, and the
+				// view is not admitted.
+				if f.CompartmentLedger != nil && len(retainedOracleNames(f, currentOracle)) > 0 {
+					adm.enrichDelta, adm.symbols = currentOracle, []string{f.Symbol}
+				}
+				return decided(FindingInspection{State: FindingStale, Reason: reason})
+			}
+		}
+		adm.symbols = append(adm.symbols, f.Symbol)
+	}
+	adm.oracle = sortedSubjectEvidence(f.OracleEvidence)
+	adm.validOracle = make(map[string]bool, len(adm.oracle))
+	for _, evidence := range adm.oracle {
+		if shared.validOracle(ctx, evidence.Symbol) {
+			adm.validOracle[evidence.Symbol] = true
+			adm.symbols = append(adm.symbols, evidence.Symbol)
+		}
+	}
+	return adm, nil
+}
+
+// judgeAdmittedContext finishes an admitted record's judgment over the
+// views it reads — the prebuilt set where it serves the subject, a
+// supplementary view otherwise (the per-record judgment's own path,
+// reported through inspectionSupplementaryViewHook).
+func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgmentAdmission, prebuilt *subjectViewSet) (FindingInspection, error) {
+	if adm.decided != nil {
+		inspection := *adm.decided
+		if adm.enrichDelta != nil {
+			if modified := t.modifiedOracleNames(ctx, f, adm.enrichDelta, prebuilt); len(modified) > 0 {
+				inspection.Reason = strings.TrimSuffix(inspection.Reason, ")") + "; modified: " + cappedNameList(modified, "tests") + ")"
+			}
+		}
+		return inspection, nil
+	}
+	viewFor, err := t.viewsFor(ctx, adm.symbols, prebuilt, findingPackageProcessAttestable(f))
+	if err != nil {
+		return FindingInspection{}, err
+	}
+	if adm.target != "" {
+		inspection, err := viewFor[adm.target].inspectContext(ctx, f.TargetEvidence)
+		if err != nil || inspection.State != FindingCurrent {
+			if err == nil && inspection.Reason != "" {
+				inspection.Reason = "target: " + inspection.Reason
+			}
+			return inspection, err
+		}
+	}
+	for _, evidence := range adm.oracle {
+		if err := ctx.Err(); err != nil {
+			return FindingInspection{}, err
+		}
+		if !adm.validOracle[evidence.Symbol] {
+			return FindingInspection{State: FindingStale, Reason: "oracle " + evidence.Symbol + " no longer resolves"}, nil
+		}
+		inspection, err := viewFor[evidence.Symbol].inspectContext(ctx, evidence)
+		if err != nil {
+			return FindingInspection{}, err
+		}
+		if inspection.State != FindingCurrent {
+			inspection.Reason = "oracle " + evidence.Symbol + ": " + inspection.Reason
+			return inspection, nil
+		}
+	}
+	return FindingInspection{State: FindingCurrent}, nil
+}
+
+// viewsFor serves each symbol's view from the prebuilt set, building
+// one supplementary set for the rest.
+func (t *Tree) viewsFor(ctx context.Context, symbols []string, prebuilt *subjectViewSet, packageProcess bool) (map[string]*subjectView, error) {
+	viewFor := make(map[string]*subjectView, len(symbols))
+	var missing []string
+	for _, symbol := range symbols {
+		if prebuilt != nil {
+			if view, ok := prebuilt.bySymbol[symbol]; ok {
+				viewFor[symbol] = view
+				continue
+			}
+		}
+		missing = append(missing, symbol)
+	}
+	if len(missing) > 0 {
+		if inspectionSupplementaryViewHook != nil {
+			inspectionSupplementaryViewHook(missing)
+		}
+		supplementary, err := t.newSubjectViews(ctx, missing, packageProcess)
+		if err != nil {
+			return nil, err
+		}
+		for symbol, view := range supplementary.bySymbol {
+			viewFor[symbol] = view
+		}
+	}
+	return viewFor, nil
 }
 
 func canonicalCandidateEvidence(evidence []CandidateEvidence) []CandidateEvidence {
@@ -861,174 +1182,11 @@ func (t *Tree) inspectFindingStateContext(ctx context.Context, f Finding, prebui
 	if err := ctx.Err(); err != nil {
 		return FindingInspection{}, err
 	}
-	if f.Shape != nil {
-		return t.inspectShapedFindingContext(ctx, f)
-	}
-	declared, err := t.eng.DeclaredSymbolsContext(ctx)
+	adm, err := t.admitFindingContext(ctx, f, t.newAdmissionShared())
 	if err != nil {
 		return FindingInspection{}, err
 	}
-	i := sort.SearchStrings(declared, f.Symbol)
-	if i == len(declared) || declared[i] != f.Symbol {
-		return FindingInspection{State: FindingDetached, Reason: "mutated symbol no longer resolves - terminal: no re-measure can revive this record; prune removes it, retarget follows a rename"}, nil
-	}
-	if f.OperatorSet != engine.OperatorSet {
-		return FindingInspection{State: FindingStale, Reason: "operator set changed"}, nil
-	}
-	if _, err := time.ParseDuration(f.OracleTimeout); err != nil {
-		return FindingInspection{}, fmt.Errorf("finding %s has invalid oracle timeout: %w", f.Symbol, err)
-	}
-	if !f.OracleExplicit {
-		currentOracle, err := t.resolveOracleContext(ctx, Target{Symbol: f.Symbol})
-		if err != nil {
-			return FindingInspection{}, err
-		}
-		recordedOracle := make([]string, len(f.OracleEvidence))
-		for i, evidence := range f.OracleEvidence {
-			recordedOracle[i] = evidence.Symbol
-		}
-		sort.Strings(recordedOracle)
-		if reason := derivedOracleDelta(recordedOracle, currentOracle); reason != "" {
-			// The identity delta alone under-describes the edit that
-			// staled the record: an oracle test STRENGTHENED IN PLACE
-			// beside additions is the one that matters most to a caller
-			// who just wrote kill-tests, and stopping at "added: ..."
-			// hides it (the pando field report). Name the surviving
-			// oracle tests whose own evidence moved WHILE THE TARGET'S
-			// STANDS - a moved target moves every oracle's closure with
-			// it, so a list there would point at untouched tests -
-			// stale-only, best-effort: the stale path re-measures
-			// anyway, so one evidence walk is cheap against it.
-			if modified := t.modifiedOracleNames(ctx, f, currentOracle, prebuilt); len(modified) > 0 {
-				reason = strings.TrimSuffix(reason, ")") + "; modified: " + cappedNameList(modified, "tests") + ")"
-			}
-			return FindingInspection{State: FindingStale, Reason: reason}, nil
-		}
-	}
-	oracle := sortedSubjectEvidence(f.OracleEvidence)
-	validOracle := make(map[string]bool, len(oracle))
-	symbols := []string{f.Symbol}
-	for _, evidence := range oracle {
-		if err := t.eng.ValidateOracleContext(ctx, []string{evidence.Symbol}); err == nil {
-			validOracle[evidence.Symbol] = true
-			symbols = append(symbols, evidence.Symbol)
-		}
-	}
-	viewFor := make(map[string]*subjectView, len(symbols))
-	var missing []string
-	for _, symbol := range symbols {
-		if prebuilt != nil {
-			if view, ok := prebuilt.bySymbol[symbol]; ok {
-				viewFor[symbol] = view
-				continue
-			}
-		}
-		missing = append(missing, symbol)
-	}
-	if len(missing) > 0 {
-		if inspectionSupplementaryViewHook != nil {
-			inspectionSupplementaryViewHook(missing)
-		}
-		supplementary, err := t.newSubjectViews(ctx, missing, findingPackageProcessAttestable(f))
-		if err != nil {
-			return FindingInspection{}, err
-		}
-		for symbol, view := range supplementary.bySymbol {
-			viewFor[symbol] = view
-		}
-	}
-	target := viewFor[f.Symbol]
-	inspection, err := target.inspectContext(ctx, f.TargetEvidence)
-	if err != nil || inspection.State != FindingCurrent {
-		// The reason names its responsible subject so it stays
-		// self-contained when copied out of the record's context,
-		// parallel to the oracle prefix below (REQ-result-inspection).
-		if err == nil && inspection.Reason != "" {
-			inspection.Reason = "target: " + inspection.Reason
-		}
-		return inspection, err
-	}
-	for _, evidence := range oracle {
-		if err := ctx.Err(); err != nil {
-			return FindingInspection{}, err
-		}
-		if !validOracle[evidence.Symbol] {
-			return FindingInspection{State: FindingStale, Reason: "oracle " + evidence.Symbol + " no longer resolves"}, nil
-		}
-		view := viewFor[evidence.Symbol]
-		inspection, err := view.inspectContext(ctx, evidence)
-		if err != nil {
-			return FindingInspection{}, err
-		}
-		if inspection.State != FindingCurrent {
-			inspection.Reason = "oracle " + evidence.Symbol + ": " + inspection.Reason
-			return inspection, nil
-		}
-	}
-	return FindingInspection{State: FindingCurrent}, nil
-}
-
-// inspectShapedFindingContext derives a shaped finding's state: the
-// declared shape re-derives against the current tree (a moved digest is
-// stale, a shape that no longer resolves — a departed scoped package,
-// type, or recipe file — is stale with the deriving refusal named,
-// never detached: retirement is the caller's explicit edit), and the
-// oracle evidence rows inspect exactly as a symbol finding's do
-// (REQ-target-structural, REQ-target-manual-recipes,
-// REQ-result-inspection).
-func (t *Tree) inspectShapedFindingContext(ctx context.Context, f Finding) (FindingInspection, error) {
-	if f.OperatorSet != shapedOperatorSet {
-		return FindingInspection{State: FindingStale, Reason: "shaped operator set changed"}, nil
-	}
-	if _, err := time.ParseDuration(f.OracleTimeout); err != nil {
-		return FindingInspection{}, fmt.Errorf("finding %s has invalid oracle timeout: %w", f.Symbol, err)
-	}
-	_, digest, _, err := t.shapedCandidates(ctx, Target{Symbol: f.Symbol, Structural: f.Shape.Structural, Manual: f.Shape.Manual, Oracle: nil, OracleExplicit: true})
-	if err != nil {
-		if ctx.Err() != nil {
-			return FindingInspection{}, ctx.Err()
-		}
-		return FindingInspection{State: FindingStale, Reason: "shape no longer derives: " + err.Error()}, nil
-	}
-	if digest != f.BodyHash {
-		return FindingInspection{State: FindingStale, Reason: "the declared shape or a probed file moved"}, nil
-	}
-	oracle := sortedSubjectEvidence(f.OracleEvidence)
-	var symbols []string
-	validOracle := make(map[string]bool, len(oracle))
-	for _, evidence := range oracle {
-		if err := t.eng.ValidateOracleContext(ctx, []string{evidence.Symbol}); err == nil {
-			validOracle[evidence.Symbol] = true
-			symbols = append(symbols, evidence.Symbol)
-		}
-	}
-	viewFor := make(map[string]*subjectView, len(symbols))
-	if len(symbols) > 0 {
-		supplementary, err := t.newSubjectViews(ctx, symbols, findingPackageProcessAttestable(f))
-		if err != nil {
-			return FindingInspection{}, err
-		}
-		for symbol, view := range supplementary.bySymbol {
-			viewFor[symbol] = view
-		}
-	}
-	for _, evidence := range oracle {
-		if err := ctx.Err(); err != nil {
-			return FindingInspection{}, err
-		}
-		if !validOracle[evidence.Symbol] {
-			return FindingInspection{State: FindingStale, Reason: "oracle " + evidence.Symbol + " no longer resolves"}, nil
-		}
-		inspection, err := viewFor[evidence.Symbol].inspectContext(ctx, evidence)
-		if err != nil {
-			return FindingInspection{}, err
-		}
-		if inspection.State != FindingCurrent {
-			inspection.Reason = "oracle " + evidence.Symbol + ": " + inspection.Reason
-			return inspection, nil
-		}
-	}
-	return FindingInspection{State: FindingCurrent}, nil
+	return t.judgeAdmittedContext(ctx, f, adm, prebuilt)
 }
 
 func sortedSubjectEvidence(evidence []SubjectEvidence) []SubjectEvidence {
@@ -1226,6 +1384,26 @@ func derivedOracleDelta(recorded, current []string) string {
 	return "derived oracle changed (" + strings.Join(parts, "; ") + ")"
 }
 
+// retainedOracleNames maps the test names of the record's oracle tests
+// that are still in the current derived oracle to their symbols — the
+// tests a ledger diff can name as modified.
+func retainedOracleNames(f Finding, currentOracle []string) map[string]string {
+	currentSet := make(map[string]bool, len(currentOracle))
+	for _, symbol := range currentOracle {
+		currentSet[symbol] = true
+	}
+	byName := map[string]string{}
+	for _, evidence := range f.OracleEvidence {
+		if !currentSet[evidence.Symbol] {
+			continue
+		}
+		if _, fn := splitTestSymbol(evidence.Symbol); fn != "" {
+			byName[fn] = evidence.Symbol
+		}
+	}
+	return byName
+}
+
 // modifiedOracleNames names the surviving oracle tests whose BODIES
 // changed - the "modified:" arm of the derived-oracle-delta reason
 // (REQ-result-inspection's naming arm). The instrument is the recorded
@@ -1242,22 +1420,7 @@ func (t *Tree) modifiedOracleNames(ctx context.Context, f Finding, currentOracle
 	if f.CompartmentLedger == nil {
 		return nil
 	}
-	currentSet := make(map[string]bool, len(currentOracle))
-	for _, symbol := range currentOracle {
-		currentSet[symbol] = true
-	}
-	// The intersection's function names, mapped back to their symbols:
-	// oracle validation already refuses a name declared in both
-	// compartment variants, so the name is unambiguous here.
-	byName := map[string]string{}
-	for _, evidence := range f.OracleEvidence {
-		if !currentSet[evidence.Symbol] {
-			continue
-		}
-		if _, fn := splitTestSymbol(evidence.Symbol); fn != "" {
-			byName[fn] = evidence.Symbol
-		}
-	}
+	byName := retainedOracleNames(f, currentOracle)
 	if len(byName) == 0 {
 		return nil
 	}

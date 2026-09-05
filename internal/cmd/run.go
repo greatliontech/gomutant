@@ -175,7 +175,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
 	rep.setSelected(len(targets))
 	rep.phase("preparing")
-	if residue, err = tree.OracleClosureSignpostContext(ctx, residue, prior, targets); err != nil {
+	if residue, err = tree.OracleClosureSignpostContext(ctx, residue, prior, targets, rep.phase); err != nil {
 		return err
 	}
 	var terminal bytes.Buffer

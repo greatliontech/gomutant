@@ -261,7 +261,7 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 	if phase == nil {
 		phase = func(string) {}
 	}
-	views := make([]findingView, 0, len(all))
+	var selected []gomutant.Finding
 	for _, finding := range all {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -272,17 +272,28 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 		if symbol != "" && finding.Symbol != symbol {
 			continue
 		}
-		// A nil tree is the recorded path: no freshness derivation,
-		// the record's own facts, state "recorded".
-		inspection := gomutant.RecordedInspection(finding)
-		if tree != nil {
-			phase("judging " + finding.Symbol)
-			judged, err := tree.InspectFindingContext(ctx, finding)
-			if err != nil {
-				return nil, err
-			}
-			inspection = judged
+		selected = append(selected, finding)
+	}
+	// The judged pass derives every selected record's freshness in one
+	// pass over their shared subject views (REQ-result-inspection).
+	inspections := make([]gomutant.FindingInspection, len(selected))
+	for i, finding := range selected {
+		inspections[i] = gomutant.RecordedInspection(finding)
+	}
+	if tree != nil && len(selected) > 0 {
+		phase(fmt.Sprintf("judging %d record(s)", len(selected)))
+		judged, err := tree.InspectFindingsContext(ctx, selected, phase)
+		if err != nil {
+			return nil, err
 		}
+		inspections = judged
+	}
+	views := make([]findingView, 0, len(selected))
+	for i, finding := range selected {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		inspection := inspections[i]
 		if state != "" && string(inspection.State) != state {
 			continue
 		}

@@ -44,14 +44,18 @@ func TestOracleClosureSignpostNamesStaleFindingsBeyondTheTargetSet(t *testing.T)
 	// oracle closure and never counts.
 	otherStale := Finding{Symbol: "example.com/closure.G", OperatorSet: "old/1", OracleTimeout: "1m0s",
 		OracleEvidence: []SubjectEvidence{{Symbol: "example.com/closure.TestG"}}}
-	prior := []Finding{staleByOracle("example.com/closure.F"), otherStale}
+	// Best-effort: a record whose judgment errors (an unparseable
+	// oracle timeout) is skipped; the rest still count.
+	broken := Finding{Symbol: "example.com/closure.G", OperatorSet: engine.OperatorSet, OracleTimeout: "bogus",
+		OracleEvidence: []SubjectEvidence{{Symbol: "example.com/closure.TestGone"}}}
+	prior := []Finding{broken, staleByOracle("example.com/closure.F"), otherStale}
 	residue := []Residue{
 		{Path: "p_test.go", Reason: testFileResidueReason},
 		{Path: "gen.go", Reason: "generated file"},
 	}
 	// G is stale for a non-oracle reason: only F counts.
 	var targets []Target
-	got, err := tree.OracleClosureSignpostContext(context.Background(), residue, prior, targets)
+	got, err := tree.OracleClosureSignpostContext(context.Background(), residue, prior, targets, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +69,7 @@ func TestOracleClosureSignpostNamesStaleFindingsBeyondTheTargetSet(t *testing.T)
 
 	// No test-file row: the rows pass through untouched even with
 	// qualifying findings.
-	untouched, err := tree.OracleClosureSignpostContext(context.Background(), residue[1:], prior, nil)
+	untouched, err := tree.OracleClosureSignpostContext(context.Background(), residue[1:], prior, nil, nil)
 	if err != nil || untouched[0].Reason != "generated file" {
 		t.Fatalf("no-test-row pass-through = %+v, %v", untouched, err)
 	}
@@ -73,7 +77,7 @@ func TestOracleClosureSignpostNamesStaleFindingsBeyondTheTargetSet(t *testing.T)
 	// Nothing qualifying: every prior finding is targeted - the run
 	// re-measures them itself.
 	all := []Target{{Symbol: "example.com/closure.F"}, {Symbol: "example.com/closure.G"}}
-	plain, err := tree.OracleClosureSignpostContext(context.Background(), residue, prior, all)
+	plain, err := tree.OracleClosureSignpostContext(context.Background(), residue, prior, all, nil)
 	if err != nil || plain[0].Reason != testFileResidueReason {
 		t.Fatalf("fully-targeted pass-through = %+v, %v", plain, err)
 	}

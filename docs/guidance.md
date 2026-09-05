@@ -79,7 +79,7 @@ oracleSet integer referencing oracleSets[].id.
 **knobs:**
 - `label` (mcp, cli) — show only findings carrying this label.
 - `state` (mcp, cli) — show only findings in this judged state: current, stale, unverifiable, or detached (implies judge).
-- `judge` (mcp, cli) — re-derive each record's freshness state against the current tree — minutes-class on large documents; a state filter or a tags/toolchain selection implies it; the default reports recorded facts with state 'recorded' and loads no tree.
+- `judge` (mcp, cli) — re-derive each record's freshness state against the current tree — one pass over the records' shared subject views, seconds-class where it was minutes-class; a state filter or a tags/toolchain selection implies it; the default reports recorded facts with state 'recorded' and loads no tree.
 - `symbol` (mcp, cli) — show only the finding for this mutated symbol.
 - `detail` (mcp, cli) — full rows: operator tables, open survivors, attested dispositions, per-candidate unverifiable runtime evidence (candidateEvidence); the default is one bounded summary row per record.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
@@ -261,7 +261,7 @@ why; findings inspects the document (survivors with execution
 buckets, candidate evidence, repo/local layer) without running
 anything — recorded facts by default, cheap at any size; the judge knob
 re-derives freshness states (current, stale, unverifiable,
-detached) against the tree, minutes-class on large documents, and a
+detached) against the tree, one pass over the records' shared subject views, seconds-class where it was minutes-class, and a
 state filter or a tags/toolchain selection implies it;
 attest_survivor dispositions an equivalent mutant with the
 reasoning on record; prune removes resolved-dead records after a

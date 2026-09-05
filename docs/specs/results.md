@@ -915,7 +915,9 @@ cost scales with the document's unique evidence and record count,
 never with derivation (a field document's five-minute "inspection"
 was the derivation, not the parse); a judged question — the state
 filter, a selection or vouch input, an explicit judge request —
-derives the classification above, announced as the expensive stretch
+derives the classification above in one pass over the records' shared
+subject views — the cost scales with the distinct subjects the records
+name, never with the record count — announced as the expensive stretch
 it is, and the recorded default names the judged opt-in at its point
 of use. Every judged view carries the reason, and every view the open
 and attested counts, independently of that state, including fully

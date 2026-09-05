@@ -505,7 +505,7 @@ const testFileResidueReason = "test file: tests are oracles, never targets"
 // (REQ-target-changed). Counting is best-effort - a record whose
 // inspection errors is skipped; the run that re-measures it will say
 // why - and the rows pass through unchanged when nothing qualifies.
-func (t *Tree) OracleClosureSignpostContext(ctx context.Context, residue []Residue, prior []Finding, targets []Target) ([]Residue, error) {
+func (t *Tree) OracleClosureSignpostContext(ctx context.Context, residue []Residue, prior []Finding, targets []Target, progress func(stage string)) ([]Residue, error) {
 	hasTestRow := false
 	for _, r := range residue {
 		if r.Reason == testFileResidueReason {
@@ -520,21 +520,35 @@ func (t *Tree) OracleClosureSignpostContext(ctx context.Context, residue []Resid
 	for _, target := range targets {
 		targeted[target.Symbol] = true
 	}
-	var closed []string
+	var candidates []Finding
 	for _, finding := range prior {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		if !targeted[finding.Symbol] {
+			candidates = append(candidates, finding)
 		}
-		if targeted[finding.Symbol] {
+	}
+	if len(candidates) == 0 {
+		return residue, nil
+	}
+	// One judged pass over the untargeted records' shared views — the
+	// signpost's cost is one view build, whatever the document's size —
+	// with the per-record boundary: a record whose judgment errors is
+	// skipped, the rest still count.
+	if progress != nil {
+		progress(fmt.Sprintf("closure signpost over %d prior record(s)", len(candidates)))
+	}
+	inspections, errs, err := t.inspectFindings(ctx, candidates, nil, true)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return residue, nil
+	}
+	var closed []string
+	for i, finding := range candidates {
+		if errs[i] != nil {
 			continue
 		}
-		inspection, err := t.InspectFindingContext(ctx, finding)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			continue
-		}
+		inspection := inspections[i]
 		if inspection.State != FindingStale {
 			continue
 		}

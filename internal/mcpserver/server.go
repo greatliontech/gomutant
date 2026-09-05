@@ -849,7 +849,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	targets, wholeTree = sel.targets, sel.wholeTree
 	out.Residue = sel.residue
 	prior := prepared.Prior
-	if out.Residue, err = tree.OracleClosureSignpostContext(ctx, out.Residue, prior, targets); err != nil {
+	if out.Residue, err = tree.OracleClosureSignpostContext(ctx, out.Residue, prior, targets, func(stage string) {
+		if notify != nil {
+			notify(stage)
+		}
+	}); err != nil {
 		return nil, out, err
 	}
 	if len(targets) == 0 {
@@ -1387,18 +1391,24 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	}
 	rows, err := withHeartbeat(ctx, notify, stretch, func(ctx context.Context) (findingsOut, error) {
 		var res findingsOut
-		for _, finding := range matched {
+		// One pass over the matched records' shared subject views
+		// (REQ-result-inspection).
+		inspections := make([]gomutant.FindingInspection, len(matched))
+		for i, finding := range matched {
+			inspections[i] = gomutant.RecordedInspection(finding)
+		}
+		if tree != nil && len(matched) > 0 {
+			judged, err := tree.InspectFindingsContext(ctx, matched, nil)
+			if err != nil {
+				return res, err
+			}
+			inspections = judged
+		}
+		for i, finding := range matched {
 			if err := ctx.Err(); err != nil {
 				return res, err
 			}
-			inspection := gomutant.RecordedInspection(finding)
-			if tree != nil {
-				judged, err := tree.InspectFindingContext(ctx, finding)
-				if err != nil {
-					return res, err
-				}
-				inspection = judged
-			}
+			inspection := inspections[i]
 			if in.State != "" && string(inspection.State) != in.State {
 				continue
 			}
