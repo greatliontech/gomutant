@@ -1583,10 +1583,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			return nil, fmt.Errorf("gomutant: scratch namespace %s:%s refused before measurement: %w", namespace.Dir, namespace.Pattern, err)
 		}
 	}
-	// Bracket-path preflight is per measured module (the base the
-	// per-spawn capture resolves against), memoized, at group
-	// formation - before that module's first spawn.
-	bracketPreflights := map[string]error{}
 	// The oracle budget: an explicit timeout is the caller's override;
 	// 0 derives each group's budget from its own measured baseline —
 	// the baseline probe IS a measurement of the oracle's cost on this
@@ -2047,6 +2043,55 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 	}
+	// Bracket-path preflight is per measured module — the base each
+	// oracle package's spawn capture resolves against — memoized, and
+	// fired at a target's measure decision before its observed union
+	// (REQ-exec-preparation's loaded-set stage): a served target never
+	// preflights, a plan reaches it, and nothing costly precedes it.
+	bracketPreflights := map[string]error{}
+	preflightOracleModules := func(oracle []string) error {
+		if len(opts.BracketPaths) == 0 {
+			return nil
+		}
+		for _, run := range pkgRuns(oracle) {
+			moduleDir, _, err := preparation.packageContext(ctx, run.pkg)
+			if err != nil {
+				return err
+			}
+			if _, seen := bracketPreflights[moduleDir]; !seen {
+				bracketPreflights[moduleDir] = preflightBracketPaths(ctx, moduleDir, opts.BracketPaths)
+			}
+			if err := bracketPreflights[moduleDir]; err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// producerViewsFor builds a target's observed producer views: the
+	// shared union's subset for the target or, on a fault the campaign
+	// has not cancelled, one bounded per-target rebuild — the field
+	// failure mode is transient pressure faulting one symbol or module
+	// group out of the shared union, gone by the time anyone reads the
+	// fault, so a transient union fault costs one extra pass for one
+	// target, never a skip (REQ-exec-quiescence); the second attempt is
+	// reported to the proof hook. A union that cannot build at all is
+	// the campaign's failure (err); a per-target fault is the caller's
+	// to route (fault).
+	producerViewsFor := func(mv *modeViews, target string, oracle []string, rebuild []string) (views *subjectViewSet, fault, err error) {
+		if err := buildProducerUnion(mv); err != nil {
+			return nil, nil, err
+		}
+		views, fault = mv.producerUnion.forTarget(target, oracle, mv.producerFaults)
+		if fault != nil && ctx.Err() == nil {
+			if opts.proofAttempt != nil {
+				opts.proofAttempt(target, 2)
+			}
+			probeGate.RLock()
+			views, fault = t.newSubjectViewsWithPackageContext(ctx, rebuild, preparation.packageContext, true, mv.engines)
+			probeGate.RUnlock()
+		}
+		return views, fault, nil
+	}
 	// preparedTargets and preparedCandidates are the pipelined campaign's
 	// running tallies: written by the preparation goroutine as each measure
 	// target readies, read by the advisory execution events, which grow to
@@ -2322,21 +2367,27 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// producer views — the decision views above serve only the pin
 		// checks; a shaped identity is not in the union, so the subset
 		// derives from the oracle symbols alone.
-		if err := buildProducerUnion(mv); err != nil {
+		if err := preflightOracleModules(oracle); err != nil {
 			return nil, err
 		}
-		producerViews, err := mv.producerUnion.forTarget(oracle[0], oracle[1:], mv.producerFaults)
-		if err != nil && ctx.Err() == nil {
-			probeGate.RLock()
-			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, oracle, preparation.packageContext, true, mv.engines)
-			probeGate.RUnlock()
-		}
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, ctxErr
+		// A plan pays no observed union: its decision derives from the
+		// decision views' pin checks and the shape's own candidates, and
+		// the union only attaches execution evidence
+		// (REQ-exec-plan-only).
+		var producerViews *subjectViewSet
+		if !opts.PlanOnly {
+			views, fault, err := producerViewsFor(mv, oracle[0], oracle[1:], oracle)
+			if err != nil {
+				return nil, err
 			}
-			skipTarget(i, "producer evidence unavailable: "+err.Error(), true)
-			return nil, nil
+			if fault != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, ctxErr
+				}
+				skipTarget(i, "producer evidence unavailable: "+fault.Error(), true)
+				return nil, nil
+			}
+			producerViews = views
 		}
 		// Producer enrollment mirrors the symbol path's: the global
 		// modules enter end-of-run producer validation so the epilogue's
@@ -2348,12 +2399,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		for _, oracleView := range oracleViews {
 			oracleView.module.producer = true
 		}
-		oracleViews = oracleViews[:0]
-		for _, symbol := range oracle {
-			oracleViews = append(oracleViews, producerViews.bySymbol[symbol])
-		}
-		for _, module := range producerViews.modules {
-			module.producer = true
+		if producerViews != nil {
+			oracleViews = oracleViews[:0]
+			for _, symbol := range oracle {
+				oracleViews = append(oracleViews, producerViews.bySymbol[symbol])
+			}
+			for _, module := range producerViews.modules {
+				module.producer = true
+			}
 		}
 		item := work{target: i, oracle: oracle, reason: reason, shaped: true, candidates: resolved.shaped, shapedFiles: resolved.shapedFiles, oracleViews: oracleViews, producer: producerViews}
 		w := &item
@@ -2398,12 +2451,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			if err != nil {
 				return nil, err
 			}
-			if _, seen := bracketPreflights[moduleDir]; !seen {
-				bracketPreflights[moduleDir] = preflightBracketPaths(ctx, moduleDir, opts.BracketPaths)
-			}
-			if err := bracketPreflights[moduleDir]; err != nil {
-				return nil, err
-			}
 			w.groups = append(w.groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
 		}
 		if reason, err := probeGroupBaselines(ctx, tg, w); err != nil {
@@ -2432,6 +2479,20 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		oracleViews := make([]*subjectView, 0, len(oracle))
 		for _, symbol := range oracle {
 			oracleViews = append(oracleViews, mv.views.bySymbol[symbol])
+		}
+		// A staged run's one external-input judgment, before the shaped
+		// dispatch: both preparation paths derive their provenance inputs
+		// from these views (a shaped target has no target view of its
+		// own, and its probed files ride resolved.shapedFiles).
+		if repository.staged {
+			external, err := t.externalInputs(ctx, repository, targetView, oracleViews, resolved.shapedFiles)
+			if err != nil {
+				return nil, err
+			}
+			if len(external) != 0 {
+				refuseSkipped(i, "measured input outside the repository: "+cappedJoin(external, 8)+" - the index snapshot cannot vouch for it; measure unstaged", true)
+				return nil, nil
+			}
 		}
 		if resolved.shaped != nil {
 			return prepareShaped(ctx, resolved)
@@ -2623,36 +2684,31 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			}
 		}
 
-		if err := buildProducerUnion(mv); err != nil {
+		if err := preflightOracleModules(oracle); err != nil {
 			return nil, err
 		}
-		producerViews, err := mv.producerUnion.forTarget(tg.Symbol, oracle, mv.producerFaults)
-		if err != nil && ctx.Err() == nil {
-			// One bounded retry (REQ-exec-quiescence): the field failure
-			// mode is transient pressure faulting one symbol or module
-			// group out of the shared union, gone by the time anyone
-			// reads the fault. The retry rebuilds this target's own proof
-			// surface — the demoted per-target build — so a transient
-			// union fault costs one extra pass for one target, never a
-			// skip.
-			if opts.proofAttempt != nil {
-				opts.proofAttempt(tg.Symbol, 2)
+		// A plan pays no observed union: the decision below derives from
+		// the decision views and the candidate generation alone, and the
+		// union only attaches execution evidence (REQ-exec-plan-only).
+		var producerViews *subjectViewSet
+		if !opts.PlanOnly {
+			views, fault, err := producerViewsFor(mv, tg.Symbol, oracle, append([]string{tg.Symbol}, oracle...))
+			if err != nil {
+				return nil, err
 			}
-			probeGate.RLock()
-			producerViews, err = t.newSubjectViewsWithPackageContext(ctx, append([]string{tg.Symbol}, oracle...), preparation.packageContext, true, mv.engines)
-			probeGate.RUnlock()
-		}
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				// The campaign itself is canceled: abort is the answer.
-				return nil, proofAbortError(tg.Symbol, oracle, err, ctxErr)
+			if fault != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					// The campaign itself is canceled: abort is the answer.
+					return nil, proofAbortError(tg.Symbol, oracle, fault, ctxErr)
+				}
+				// A per-target evidence condition, target-local by the same
+				// rule as drift refusal (REQ-exec-quiescence): this target
+				// skips with the cause on its decision line — a skip never
+				// overwrites a prior record — and the campaign proceeds.
+				skipTarget(i, fmt.Sprintf("freshness proof unavailable (oracle %s): %v", strings.Join(oracle, ", "), fault), true)
+				return nil, nil
 			}
-			// A per-target evidence condition, target-local by the same
-			// rule as drift refusal (REQ-exec-quiescence): this target
-			// skips with the cause on its decision line — a skip never
-			// overwrites a prior record — and the campaign proceeds.
-			skipTarget(i, fmt.Sprintf("freshness proof unavailable (oracle %s): %v", strings.Join(oracle, ", "), err), true)
-			return nil, nil
+			producerViews = views
 		}
 		// Producer enrollment happens only for targets whose proof
 		// exists: enrolling before the build would put a skipped
@@ -2670,17 +2726,19 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		targetView = producerViews.bySymbol[tg.Symbol]
-		oracleViews = oracleViews[:0]
-		for _, symbol := range oracle {
-			oracleViews = append(oracleViews, producerViews.bySymbol[symbol])
+		if producerViews != nil {
+			targetView = producerViews.bySymbol[tg.Symbol]
+			oracleViews = oracleViews[:0]
+			for _, symbol := range oracle {
+				oracleViews = append(oracleViews, producerViews.bySymbol[symbol])
+			}
+			for _, module := range producerViews.modules {
+				module.producer = true
+			}
 		}
 		oracleSet := make(map[string]bool, len(oracle))
 		for _, o := range oracle {
 			oracleSet[o] = true
-		}
-		for _, module := range producerViews.modules {
-			module.producer = true
 		}
 		currentLedger, err := targetView.view.TestVariantLedger(targetView.subject)
 		if err != nil {
@@ -2852,12 +2910,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				moduleDir, packageDir, err := preparation.packageContext(ctx, pr.pkg)
 				if err != nil {
-					return nil, err
-				}
-				if _, seen := bracketPreflights[moduleDir]; !seen {
-					bracketPreflights[moduleDir] = preflightBracketPaths(ctx, moduleDir, opts.BracketPaths)
-				}
-				if err := bracketPreflights[moduleDir]; err != nil {
 					return nil, err
 				}
 				groups = append(groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
@@ -4589,6 +4641,30 @@ func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, 
 	return append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum")), nil
 }
 
+// externalInputs names the target's provenance inputs outside the
+// repository — compile inputs the index snapshot can never vouch for
+// (REQ-result-staged), judged over their physical form exactly as the
+// dirty stamp judges them — so a staged run refuses the target at
+// preparation, before any proof or probe, with the input named
+// instead of a drift headline.
+func (t *Tree) externalInputs(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, shapedFiles []string) ([]string, error) {
+	paths, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
+	if err != nil {
+		return nil, err
+	}
+	paths = append(paths, shapedFiles...)
+	seen := map[string]bool{}
+	var external []string
+	for _, path := range paths {
+		if _, kind := repository.placement(path); kind.outside() && !seen[path] {
+			seen[path] = true
+			external = append(external, path)
+		}
+	}
+	sort.Strings(external)
+	return external, nil
+}
+
 // stampProvenance records the current tree's provenance on a finding -
 // measured, drifted, or served: the capture commit, and dirty
 // computed over the subject source files, their historical package
@@ -4669,45 +4745,25 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		// keeps a record with external identities machine-local with the
 		// truthful machine-local-input reason. Stamping such records
 		// dirty forever would only mislabel why they cannot promote
-		// (REQ-result-layers). The repository root is git's physical
-		// path while a recorded identity is the literal path the run
-		// opened, so a literal identity outside the root may still be an
-		// alias form of an in-repo path (a working tree reached through
-		// a symlink): judge the physical form git sees, and keep any
-		// identity whose physical location cannot be established - form
-		// divergence resolves fail-closed, never silently external.
+		// (REQ-result-layers). The judgment is placement's — the one
+		// physical-form rule the dirty walk shares: an in-repo identity
+		// (an alias form included) joins the pathspec at its physical
+		// form or, when it no longer exists, at the first unresolved
+		// component under its in-repo ancestor; a resolvable external
+		// identity is dropped; an identity missing under an external
+		// ancestor, or one whose location cannot be established, is a
+		// candidate for the digest vouch below - fail-closed, never
+		// silently external. The identity itself is what the dirty walk
+		// re-judges (placement is idempotent over it), so a tracked link
+		// it traverses reaches git even for an outside identity.
 		var unresolvable []string
 		for _, p := range paths {
-			if rel, rerr := filepath.Rel(repository.root, p); rerr == nil && filepath.IsLocal(rel) {
+			_, kind := repository.placement(p)
+			if kind != placedUnknown {
 				sourceFiles = append(sourceFiles, p)
-				continue
 			}
-			resolved, rerr := filepath.EvalSymlinks(p)
-			if rerr != nil {
-				// The identity itself does not resolve, but its deepest
-				// resolvable ancestor decides the family: an ancestor
-				// inside the repository reconstructs an in-repo path -
-				// git reports drift under it (a tracked file deleted
-				// behind a dead alias) - while a genuinely external
-				// chain (swept oracle scratch under the temp root) is a
-				// candidate for the digest vouch below.
-				if ancestor, remainder, ok := deepestResolvedAncestor(p); ok {
-					if rel, rerr := filepath.Rel(repository.root, ancestor); rerr == nil && filepath.IsLocal(rel) {
-						// The pathspec anchors at the FIRST unresolved
-						// component: git never matches an index entry
-						// shallower than a pathspec, and the drift may
-						// be on an intermediate tracked symlink, not
-						// the leaf.
-						first, _, _ := strings.Cut(remainder, string(filepath.Separator))
-						sourceFiles = append(sourceFiles, filepath.Join(ancestor, first))
-						continue
-					}
-				}
+			if kind == placedOutsideMissing || kind == placedUnknown {
 				unresolvable = append(unresolvable, p)
-				continue
-			}
-			if rel, rerr := filepath.Rel(repository.root, resolved); rerr == nil && filepath.IsLocal(rel) {
-				sourceFiles = append(sourceFiles, resolved)
 			}
 		}
 		if len(unresolvable) > 0 {

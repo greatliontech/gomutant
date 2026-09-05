@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -176,6 +177,86 @@ func (t *Tree) Ephemeral(ctx context.Context, file string, mutant []byte, testPk
 	}
 
 	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, oracleTimeout, runs)
+}
+
+// refuseUnselectedRun refuses a run pattern that selects none of the
+// package's top-level names. go test reads the pattern as top-level
+// alternatives of slash-separated elements and matches each element
+// unanchored against the corresponding level of a test's name, so the
+// first element of every alternative is matched here the same way
+// against the top-level test, fuzz, and example names: any alternative
+// selecting a name admits the pattern. An element that does not
+// compile is left to go test's own diagnostic, and the post-probe
+// zero-run check keeps guarding what only the harness decides (a
+// selected test excluded by its build constraints).
+func (t *Tree) refuseUnselectedRun(ctx context.Context, testPkg, run string) error {
+	var patterns []*regexp.Regexp
+	for _, first := range runPatternFirstElements(run) {
+		pattern, err := regexp.Compile(first)
+		if err != nil {
+			return nil
+		}
+		patterns = append(patterns, pattern)
+	}
+	names, err := t.eng.RunSelectableNamesContext(ctx, testPkg)
+	if err != nil {
+		return err
+	}
+	for _, pattern := range patterns {
+		for _, name := range names {
+			if pattern.MatchString(name) {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%q matched no tests in %s: nothing can attribute the mutant", run, testPkg)
+}
+
+// runPatternFirstElements splits a -run pattern exactly as the testing
+// harness does — top-level '|' separates alternatives, top-level '/'
+// separates the elements of one alternative, where top-level means
+// outside brackets and parentheses and not escaped — and returns each
+// alternative's first element, the one matched against top-level names.
+func runPatternFirstElements(run string) []string {
+	var firsts []string
+	start, brackets, parens := 0, 0, 0
+	inFirst := true
+	for i := 0; i < len(run); i++ {
+		switch run[i] {
+		case '[':
+			brackets++
+		case ']':
+			if brackets--; brackets < 0 {
+				brackets = 0
+			}
+		case '(':
+			if brackets == 0 {
+				parens++
+			}
+		case ')':
+			if brackets == 0 {
+				parens--
+			}
+		case '\\':
+			i++
+		case '/':
+			if brackets == 0 && parens == 0 && inFirst {
+				firsts = append(firsts, run[start:i])
+				inFirst = false
+			}
+		case '|':
+			if brackets == 0 && parens == 0 {
+				if inFirst {
+					firsts = append(firsts, run[start:i])
+				}
+				start, inFirst = i+1, true
+			}
+		}
+	}
+	if inFirst {
+		firsts = append(firsts, run[start:])
+	}
+	return firsts
 }
 
 // ephemeralEditDigest derives the mutant's identity: a digest over the
@@ -391,6 +472,14 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 				return nil, fmt.Errorf("the oracle never compiles %s: package %s is outside %s's linked dependency set — no verdict; name an oracle that links the edited package", replacement.File, pkg, testPkg)
 			}
 		}
+	}
+	// The pattern is matched against the package's run-selectable names
+	// before any process launches: a pattern selecting none has nothing
+	// to attribute the mutant to, and the baseline probe would only
+	// rediscover that at its own cost (REQ-exec-preparation's loaded-set
+	// stage).
+	if err := t.refuseUnselectedRun(ctx, testPkg, run); err != nil {
+		return nil, err
 	}
 	// A rapid property failing on the baseline or against the mutant must
 	// never write a reproducer into the tree (REQ-mut-overlay).

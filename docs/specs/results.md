@@ -497,7 +497,10 @@ diverging from the index, untracked files, and ignored files over a
 measured target's inputs are drift the snapshot cannot vouch for - that
 target refuses with the drift named instead of persisting a
 dirty machine-local record, and an index re-staged mid-run refuses the
-same way (the recorded tree no longer names the measured content). Each
+same way (the recorded tree no longer names the measured content). An
+input outside the repository — a compile input the snapshot can never
+vouch for — refuses the target at preparation, served or measured,
+named as such and never as drift, before any proof or probe. Each
 finding records the index's own tree identity - the tree the eventual
 commit carries when the staging lands as reviewed - as provenance
 metadata beside the commit, never as a measurement pin: the measurement
@@ -594,7 +597,17 @@ recorded (a swept oracle-scratch path recorded missing is missing
 still), and an unchanged external identity is not git-visible drift,
 while an in-repo ancestor reconstructs a pathspec at its first
 unresolved component - git reports drift at or beneath the component,
-an intermediate tracked symlink included. The vouch proves stability
+an intermediate tracked symlink included. A provenance input — a
+source, module-selection, or probed file — carries no evidence to
+revalidate: one that no longer exists is judged by its deepest
+resolvable ancestor's physical form alone (outside the repository, it
+is not git's to vouch for; inside, git is asked at the first unresolved
+component), and every provenance input is judged over its physical
+form in both directions — an in-repo spelling of a file physically
+outside the repository is outside — while the spelling's own tracked
+entries stay git's to judge: a symlink the spelling traverses is asked
+about beside the physical form, so a repointed link is drift even when
+the physical form alone would read clean. The vouch proves stability
 since measurement, not cleanliness at measurement: an externally
 rooted identity recorded against pre-existing uncommitted drift can
 re-stamp clean, and the machine-local clause - which such an identity

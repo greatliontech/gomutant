@@ -4623,9 +4623,12 @@ func TestRunPlanOnlyRefusesOnTreeDrift(t *testing.T) {
 	if moved == string(src) {
 		t.Fatal("fixture body not found")
 	}
+	// The drift lands at the target's decision — after the run-start
+	// view capture, before the plan's epilogue — the moment a plan
+	// still reaches (it builds no observed union, REQ-exec-plan-only).
 	_, err = tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}, Options{
 		PlanOnly: true,
-		proofAttempt: func(string, int) {
+		Decision: func(RunDecision) {
 			if err := os.WriteFile(libPath, []byte(moved), 0o644); err != nil {
 				t.Error(err)
 			}

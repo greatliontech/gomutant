@@ -163,8 +163,29 @@ func TestEphemeral(t *testing.T) {
 	if _, err := tr.Ephemeral(ctx, "lib/lib.go", orig, "example.com/fixture/lib", "^TestAdd$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "identical") {
 		t.Fatalf("identical replacement scored: %v", err)
 	}
-	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestNoSuch$", time.Minute, 1); err == nil || !strings.Contains(err.Error(), "matched no tests") {
+	// The zero-match refusal precedes the baseline probe: no oracle
+	// process launches for a pattern selecting nothing, and the
+	// unmeetable timeout below would name itself first if one did.
+	probes := 0
+	probe := testProbe
+	defer func() { testProbe = probe }()
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, error) {
+		probes++
+		return probe(ctx, dir, testPkg, run, timeout, binFlags, env)
+	}
+	if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", "^TestNoSuch$", time.Nanosecond, 1); err == nil || !strings.Contains(err.Error(), "matched no tests") {
 		t.Fatalf("zero-match probe scored: %v", err)
+	}
+	// A top-level match under a subtest element, and a match in the
+	// second alternative of a pattern whose first names nothing, both
+	// reach the probe — the harness's own split.
+	for _, run := range []string{"^TestAdd$/nothing", "^TestNoSuch$/x|^TestAdd$"} {
+		if _, err := tr.Ephemeral(ctx, "lib/lib.go", []byte(broken), "example.com/fixture/lib", run, time.Nanosecond, 1); err == nil || !strings.Contains(err.Error(), "oracle_timeout_sec") {
+			t.Fatalf("%q selects TestAdd and must reach the probe: %v", run, err)
+		}
+	}
+	if probes != 2 {
+		t.Fatalf("baseline probes launched = %d; want exactly the two selecting patterns'", probes)
 	}
 	// The failing-clean pairing edits the failing package's OWN test
 	// file: the linkage gate admits it (the oracle's own files are in

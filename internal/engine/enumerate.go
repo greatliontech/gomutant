@@ -78,6 +78,27 @@ func (t *Tree) TestsOf(pkgPath string) []string {
 
 // TestsOfContext is TestsOf with cooperative cancellation.
 func (t *Tree) TestsOfContext(ctx context.Context, pkgPath string) ([]string, error) {
+	return t.testFileNames(ctx, pkgPath, func(pkg *packages.Package, fn *ast.FuncDecl) (string, bool) {
+		return pkgPath + "." + fn.Name.Name, runnableTest(pkg, fn)
+	})
+}
+
+// RunSelectableNamesContext lists the top-level names go test's -run
+// pattern selects in pkgPath's test files: the runnable tests and fuzz
+// targets, and the examples (selected by the pattern whether or not an
+// output comment makes them run) — so a caller can tell a pattern that
+// selects nothing before any process launches.
+func (t *Tree) RunSelectableNamesContext(ctx context.Context, pkgPath string) ([]string, error) {
+	return t.testFileNames(ctx, pkgPath, func(pkg *packages.Package, fn *ast.FuncDecl) (string, bool) {
+		name := fn.Name.Name
+		return name, runnableTest(pkg, fn) || (harnessName(name, "Example") && fn.Type.TypeParams == nil)
+	})
+}
+
+// testFileNames walks the top-level function declarations of pkgPath's
+// test files across its loaded variants, collecting the sorted, distinct
+// names the selector admits.
+func (t *Tree) testFileNames(ctx context.Context, pkgPath string, admit func(*packages.Package, *ast.FuncDecl) (string, bool)) ([]string, error) {
 	seen := map[string]bool{}
 	for _, pkg := range t.pkgs {
 		if err := ctx.Err(); err != nil {
@@ -99,8 +120,8 @@ func (t *Tree) TestsOfContext(ctx context.Context, pkgPath string) ([]string, er
 				if !ok || fn.Recv != nil {
 					continue
 				}
-				if runnableTest(pkg, fn) {
-					seen[pkgPath+"."+fn.Name.Name] = true
+				if symbol, ok := admit(pkg, fn); ok {
+					seen[symbol] = true
 				}
 			}
 		}

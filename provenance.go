@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -110,6 +111,107 @@ func captureRepositoryStateContext(ctx context.Context, dir string, staged bool)
 // names its evidence: every arm that answers true reports the paths
 // (and their divergence class) that decided it, so a refusal built on
 // the judgment can name what differs instead of asserting bare drift.
+// placementKind is the family a provenance path falls in for the
+// repository: in the repository, physically outside it, missing under
+// an ancestor outside it, or of no establishable location.
+type placementKind int
+
+const (
+	placedInRepo placementKind = iota
+	placedOutside
+	placedOutsideMissing
+	placedUnknown
+)
+
+// outside reports an identity the repository cannot vouch for: one
+// physically outside it, existing or not.
+func (k placementKind) outside() bool { return k == placedOutside || k == placedOutsideMissing }
+
+// placement judges a provenance path against the repository over its
+// physical form — the form git sees — in both directions: an external
+// spelling of an in-repo file (a working tree reached through a
+// symlink) is in the repository at its physical relative path, and an
+// in-repo spelling of an external file (a tracked symlink out of the
+// tree) is outside, since git never saw its bytes (REQ-result-layers,
+// REQ-result-staged). A path that does not exist is judged by its
+// deepest resolvable ancestor: an in-repo ancestor yields the pathspec
+// at the first unresolved component (git reports drift at or beneath
+// it), an external ancestor places the path outside as missing. A
+// spelling no ancestor of which resolves, or a repository root that
+// does not, keeps its own path as the pathspec - fail-closed, never
+// silently external: git's answer over a path it does not track is the
+// dirty judgment's own unavailable arm.
+//
+// The pathspecs are what git is asked about: the physical form's
+// relative path when it is in the repository, and beside it the
+// spelling's own first symlink component when the spelling is local
+// and traverses one — the link is a tracked entry of its own, and a
+// repointed link is git-visible drift the physical form alone would
+// hide. An outside identity reached through such a link therefore
+// still hands git the link.
+func (s repositoryState) placement(path string) (pathspecs []string, kind placementKind) {
+	if !filepath.IsAbs(path) {
+		if abs, err := filepath.Abs(path); err == nil {
+			path = abs
+		}
+	}
+	rootPhysical, err := filepath.EvalSymlinks(s.root)
+	if err != nil {
+		return []string{path}, placedUnknown
+	}
+	physical, remainder := path, ""
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		physical = resolved
+	} else if ancestor, rest, ok := deepestResolvedAncestor(path); ok {
+		physical, remainder = ancestor, rest
+	} else {
+		return []string{path}, placedUnknown
+	}
+	if link, ok := s.firstSymlinkComponent(path); ok {
+		pathspecs = append(pathspecs, link)
+	}
+	rel, err := filepath.Rel(rootPhysical, physical)
+	if err != nil || !filepath.IsLocal(rel) {
+		if remainder != "" {
+			return pathspecs, placedOutsideMissing
+		}
+		return pathspecs, placedOutside
+	}
+	if remainder != "" {
+		first, _, _ := strings.Cut(remainder, string(filepath.Separator))
+		rel = filepath.Join(rel, first)
+	}
+	// The repository root itself is no pathspec: "." would ask git
+	// about the whole tree, so a root-shaped input names nothing.
+	if rel != "." && !slices.Contains(pathspecs, rel) {
+		pathspecs = append(pathspecs, rel)
+	}
+	return pathspecs, placedInRepo
+}
+
+// firstSymlinkComponent returns the repository-relative prefix of a
+// local spelling ending at its first symlink component — the tracked
+// entry git reports a repointing under — or false when the spelling is
+// not local to the repository or traverses no symlink.
+func (s repositoryState) firstSymlinkComponent(path string) (string, bool) {
+	rel, err := filepath.Rel(s.root, path)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", false
+	}
+	prefix := ""
+	for _, component := range strings.Split(rel, string(filepath.Separator)) {
+		prefix = filepath.Join(prefix, component)
+		info, err := os.Lstat(filepath.Join(s.root, prefix))
+		if err != nil {
+			return "", false
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return prefix, true
+		}
+	}
+	return "", false
+}
+
 func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []string) (bool, []string, error) {
 	if !s.available {
 		return true, []string{"no repository state available for the dirty judgment"}, nil
@@ -120,13 +222,16 @@ func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []
 		if err := ctx.Err(); err != nil {
 			return false, nil, err
 		}
-		rel, err := filepath.Rel(s.root, path)
-		if err != nil || !filepath.IsLocal(rel) {
-			return true, []string{"measured input outside the repository: " + path}, nil
-		}
-		if !seen[rel] {
-			seen[rel] = true
-			pathspec = append(pathspec, rel)
+		// An identity outside the repository is not git's to vouch for
+		// and not drift (REQ-result-layers): only the tracked link it may
+		// be reached through stays in the pathspec; the content pins over
+		// the identity are the record's own.
+		specs, _ := s.placement(path)
+		for _, rel := range specs {
+			if !seen[rel] {
+				seen[rel] = true
+				pathspec = append(pathspec, rel)
+			}
 		}
 	}
 	if len(pathspec) == 0 {

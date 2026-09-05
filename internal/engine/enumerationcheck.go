@@ -273,13 +273,27 @@ func runnableTestNameShape(name string) string {
 	default:
 		return ""
 	}
+	if !harnessName(name, prefix) {
+		return ""
+	}
+	return param
+}
+
+// harnessName reports whether name is the harness's prefixed shape: the
+// prefix alone, or the prefix followed by a rune that is not lower case
+// (TestFoo and Test are tests; Testfoo is a helper) — go test's own
+// rule for Test, Fuzz, Benchmark, and Example names.
+func harnessName(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
 	if rest := name[len(prefix):]; rest != "" {
 		r, _ := utf8.DecodeRuneInString(rest)
 		if unicode.IsLower(r) {
-			return ""
+			return false
 		}
 	}
-	return param
+	return true
 }
 
 // matchesTestingParam reports whether a parameter's syntactic type denotes

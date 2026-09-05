@@ -520,7 +520,9 @@ refused rather than guessed: a mutation applied somewhere the
 caller did not mean is a measurement of the wrong mutant. The run refuses
 inputs the build would silently ignore before any process launches: a test
 package that is not a loaded package import path (a flag-shaped value would
-otherwise change the invocation being measured); a replacement of a file
+otherwise change the invocation being measured); a run pattern that selects
+none of the package's tests, fuzz targets, or examples (nothing could
+attribute the mutant); a replacement of a file
 the loaded build does not compile — a build-constraint-excluded source or a
 non-Go file — whose mutation could never be exercised and would report a
 false survivor; and a replacement of a file outside the named test
@@ -776,14 +778,19 @@ this binary does not read), and last the campaign lock — before its first
 tree load, so a refused verb pays nothing it could have refused earlier.
 The lock comes last because its acquisition persists state (the
 document's directory, the lock file) that a refusal after it would
-strand. The preparation is one stage per verb, in one order, the same on
-both faces.
+strand. The loaded set decides a second stage, before the first oracle
+process: a bracket path absent or unhashable under a measured module, a
+run pattern selecting none of the named package's tests, and — under a
+staged run — a target input outside the repository, each refuses before
+any proof or probe. The preparation is one stage per verb, in one order,
+the same on both faces.
 
 **REQ-exec-plan-only** (behavior): A plan-only run MUST perform the full
 deterministic preparation sequence — every refusal REQ-exec-preparation
 places before the first load included — and deliver every target decision
 exactly as an executing run would — mutants enumerated, candidate counts and reasons exact — then
-stop: no baseline probes, no mutant executes, and nothing new persists
+stop: no measurement material (no observed producer union, no baseline
+probe), no mutant executes, and nothing new persists
 (a cached serve's incremental commit is suppressed alongside the final
 merge; re-merging existing records was already idempotent, and the
 plan-only return carries only findings complete without execution —
@@ -795,7 +802,8 @@ already names — stale pins, unverifiable or unstable oracle evidence
 from prior-record inspection, skip classes preparation itself decides —
 surfaces mechanically before any execution budget is committed,
 splitting the workflow into plan, fix preconditions, execute; a hole
-only execution can discover keeps surfacing at execution, and a plan
+only execution can discover — a failing baseline, a freshness proof the
+observed union cannot build — keeps surfacing at execution, and a plan
 refuses on the same tree-motion evidence (producer drift) an executing
 run's epilogue refuses on.
 

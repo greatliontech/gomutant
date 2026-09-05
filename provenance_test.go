@@ -150,10 +150,10 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 		len(causes) != 1 || !strings.Contains(causes[0], "untracked") || !strings.Contains(causes[0], "input.txt") {
 		t.Fatalf("untracked selected runtime input: dirty=%v causes=%v err=%v, want the untracked class named", dirty, causes, err)
 	}
-	// A measured input outside the repository names itself.
-	if dirty, causes, _ := repository.pathsDirtyContext(context.Background(), []string{filepath.Join(os.TempDir(), "elsewhere.txt")}); !dirty ||
-		len(causes) != 1 || !strings.Contains(causes[0], "outside the repository") {
-		t.Fatalf("external input: dirty=%v causes=%v, want the outside-the-repository cause", dirty, causes)
+	// A measured input outside the repository is not git's to vouch for
+	// and is not drift: it leaves the pathspec (REQ-result-layers).
+	if dirty, causes, err := repository.pathsDirtyContext(context.Background(), []string{filepath.Join(os.TempDir(), "elsewhere.txt")}); err != nil || dirty || len(causes) != 0 {
+		t.Fatalf("external input: dirty=%v causes=%v err=%v, want a clean judgment with the identity dropped", dirty, causes, err)
 	}
 }
 
@@ -559,5 +559,90 @@ func TestCappedJoinCountsRemainder(t *testing.T) {
 	}
 	if got := cappedJoin(items, 2); got != "a; b; and 2 more" {
 		t.Fatalf("capped join = %q, want the remainder counted", got)
+	}
+}
+
+// TestStampAsksGitAboutTheLinkAnOutsideIdentityTraverses: a runtime
+// input reached through a tracked symlink out of the tree is outside
+// the repository - not git's to vouch for, dropped from the dirty walk
+// - while the link is a tracked entry of its own: committed, the
+// record stamps clean; repointed, the link's drift stamps dirty even
+// though the physical form alone reads clean (REQ-result-layers).
+func TestStampAsksGitAboutTheLinkAnOutsideIdentityTraverses(t *testing.T) {
+	root := t.TempDir()
+	moduleDir := filepath.Join(root, "m")
+	goMod := filepath.Join(moduleDir, "go.mod")
+	source := filepath.Join(moduleDir, "pkg", "source.go")
+	outside := filepath.Join(t.TempDir(), "data")
+	for path, content := range map[string]string{
+		goMod:                               "module example.com/provenance\n\ngo 1.26\n",
+		source:                              "package provenance\n",
+		filepath.Join(outside, "input.txt"): "runtime\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(moduleDir, "data")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skip(err)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=gomutant", "GIT_AUTHOR_EMAIL=gomutant@example.invalid",
+			"GIT_COMMITTER_NAME=gomutant", "GIT_COMMITTER_EMAIL=gomutant@example.invalid",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("add", "-A")
+	runGit("commit", "-q", "-m", "fixture")
+	repository := captureRepositoryState(root)
+	if !repository.available {
+		t.Fatalf("repository state = %+v", repository)
+	}
+	observed, err := runtimeinput.FromTestLog([]byte("open "+filepath.Join(link, "input.txt")+"\n"), moduleDir, moduleDir, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, moduleDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := &Tree{dir: root}
+	const symbol = "example.com/provenance.F"
+	view := &subjectView{symbol: symbol, moduleDir: moduleDir, sourceFiles: []string{source}}
+	ctx := context.Background()
+	stamp := func() Finding {
+		f := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
+		if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &f); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	if f := stamp(); f.Dirty {
+		t.Fatal("outside identity through a committed link stamped dirty")
+	}
+	// Repointed to a byte-identical target: the evidence revalidates
+	// whole, so only the link's own entry can carry the drift.
+	elsewhere := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(elsewhere, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(elsewhere, "input.txt"), []byte("runtime\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, link); err != nil {
+		t.Fatal(err)
+	}
+	if f := stamp(); !f.Dirty {
+		t.Fatal("repointed tracked link stamped clean: the link is git's to judge even when its target is not")
 	}
 }
