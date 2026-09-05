@@ -243,19 +243,38 @@ func executingCandidates(w work) int {
 	return len(executingIndexes(w))
 }
 
-// probeScheduleCoverage populates the store for every group of w that
-// qualifies, before the window's workers dispatch. Failures are
-// recorded (never re-probed) and disable scheduling for the group —
-// the advisory posture.
-func (t *Tree) probeScheduleCoverage(ctx context.Context, w work, opts Options, runEnv []string) error {
+// probeUnit is one group the window's probe phase will probe: its
+// store key, the group, the covered package, the batches to probe
+// (ceil(sqrt(N)) over the group's N oracle tests), and the pins a
+// complete probe banks under (REQ-result-baseline-bank) — the oracle
+// views' closure rows and the covered package's own row, taken at plan
+// time from the views the decision consulted.
+type probeUnit struct {
+	key      string
+	g        group
+	coverPkg string
+	batches  [][]string
+	bankable bool
+	evidence []closureRow
+	coverRow closureRow
+}
+
+// scheduleProbePlan decides which of the work's oracle groups the probe
+// phase pays for — an unseen group with enough tests whose banked probe
+// cannot serve — reserving each key and serving the bank as it decides,
+// and returns the units to probe. It is the one decision the pricing
+// announcement and the probing loop both consult, so the announced
+// total is exactly the batches the loop runs.
+func (t *Tree) scheduleProbePlan(ctx context.Context, w work, opts Options) ([]probeUnit, error) {
 	store := opts.scheduleStore
 	if store == nil || w.shaped || w.targetView == nil || executingCandidates(w) < scheduleMinCandidates {
-		return nil
+		return nil, nil
 	}
 	coverPkg := w.targetView.subject.Package
+	var plan []probeUnit
 	for _, g := range w.groups {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		key := coverageKey(g, coverPkg)
 		store.mu.Lock()
@@ -290,35 +309,88 @@ func (t *Tree) probeScheduleCoverage(ctx context.Context, w work, opts Options, 
 				continue
 			}
 		}
-		entry := &groupSchedule{}
-		for _, batch := range scheduleBatches(fns) {
-			probeStart := time.Now()
-			cov, err := campaignCoveredPositions(ctx, t.dir, g.pkgs[0], testRunRegex(batch), coverPkg, opts.OracleTimeout, g.flags, runEnv, t.eng.DirectiveCoverage())
-			if err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				entry = &groupSchedule{}
-				break
-			}
-			entry.batches = append(entry.batches, scheduleBatch{fns: batch, cov: cov, dur: time.Since(probeStart)})
+		unit := probeUnit{key: key, g: g, coverPkg: coverPkg, batches: scheduleBatches(fns)}
+		if views := groupOracleViews(w, g); len(views) > 0 {
+			unit.bankable, unit.evidence, unit.coverRow = true, closureRows(views), closureRowOf(w.targetView)
 		}
-		store.mu.Lock()
-		store.byKey[key] = entry
-		store.mu.Unlock()
-		// Deposit (REQ-result-baseline-bank): only a complete healthy
-		// probe banks — a failed pass stored the empty no-signal entry.
-		if len(entry.batches) > 0 && w.targetView != nil {
-			if views := groupOracleViews(w, g); len(views) > 0 {
-				banked := bankedCoverage{Evidence: closureRows(views), CoverRow: closureRowOf(w.targetView)}
-				for _, b := range entry.batches {
-					banked.Batches = append(banked.Batches, bankedBatch{Fns: b.fns, DurMillis: b.dur.Milliseconds(), Coverage: b.cov.Persist()})
-				}
-				opts.baselineBank.putCoverage(key, banked)
+		plan = append(plan, unit)
+	}
+	return plan, nil
+}
+
+// probePlanBatches counts the batches a plan will probe.
+func probePlanBatches(plan []probeUnit) int {
+	total := 0
+	for _, unit := range plan {
+		total += len(unit.batches)
+	}
+	return total
+}
+
+// probePlanCost prices a plan from the groups' measured baselines — a
+// coverage batch is one oracle process over a share of the group's
+// tests, priced at the group's whole baseline, so the sum is an upper
+// bound (a batch of 1/ceil(sqrt N) of the tests costs at most the
+// suite) — and counts the batches of groups with no measured baseline
+// as unpriced, never folded into the projection.
+func probePlanCost(plan []probeUnit, baselineDur func(group) (time.Duration, bool)) (priced time.Duration, unpriced int) {
+	for _, unit := range plan {
+		if baselineDur != nil {
+			if dur, ok := baselineDur(unit.g); ok {
+				priced += dur * time.Duration(len(unit.batches))
+				continue
 			}
 		}
+		unpriced += len(unit.batches)
+	}
+	return priced, unpriced
+}
+
+// probeScheduleUnit probes one planned group batch by batch, calling
+// tick after each batch, and stores the group's schedule; a batch that
+// fails leaves the group unscheduled (its key stays reserved).
+func (t *Tree) probeScheduleUnit(ctx context.Context, unit probeUnit, opts Options, runEnv []string, tick func()) error {
+	store := opts.scheduleStore
+	entry := &groupSchedule{}
+	for _, batch := range unit.batches {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		probeStart := time.Now()
+		cov, err := campaignCoveredPositions(ctx, t.dir, unit.g.pkgs[0], testRunRegex(batch), unit.coverPkg, opts.OracleTimeout, unit.g.flags, runEnv, t.eng.DirectiveCoverage())
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			entry = &groupSchedule{}
+			break
+		}
+		entry.batches = append(entry.batches, scheduleBatch{fns: batch, cov: cov, dur: time.Since(probeStart)})
+		tick()
+	}
+	store.mu.Lock()
+	store.byKey[unit.key] = entry
+	store.mu.Unlock()
+	// Deposit (REQ-result-baseline-bank): only a complete healthy
+	// probe banks — a failed pass stored the empty no-signal entry.
+	if len(entry.batches) > 0 && unit.bankable {
+		banked := bankedCoverage{Evidence: unit.evidence, CoverRow: unit.coverRow}
+		for _, b := range entry.batches {
+			banked.Batches = append(banked.Batches, bankedBatch{Fns: b.fns, DurMillis: b.dur.Milliseconds(), Coverage: b.cov.Persist()})
+		}
+		opts.baselineBank.putCoverage(unit.key, banked)
 	}
 	return nil
+}
+
+// probeProjection renders a plan's priced cost for the announcement:
+// absent when nothing is priced — an all-unpriced phase never reads as
+// a zero-cost one, the estimate class's own rule.
+func probeProjection(priced time.Duration) string {
+	if priced == 0 {
+		return ""
+	}
+	return roundedDuration(priced)
 }
 
 // scheduleStep is one budget window of a mutant's schedule: a group
@@ -445,7 +517,7 @@ func (t *Tree) phaseKillVouched(ctx context.Context, g group, bound time.Duratio
 			opts.probeGate.RLock()
 			defer opts.probeGate.RUnlock()
 		}
-		ran, passed, _, _, err := phaseBaselineProbe(ctx, t.dir, g.pkgs[0], g.runRegex, bound, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		ran, passed, _, _, _, err := phaseBaselineProbe(ctx, t.dir, g.pkgs[0], g.runRegex, bound, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 		return err == nil && ran > 0 && passed
 	})
 }

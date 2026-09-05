@@ -159,7 +159,7 @@ func TestRunServesBankedBaselinesAcrossRuns(t *testing.T) {
 		scheduleMinCandidates = restoreMinC
 	})
 	var baselineProbes, coverageProbes atomic.Int64
-	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string) (int, bool, []string, runtimeinput.Observation, error) {
+	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string) (int, bool, []string, string, runtimeinput.Observation, error) {
 		baselineProbes.Add(1)
 		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env)
 	}

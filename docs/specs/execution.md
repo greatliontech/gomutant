@@ -631,7 +631,13 @@ record carries the phase and elapsed time before that point and the
 tallies after; the MCP heartbeat names the same stretch); the ephemeral
 verb reports
 `baseline` before its probe, `mutant-run` before each run, and `coverage`
-before its advisory probe, on both faces; the shared runner reports `resolving` before each target's
+before its advisory probe, on both faces; a window's coverage-probe phase
+announces `probing` with its projected cost — an upper bound, each batch
+at its group's measured baseline, the batches of groups without one
+counted unpriced, and no figure at all when nothing is priced (a
+projection with nothing priced is absent, never zero: the rule every
+projection of the estimate class keeps) — before its first batch, and
+reports the batches paid after each, before the window's `estimate`; the shared runner reports `resolving` before each target's
 target and oracle resolution, `freshness` before constructing and checking that
 target's subject views, `mutants` before enumerating a target that requires
 measurement, and `baseline` before each package-scoped oracle group actually
@@ -675,7 +681,9 @@ diagnostic, carry no ordering or completion guarantee, and never enter a
 decision or finding. The class carries an optional payload: detail-free
 events are keep-alives a consumer may throttle, while a payload-bearing
 event (the per-subject analysis-unavailable provenance, the
-unlisted-toolchain notice) is a distinct fact that no face may throttle,
+unlisted-toolchain notice, a failing baseline's own output — a reported
+failure or a result drifting between its discovery and measurement runs
+— beside its skip decision) is a distinct fact that no face may throttle,
 fold, or discard at the source — transport-level advisory delivery is
 unchanged — its package kept a package and its payload its own
 field on every structured face. Subscribing to the class delivers both

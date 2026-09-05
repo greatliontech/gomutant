@@ -435,6 +435,7 @@ var analysisVocabulary = map[string]string{
 	"observe":              "observing oracle runtime inputs (freshness evidence)",
 	"runtime":              "validating runtime-input evidence (oracle freshness)",
 	"prove":                "proving oracle closure freshness (gofresh hash proof)",
+	"baseline-output":      "oracle baseline output for",
 }
 
 func analysisPhrase(phase string) string {

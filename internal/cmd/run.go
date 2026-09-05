@@ -348,7 +348,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 				rep.emit("analysis", map[string]string{"phase": phase, "package": pkg, "detail": detail})
 				return
 			}
-			fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(analysisPhrase(phase)+" "+pkg+" — "+detail))
+			renderAnalysis(out, phase, pkg, detail)
 		},
 		Guidance: func(g gomutant.OracleGuidance) {
 			rep.line("guidance", g, func(w io.Writer) {
@@ -621,6 +621,27 @@ func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent, selectionN
 		// the JSONL face; a human line per candidate would be noise —
 		// the cadence progress line carries the pace instead.
 		return
+	case "probing":
+		// The probe phase, priced before its first batch — the announcement
+		// carries the projection, each later event a batch paid — so the
+		// window's coverage probes read as work with a horizon, never a
+		// frozen done-count (REQ-exec-run-status).
+		line := fmt.Sprintf("probing   target %d/%d %s%s  probes %d/%d", event.TargetIndex, event.TargetCount, event.Symbol, selectionNote, event.ProbesDone, event.ProbesTotal)
+		if event.ProbesDone == 0 {
+			// The projection is an upper bound (each batch at its group's
+			// whole baseline); nothing priced renders no figure.
+			if event.EstimateProjected != "" {
+				line += fmt.Sprintf("  (up to ~%s", event.EstimateProjected)
+				if event.ProbesUnpriced > 0 {
+					line += fmt.Sprintf(", %d unpriced", event.ProbesUnpriced)
+				}
+				line += ")"
+			} else if event.ProbesUnpriced > 0 {
+				line += fmt.Sprintf("  (%d unpriced)", event.ProbesUnpriced)
+			}
+		}
+		fmt.Fprintln(w, line)
+		return
 	case "estimate":
 		// The window cost model, before any budget is spent: the
 		// priced projection at measured-baseline pace, the candidate
@@ -743,4 +764,19 @@ func oracleMemoryBytes(mib int64) int64 {
 		return mib
 	}
 	return mib << 20
+}
+
+// renderAnalysis prints a payload-bearing analysis event: one line with
+// the detail when it fits one, else the line then the detail's lines
+// indented under it (a baseline's output is many).
+func renderAnalysis(w io.Writer, phase, pkg, detail string) {
+	head := strings.TrimSpace(analysisPhrase(phase) + " " + pkg)
+	if !strings.Contains(strings.TrimRight(detail, "\n"), "\n") {
+		fmt.Fprintf(w, "analysis  %s — %s\n", head, strings.TrimSpace(detail))
+		return
+	}
+	fmt.Fprintf(w, "analysis  %s:\n", head)
+	for _, line := range strings.Split(strings.TrimRight(detail, "\n"), "\n") {
+		fmt.Fprintf(w, "          %s\n", line)
+	}
 }

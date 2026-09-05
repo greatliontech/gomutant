@@ -412,6 +412,54 @@ func (r runStreams) decision(decision gomutant.RunDecision) {
 	}
 }
 
+// executing is the run tool's one execution-event hook: it names the
+// heartbeat's stretch, and while a token listens it forwards the
+// advisory execution-phase events (REQ-exec-run-status's advisory
+// classes) — the probe phase's priced announcement once, the per-batch
+// probe ticks naming the stretch only, a confirmation flip with its
+// payload, every other phase with its window position and tallies.
+func (r runStreams) executing(e gomutant.ExecutionEvent) {
+	switch e.Phase {
+	case "probing":
+		r.lastPhase.Store(fmt.Sprintf("probing %d/%d %s", e.ProbesDone, e.ProbesTotal, e.Symbol))
+		if e.ProbesDone != 0 || r.notify == nil {
+			return
+		}
+		message := fmt.Sprintf("probing %s: %d coverage probe(s)", e.Symbol, e.ProbesTotal)
+		if e.EstimateProjected != "" {
+			message += " up to ~" + e.EstimateProjected
+		}
+		if e.ProbesUnpriced > 0 {
+			message += fmt.Sprintf(", %d unpriced", e.ProbesUnpriced)
+		}
+		r.notify(message)
+		return
+	case "executing", "estimate":
+		r.lastPhase.Store("executing mutants " + e.Symbol)
+	}
+	if r.notify == nil {
+		return
+	}
+	if e.Phase == "confirmation-flip" {
+		// The demotion carries its payload on every face: a
+		// provisional kill re-scored survivor names its mutant
+		// and withdrawn killer (REQ-exec-run-status).
+		r.notify(fmt.Sprintf("confirmation FLIP: %s %s - provisional kill by %s re-scored survivor on serial re-run", e.Symbol, e.FlipPosition, e.FlipKiller))
+		return
+	}
+	message := fmt.Sprintf("%s target %d/%d %s candidates %d/%d", e.Phase, e.TargetIndex, e.TargetCount, e.Symbol, e.CandidatesDone, e.CandidatesTotal)
+	if e.ConfirmationsTotal > 0 {
+		message += fmt.Sprintf(" confirmations %d/%d", e.ConfirmationsDone, e.ConfirmationsTotal)
+	}
+	if e.ConfirmationMode != "" {
+		// The gate state rides every face: the disarmed stride
+		// must be distinguishable from the armed one for MCP
+		// operators too (REQ-exec-run-status).
+		message += " mode=" + e.ConfirmationMode
+	}
+	r.notify(message)
+}
+
 func (r runStreams) progress(event gomutant.PreparationEvent) {
 	r.out.PreparationCount++
 	r.lastPhase.Store("prepare " + string(event.Stage))
@@ -908,9 +956,10 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		PropertyOracle: func(n gomutant.PropertyOracleNote) {
 			out.PropertyOracles = append(out.PropertyOracles, fmt.Sprintf("%s %s: %s", n.Package, n.Runtime, n.Note))
 		},
-		Prior:    prior,
-		Decision: streams.decision,
-		Progress: streams.progress,
+		Prior:     prior,
+		Decision:  streams.decision,
+		Progress:  streams.progress,
+		Executing: streams.executing,
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
@@ -948,29 +997,6 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if notify != nil {
 		options.AnalysisEvent = func(phase, pkg, detail string) {
 			notify(analysisEventMessage(phase, pkg, detail))
-		}
-		// Execution-phase progress joins the same advisory notification
-		// channel (REQ-exec-run-status's advisory classes): phase,
-		// window position, and exact campaign tallies.
-		options.Executing = func(e gomutant.ExecutionEvent) {
-			if e.Phase == "confirmation-flip" {
-				// The demotion carries its payload on every face: a
-				// provisional kill re-scored survivor names its mutant
-				// and withdrawn killer (REQ-exec-run-status).
-				notify(fmt.Sprintf("confirmation FLIP: %s %s - provisional kill by %s re-scored survivor on serial re-run", e.Symbol, e.FlipPosition, e.FlipKiller))
-				return
-			}
-			message := fmt.Sprintf("%s target %d/%d %s candidates %d/%d", e.Phase, e.TargetIndex, e.TargetCount, e.Symbol, e.CandidatesDone, e.CandidatesTotal)
-			if e.ConfirmationsTotal > 0 {
-				message += fmt.Sprintf(" confirmations %d/%d", e.ConfirmationsDone, e.ConfirmationsTotal)
-			}
-			if e.ConfirmationMode != "" {
-				// The gate state rides every face: the disarmed stride
-				// must be distinguishable from the armed one for MCP
-				// operators too (REQ-exec-run-status).
-				message += " mode=" + e.ConfirmationMode
-			}
-			notify(message)
 		}
 	}
 	// The heartbeat keeps long compile and execution stretches audible

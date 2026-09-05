@@ -904,18 +904,20 @@ func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Du
 }
 
 // TestProbeObservedEnv is TestProbe under a frozen environment with a
-// runtime-input observation rooted at moduleDir and packageDir.
-func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, failed []string, state runtimeinput.Observation, err error) {
+// runtime-input observation rooted at moduleDir and packageDir; a
+// failing run — reported, or drifting between the discovery and
+// measurement runs — carries the failing tests' output as diagnostic.
+func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, failed []string, diagnostic string, state runtimeinput.Observation, err error) {
 	once, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
 	ran, passed, failed, first := once.ran, once.passed, once.failed, once.state
 	if err != nil {
-		return ran, passed, failed, first, err
+		return ran, passed, failed, "", first, err
 	}
 	if !passed {
-		return ran, false, failed, first, nil
+		return ran, false, failed, once.diagnostic, first, nil
 	}
 	if ran == 0 {
-		return 0, true, nil, first, nil
+		return 0, true, nil, "", first, nil
 	}
 	// The repeat guards baseline VALIDITY (a flaky pass fabricating
 	// verdicts), which no observation bracket subsumes: it runs even
@@ -923,40 +925,40 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	// Only the empty-observation shortcut below needs verifiable
 	// evidence to be meaningful.
 	if !first.OK {
-		return ran, passed, nil, first, err
+		return ran, passed, nil, "", first, err
 	}
 	empty, err := runtimeinput.MergeEnv(moduleDir, env)
 	if err != nil {
-		return 0, false, nil, runtimeinput.Observation{}, err
+		return 0, false, nil, "", runtimeinput.Observation{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, false, nil, runtimeinput.Observation{}, err
+		return 0, false, nil, "", runtimeinput.Observation{}, err
 	}
 	empty, err = runtimeinput.AbsoluteEnv(empty, moduleDir, env)
 	if err != nil {
-		return 0, false, nil, runtimeinput.Observation{}, err
+		return 0, false, nil, "", runtimeinput.Observation{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, false, nil, runtimeinput.Observation{}, err
+		return 0, false, nil, "", runtimeinput.Observation{}, err
 	}
 	if !first.Unverifiable && first.State == empty.State {
-		return ran, passed, nil, first, nil
+		return ran, passed, nil, "", first, nil
 	}
 	again, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
 	secondRan, secondPassed, secondFailed, second := again.ran, again.passed, again.failed, again.state
 	if err != nil {
-		return secondRan, secondPassed, secondFailed, second, err
+		return secondRan, secondPassed, secondFailed, "", second, err
 	}
 	if secondRan != ran {
-		return secondRan, secondPassed, secondFailed, runtimeinput.Observation{}, fmt.Errorf("baseline test count changed between discovery and measurement")
+		return secondRan, secondPassed, secondFailed, "", runtimeinput.Observation{}, fmt.Errorf("baseline test count changed between discovery and measurement")
 	}
 	if !secondPassed {
-		return secondRan, false, secondFailed, runtimeinput.Observation{}, fmt.Errorf("baseline result changed between discovery and measurement (failed: %s)", strings.Join(secondFailed, ", "))
+		return secondRan, false, secondFailed, again.diagnostic, runtimeinput.Observation{}, fmt.Errorf("baseline result changed between discovery and measurement (failed: %s)", strings.Join(secondFailed, ", "))
 	}
 	// The repeat guards baseline VALIDITY only; the evidence is the scored
 	// second run's own bracket-vouched observation - the historical
 	// cross-run evidence comparison is retired (REQ-exec-observation).
-	return secondRan, secondPassed, nil, second, nil
+	return secondRan, secondPassed, nil, "", second, nil
 }
 
 // probeResult is one baseline probe's outcome: the top-level tests that

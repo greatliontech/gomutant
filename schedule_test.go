@@ -196,9 +196,10 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 
 	var audited, auditFlips int
 	var flipKillers []string
-	var estimates []ExecutionEvent
+	var estimates, probings []ExecutionEvent
 	var executingEvents, ticks, lastTickDone int
 	tickMonotonic := true
+	probingBeforeEstimate := true
 	var emu sync.Mutex
 	markerActive.Store(true)
 	scheduled, err := tr.Run(ctx, []Target{target}, Options{Executing: func(e ExecutionEvent) {
@@ -214,6 +215,11 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 			executingEvents++
 		case "estimate":
 			estimates = append(estimates, e)
+		case "probing":
+			if len(estimates) != 0 {
+				probingBeforeEstimate = false
+			}
+			probings = append(probings, e)
 		case "tick":
 			ticks++
 			if e.CandidatesDone <= lastTickDone || e.CandidatesDone > e.CandidatesTotal {
@@ -318,6 +324,25 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	if executingEvents == 0 || len(estimates) != executingEvents {
 		t.Fatalf("%d estimate events for %d windows — want one per window", len(estimates), executingEvents)
 	}
+	// The probe phase is priced and ticked (REQ-exec-run-status): the
+	// announcement precedes the first estimate and carries the total the
+	// loop then pays exactly — one tick per probed batch, monotone to
+	// the announced total, which equals the coverage probes the seam saw.
+	plannedBatches := len(scheduleBatches(groupTestFns(target.Oracle, "example.com/fixture/lib")))
+	if !probingBeforeEstimate || len(probings) == 0 || probings[0].ProbesDone != 0 || probings[0].ProbesTotal != plannedBatches {
+		t.Fatalf("probing announcement = %+v (before estimate: %v), want probes 0/%d first", probings, probingBeforeEstimate, plannedBatches)
+	}
+	if probings[0].EstimateProjected == "" && probings[0].ProbesUnpriced != probings[0].ProbesTotal {
+		t.Fatalf("probing announcement neither priced nor counted unpriced: %+v", probings[0])
+	}
+	for i, e := range probings[1:] {
+		if e.ProbesDone != i+1 || e.ProbesTotal != probings[0].ProbesTotal {
+			t.Fatalf("probing tick %d = %+v, want probes %d/%d", i+1, e, i+1, probings[0].ProbesTotal)
+		}
+	}
+	if len(probings)-1 != probings[0].ProbesTotal {
+		t.Fatalf("%d probing ticks for %d announced batches", len(probings)-1, probings[0].ProbesTotal)
+	}
 	classed := 0
 	for _, e := range estimates {
 		classed += e.EstimateNarrowed + e.EstimateFull + e.EstimateUnknown
@@ -402,8 +427,8 @@ func TestPhaseKillWithoutPhaseBaselineDegradesToUnsplit(t *testing.T) {
 		}
 		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
 	}
-	phaseBaselineProbe = func(_ context.Context, _, _, _ string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string) (int, bool, []string, runtimeinput.Observation, error) {
-		return 1, false, []string{pkg + ".TestA"}, runtimeinput.Observation{}, nil
+	phaseBaselineProbe = func(_ context.Context, _, _, _ string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string) (int, bool, []string, string, runtimeinput.Observation, error) {
+		return 1, false, []string{pkg + ".TestA"}, "", runtimeinput.Observation{}, nil
 	}
 
 	tr := &Tree{}
@@ -459,9 +484,9 @@ func TestPhaseKillVouchRunsUnderRunWideBound(t *testing.T) {
 		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
 	}
 	var vouchBounds []time.Duration
-	phaseBaselineProbe = func(_ context.Context, _, _, _ string, bound time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string) (int, bool, []string, runtimeinput.Observation, error) {
+	phaseBaselineProbe = func(_ context.Context, _, _, _ string, bound time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string) (int, bool, []string, string, runtimeinput.Observation, error) {
 		vouchBounds = append(vouchBounds, bound)
-		return 1, true, nil, runtimeinput.Observation{}, nil
+		return 1, true, nil, "", runtimeinput.Observation{}, nil
 	}
 
 	tr := &Tree{}
@@ -563,7 +588,7 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 	served.serve = &Finding{}
 	served.flagged = map[int]bool{0: true}
 	store := newScheduleStore()
-	if err := tr.probeScheduleCoverage(ctx, served, Options{scheduleStore: store}, nil); err != nil {
+	if err := probeWork(ctx, tr, served, Options{scheduleStore: store}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 0 || len(store.byKey) != 0 {
@@ -572,13 +597,13 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 
 	// A fresh work probes — ceil(sqrt(9)) = 3 batches — and the
 	// failure stores an empty signal exactly once.
-	if err := tr.probeScheduleCoverage(ctx, w, Options{scheduleStore: store}, nil); err != nil {
+	if err := probeWork(ctx, tr, w, Options{scheduleStore: store}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("failed probe retried within one pass: %d calls (first batch fails, probe stops)", calls.Load())
 	}
-	if err := tr.probeScheduleCoverage(ctx, w, Options{scheduleStore: store}, nil); err != nil {
+	if err := probeWork(ctx, tr, w, Options{scheduleStore: store}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 1 {
@@ -598,7 +623,7 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 		return engine.CoverageForTest(nil), nil
 	}
 	healthy := newScheduleStore()
-	if err := tr.probeScheduleCoverage(ctx, w, Options{scheduleStore: healthy}, nil); err != nil {
+	if err := probeWork(ctx, tr, w, Options{scheduleStore: healthy}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 3 {
@@ -706,4 +731,47 @@ func TestNarrowedPhaseTimeoutDegradesToUnsplit(t *testing.T) {
 	if got := tr.scheduleSteps(w, m, opts); len(got) != 1 || !got[0].narrowed {
 		t.Fatalf("a narrowed-bound timeout unscheduled the group: %+v", got)
 	}
+}
+
+// The probe phase's price folds only groups with a measured baseline;
+// the rest are counted unpriced, never projected (REQ-exec-run-status).
+func TestProbePlanCostCountsUnpricedBatches(t *testing.T) {
+	plan := []probeUnit{
+		{g: group{pkgs: []string{"example.com/a"}}, batches: [][]string{{"TestA"}, {"TestB"}}},
+		{g: group{pkgs: []string{"example.com/b"}}, batches: [][]string{{"TestC"}, {"TestD"}, {"TestE"}}},
+	}
+	priced, unpriced := probePlanCost(plan, func(g group) (time.Duration, bool) {
+		if g.pkgs[0] == "example.com/a" {
+			return 3 * time.Second, true
+		}
+		return 0, false
+	})
+	if priced != 6*time.Second || unpriced != 3 {
+		t.Fatalf("priced %s, unpriced %d; want 6s and 3", priced, unpriced)
+	}
+	if priced, unpriced := probePlanCost(plan, nil); priced != 0 || unpriced != 5 {
+		t.Fatalf("without a baseline oracle: priced %s, unpriced %d; want 0 and 5", priced, unpriced)
+	}
+	if probePlanBatches(plan) != 5 {
+		t.Fatalf("plan batches = %d", probePlanBatches(plan))
+	}
+	// Nothing priced renders no projection — never a zero.
+	if probeProjection(0) != "" || probeProjection(6*time.Second) != "6s" {
+		t.Fatalf("projection = %q / %q", probeProjection(0), probeProjection(6*time.Second))
+	}
+}
+
+// probeWork plans and probes one work's groups without ticks — the
+// window's composition over one work, for the schedule's own pins.
+func probeWork(ctx context.Context, tr *Tree, w work, opts Options) error {
+	plan, err := tr.scheduleProbePlan(ctx, w, opts)
+	if err != nil {
+		return err
+	}
+	for _, unit := range plan {
+		if err := tr.probeScheduleUnit(ctx, unit, opts, nil, func() {}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

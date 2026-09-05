@@ -400,6 +400,16 @@ type ExecutionEvent struct {
 	EstimateNarrowed  int    `json:"estimateNarrowed,omitempty"`
 	EstimateFull      int    `json:"estimateFull,omitempty"`
 	EstimateUnknown   int    `json:"estimateUnknown,omitempty"`
+	// ProbesDone/ProbesTotal ride the `probing` phase: the window's
+	// coverage-probe batches paid so far and in all, announced with the
+	// projected cost before the first batch and ticked per batch
+	// (REQ-exec-run-status).
+	ProbesDone  int `json:"probesDone,omitempty"`
+	ProbesTotal int `json:"probesTotal,omitempty"`
+	// ProbesUnpriced counts the announced batches of groups without a
+	// measured baseline — outside EstimateProjected, which on the
+	// probing phase is an upper bound at the groups' whole baselines.
+	ProbesUnpriced int `json:"probesUnpriced,omitempty"`
 }
 
 // PreparationEvent reports one operation before it begins. Symbol is set for
@@ -732,7 +742,7 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 		if pkg == "" || fn == "" || !ok {
 			continue
 		}
-		_, passed, _, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		_, passed, _, _, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 		if err != nil {
 			if ctx.Err() != nil {
 				return oracleAttribution{}, ctx.Err()
@@ -1037,7 +1047,7 @@ func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scope
 	if passed, ok := memo[key]; ok {
 		return passed
 	}
-	ran, passed, _, _, err := engine.TestProbeObservedEnv(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+	ran, passed, _, _, _, err := engine.TestProbeObservedEnv(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 	ok := err == nil && ran > 0 && passed
 	memo[key] = ok
 	return ok
@@ -2236,7 +2246,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				}
 				baselineStart := time.Now()
 				probeGate.RLock()
-				ran, passed, failedTests, observed, err := groupBaselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+				ran, passed, failedTests, diagnostic, observed, err := groupBaselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 				probeGate.RUnlock()
 				baselineElapsed := time.Since(baselineStart)
 				var reason string
@@ -2249,6 +2259,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					reason = fmt.Sprintf("oracle baseline matched no tests in %s", group.pkgs[0])
 				case !passed:
 					reason = fmt.Sprintf("oracle baseline does not pass in %s (failed: %s)", group.pkgs[0], strings.Join(failedTests, ", "))
+				}
+				// What the oracle saw rides the analysis channel as a
+				// payload-bearing event beside the skip decision — the
+				// decision line names the tests, the event carries their
+				// output — for a reported failure and for a result that
+				// drifted between the discovery and measurement runs alike,
+				// so a baseline failing under the campaign and passing for
+				// the caller's plain go test is diagnosable from the run
+				// (REQ-exec-run-status).
+				if reason != "" && diagnostic != "" && opts.AnalysisEvent != nil {
+					opts.AnalysisEvent("baseline-output", group.pkgs[0], diagnostic)
 				}
 				// A refusing CONSUMER package of a derived oracle names
 				// the escape: the oracle-of-record is a derivation-time
@@ -3213,9 +3234,41 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		// (REQ-exec-oracle-run's verdict-preserving schedule). The
 		// survivor buckets keep their own full-pattern probe — a union
 		// of subset runs is not that measurement.
+		// The probe phase is priced and ticked like the mutant phase: one
+		// plan decides which groups probe (the loop consults the same
+		// plan), the announcement projects its cost from the groups'
+		// measured baselines, and each batch ticks.
+		var plan []probeUnit
 		for _, w := range window {
-			if err := t.probeScheduleCoverage(ctx, w, opts, runEnv); err != nil {
+			units, err := t.scheduleProbePlan(ctx, w, opts)
+			if err != nil {
 				return nil, err
+			}
+			plan = append(plan, units...)
+		}
+		if probesTotal := probePlanBatches(plan); probesTotal > 0 {
+			priced, unpriced := probePlanCost(plan, opts.baselineDur)
+			reportExecuting(opts.Executing, ExecutionEvent{
+				Phase:       "probing",
+				TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
+				Symbol:         targets[window[0].target].Symbol,
+				CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
+				ProbesTotal: probesTotal, EstimateProjected: probeProjection(priced), ProbesUnpriced: unpriced,
+			})
+			probesDone := 0
+			for _, unit := range plan {
+				if err := t.probeScheduleUnit(ctx, unit, opts, runEnv, func() {
+					probesDone++
+					reportExecuting(opts.Executing, ExecutionEvent{
+						Phase:       "probing",
+						TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
+						Symbol:         targets[window[0].target].Symbol,
+						CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
+						ProbesDone: probesDone, ProbesTotal: probesTotal,
+					})
+				}); err != nil {
+					return nil, err
+				}
 			}
 		}
 		// The window's cost model, priced AFTER the probes so the

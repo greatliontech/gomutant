@@ -45,6 +45,11 @@ awaiting disposition, never verdicts. Preparation and decision
 streams leave the response when a progress token streamed them —
 their totals stay. Long campaigns exceed MCP client timeouts —
 raise the timeout or use the cli.
+A window's coverage-probe phase announces its cost's upper bound
+before its first batch and reports the batches paid after each, before
+the window's estimate; a
+target skipped on a failing oracle baseline carries the oracle's own
+output as an analysis line beside its decision.
 **example:** run with changed=HEAD~1 at a chunk gate; run --plan
 first when the target decision set is in doubt.
 
