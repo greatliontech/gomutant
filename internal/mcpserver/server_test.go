@@ -779,7 +779,7 @@ func TestToolFindingsCapsSummaryRows(t *testing.T) {
 	s := New(dir)
 	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		var all []gomutant.Finding
-		for i := 0; i < envelopeRowCap+3; i++ {
+		for i := 0; i < envelope.rows+3; i++ {
 			all = append(all, seededFinding(fmt.Sprintf("example.com/empty.Gone%02d", i)))
 		}
 		return all, nil
@@ -790,8 +790,8 @@ func TestToolFindingsCapsSummaryRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Summary) != envelopeRowCap || out.Omitted != 3 {
-		t.Fatalf("cap = %d rows, %d omitted; want %d and 3", len(out.Summary), out.Omitted, envelopeRowCap)
+	if len(out.Summary) != envelope.rows || out.Omitted != 3 {
+		t.Fatalf("cap = %d rows, %d omitted; want %d and 3", len(out.Summary), out.Omitted, envelope.rows)
 	}
 }
 
@@ -1447,17 +1447,17 @@ func TestRunAdvisoryCapsAreWired(t *testing.T) {
 	if len(fullSheds) != 60 {
 		t.Fatalf("the drift fold's shed list shrank with the response: %d", len(fullSheds))
 	}
-	if len(out.Guidance[0].Targets) != guidanceListCap || out.Guidance[0].OmittedTargets != 15 ||
-		len(out.Guidance[0].UnstableTests) != guidanceListCap || out.Guidance[0].OmittedTests != 15 {
+	if len(out.Guidance[0].Targets) != envelope.nested || out.Guidance[0].OmittedTargets != 15 ||
+		len(out.Guidance[0].UnstableTests) != envelope.nested || out.Guidance[0].OmittedTests != 15 {
 		t.Fatalf("guidance nested caps unwired: %+v", out.Guidance[0])
 	}
-	if len(out.Guidance) != envelopeRowCap || out.OmittedGuidance != 10 {
+	if len(out.Guidance) != envelope.rows || out.OmittedGuidance != 10 {
 		t.Fatalf("guidance row cap unwired: %d rows, %d omitted", len(out.Guidance), out.OmittedGuidance)
 	}
-	if len(out.Contradictions) != envelopeRowCap || out.OmittedContradictions != 10 ||
-		len(out.PropertyOracles) != envelopeRowCap || out.OmittedPropertyOracles != 10 ||
-		len(out.AttestationSheds) != envelopeRowCap || out.OmittedAttestationSheds != 10 ||
-		len(out.AttestationCarries) != envelopeRowCap || out.OmittedAttestationCarries != 10 {
+	if len(out.Contradictions) != envelope.rows || out.OmittedContradictions != 10 ||
+		len(out.PropertyOracles) != envelope.rows || out.OmittedPropertyOracles != 10 ||
+		len(out.AttestationSheds) != envelope.rows || out.OmittedAttestationSheds != 10 ||
+		len(out.AttestationCarries) != envelope.rows || out.OmittedAttestationCarries != 10 {
 		t.Fatalf("advisory caps unwired: %+v", out)
 	}
 }
@@ -1477,9 +1477,9 @@ func TestDiscoverCapsAreWired(t *testing.T) {
 		t.Fatalf("detail=true truncated: %d/%d/%d", len(full.Targets), len(full.OracleSets), len(full.Residue))
 	}
 	out.capUnlessDetail(false)
-	if len(out.Targets) != envelopeRowCap || out.OmittedTargets != 10 ||
-		len(out.OracleSets) != envelopeRowCap || out.OmittedOracleSets != 5 ||
-		len(out.Residue) != envelopeRowCap || out.OmittedResidue != 2 {
+	if len(out.Targets) != envelope.rows || out.OmittedTargets != 10 ||
+		len(out.OracleSets) != envelope.rows || out.OmittedOracleSets != 5 ||
+		len(out.Residue) != envelope.rows || out.OmittedResidue != 2 {
 		t.Fatalf("caps unwired: %+v", out)
 	}
 }

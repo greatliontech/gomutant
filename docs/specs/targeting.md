@@ -167,8 +167,9 @@ effective target set a run would consume without running mutants: each symbol,
 its sorted oracle identified as explicit or package-derived, its sorted opaque
 labels, and changed-scope residue with reasons. Duplicate symbols and invalid
 or ambiguous oracles are refused exactly as a run refuses them. Human and
-machine-readable CLI views and MCP discovery derive from the same target
-descriptions, so inspection cannot disagree with execution.
+machine-readable CLI views (the latter under the one structured-face flag
+name REQ-exec-run-status fixes) and MCP discovery derive from the same
+target descriptions, so inspection cannot disagree with execution.
 
 **REQ-target-structural** (behavior): A target MAY declare a structural
 mutation class instead of a symbol — import-boundary (one candidate per

@@ -38,7 +38,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill")
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
-	f.DurationVar(&o.progressEvery, "progress-interval", 30*time.Second, "cadence of the progress line naming the phase in flight (loading, baseline, mutant run, coverage) and the elapsed time; 0 disables")
+	progressIntervalFlag(f, &o.progressEvery, "cadence of the progress line naming the phase in flight (loading, baseline, mutant run, coverage) and the elapsed time; 0 disables")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "maximum duration of the baseline and mutant oracle processes; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
 	f.IntVar(&o.runs, "runs", 1, "run the mutant this many times (1-10): killed means every run killed - consecutive kills split deterministic kills from a property generator's draw luck")

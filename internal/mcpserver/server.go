@@ -28,7 +28,9 @@ import (
 
 // clientKeepAliveInterval paces the server's keepalive pings - the
 // disconnect detector for in-flight campaigns. A variable so tests can
-// tighten it; production always uses the default.
+// tighten it; production always uses the default. It equals the
+// progress cadence by coincidence, not by policy: a transport pace and
+// a silence bound, deliberately independent.
 var clientKeepAliveInterval = 30 * time.Second
 
 // Server is a dir-bound MCP server over the gomutant library.
@@ -170,9 +172,10 @@ func serverOptions() *mcp.ServerOptions {
 	}
 }
 
-// heartbeatInterval paces withHeartbeat's still-working notifications;
-// a variable so the emission is testable without a 20-second test.
-var heartbeatInterval = 20 * time.Second
+// heartbeatInterval paces withHeartbeat's still-working notifications
+// on the one cadence every face's progress keeps; a variable so the
+// emission is testable without a thirty-second test.
+var heartbeatInterval = gomutant.ProgressCadence
 
 // loadTreeReporting is every tool's typed load: `loading` announced at
 // once when a token listens (REQ-exec-run-status), then the load under
@@ -296,17 +299,16 @@ func commandTimeout(name string, seconds *int) (time.Duration, error) {
 // second findings call after a run that rendered healthy counts while
 // the store routed the record to the machine-local overlay.
 func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (string, string)) (rows []findingOut, omitted int) {
-	const openCap = 20
 	for _, f := range findings {
-		if len(rows) == envelopeRowCap {
+		if len(rows) == envelope.rows {
 			omitted++
 			continue
 		}
 		open := f.Open()
 		omittedOpen := 0
-		if len(open) > openCap {
-			omittedOpen = len(open) - openCap
-			open = open[:openCap]
+		if len(open) > envelope.open {
+			omittedOpen = len(open) - envelope.open
+			open = open[:envelope.open]
 		}
 		row := findingOut{
 			Symbol: f.Symbol, Labels: f.Labels,
@@ -336,12 +338,6 @@ type guidanceOut struct {
 	Reason         string   `json:"reason,omitempty" jsonschema:"the first covered finding's unverifiable reason"`
 	Suggestion     string   `json:"suggestion"`
 }
-
-// guidanceListCap bounds a guidance row's nested lists - one row
-// aggregates every target an unstable oracle set covers, the exact
-// unauthored blow-up REQ-mcp-envelope refuses; the explain tool's
-// per-group symbol cap is the precedent.
-const guidanceListCap = 10
 
 // contradictionOut is one shed attestation report (a drift serve's added
 // or moved tests killed an attested survivor).
@@ -377,8 +373,6 @@ type runStreams struct {
 	lastPhase *atomic.Value
 }
 
-const streamRowCap = 100
-
 // analysisEventMessage renders an analysis event for the advisory
 // notification channel; a non-empty detail (the per-subject
 // analysis-unavailable provenance, the unlisted-toolchain notice)
@@ -408,7 +402,7 @@ func (r runStreams) decision(decision gomutant.RunDecision) {
 		r.notify(decisionMessage(decision))
 		return
 	}
-	if len(r.out.Decisions) < streamRowCap {
+	if len(r.out.Decisions) < envelope.streamed {
 		r.out.Decisions = append(r.out.Decisions, decision)
 	}
 }
@@ -468,7 +462,7 @@ func (r runStreams) progress(event gomutant.PreparationEvent) {
 		r.notify(preparationMessage(event))
 		return
 	}
-	if len(r.out.Preparation) < streamRowCap {
+	if len(r.out.Preparation) < envelope.streamed {
 		r.out.Preparation = append(r.out.Preparation, event)
 	}
 }
@@ -619,10 +613,32 @@ type runOut struct {
 	Note                      string                      `json:"note,omitempty" jsonschema:"set when the run measured nothing (names the input that selected zero targets and the next step) or when a whole-tree reconcile dropped records whose targets left the code"`
 }
 
-// envelopeRowCap is the one row bound every capped response list
-// shares (REQ-mcp-envelope); per-row nested lists carry their own
-// tighter bounds.
-const envelopeRowCap = 50
+// envelope is the response envelope's one bounding policy
+// (REQ-mcp-envelope): every cap a response applies is a field here,
+// its purpose stated once, and every capped list counts its omitted
+// remainder. Never written — a variable only because Go has no
+// constant structs.
+var envelope = struct {
+	// rows bounds every response row list — targets, residue, finding
+	// and inspection rows, guidance, sheds and carries, contradictions,
+	// property-oracle statements, oracle sets, explain's groups, the
+	// findings response's ephemeral attestations. The served prose
+	// (tool descriptions, the guidance document) states this number;
+	// the requirement names it, and the policy pin holds them together.
+	rows int
+	// open bounds the open survivors listed per record.
+	open int
+	// reasons bounds the machine-local clauses listed per record.
+	reasons int
+	// nested bounds a row's own nested lists — a guidance row's targets
+	// and unstable tests, an explain group's symbols — where one row
+	// would otherwise carry an unauthored blow-up.
+	nested int
+	// streamed bounds the preparation events and decisions kept inline
+	// for a request without a progress token (a token receives them all
+	// as notifications).
+	streamed int
+}{rows: 50, open: 20, reasons: 20, nested: 10, streamed: 100}
 
 // capRows bounds a response list at the envelope cap with the remainder
 // counted (REQ-mcp-envelope); the findings document carries every full
@@ -630,10 +646,10 @@ const envelopeRowCap = 50
 // a later append can never scribble over the caller's retained full
 // list.
 func capRows[T any](rows []T) ([]T, int) {
-	if len(rows) <= envelopeRowCap {
+	if len(rows) <= envelope.rows {
 		return rows, 0
 	}
-	return rows[:envelopeRowCap:envelopeRowCap], len(rows) - envelopeRowCap
+	return rows[:envelope.rows:envelope.rows], len(rows) - envelope.rows
 }
 
 // selectionEmptiedNote names the input that emptied a target selection
@@ -743,13 +759,13 @@ func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, targets
 func (out *runOut) capAdvisories() (fullSheds []string) {
 	fullSheds = out.AttestationSheds
 	for i := range out.Guidance {
-		if n := len(out.Guidance[i].Targets); n > guidanceListCap {
-			out.Guidance[i].OmittedTargets = n - guidanceListCap
-			out.Guidance[i].Targets = out.Guidance[i].Targets[:guidanceListCap:guidanceListCap]
+		if n := len(out.Guidance[i].Targets); n > envelope.nested {
+			out.Guidance[i].OmittedTargets = n - envelope.nested
+			out.Guidance[i].Targets = out.Guidance[i].Targets[:envelope.nested:envelope.nested]
 		}
-		if n := len(out.Guidance[i].UnstableTests); n > guidanceListCap {
-			out.Guidance[i].OmittedTests = n - guidanceListCap
-			out.Guidance[i].UnstableTests = out.Guidance[i].UnstableTests[:guidanceListCap:guidanceListCap]
+		if n := len(out.Guidance[i].UnstableTests); n > envelope.nested {
+			out.Guidance[i].OmittedTests = n - envelope.nested
+			out.Guidance[i].UnstableTests = out.Guidance[i].UnstableTests[:envelope.nested:envelope.nested]
 		}
 	}
 	out.Guidance, out.OmittedGuidance = capRows(out.Guidance)
@@ -1304,14 +1320,11 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	out := findingsOut{Document: s.findingsPath(in.Findings)}
 	// The committed ephemeral-equivalence record rides the inspection,
 	// independent of the finding rows (REQ-result-ephemeral-attest).
-	if atts, err := gomutant.LoadEphemeralAttestations(gomutant.EphemeralAttestationsPathFor(out.Document)); err != nil {
+	atts, err := gomutant.LoadEphemeralAttestations(gomutant.EphemeralAttestationsPathFor(out.Document))
+	if err != nil {
 		return nil, out, err
-	} else if len(atts) > guidanceListCap {
-		out.EphemeralAttestations = atts[:guidanceListCap]
-		out.OmittedEphemeralAttestations = len(atts) - guidanceListCap
-	} else {
-		out.EphemeralAttestations = atts
 	}
+	out.EphemeralAttestations, out.OmittedEphemeralAttestations = capRows(atts)
 	switch in.State {
 	case "", string(gomutant.FindingCurrent), string(gomutant.FindingStale), string(gomutant.FindingUnverifiable), string(gomutant.FindingDetached):
 	default:
@@ -1487,7 +1500,6 @@ type explainOut struct {
 // document's promotion triage. Projection only - no tests run, and the
 // advisory stance holds: causes and prescriptions, never a verdict.
 func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in explainIn) (*mcp.CallToolResult, explainOut, error) {
-	const groupCap, groupSymbolCap, openCap, reasonCap = 50, 10, 20, 20
 	if in.Symbol != "" && in.Label != "" {
 		return nil, explainOut{}, fmt.Errorf("explain: the label filter restricts the triage arm; pass symbol or label, not both")
 	}
@@ -1531,14 +1543,14 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 				Attested: len(finding.AttestedDispositions()),
 				Document: s.findingsPath(in.Findings),
 			}
-			if len(out.LayerReasons) > reasonCap {
-				out.OmittedLayerReasons = len(out.LayerReasons) - reasonCap
-				out.LayerReasons = out.LayerReasons[:reasonCap]
+			if len(out.LayerReasons) > envelope.reasons {
+				out.OmittedLayerReasons = len(out.LayerReasons) - envelope.reasons
+				out.LayerReasons = out.LayerReasons[:envelope.reasons]
 			}
 			open := finding.Open()
 			for i, survivor := range open {
-				if i == openCap {
-					out.OmittedOpen = len(open) - openCap
+				if i == envelope.open {
+					out.OmittedOpen = len(open) - envelope.open
 					break
 				}
 				out.Open = append(out.Open, explainedSurvivor{
@@ -1590,16 +1602,16 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 		return reasons[i] < reasons[j]
 	})
 	for i, reason := range reasons {
-		if i == groupCap {
-			out.OmittedGroups = len(reasons) - groupCap
+		if i == envelope.rows {
+			out.OmittedGroups = len(reasons) - envelope.rows
 			break
 		}
 		symbols := groups[reason]
 		sort.Strings(symbols)
 		group := promotionGroup{Reason: reason, Count: len(symbols)}
-		if len(symbols) > groupSymbolCap {
-			group.Symbols = symbols[:groupSymbolCap]
-			group.OmittedSymbols = len(symbols) - groupSymbolCap
+		if len(symbols) > envelope.nested {
+			group.Symbols = symbols[:envelope.nested]
+			group.OmittedSymbols = len(symbols) - envelope.nested
 		} else {
 			group.Symbols = symbols
 		}

@@ -426,6 +426,15 @@ type ExecutionEvent struct {
 	ProbesUnpriced int `json:"probesUnpriced,omitempty"`
 }
 
+// ProgressCadence is the one cadence every face's progress keeps: the
+// CLI's progress line (its operator flag defaults to it) and the MCP
+// heartbeat pace on it, so no stretch on either face stays silent
+// longer than this (REQ-exec-run-status; the MCP heartbeat clause). A
+// fixed value rather than one derived from the measured pace: the
+// line's information changes at commits, and a reader — human or
+// token-paying — is served by a bounded silence, not by more lines.
+const ProgressCadence = 30 * time.Second
+
 // PreparationEvent reports one operation before it begins. Symbol is set for
 // target-scoped operations; Package is additionally set for baseline probes.
 type PreparationEvent struct {

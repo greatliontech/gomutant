@@ -628,153 +628,158 @@ gomutant does not promise identical survivors across runs — it promises that
 an outcome it cannot attribute is refused (REQ-exec-attribution), so noise
 aborts rather than scoring.
 
-**REQ-exec-run-status** (behavior): CLI and MCP faces MUST report `loading`
-before tree loading (every verb that loads, on its human CLI face and, when
-a token listens, its MCP face; the CLI face keeps a cadenced progress line
-naming the stretch in flight — the load, an ephemeral probe's phase, a
-judged record — until the first decision, after which the line carries the
-served, skipped, and committed tallies, and the structured face's progress
-record carries the phase and elapsed time before that point and the
-tallies after; the MCP heartbeat names the same stretch); the ephemeral
-verb reports
-`baseline` before its probe, `mutant-run` before each run, and `coverage`
-before its advisory probe, on both faces; a window's coverage-probe phase
-announces `probing` with its projected cost — an upper bound, each batch
-at its group's measured baseline, the batches of groups without one
-counted unpriced, and no figure at all when nothing is priced (a
-projection with nothing priced is absent, never zero: the rule every
-projection of the estimate class keeps) — before its first batch, and
-reports the batches paid after each, before the window's `estimate`; the shared runner reports `resolving` before each target's
-target and oracle resolution, `freshness` before constructing and checking that
-target's subject views, `mutants` before enumerating a target that requires
-measurement, and `baseline` before each package-scoped oracle group actually
-probed rather than reused within the run — a group served from the
+**REQ-exec-run-status** (behavior): CLI and MCP faces MUST report
+`loading` before tree loading (every verb that loads, on its human CLI
+face and, when a token listens, its MCP face; the CLI face keeps a
+cadenced progress line naming the stretch in flight — the load, an
+ephemeral probe's phase, a judged record — until the first decision,
+after which the line carries the served, skipped, and committed tallies,
+and the structured face's progress record carries the phase and elapsed
+time before that point and the tallies after; the MCP heartbeat names
+the same stretch); the ephemeral verb reports `baseline` before its
+probe, `mutant-run` before each run, and `coverage` before its advisory
+probe, on both faces; a window's coverage-probe phase announces
+`probing` with its projected cost — an upper bound, each batch at its
+group's measured baseline, the batches of groups without one counted
+unpriced, and no figure at all when nothing is priced (a projection with
+nothing priced is absent, never zero: the rule every projection of the
+estimate class keeps) — before its first batch, and reports the batches
+paid after each, before the window's `estimate`; the shared runner
+reports `resolving` before each target's target and oracle resolution,
+`freshness` before constructing and checking that target's subject
+views, `mutants` before enumerating a target that requires measurement,
+and `baseline` before each package-scoped oracle group actually probed
+rather than reused within the run — a group served from the
 machine-local measurement bank instead of probed reports the same
-`baseline` event MARKED banked (a cross-run serve must never be
-silent), rendered distinguishably on the CLI and carried as a field
-on the structured faces. Resolution and freshness events
-follow target order before module-batched view construction; subsequent mutant
-and baseline events follow target order, with baseline events in canonical
-package-group order. Worker count cannot affect the sequence's content or
-order. Preparation is pipelined with execution: once a target's preparation
-completes and its decision is reported, it may enter execution while later
-targets still prepare, so later targets' preparation events and decisions may
-follow earlier targets' execution-phase events — the preparation-and-decision
-sequence itself stays deterministic, target-ordered, and worker-independent,
-only its interleaving with the advisory execution-phase events is
-timing-dependent. A window's serial confirmations exclude preparation probes
-outright: a confirmation's scored run shares no process with any preparation
-probe, so a probe's test-level side effects — an exclusive port, a file
-lock — can never manufacture a false reproduction or a false flip; beyond
-that exclusion the confirmation isolation obligation names sibling mutants,
-none of which are in flight once the window drains, and preparation load is
-ambient like any other process, covered by the stride gate's volatility
-arm. The named residual is the baseline probe itself: a probe of one
-package's tests may run beside executing mutants of that package — exactly
-the concurrency worker parallelism already implies for a suite holding
-cross-process-exclusive resources — or beside the advisory coverage and
-guidance probes; a collision fails the probe
-loudly and aborts the run, or skews an advisory bucket, never entering a
-verdict. The CLI streams these events as they occur; the
-MCP face carries them per REQ-mcp-envelope in [mcp.md](mcp.md) — streamed to
-progress notifications or inline-capped, totals always exact. The CLI reports
-each skipped target once, as its decision line, and aggregates skip classes
-into one counted line after the summary when more than one target skipped — a
-row that would repeat an already-rendered line is dropped at the source. The
-MCP face's rows are data for the caller's own joins, not rendering: dedup is
-a CLI concern. Advisory freshness-analysis
-events may accompany the deterministic sequence; they are
-diagnostic, carry no ordering or completion guarantee, and never enter a
-decision or finding. The class carries an optional payload: detail-free
-events are keep-alives a consumer may throttle, while a payload-bearing
-event (the per-subject analysis-unavailable provenance, the
-unlisted-toolchain notice, a failing baseline's own output — a reported
-failure or a result drifting between its discovery and measurement runs
-— beside its skip decision) is a distinct fact that no face may throttle,
-fold, or discard at the source — transport-level advisory delivery is
-unchanged — its package kept a package and its payload its own
-field on every structured face. Subscribing to the class delivers both
-kinds — a consumer cannot receive the keep-alives without the
-diagnostics. Advisory execution-phase progress events join the
-same advisory class: at each execution window boundary the run may report the
+`baseline` event MARKED banked (a cross-run serve must never be silent),
+rendered distinguishably on the CLI and carried as a field on the
+structured faces. Resolution and freshness events follow target order
+before module-batched view construction; subsequent mutant and baseline
+events follow target order, with baseline events in canonical
+package-group order. Worker count cannot affect the sequence's content
+or order. Preparation is pipelined with execution: once a target's
+preparation completes and its decision is reported, it may enter
+execution while later targets still prepare, so later targets'
+preparation events and decisions may follow earlier targets'
+execution-phase events — the preparation-and-decision sequence itself
+stays deterministic, target-ordered, and worker-independent, only its
+interleaving with the advisory execution-phase events is
+timing-dependent. A window's serial confirmations exclude preparation
+probes outright: a confirmation's scored run shares no process with any
+preparation probe, so a probe's test-level side effects — an exclusive
+port, a file lock — can never manufacture a false reproduction or a
+false flip; beyond that exclusion the confirmation isolation obligation
+names sibling mutants, none of which are in flight once the window
+drains, and preparation load is ambient like any other process, covered
+by the stride gate's volatility arm. The named residual is the baseline
+probe itself: a probe of one package's tests may run beside executing
+mutants of that package — exactly the concurrency worker parallelism
+already implies for a suite holding cross-process-exclusive resources —
+or beside the advisory coverage and guidance probes; a collision fails
+the probe loudly and aborts the run, or skews an advisory bucket, never
+entering a verdict. The CLI streams these events as they occur; the MCP
+face carries them per REQ-mcp-envelope in [mcp.md](mcp.md) — streamed to
+progress notifications or inline-capped, totals always exact. The CLI
+reports each skipped target once, as its decision line, and aggregates
+skip classes into one counted line after the summary when more than one
+target skipped — a row that would repeat an already-rendered line is
+dropped at the source. The MCP face's rows are data for the caller's own
+joins, not rendering: dedup is a CLI concern. Advisory
+freshness-analysis events may accompany the deterministic sequence; they
+are diagnostic, carry no ordering or completion guarantee, and never
+enter a decision or finding. The class carries an optional payload:
+detail-free events are keep-alives a consumer may throttle, while a
+payload-bearing event (the per-subject analysis-unavailable provenance,
+the unlisted-toolchain notice, a failing baseline's own output — a
+reported failure or a result drifting between its discovery and
+measurement runs — beside its skip decision) is a distinct fact that no
+face may throttle, fold, or discard at the source — transport-level
+advisory delivery is unchanged — its package kept a package and its
+payload its own field on every structured face. Subscribing to the class
+delivers both kinds — a consumer cannot receive the keep-alives without
+the diagnostics. Advisory execution-phase progress events join the same
+advisory class: at each execution window boundary the run may report the
 window's phase (executing, then one confirming event per serially
-confirmed kill with the window's confirmation progress and the
-gate's confirmation mode — serial-full while every kill confirms,
-stride-sampled once the streak earns sampling, so the disarmed
-stride is distinguishable from the armed one in the log — and one
-confirmation-flip event per kill the serial re-run demotes — naming
-the phase, symbol, mutant position, and the withdrawn provisional
-killer, so a demotion is never silent on any face), the 1-based
-index of the window's first measure target among those dispatched and the
-count of measure targets prepared so far (growing to campaign-wide as
-pipelined preparation completes), a representative symbol,
-and exact candidate tallies over the targets prepared so far — counts of
-selected candidates, carried and non-runnable ones included, exactly as the
+confirmed kill with the window's confirmation progress and the gate's
+confirmation mode — serial-full while every kill confirms,
+stride-sampled once the streak earns sampling, so the disarmed stride is
+distinguishable from the armed one in the log — and one
+confirmation-flip event per kill the serial re-run demotes — naming the
+phase, symbol, mutant position, and the withdrawn provisional killer, so
+a demotion is never silent on any face), the 1-based index of the
+window's first measure target among those dispatched and the count of
+measure targets prepared so far (growing to campaign-wide as pipelined
+preparation completes), a representative symbol, and exact candidate
+tallies over the targets prepared so far — counts of selected
+candidates, carried and non-runnable ones included, exactly as the
 decisions count them, growing to the campaign-wide totals as pipelined
 preparation completes — timing-dependent by nature, outside the
 deterministic sequence, never entering a decision or finding, so an
-operator can read phase and progress from the log alone. The same
-class carries the WINDOW COST MODEL: after a window's coverage probes
-and before its first mutant dispatches, the run reports the window's
+operator can read phase and progress from the log alone. The same class
+carries the WINDOW COST MODEL: after a window's coverage probes and
+before its first mutant dispatches, the run reports the window's
 estimate — a projection of scheduled oracle time at measured-baseline
 pace, derived entirely from measurements the run already made
-(passing-baseline wall-clocks and coverage-probe batch wall-clocks),
-the executing candidates classified as narrowed, whole-group, or
-unpriced, and the narrowed-survivor audit priced
-separately — an unpriced candidate is counted and NEVER folded into
-the projection: the model fabricates no duration; the projection is a
-pace anchor, not a bound in either direction — its named exclusions
-are a timing-out candidate (which costs up to its derived budget, a
-multiple of the priced baseline), serial confirmation runs, the
-once-per-group survivor bucket probes, and per-mutant build overlay
-cost, all reconciled by the live pace instead of predicted. The
-separately-priced audit is the same kind of anchor: its COUNT is a
-true cap (at most the per-window sample bound of full-oracle
-re-runs), but each re-run is priced at passing-baseline pace and a
-mutated tree can run slower or time out at its derived budget — the
-audit price is a projection, never a bound; and
-per-candidate completion events, delivered monotonically, so the
-done tally advances candidate by candidate instead of window by
-window (a multi-hour window must not read as a stuck campaign),
-truing up to the prepared totals at each window boundary and never
-regressing — a drained window's discarded work must not un-happen
-completions on any face. Window EXECUTION order is value-ordered:
-among the READY windows — a window is ready once admitted to the
-driver's pool; a gathered-but-unadmitted window waits for a later
-pick, and once preparation completes every remaining window is
-admitted before the next pick — the cheapest dispatches first by the
+(passing-baseline wall-clocks and coverage-probe batch wall-clocks), the
+executing candidates classified as narrowed, whole-group, or unpriced,
+and the narrowed-survivor audit priced separately — an unpriced
+candidate is counted and NEVER folded into the projection: the model
+fabricates no duration; the projection is a pace anchor, not a bound in
+either direction — its named exclusions are a timing-out candidate
+(which costs up to its derived budget, a multiple of the priced
+baseline), serial confirmation runs, the once-per-group survivor bucket
+probes, and per-mutant build overlay cost, all reconciled by the live
+pace instead of predicted. The separately-priced audit is the same kind
+of anchor: its COUNT is a true cap (at most the per-window sample bound
+of full-oracle re-runs), but each re-run is priced at passing-baseline
+pace and a mutated tree can run slower or time out at its derived budget
+— the audit price is a projection, never a bound; and per-candidate
+completion events, delivered monotonically, so the done tally advances
+candidate by candidate instead of window by window (a multi-hour window
+must not read as a stuck campaign), truing up to the prepared totals at
+each window boundary and never regressing — a drained window's discarded
+work must not un-happen completions on any face. Window EXECUTION order
+is value-ordered: among the READY windows — a window is ready once
+admitted to the driver's pool; a gathered-but-unadmitted window waits
+for a later pick, and once preparation completes every remaining window
+is admitted before the next pick — the cheapest dispatches first by the
 PRE-PROBE price (the same cost model with every executing candidate
 priced whole-group off the measured baselines, which legitimately
-differs from the same window's post-probe estimate event); an
-unpriced window — one ANY of whose executing candidates has no
-recorded price — never jumps the queue on fabricated cheapness: it
-waits behind every priced window, in arrival order. Window membership
-and the deterministic preparation-and-decision sequence are
-unaffected, only the execution axis the pipelining clause already
-leaves timing-dependent — so an interrupt at any point has banked the
-most verdicts its elapsed time could buy. The CLI
-additionally renders, in the same advisory class: the requested
-selection size beside the prepared-target denominator whenever the
-two differ or serves and skips have offset an equality (a resumed
-run's shrunken count reads as remaining work of the same request,
-never a different campaign, and the context must not vanish exactly
-when equality is coincidental); a cumulative progress line on a
-fixed cadence — commits (cached serves included) against the
-SELECTION, the served and skipped splits, candidate tallies, kills,
-elapsed time, and once at least one candidate completed an
+differs from the same window's post-probe estimate event); an unpriced
+window — one ANY of whose executing candidates has no recorded price —
+never jumps the queue on fabricated cheapness: it waits behind every
+priced window, in arrival order. Window membership and the deterministic
+preparation-and-decision sequence are unaffected, only the execution
+axis the pipelining clause already leaves timing-dependent — so an
+interrupt at any point has banked the most verdicts its elapsed time
+could buy. The CLI additionally renders, in the same advisory class: the
+requested selection size beside the prepared-target denominator whenever
+the two differ or serves and skips have offset an equality (a resumed
+run's shrunken count reads as remaining work of the same request, never
+a different campaign, and the context must not vanish exactly when
+equality is coincidental); a cumulative progress line on the one fixed
+cadence every face's progress keeps — thirty seconds, the value the MCP
+heartbeat cites, fixed rather than paced by measurement because the
+line's information changes at commits and a reader is served by a
+bounded silence, not by more lines — commits (cached serves included)
+against the SELECTION, the served and skipped splits, candidate tallies,
+kills, elapsed time, and once at least one candidate completed an
 estimated-remaining extrapolation of the measured execution pace
 (anchored at the first completion, so preparation and baseline time
-never dilute it; absent until measured — the line states nothing it
-has not measured) — with the cadence an operator flag defaulting on;
-and a structured JSON-lines face as an option, carrying every event,
-decision, per-target result row, and summary as one JSON object per
-line with an event-kind field, human prose wrapped as note events —
-the structured stream never loses a line the human face would show,
-and no human line leaks into it. Event data never enters a run
-decision or finding, and run inputs are snapshotted before delivery. Callbacks
-execute synchronously as trusted caller code and must return normally; their
-external side effects have ordinary process semantics. An error or cancellation
-may leave a rendered prefix, but never a partial finding or decision.
+never dilute it; absent until measured — the line states nothing it has
+not measured) — with the cadence an operator flag defaulting to it; and
+a structured JSON-lines face as an option — one flag name (`--json`) on
+every verb's structured face, the verb saying the shape (findings and
+discover render a document under it, per their own specs) — carrying
+every event, decision, per-target result row, and summary as one JSON
+object per line with an event-kind field, human prose wrapped as note
+events — the structured stream never loses a line the human face would
+show, and no human line leaks into it. Event data never enters a run
+decision or finding, and run inputs are snapshotted before delivery.
+Callbacks execute synchronously as trusted caller code and must return
+normally; their external side effects have ordinary process semantics.
+An error or cancellation may leave a rendered prefix, but never a
+partial finding or decision.
 
 Before a target's own mutants execute, the run reports that target's
 decision, decisions streaming in target

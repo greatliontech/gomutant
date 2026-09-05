@@ -210,7 +210,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestApplySplicedUnionNamesDivergingInputs"
   role: BINDING_ROLE_TESTS
@@ -219,7 +219,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestManifestPathDeltaNamesTheMoverBestEffort"
   role: BINDING_ROLE_TESTS
@@ -228,7 +228,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestStaleReasonNamesModifiedOracleTests"
   role: BINDING_ROLE_TESTS
@@ -237,7 +237,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestStaleReasonSkipsModifiedListWhenTargetMoved"
   role: BINDING_ROLE_TESTS
@@ -246,7 +246,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestFindingsCommandDefaultsToSummaryRows"
   role: BINDING_ROLE_TESTS
@@ -255,7 +255,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestFindingsDefaultNeedsNoTree"
   role: BINDING_ROLE_TESTS
@@ -264,7 +264,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestFindingsOptionsJudgedInputs"
   role: BINDING_ROLE_TESTS
@@ -273,7 +273,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestInspectFindingsCarriesCandidateEvidence"
   role: BINDING_ROLE_TESTS
@@ -849,7 +849,7 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-inspection"
-  content_hash: "288133ceca557a0d65c38fa1c6c706c3f23581a6d300c894f576a2c910efa515"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestInspectFindingsJudgesInOnePass"
   role: BINDING_ROLE_TESTS
@@ -935,4 +935,13 @@ bindings {
   symbol: "github.com/greatliontech/gomutant.TestStoreServedRecordsShareNoListWithTheCache"
   role: BINDING_ROLE_TESTS
   shape_hash: "58039dbb04716a007afd5889804f852a45b1982fefdce95ecf8ac199658c3667"
+}
+
+bindings {
+  requirement_id: "REQ-result-inspection"
+  content_hash: "0dfcb31840bb174c3d68e43005d510bc0df4b1f3cd91bfeeaabc7f2989315922"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestStructuredOutputIsOneFlagName"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9ea27f68bf46e7cf8d7b7cde5f51bd393d41a29906e4effd98448c454121be61"
 }

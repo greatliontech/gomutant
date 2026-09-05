@@ -67,8 +67,8 @@ func newRunCommand() *cobra.Command {
 	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
 	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
 	selectionFlags(f, &o.tags, &o.toolchain)
-	f.BoolVar(&o.jsonl, "jsonl", false, "structured output: every progress event, decision, result row, and summary as one JSON object per line — the CLI's machine-readable face; the human rendering is suppressed")
-	f.DurationVar(&o.progressEvery, "progress-interval", 30*time.Second, "cadence of the cumulative progress line (targets committed, candidates, kills, elapsed); 0 disables")
+	f.BoolVar(&o.jsonl, "json", false, "structured output as JSON lines: every progress event, decision, result row, and summary as one JSON object per line — the CLI's machine-readable face; the human rendering is suppressed")
+	progressIntervalFlag(f, &o.progressEvery, "cadence of the cumulative progress line (targets committed, candidates, kills, elapsed); 0 disables")
 	f.BoolVar(&o.plan, "plan", false, "preflight only: run the full preparation sequence and print every target decision — cached, skipped with reason, or measure with candidate count — then stop before baseline probes and mutant execution, persisting nothing; precondition holes surface before any budget is spent")
 	return cmd
 }

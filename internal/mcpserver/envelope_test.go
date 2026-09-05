@@ -34,10 +34,10 @@ func TestRunStreamsLeaveThePayloadWhenStreamed(t *testing.T) {
 
 	var inline runOut
 	collector := newRunStreams(&inline, nil)
-	for range streamRowCap + 7 {
+	for range envelope.streamed + 7 {
 		collector.decision(gomutant.RunDecision{Symbol: "p.F", Action: "measure"})
 	}
-	if len(inline.Decisions) != streamRowCap || inline.DecisionsCount != streamRowCap+7 {
+	if len(inline.Decisions) != envelope.streamed || inline.DecisionsCount != envelope.streamed+7 {
 		t.Fatalf("inline cap = %d rows, %d total", len(inline.Decisions), inline.DecisionsCount)
 	}
 }

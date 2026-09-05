@@ -945,7 +945,8 @@ of use. Every judged view carries the reason, and every view the open
 and attested counts, independently of that state, including fully
 attested records; the detail
 view carries the survivor and disposition lists themselves, and the CLI's
-machine-readable JSON export - like the document on disk - stays complete
+machine-readable JSON export (under the one structured-face flag name
+REQ-exec-run-status fixes) - like the document on disk - stays complete
 regardless of the human default (bounded protocol envelopes cap per their
 own contract). Filtering — by
 an opaque label, by state, or by symbol — changes only which records are

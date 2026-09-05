@@ -23,7 +23,7 @@
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection (e.g. go1.26.5); rides the toolchain measurement pin, so a different selection re-measures rather than serving across.
 - `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence. On mcp vouches are per-server (gomutant mcp --vouch), not per-call.
-- `jsonl` (cli) — structured output: every progress event, decision, result row, and summary as one JSON object per line; the human rendering is suppressed.
+- `json` (cli) — structured output as JSON lines: every progress event, decision, result row, and summary as one JSON object per line — the CLI's machine-readable face; the human rendering is suppressed.
 - `progress-interval` (cli) — cadence of the cumulative progress line (targets committed, candidates, kills, elapsed); 0 disables.
 - `plan` (cli) — preflight only: run the full preparation sequence and print every target decision — cached, skipped with reason, or measure with candidate count — then stop before baseline probes and mutant execution, persisting nothing; precondition holes surface before any budget is spent.
 - `dir` (cli) — tree root (module or workspace).
@@ -253,37 +253,35 @@ orientation.
 
 ## decision map
 
-gomutant measures whether tests notice mutations. The loop: run
-measures targets (whole tree, changed vs a git ref, or a targets
-document) and maintains the findings document incrementally — prior
-findings with matching pins are served, and each decision line says
-why; findings inspects the document (survivors with execution
-buckets, candidate evidence, repo/local layer) without running
-anything — recorded facts by default, cheap at any size; the judge knob
-re-derives freshness states (current, stale, unverifiable,
-detached) against the tree, one pass over the records' shared subject views, seconds-class where it was minutes-class, and a
-state filter or a tags/toolchain selection implies it;
-attest_survivor dispositions an equivalent mutant with the
-reasoning on record; prune removes resolved-dead records after a
-refactor and retarget follows a rename (both with check
-previews); ephemeral probes one hand-written mutant without
-persisting a finding — its attest knob records a judged equivalence
-in the committed record beside the document; discover lists
-effective targets without measuring;
-explain answers why — a symbol's full machine-local clause list and
-per-survivor prescriptions, or the whole document's promotion
-triage. Survivors are findings awaiting disposition — strengthen a
-test or attest an equivalence — never verdicts. A survivor bucketed
-never-executed wants coverage; executed-and-passed and covering-passed (the
-narrowed survivor: covering tests passed, the non-reaching remainder exempt
-on measured coverage) want a sharper
-assertion or an attestation. Send a progress token on run/ephemeral
-for phase notifications and a heartbeat; long campaigns exceed MCP
-client timeouts — raise the timeout or use the CLI (mcp timeouts
-default to 300 seconds, the cli to unlimited). Responses cap long
-lists and count the remainder; the findings document on disk is
-always complete. MCP-only: explain and inline edit forms; CLI-only:
-mcp itself, version, plan preflight, jsonl output, and per-call
-vouches (per-server on mcp). The guidance verb serves any verb's
-full section — knobs, when-to-use, example — from the tool's own
-embedded document.
+gomutant measures whether tests notice mutations. The loop: run measures
+targets (whole tree, changed vs a git ref, or a targets document) and
+maintains the findings document incrementally — prior findings with
+matching pins are served, and each decision line says why; findings
+inspects the document (survivors with execution buckets, candidate
+evidence, repo/local layer) without running anything — recorded facts by
+default, cheap at any size; the judge knob re-derives freshness states
+(current, stale, unverifiable, detached) against the tree, one pass over
+the records' shared subject views, seconds-class where it was
+minutes-class, and a state filter or a tags/toolchain selection implies
+it; attest_survivor dispositions an equivalent mutant with the reasoning
+on record; prune removes resolved-dead records after a refactor and
+retarget follows a rename (both with check previews); ephemeral probes
+one hand-written mutant without persisting a finding — its attest knob
+records a judged equivalence in the committed record beside the
+document; discover lists effective targets without measuring; explain
+answers why — a symbol's full machine-local clause list and per-survivor
+prescriptions, or the whole document's promotion triage. Survivors are
+findings awaiting disposition — strengthen a test or attest an
+equivalence — never verdicts. A survivor bucketed never-executed wants
+coverage; executed-and-passed and covering-passed (the narrowed
+survivor: covering tests passed, the non-reaching remainder exempt on
+measured coverage) want a sharper assertion or an attestation. Send a
+progress token on run/ephemeral for phase notifications and a heartbeat;
+long campaigns exceed MCP client timeouts — raise the timeout or use the
+CLI (mcp timeouts default to 300 seconds, the cli to unlimited).
+Responses cap long lists and count the remainder; the findings document
+on disk is always complete. MCP-only: explain and inline edit forms;
+CLI-only: mcp itself, version, plan preflight, the run verb's JSON-lines
+output, and per-call vouches (per-server on mcp). The guidance verb
+serves any verb's full section — knobs, when-to-use, example — from the
+tool's own embedded document.

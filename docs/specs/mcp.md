@@ -57,7 +57,8 @@ totals; a request without one keeps them inline, capped, with honest totals.
 Candidate evidence is drill-down via the findings tool, never run payload.
 Advisory lists — oracle guidance, attestation sheds and carries,
 attestation contradictions, property-oracle statements, discovery's oracle
-sets — cap at the same row bound with their remainders counted (the
+sets, the findings response's ephemeral-equivalence attestations — cap at
+the same row bound with their remainders counted (the
 error-riding shed fold keeps its own exemplar bound over the full set).
 And an empty answer is an answer, never a bare zero-row success: a run or
 discovery selecting zero targets, a findings query matching no record (the
@@ -70,9 +71,11 @@ whether or not anything was measured — so the caller's next move is a
 decision, not a diagnosis. A selection mode that emptied the target set
 before filters applied is never blamed on the filters.
 While a token listens, a heartbeat notification names the current phase and
-elapsed time on a fixed cadence, so no compile or execution stretch stays
-silent past a client's deadline. The server's instructions and each tool's
-description teach when to use what and what the caps mean.
+elapsed time on the one fixed cadence every face's progress keeps (the
+value REQ-exec-run-status fixes for the CLI progress line), so no compile
+or execution stretch stays silent past a client's deadline. The server's
+instructions and each tool's description teach when to use what and what
+the caps mean.
 
 **REQ-mcp-guidance** (behavior): Tool-level served prose MUST be the
 embedded guidance document's projections (`docs/guidance.md`, in the

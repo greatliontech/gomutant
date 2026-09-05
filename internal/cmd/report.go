@@ -10,6 +10,8 @@ import (
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
+
+	"github.com/spf13/pflag"
 )
 
 // runReporter is the run's cumulative reporting state: the cadenced
@@ -112,7 +114,14 @@ func (r *runReporter) interrupted(cause string) {
 // cadence as a flag because their stretches are the caller's to size.
 // A variable so a test can lower it — the package's tests run
 // serially, so the swap is race-free.
-var verbProgressInterval = 30 * time.Second
+var verbProgressInterval = gomutant.ProgressCadence
+
+// progressIntervalFlag registers a verb's cadence flag: one name and one
+// default (the shared cadence) on every verb that exposes it, the usage
+// the verb's own.
+func progressIntervalFlag(f *pflag.FlagSet, into *time.Duration, usage string) {
+	f.DurationVar(into, "progress-interval", gomutant.ProgressCadence, usage)
+}
 
 func newRunReporter(out io.Writer, jsonl bool, selected int) *runReporter {
 	return &runReporter{
