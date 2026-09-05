@@ -85,7 +85,14 @@ pins re-verify (REQ-result-baseline-bank in
 because verdict integrity is evidence-gated elsewhere — a timeout
 kill needs a re-executable candidate-evidence row — so a stale-fast
 banked baseline can cost re-runs, never a wrong verdict, and the
-leash plays no discard role over banked measurement — as a multiple
+leash plays no discard role over banked measurement, and a measured
+duration LIFTS the leash — the fixed leash stays the floor, lifted to
+the budget the duration derives — for the probes it speaks for: a
+banked duration of the same oracle package lifts a baseline's leash on
+either face (the campaign's own entry; the ephemeral face's longest
+entry for the package, under any pattern), and a group's own baseline (measured, or served from the
+bank) lifts its advisory probes' leash, so an oracle the bank knows is
+slow is not refused at a leash sized for faster ones — as a multiple
 with the retired 60-second default as its floor, the same derivation
 the ephemeral face carries; the measurement is a passing baseline's own
 wall-clock (a failing or refused baseline skips its targets, derives

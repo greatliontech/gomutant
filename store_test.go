@@ -911,7 +911,9 @@ func TestStoreCachedDocumentEqualsAFreshParse(t *testing.T) {
 			f.Operators = []OperatorSummary{}
 			f.CandidateCount, f.Generated, f.Mutants, f.Killed = 0, 0, 0, 0
 		},
-		func(f *Finding) { f.Kills, f.Survivors, f.Attested, f.CandidateEvidence, f.Labels = []Kill{}, []Survivor{}, []Attestation{}, []CandidateEvidence{}, []string{} },
+		func(f *Finding) {
+			f.Kills, f.Survivors, f.Attested, f.CandidateEvidence, f.Labels = []Kill{}, []Survivor{}, []Attestation{}, []CandidateEvidence{}, []string{}
+		},
 		func(f *Finding) {
 			f.Mutants, f.Killed = 2, 1
 			f.Operators = []OperatorSummary{{Operator: "zero return", Generated: 2, Killed: 1, Survived: 1}}
@@ -928,8 +930,12 @@ func TestStoreCachedDocumentEqualsAFreshParse(t *testing.T) {
 			f.TargetEvidence, f.Labels = SubjectEvidence{}, []string{}
 		},
 		func(f *Finding) { f.CompartmentLedger = &CompartmentLedger{} },
-		func(f *Finding) { f.CompartmentLedger = &CompartmentLedger{Declarations: []CompartmentDeclaration{{File: "p.go", Kind: "func", Name: "A", Hash: "h"}}, FileHeaders: []CompartmentFileHeader{}} },
-		func(f *Finding) { f.OracleEvidence = append(f.OracleEvidence, cleanEvidence("p.ATest"), cleanEvidence("q.BTest")) },
+		func(f *Finding) {
+			f.CompartmentLedger = &CompartmentLedger{Declarations: []CompartmentDeclaration{{File: "p.go", Kind: "func", Name: "A", Hash: "h"}}, FileHeaders: []CompartmentFileHeader{}}
+		},
+		func(f *Finding) {
+			f.OracleEvidence = append(f.OracleEvidence, cleanEvidence("p.ATest"), cleanEvidence("q.BTest"))
+		},
 		func(f *Finding) { f.Cached = true },
 		func(f *Finding) { f.Exempted = []Exemption{} },
 		func(f *Finding) { f.Exempted = []Exemption{{Subject: "p", Reason: "r", Rationale: "why"}} },

@@ -357,7 +357,7 @@ func (t *Tree) probeScheduleUnit(ctx context.Context, unit probeUnit, opts Optio
 			return err
 		}
 		probeStart := time.Now()
-		cov, err := campaignCoveredPositions(ctx, t.dir, unit.g.pkgs[0], testRunRegex(batch), unit.coverPkg, opts.OracleTimeout, unit.g.flags, runEnv, t.eng.DirectiveCoverage())
+		cov, err := campaignCoveredPositions(ctx, t.dir, unit.g.pkgs[0], testRunRegex(batch), unit.coverPkg, opts.advisoryLeash(unit.g), unit.g.flags, runEnv, t.eng.DirectiveCoverage())
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()

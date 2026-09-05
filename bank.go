@@ -183,6 +183,31 @@ func (b *baselineBank) baseline(key string) (bankedBaseline, bool) {
 	return e, ok
 }
 
+// longestBaselineFor is the longest banked baseline of a test package
+// under any run pattern, flags, or scope — the measurement leash's
+// lift reads it (leashFor). A lift never tightens, so an
+// over-inclusive match is safe: any measured duration of this
+// package's tests is evidence that a bound below it would refuse an
+// honest baseline.
+func (b *baselineBank) longestBaselineFor(pkg string) (time.Duration, bool) {
+	if b == nil {
+		return 0, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var longest time.Duration
+	found := false
+	for key, e := range b.file.Baselines {
+		if entryPkg, _, _ := strings.Cut(key, "\x00"); entryPkg != pkg {
+			continue
+		}
+		if raw := time.Duration(e.RawMillis) * time.Millisecond; !found || raw > longest {
+			longest, found = raw, true
+		}
+	}
+	return longest, found
+}
+
 func (b *baselineBank) putBaseline(key string, e bankedBaseline) {
 	if b == nil {
 		return

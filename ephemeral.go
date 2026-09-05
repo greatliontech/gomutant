@@ -351,6 +351,21 @@ const ephemeralBaselineLeash = 10 * time.Minute
 // suite burns it once per group; the command timeout still bounds.
 const campaignBaselineLeash = time.Hour
 
+// leashFor is the measurement leash a baseline runs under when the
+// bank holds a measured duration for its oracle: the fixed leash
+// lifted to the budget that duration would derive, never tightened.
+// The fixed value is the floor the contract makes generous — a loaded
+// host must not die at baseline — and the lift serves the group the
+// bank knows is slow: a suite-class oracle probed on the ephemeral
+// face (its leash sized for probe-class ones), or a campaign whose
+// host slowed since the entry was banked (REQ-exec-oracle-budget).
+func leashFor(fixed, banked time.Duration) time.Duration {
+	if lifted := derivedOracleBudget(banked); lifted > fixed {
+		return lifted
+	}
+	return fixed
+}
+
 // ephemeralBudgetFloor keeps a derived budget from ever being less
 // patient than the fixed default it replaced: the floor is the
 // retired 60s, because a warm-cache baseline pays no compile while
@@ -387,13 +402,13 @@ func derivedOracleBudget(baseline time.Duration) time.Duration {
 //     leashed baseline (on faces whose command timeout is shorter
 //     than the leash the leash can never fire), named as such;
 //   - every other refusal — cancellation included — passes through.
-func derivedBaselineRefusal(err error) error {
+func derivedBaselineRefusal(err error, leash time.Duration) error {
 	var bt *engine.BaselineTimeoutError
 	if errors.As(err, &bt) {
 		return fmt.Errorf("baseline test ran past the %s measurement leash - the derived budget needs a measured baseline; pass an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) to bound this oracle instead", bt.Bound)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("the command deadline expired during the %s-leashed baseline measurement - raise the command timeout (timeout_sec / --timeout), or pass an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) to bound this oracle instead: %w", ephemeralBaselineLeash, err)
+		return fmt.Errorf("the command deadline expired during the %s-leashed baseline measurement - raise the command timeout (timeout_sec / --timeout), or pass an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) to bound this oracle instead: %w", leash, err)
 	}
 	return err
 }
@@ -457,9 +472,10 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	// timeout-kill meaning.
 	derive := oracleTimeout <= 0
 	baselineBound := oracleTimeout
-	if derive {
-		baselineBound = ephemeralBaselineLeash
-	}
+	// The leash the baseline (derive mode) and the advisory coverage
+	// probe (both modes) run under; lifted by the bank just before the
+	// first probe, after every refusal that needs no bank read.
+	probeLeash := ephemeralBaselineLeash
 	if runs == 0 {
 		runs = 1
 	}
@@ -525,12 +541,18 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 
 	env := t.eng.GoEnv()
+	if banked, hit := openBaselineBank(t.dir).longestBaselineFor(testPkg); hit {
+		probeLeash = leashFor(ephemeralBaselineLeash, banked)
+	}
+	if derive {
+		baselineBound = probeLeash
+	}
 	report(PreparationEvent{Stage: PreparationBaseline, Symbol: run, Package: testPkg, OracleBudget: baselineBound.String()})
 	baselineStart := time.Now()
 	ran, passed, diagnostic, err := testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env)
 	if err != nil {
 		if derive {
-			return nil, derivedBaselineRefusal(err)
+			return nil, derivedBaselineRefusal(err, baselineBound)
 		}
 		return nil, err
 	}
@@ -605,7 +627,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	res.Killed = res.KilledRuns == runs
 	if !res.Killed {
-		report(PreparationEvent{Stage: PreparationCoverage, Symbol: run, Package: testPkg, OracleBudget: ephemeralBaselineLeash.String()})
+		report(PreparationEvent{Stage: PreparationCoverage, Symbol: run, Package: testPkg, OracleBudget: probeLeash.String()})
 		// A survivor verdict over a replacement the probed run never
 		// exercised is not evidence the oracle noticed anything — the
 		// linked-but-unexecuted false-survivor channel (an UNLINKED
@@ -627,7 +649,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// runs under the measurement leash in both modes. Its expiry is
 		// the advisory posture, never a verdict — CoverageUnknown, the
 		// label absent — and the command timeout still bounds.
-		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", ephemeralBaselineLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err != nil {
+		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", probeLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err != nil {
 			res.CoverageUnknown = true
 		} else {
 			for i, replacement := range replacements {

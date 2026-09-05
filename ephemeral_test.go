@@ -415,6 +415,7 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 // oracle, not the rebuild (REQ-exec-ephemeral's derived budget and
 // probe-failure posture).
 func TestEphemeralCoverageProbeRunsUnderMeasurementLeash(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	if testing.Short() {
 		t.Skip("runs go test per probe")
 	}
@@ -450,6 +451,7 @@ func TestEphemeralCoverageProbeRunsUnderMeasurementLeash(t *testing.T) {
 // measurement itself — while an explicit timeout hands the baseline
 // the caller's bound verbatim (REQ-exec-ephemeral's derived budget).
 func TestEphemeralBaselineRunsUnderLeash(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	if testing.Short() {
 		t.Skip("runs go test per probe")
 	}
@@ -545,7 +547,7 @@ func TestDerivedOracleBudget(t *testing.T) {
 // a timeout kill's evidence names the derivation and its override
 // path (REQ-exec-ephemeral's derived budget).
 func TestDerivedBoundsNamedHonestly(t *testing.T) {
-	reframed := derivedBaselineRefusal(&engine.BaselineTimeoutError{Bound: ephemeralBaselineLeash})
+	reframed := derivedBaselineRefusal(&engine.BaselineTimeoutError{Bound: ephemeralBaselineLeash}, ephemeralBaselineLeash)
 	if !strings.Contains(reframed.Error(), "measurement leash") || !strings.Contains(reframed.Error(), ephemeralBaselineLeash.String()) {
 		t.Fatalf("leash expiry re-frame = %q, want the leash named", reframed)
 	}
@@ -554,22 +556,22 @@ func TestDerivedBoundsNamedHonestly(t *testing.T) {
 	}
 	// The message names the bound the typed error carries, not a
 	// package constant it assumes.
-	if got := derivedBaselineRefusal(&engine.BaselineTimeoutError{Bound: 42 * time.Second}); !strings.Contains(got.Error(), "42s") {
+	if got := derivedBaselineRefusal(&engine.BaselineTimeoutError{Bound: 42 * time.Second}, ephemeralBaselineLeash); !strings.Contains(got.Error(), "42s") {
 		t.Fatalf("re-frame ignored the fired bound: %q", got)
 	}
 	// A bare deadline expiry is the command deadline dying during the
 	// leashed baseline — on faces whose command timeout undercuts the
 	// leash, the only bound that can fire — named as such, with the
 	// original error kept in the chain.
-	cmdExpiry := derivedBaselineRefusal(fmt.Errorf("running baseline: %w", context.DeadlineExceeded))
+	cmdExpiry := derivedBaselineRefusal(fmt.Errorf("running baseline: %w", context.DeadlineExceeded), ephemeralBaselineLeash)
 	if !strings.Contains(cmdExpiry.Error(), "command deadline") || !errors.Is(cmdExpiry, context.DeadlineExceeded) {
 		t.Fatalf("command-deadline expiry re-frame = %q, want the command deadline named and the chain kept", cmdExpiry)
 	}
-	if cancelled := derivedBaselineRefusal(context.Canceled); cancelled != context.Canceled {
+	if cancelled := derivedBaselineRefusal(context.Canceled, ephemeralBaselineLeash); cancelled != context.Canceled {
 		t.Fatalf("cancellation was rewritten: %v", cancelled)
 	}
 	other := errors.New("baseline test failed to build")
-	if got := derivedBaselineRefusal(other); got != other {
+	if got := derivedBaselineRefusal(other, ephemeralBaselineLeash); got != other {
 		t.Fatalf("non-timeout refusal was rewritten: %v", got)
 	}
 	ev := derivedTimeoutEvidence(2*time.Minute, 30*time.Second)

@@ -26,6 +26,15 @@ import (
 
 var findingObservationSequence atomic.Uint64
 
+// advisoryLeash is the bound an advisory probe of g runs under
+// (groupLeash when the run installed it, the run-wide bound otherwise).
+func (o Options) advisoryLeash(g group) time.Duration {
+	if o.groupLeash != nil {
+		return o.groupLeash(g)
+	}
+	return o.OracleTimeout
+}
+
 // lockCallbacks wraps every caller callback in one mutex so pipelined
 // preparation and execution — which invoke callbacks from two goroutines —
 // preserve the synchronous-caller-code contract: no two callbacks ever run
@@ -294,6 +303,11 @@ type Options struct {
 	// a false answer prices nothing, never fabricates
 	// (REQ-exec-run-status's estimate class).
 	baselineDur func(g group) (time.Duration, bool)
+	// groupLeash resolves the leash a group's advisory probes run
+	// under — the campaign leash lifted by the group's baseline in
+	// derive mode, the explicit timeout otherwise; nil before the run
+	// installs it (advisoryLeash falls back to OracleTimeout).
+	groupLeash func(g group) time.Duration
 	// probeGate is the run's producer-probe gate: the phase-baseline
 	// vouch holds it shared exactly like every other producer-side
 	// oracle probe, so it never shares a window with a serial
@@ -742,7 +756,7 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 		if pkg == "" || fn == "" || !ok {
 			continue
 		}
-		_, passed, _, _, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		_, passed, _, _, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.advisoryLeash(g), g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 		if err != nil {
 			if ctx.Err() != nil {
 				return oracleAttribution{}, ctx.Err()
@@ -1739,9 +1753,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	scopedBaselines := map[scopedBaselineKey]bool{}
 	coverageCache := map[string]engine.Coverage{}
 	opts.scheduleStore = newScheduleStore()
-	// The bank rides findings-producing runs only (OwnWrites is their
-	// marker, and the campaign lock they hold serializes the file);
-	// library embeddings and probes stay bank-less. Deposits persist
+	// The bank is WRITTEN by findings-producing runs only (OwnWrites is
+	// their marker, and the campaign lock they hold serializes the
+	// file); library embeddings and probes deposit nothing — the
+	// ephemeral face reads it for its leash lift, a lock-free read the
+	// atomic rename keeps whole. Deposits persist
 	// as they land — an exit-time save dies with a killed process —
 	// and the deferred save is only the flush backstop
 	// (REQ-result-baseline-bank).
@@ -2176,6 +2192,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 		return opts.OracleTimeout
 	}
 	opts.groupBudget = budgetFor
+	// The leash a group's advisory probes run under: the campaign leash
+	// lifted by the group's own baseline (measured or served from the
+	// bank) in derive mode — the same lift the baseline itself gets on
+	// the miss path — and the caller's explicit timeout otherwise.
+	opts.groupLeash = func(g group) time.Duration {
+		if !deriveOracleBudgets {
+			return opts.OracleTimeout
+		}
+		groupBudgetMu.Lock()
+		defer groupBudgetMu.Unlock()
+		b, ok := groupBaselines[keyFor(g)]
+		if !ok {
+			return opts.OracleTimeout
+		}
+		return leashFor(opts.OracleTimeout, b.raw)
+	}
 	opts.baselineDur = func(g group) (time.Duration, bool) {
 		groupBudgetMu.Lock()
 		defer groupBudgetMu.Unlock()
@@ -2200,6 +2232,8 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				return reason, nil
 			}
 			state, ok := baselineCache[key]
+			var banked bankedBaseline
+			var hit bool
 			if !ok {
 				// The bank consult (REQ-result-baseline-bank): a banked
 				// group whose pins re-verify serves its measurement —
@@ -2207,7 +2241,8 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				// re-evaluates every recorded identity against disk and
 				// refuses on drift; any failure falls through to the
 				// probe.
-				if banked, hit := opts.baselineBank.baseline(key.persistedKey(bankScope)); !opts.Force && hit {
+				banked, hit = opts.baselineBank.baseline(key.persistedKey(bankScope))
+				if !opts.Force && hit {
 					views := groupOracleViews(*w, group)
 					// A pin-check ERROR falls through to the probe
 					// exactly like a pin mismatch — the bank never
@@ -2244,9 +2279,16 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 				if err := ctx.Err(); err != nil {
 					return "", err
 				}
+				// The measurement leash, lifted by the group's banked
+				// duration when the bank holds one whose pins no longer
+				// serve (the entry still says how long this oracle takes).
+				baselineBound := opts.OracleTimeout
+				if deriveOracleBudgets {
+					baselineBound = leashFor(opts.OracleTimeout, time.Duration(banked.RawMillis)*time.Millisecond)
+				}
 				baselineStart := time.Now()
 				probeGate.RLock()
-				ran, passed, failedTests, diagnostic, observed, err := groupBaselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, opts.OracleTimeout, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+				ran, passed, failedTests, diagnostic, observed, err := groupBaselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 				probeGate.RUnlock()
 				baselineElapsed := time.Since(baselineStart)
 				var reason string
@@ -5143,7 +5185,7 @@ func (t *Tree) oracleCoverage(ctx context.Context, w work, opts Options, runEnv 
 		key := coverageKey(g, coverPkg)
 		got, ok := cache[key]
 		if !ok {
-			probed, err := campaignCoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.OracleTimeout, g.flags, runEnv, t.eng.DirectiveCoverage())
+			probed, err := campaignCoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.advisoryLeash(g), g.flags, runEnv, t.eng.DirectiveCoverage())
 			if err != nil {
 				if ctx.Err() != nil {
 					return engine.Coverage{}, false, ctx.Err()
