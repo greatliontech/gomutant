@@ -59,6 +59,12 @@ var (
 	scheduleMinTests      = 8
 )
 
+// The seams below are package-level variables a test swaps for the
+// duration of one Run: they are read unsynchronized from the run's
+// goroutines, so the package's tests run sequentially — a parallel
+// test swapping one mid-Run would race the read and leak into its
+// siblings.
+//
 // campaignCoveredPositions is the schedule's (and the survivor
 // buckets') probe; a variable so tests can supply crafted coverage
 // without constructing real coverage fixtures per shape.
@@ -69,6 +75,13 @@ var campaignCoveredPositions = engine.CoveredPositions
 // direct observable is which patterns ran (the exempt remainder's
 // never appears outside the audit's full runs).
 var runMutantObservedEnv = engine.RunMutantObservedEnv
+
+// probeGateInstalled observes the run's producer-probe gate at its
+// installation; a variable so a test can hold the gate's handle and
+// pin, from inside a confirmation, that the confirmation runs under
+// the gate held exclusively (REQ-exec-attribution's isolation from
+// preparation probes). Sequential tests only, as every seam above.
+var probeGateInstalled func(gate *sync.RWMutex)
 
 // phaseBaselineProbe is the phase-pattern baseline runner; a variable
 // so the order-dependent-suite degrade is testable without an
@@ -265,7 +278,7 @@ type probeUnit struct {
 // and returns the units to probe. It is the one decision the pricing
 // announcement and the probing loop both consult, so the announced
 // total is exactly the batches the loop runs.
-func (t *Tree) scheduleProbePlan(ctx context.Context, w work, opts Options) ([]probeUnit, error) {
+func (t *Tree) scheduleProbePlan(ctx context.Context, w work, opts runOptions) ([]probeUnit, error) {
 	store := opts.scheduleStore
 	if store == nil || w.shaped || w.targetView == nil || executingCandidates(w) < scheduleMinCandidates {
 		return nil, nil
@@ -349,7 +362,7 @@ func probePlanCost(plan []probeUnit, baselineDur func(group) (time.Duration, boo
 // probeScheduleUnit probes one planned group batch by batch, calling
 // tick after each batch, and stores the group's schedule; a batch that
 // fails leaves the group unscheduled (its key stays reserved).
-func (t *Tree) probeScheduleUnit(ctx context.Context, unit probeUnit, opts Options, runEnv []string, tick func()) error {
+func (t *Tree) probeScheduleUnit(ctx context.Context, unit probeUnit, opts runOptions, runEnv []string, tick func()) error {
 	store := opts.scheduleStore
 	entry := &groupSchedule{}
 	for _, batch := range unit.batches {
@@ -414,14 +427,14 @@ type scheduleStep struct {
 	budget time.Duration
 }
 
-func stepBudget(g group, opts Options) time.Duration {
+func stepBudget(g group, opts runOptions) time.Duration {
 	if opts.groupBudget != nil {
 		return opts.groupBudget(g)
 	}
 	return opts.OracleTimeout
 }
 
-func unscheduledSteps(groups []group, opts Options) []scheduleStep {
+func unscheduledSteps(groups []group, opts runOptions) []scheduleStep {
 	out := make([]scheduleStep, len(groups))
 	for i, g := range groups {
 		out[i] = scheduleStep{first: g, budget: stepBudget(g, opts)}
@@ -437,7 +450,7 @@ func unscheduledSteps(groups []group, opts Options) []scheduleStep {
 // REQ-exec-oracle-run's schedule clause demands; the reach question is
 // survivorCovered, the one range-shaped probe every classification
 // pass shares (REQ-exec-survivor-evidence).
-func (t *Tree) scheduleSteps(w work, m engine.Mutant, opts Options) []scheduleStep {
+func (t *Tree) scheduleSteps(w work, m engine.Mutant, opts runOptions) []scheduleStep {
 	store := opts.scheduleStore
 	if store == nil || w.shaped || w.targetView == nil || m.Extent == "" {
 		return unscheduledSteps(w.groups, opts)
@@ -507,7 +520,7 @@ func narrowingBatches(entry *groupSchedule, coverPkg string, probe Survivor) ([]
 // serial confirmation's scored run. A non-pass means the suite is
 // order-dependent under this pattern: the caller re-runs the mutant
 // unsplit and the group stops scheduling.
-func (t *Tree) phaseKillVouched(ctx context.Context, g group, bound time.Duration, opts Options, runEnv []string) bool {
+func (t *Tree) phaseKillVouched(ctx context.Context, g group, bound time.Duration, opts runOptions, runEnv []string) bool {
 	if opts.scheduleStore == nil {
 		return false
 	}

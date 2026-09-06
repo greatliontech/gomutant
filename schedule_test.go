@@ -76,7 +76,7 @@ func TestScheduledGroupsPartitionAndOrder(t *testing.T) {
 	store.byKey[key] = entry
 	tr := &Tree{}
 
-	got := tr.scheduleSteps(w, m, Options{scheduleStore: store})
+	got := tr.scheduleSteps(w, m, runOptions{scheduleStore: store})
 	if len(got) != 1 || !got[0].narrowed || got[0].first.runRegex != testRunRegex([]string{"TestC", "TestD"}) {
 		t.Fatalf("schedule steps = %+v, want one narrowed step whose executing pattern is exactly the reaching batch", got)
 	}
@@ -90,22 +90,22 @@ func TestScheduledGroupsPartitionAndOrder(t *testing.T) {
 	}
 
 	// No-signal arms all degrade to the unordered group.
-	unordered := func(name string, o Options, mm engine.Mutant, ww work) {
+	unordered := func(name string, o runOptions, mm engine.Mutant, ww work) {
 		got := tr.scheduleSteps(ww, mm, o)
 		if len(got) != len(ww.groups) || got[0].narrowed || got[0].first.runRegex != ww.groups[0].runRegex {
 			t.Fatalf("%s: schedule did not degrade to the unordered group: %+v", name, got)
 		}
 	}
-	unordered("nil store", Options{}, m, w)
-	unordered("no entry", Options{scheduleStore: newScheduleStore()}, m, w)
-	unordered("no extent", Options{scheduleStore: store}, engine.Mutant{Position: m.Position}, w)
+	unordered("nil store", runOptions{}, m, w)
+	unordered("no entry", runOptions{scheduleStore: newScheduleStore()}, m, w)
+	unordered("no extent", runOptions{scheduleStore: store}, engine.Mutant{Position: m.Position}, w)
 	allReach := &groupSchedule{batches: []scheduleBatch{
 		{fns: []string{"TestA", "TestB"}, cov: reach},
 		{fns: []string{"TestC", "TestD"}, cov: reach},
 	}}
 	oneSided := newScheduleStore()
 	oneSided.byKey[key] = allReach
-	unordered("empty remainder", Options{scheduleStore: oneSided}, m, w)
+	unordered("empty remainder", runOptions{scheduleStore: oneSided}, m, w)
 	// The mirror arm: NO batch reaches the extent — the exemption must
 	// never narrow to zero execution; the group runs whole and the
 	// survivor buckets read never-executed (the pre-ruling behavior).
@@ -115,17 +115,17 @@ func TestScheduledGroupsPartitionAndOrder(t *testing.T) {
 	}}
 	noReach := newScheduleStore()
 	noReach.byKey[key] = allMiss
-	unordered("empty covering set", Options{scheduleStore: noReach}, m, w)
+	unordered("empty covering set", runOptions{scheduleStore: noReach}, m, w)
 	unsound := newScheduleStore()
 	unsound.byKey[key] = &groupSchedule{batches: []scheduleBatch{
 		{fns: []string{"TestA", "TestB"}, cov: miss.UnsoundForTest(coverPkg + "/f.go")},
 		{fns: []string{"TestC", "TestD"}, cov: reach},
 	}}
-	unordered("unsound file", Options{scheduleStore: unsound}, m, w)
+	unordered("unsound file", runOptions{scheduleStore: unsound}, m, w)
 	degraded := newScheduleStore()
 	degraded.byKey[key] = entry
 	degraded.unschedule(key)
-	unordered("unscheduled after degrade", Options{scheduleStore: degraded}, m, w)
+	unordered("unscheduled after degrade", runOptions{scheduleStore: degraded}, m, w)
 }
 
 // The narrowed survivor end to end, on the canonical residual-risk
@@ -154,12 +154,22 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	var patternMu sync.Mutex
 	var mutantPatterns []string
 	// markerActive tags the scheduled run's FULL-pattern mutant
-	// executions — exactly the audit's re-scores in this fixture — with
-	// a synthetic incomplete-process reason, so the record proves the
-	// audit's authority replaced the evidence channels, not only the
-	// verdict (the full run's incomplete lands as candidate evidence).
+	// executions — exactly the audit's re-scores in this fixture — on
+	// every channel the audit replaces: a synthetic incomplete-process
+	// reason (so the record proves the evidence channel was replaced),
+	// and a verdict of killed-by-the-real-killer whatever the run
+	// measured (so the outcome and killer channels are proven replaced
+	// deterministically — a sample landing on a candidate TestAdd does
+	// not kill would otherwise leave the replacement unobserved).
 	var markerActive atomic.Bool
+	// markerSurvives flips the forced verdict to a survival: the second
+	// scheduled run below pins that an audited candidate the full run
+	// clears is recorded as a full-run survivor — its narrowed mark
+	// cleared — never as a covering-passed one.
+	var markerSurvives atomic.Bool
 	const auditMarker = "audit-authority-marker: full-run evidence replaced the narrowed measurement"
+	const realKiller = "example.com/fixture/lib.TestAdd"
+	const auditObservationEnv = "GOMUTANT_AUDIT_OBSERVATION_MARKER"
 	fullPattern := testRunRegex([]string{"TestAdd", "TestWeak"})
 	runMutantObservedEnv = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 		oracleRuns.Add(1)
@@ -167,8 +177,34 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 		mutantPatterns = append(mutantPatterns, runRegex)
 		patternMu.Unlock()
 		out, killer, md, state, incomplete, diag, err := restoreRun(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
-		if markerActive.Load() && runRegex == fullPattern && incomplete == "" {
-			incomplete = auditMarker
+		// Only a full-pattern run that completed is forced: an errored
+		// run keeps its error and gets neither marker nor verdict.
+		if markerActive.Load() && runRegex == fullPattern && err == nil {
+			// Every channel the audit replaces is forced to a value the
+			// narrowed run cannot have produced, so the wholesale
+			// replacement is observable per channel on the record:
+			// the survive-mode run forces the incomplete reason (its
+			// candidate evidence); the kill-mode run forces the killer,
+			// the memory disposition, and a COMPLETED observation
+			// reading one extra environment input (an incomplete row's
+			// observation never reaches the subject union).
+			if markerSurvives.Load() {
+				out, killer = engine.MutantSurvived, ""
+				if incomplete == "" {
+					incomplete = auditMarker
+				}
+			} else {
+				out, killer, incomplete, md = engine.MutantKilled, realKiller, "", true
+				bracket, ferr := runtimeinput.CaptureBracket(moduleDir, bracketPaths)
+				if ferr != nil {
+					return out, killer, md, state, incomplete, diag, ferr
+				}
+				forced, ferr := runtimeinput.FromTestLogEnv([]byte("# test log\ngetenv "+auditObservationEnv+"\n"), moduleDir, packageDir, env, runtimeinput.WithCompletedProcess("audit-observation-process"), runtimeinput.WithBracket(bracket))
+				if ferr != nil {
+					return out, killer, md, state, incomplete, diag, ferr
+				}
+				state = forced
+			}
 		}
 		return out, killer, md, state, incomplete, diag, err
 	}
@@ -238,6 +274,58 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	scheduledPatterns := append([]string(nil), mutantPatterns...)
 	patternMu.Unlock()
 
+	// The audit's clear of the narrowed mark: with the full run forced
+	// to clear its sample, the audited candidate is a survivor the
+	// FULL run scored — recorded as executed-and-passed, never as the
+	// covering-passed narrowed survivor it was before the audit.
+	markerSurvives.Store(true)
+	clearedAudited := 0
+	cleared, err := tr.Run(ctx, []Target{target}, Options{Executing: func(e ExecutionEvent) {
+		if e.Phase == "audit" {
+			emu.Lock()
+			clearedAudited += e.AuditedNarrowed
+			emu.Unlock()
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	markerSurvives.Store(false)
+	// The premise, asserted so a drift is self-diagnosing: this run
+	// audits exactly one sample, the row the assertions below name.
+	if clearedAudited != 1 {
+		t.Fatalf("survive-mode run audited %d samples, want exactly 1", clearedAudited)
+	}
+	clearedRows := 0
+	for _, row := range cleared[0].Survivors {
+		if row.Execution == "executed-and-passed" {
+			clearedRows++
+		}
+		if row.Execution == "covering-passed" {
+			for _, ev := range cleared[0].CandidateEvidence {
+				if ev.Position == row.Position && ev.Reason == auditMarker {
+					t.Fatalf("the audited survivor at %s still reads as covering-passed — the audit must clear the narrowed mark", row.Position)
+				}
+			}
+		}
+	}
+	if clearedRows != 1 {
+		t.Fatalf("audited survivors recorded executed-and-passed = %d, want exactly the one audited sample: %+v", clearedRows, cleared[0].Survivors)
+	}
+	// The incompleteness channel: the audited survivor's candidate
+	// evidence is the full run's (marker-tagged) reason — the audit's
+	// authority replaces the evidence channels wholesale, not only the
+	// verdict.
+	markerRows := 0
+	for _, ev := range cleared[0].CandidateEvidence {
+		if ev.Reason == auditMarker {
+			markerRows++
+		}
+	}
+	if markerRows != 1 {
+		t.Fatalf("%d rows carry the full run's evidence marker, want the one audited survivor: %+v", markerRows, cleared[0].CandidateEvidence)
+	}
+
 	// Control: same target, same oracle, scheduling gated off.
 	markerActive.Store(false)
 	scheduleMinTests = 1 << 30
@@ -288,8 +376,11 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	if audited != 1 {
 		t.Fatalf("audit sampled %d narrowed survivors, want exactly the derived floor of 1", audited)
 	}
-	if auditFlips > audited {
-		t.Fatalf("audit disagreed %d of %d", auditFlips, audited)
+	// The seam makes every audited full run a kill by the real killer,
+	// so the audit disagrees with exactly its sample: the recovery is
+	// observed whatever candidate the hash picked.
+	if auditFlips != audited {
+		t.Fatalf("audit disagreed %d of %d, want every audited sample recovered", auditFlips, audited)
 	}
 	// TestWeak kills nothing, so every scheduled kill is an audit
 	// recovery: the re-scored verdicts ARE the kill count — a reporting
@@ -299,21 +390,42 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 		t.Fatalf("scheduled kills %d vs audit flips %d — the full run's verdicts must replace the narrowed scores", s.Killed, auditFlips)
 	}
 	for _, killer := range flipKillers {
-		if killer != "example.com/fixture/lib.TestAdd" {
+		if killer != realKiller {
 			t.Fatalf("audit flip attributed to %q, want the real killer TestAdd", killer)
 		}
 	}
-	// The audit's authority replaces the EVIDENCE channels wholesale,
-	// not only the verdict: every audited row carries the full run's
-	// (marker-tagged) incomplete reason as its candidate evidence.
-	markerRows := 0
-	for _, ev := range s.CandidateEvidence {
-		if ev.Reason == auditMarker {
-			markerRows++
+	// The observation channel: the audited kill's forced observation
+	// reads one environment input no narrowed run reads, and the
+	// record's subject union carries it — a replacement that kept the
+	// narrowed run's observation would pin a union missing the input
+	// the scored run observed.
+	described, err := runtimeinput.Describe(s.TargetEvidence.RuntimeInputs, tr.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(described.EnvNames, auditObservationEnv) {
+		t.Fatalf("subject union env inputs %v lack the audited full run's %s — the observation was not replaced", described.EnvNames, auditObservationEnv)
+	}
+	// The killer channel: TestWeak kills nothing, so every recorded
+	// kill is an audit recovery and its recorded killer is the full
+	// run's — a replacement that scored the verdict but kept the
+	// narrowed run's (empty) killer would record a kill nobody made.
+	if len(s.Kills) != auditFlips {
+		t.Fatalf("recorded kills %d vs audit flips %d: %+v", len(s.Kills), auditFlips, s.Kills)
+	}
+	for _, k := range s.Kills {
+		if k.Killer != realKiller {
+			t.Fatalf("recorded kill at %s attributed to %q, want the full run's killer %s", k.Position, k.Killer, realKiller)
 		}
 	}
-	if markerRows != audited {
-		t.Fatalf("%d audited rows but %d carry the full run's evidence marker — the audit's authority must replace the narrowed measurement's evidence channels: %+v", audited, markerRows, s.CandidateEvidence)
+	// The memory channel: the forced full run is memory-decided, the
+	// narrowed runs are not; the record's ceiling fact follows the
+	// replacement (the control below, unforced, must stay clear).
+	if !s.OracleCeilingDecided {
+		t.Fatal("audited full run was memory-decided but the record's ceiling fact reads undecided — the memory disposition was not replaced")
+	}
+	if c.OracleCeilingDecided {
+		t.Fatal("control record reads memory-decided — the forcing seam leaked into the control")
 	}
 
 	// The window cost model (REQ-exec-run-status's estimate class):
@@ -409,7 +521,7 @@ func TestPhaseKillWithoutPhaseBaselineDegradesToUnsplit(t *testing.T) {
 		{fns: []string{"TestA", "TestB"}, cov: reach},
 		{fns: []string{"TestC", "TestD"}, cov: engine.CoverageForTest(nil)},
 	}}
-	opts := Options{scheduleStore: store}
+	opts := runOptions{scheduleStore: store}
 
 	restoreRun := runMutantObservedEnv
 	restoreProbe := phaseBaselineProbe
@@ -469,7 +581,7 @@ func TestPhaseKillVouchRunsUnderRunWideBound(t *testing.T) {
 		{fns: []string{"TestA", "TestB"}, cov: reach},
 		{fns: []string{"TestC", "TestD"}, cov: engine.CoverageForTest(nil)},
 	}}
-	opts := Options{scheduleStore: store, OracleTimeout: time.Minute}
+	opts := runOptions{Options: Options{OracleTimeout: time.Minute}, scheduleStore: store}
 
 	restoreRun := runMutantObservedEnv
 	restoreProbe := phaseBaselineProbe
@@ -519,7 +631,7 @@ func TestNarrowedSurvivorSkipsNonCoveringRemainder(t *testing.T) {
 		{fns: []string{"TestA", "TestB"}, cov: reach},
 		{fns: []string{"TestC", "TestD"}, cov: engine.CoverageForTest(nil)},
 	}}
-	opts := Options{scheduleStore: store, OracleTimeout: time.Minute}
+	opts := runOptions{Options: Options{OracleTimeout: time.Minute}, scheduleStore: store}
 
 	restoreRun := runMutantObservedEnv
 	defer func() { runMutantObservedEnv = restoreRun }()
@@ -588,7 +700,7 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 	served.serve = &Finding{}
 	served.flagged = map[int]bool{0: true}
 	store := newScheduleStore()
-	if err := probeWork(ctx, tr, served, Options{scheduleStore: store}); err != nil {
+	if err := probeWork(ctx, tr, served, runOptions{scheduleStore: store}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 0 || len(store.byKey) != 0 {
@@ -597,13 +709,13 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 
 	// A fresh work probes — ceil(sqrt(9)) = 3 batches — and the
 	// failure stores an empty signal exactly once.
-	if err := probeWork(ctx, tr, w, Options{scheduleStore: store}); err != nil {
+	if err := probeWork(ctx, tr, w, runOptions{scheduleStore: store}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("failed probe retried within one pass: %d calls (first batch fails, probe stops)", calls.Load())
 	}
-	if err := probeWork(ctx, tr, w, Options{scheduleStore: store}); err != nil {
+	if err := probeWork(ctx, tr, w, runOptions{scheduleStore: store}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 1 {
@@ -623,7 +735,7 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 		return engine.CoverageForTest(nil), nil
 	}
 	healthy := newScheduleStore()
-	if err := probeWork(ctx, tr, w, Options{scheduleStore: healthy}); err != nil {
+	if err := probeWork(ctx, tr, w, runOptions{scheduleStore: healthy}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 3 {
@@ -659,7 +771,7 @@ func TestSerialConfirmationRunsUnscheduled(t *testing.T) {
 		{fns: []string{"TestA", "TestB"}, cov: reach},
 		{fns: []string{"TestC", "TestD"}, cov: engine.CoverageForTest(nil)},
 	}}
-	opts := Options{scheduleStore: store}
+	opts := runOptions{scheduleStore: store}
 
 	restoreRun := runMutantObservedEnv
 	defer func() { runMutantObservedEnv = restoreRun }()
@@ -698,7 +810,7 @@ func TestNarrowedPhaseTimeoutDegradesToUnsplit(t *testing.T) {
 		{fns: []string{"TestA", "TestB"}, cov: reach},
 		{fns: []string{"TestC", "TestD"}, cov: engine.CoverageForTest(nil)},
 	}}
-	opts := Options{scheduleStore: store, OracleTimeout: time.Minute}
+	opts := runOptions{Options: Options{OracleTimeout: time.Minute}, scheduleStore: store}
 
 	restoreRun := runMutantObservedEnv
 	defer func() { runMutantObservedEnv = restoreRun }()
@@ -763,7 +875,7 @@ func TestProbePlanCostCountsUnpricedBatches(t *testing.T) {
 
 // probeWork plans and probes one work's groups without ticks — the
 // window's composition over one work, for the schedule's own pins.
-func probeWork(ctx context.Context, tr *Tree, w work, opts Options) error {
+func probeWork(ctx context.Context, tr *Tree, w work, opts runOptions) error {
 	plan, err := tr.scheduleProbePlan(ctx, w, opts)
 	if err != nil {
 		return err

@@ -186,7 +186,7 @@ func TestProbeOracleInstabilityCollectsProbedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	groups := []group{{pkgs: []string{"example.com/probe"}, moduleDir: root, packageDir: root}}
-	attr, err := tree.probeOracleInstability(context.Background(), []string{"example.com/probe.TestF"}, groups, Options{OracleTimeout: 2 * time.Minute}, tree.eng.GoEnv())
+	attr, err := tree.probeOracleInstability(context.Background(), []string{"example.com/probe.TestF"}, groups, runOptions{Options: Options{OracleTimeout: 2 * time.Minute}}, tree.eng.GoEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestEmitOracleGuidanceNamesMutantOnlyInputs(t *testing.T) {
 	}
 	unstable := Finding{TargetEvidence: SubjectEvidence{RuntimeUnverifiable: true, RuntimeReason: "diverged", RuntimeInputs: state.Manifest}}
 	var got []OracleGuidance
-	opts := Options{Guidance: func(g OracleGuidance) { got = append(got, g) }}
+	opts := runOptions{Options: Options{Guidance: func(g OracleGuidance) { got = append(got, g) }}}
 	if err := tree.emitOracleGuidance(context.Background(), unstable, work{oracle: oracle}, "example.com/guide.F", opts, nil, cache); err != nil {
 		t.Fatal(err)
 	}

@@ -26,9 +26,58 @@ import (
 
 var findingObservationSequence atomic.Uint64
 
+// runOptions is the run's own view of its options: the caller's
+// Options beside the services Run installs — the schedule-coverage
+// store, the machine-local baseline bank, the derived budget, leash,
+// and duration resolvers, and the producer-probe gate. Every callee
+// below Run takes this, never a bare Options, so a caller-constructed
+// Options with no services cannot reach the execution machinery and
+// read as "no scheduling, no gating, no bank": nil-service semantics
+// are unrepresentable there — Run is the one constructor. Callbacks
+// stay on Options: they are the caller's surface, locked once.
+type runOptions struct {
+	Options
+	// scheduleStore carries the run's schedule-coverage signal to the
+	// executors (REQ-exec-oracle-run's verdict-preserving schedule);
+	// nil disables scheduling (ephemeral probes).
+	scheduleStore *scheduleStore
+	// baselineBank is the run's machine-local measurement bank
+	// (REQ-result-baseline-bank); nil disables banking.
+	baselineBank *baselineBank
+	// groupBudget resolves an oracle group's effective budget: the
+	// group's derived budget in derive mode, the explicit timeout
+	// otherwise; nil (probes) means OracleTimeout.
+	groupBudget func(g group) time.Duration
+	// baselineDur answers a group's measured passing-baseline
+	// wall-clock — the window cost model's whole-group price; nil or
+	// a false answer prices nothing, never fabricates
+	// (REQ-exec-run-status's estimate class).
+	baselineDur func(g group) (time.Duration, bool)
+	// groupLeash resolves the leash a group's advisory probes run
+	// under — the campaign leash lifted by the group's baseline in
+	// derive mode, the explicit timeout otherwise; nil before the run
+	// installs it (advisoryLeash falls back to OracleTimeout).
+	groupLeash func(g group) time.Duration
+	// probeGate is the run's producer-probe gate: the phase-baseline
+	// vouch holds it shared exactly like every other producer-side
+	// oracle probe, so it never shares a window with a serial
+	// confirmation's scored run (REQ-exec-attribution).
+	probeGate *sync.RWMutex
+}
+
 // advisoryLeash is the bound an advisory probe of g runs under
 // (groupLeash when the run installed it, the run-wide bound otherwise).
-func (o Options) advisoryLeash(g group) time.Duration {
+// unscheduled is the run's options with the schedule withheld: the
+// serial re-scores (the confirmation's fallback, the audit's full run)
+// execute the candidate's whole oracle scope, because a scheduled
+// corrector would reproduce the very narrowing it exists to re-examine
+// (REQ-exec-attribution, REQ-exec-oracle-run).
+func (o runOptions) unscheduled() runOptions {
+	o.scheduleStore = nil
+	return o
+}
+
+func (o runOptions) advisoryLeash(g group) time.Duration {
 	if o.groupLeash != nil {
 		return o.groupLeash(g)
 	}
@@ -288,32 +337,6 @@ type Options struct {
 	// canonical per-package patterns, never the phase split. Unordered
 	// (workers race); pins the survivor narrowing.
 	executedScope func(position, operator string, oracleScope []string)
-	// scheduleStore carries the run's schedule-coverage signal to the
-	// executors (REQ-exec-oracle-run's verdict-preserving schedule);
-	// nil disables scheduling (ephemeral probes, external callers).
-	scheduleStore *scheduleStore
-	// baselineBank is the run's machine-local measurement bank
-	// (REQ-result-baseline-bank); nil disables banking.
-	baselineBank *baselineBank
-	// groupBudget resolves an oracle group's effective budget: the
-	// group's derived budget in derive mode, the explicit timeout
-	// otherwise; nil (probes, external callers) means OracleTimeout.
-	groupBudget func(g group) time.Duration
-	// baselineDur answers a group's measured passing-baseline
-	// wall-clock — the window cost model's whole-group price; nil or
-	// a false answer prices nothing, never fabricates
-	// (REQ-exec-run-status's estimate class).
-	baselineDur func(g group) (time.Duration, bool)
-	// groupLeash resolves the leash a group's advisory probes run
-	// under — the campaign leash lifted by the group's baseline in
-	// derive mode, the explicit timeout otherwise; nil before the run
-	// installs it (advisoryLeash falls back to OracleTimeout).
-	groupLeash func(g group) time.Duration
-	// probeGate is the run's producer-probe gate: the phase-baseline
-	// vouch holds it shared exactly like every other producer-side
-	// oracle probe, so it never shares a window with a serial
-	// confirmation's scored run (REQ-exec-attribution).
-	probeGate *sync.RWMutex
 	// confirmScoped observes each serial confirmation's candidate group
 	// scope the same way, emitted at the confirmation executor's own
 	// entry off its w: the serial fallback executes those groups
@@ -751,7 +774,7 @@ func sequenceKey(values []string) string {
 // it (REQ-exec-oracle-guidance). Probes are best-effort - a probe that
 // errors, matches nothing, or fails skips its test rather than
 // aborting the run whose finding already committed.
-func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, groups []group, opts Options, runEnv []string) (oracleAttribution, error) {
+func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, groups []group, opts runOptions, runEnv []string) (oracleAttribution, error) {
 	byPkg := make(map[string]group, len(groups))
 	for _, g := range groups {
 		byPkg[g.pkgs[0]] = g
@@ -953,7 +976,7 @@ func oracleScope(w work) []string {
 // analyzes source at runtime, so the forbidden state must exist on
 // disk — the overlay reaches only the oracle binary's own
 // compilation), body mutants run through the build overlay.
-func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, error) {
+func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, error) {
 	if opts.executedScope != nil {
 		// Emitted off the same w whose groups execute below: the
 		// observation and the execution cannot diverge.
@@ -988,7 +1011,7 @@ func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, o
 // verdict always rests on every group the candidate executes against
 // (for a narrowed survivor, the added and moved tests — its unmoved
 // passes stand recorded).
-func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, killer string, scopedBaselines map[scopedBaselineKey]bool, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, killer string, scopedBaselines map[scopedBaselineKey]bool, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
 	if opts.confirmScoped != nil {
 		// Emitted off the same w both confirmation paths derive from:
 		// the serial fallback executes w.groups verbatim, and the
@@ -1046,9 +1069,7 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 	// the serial execution the scored measurement — the one corrector
 	// for a shape-induced window kill — and a scheduled corrector would
 	// reproduce the very narrowing it exists to re-examine.
-	unscheduled := opts
-	unscheduled.scheduleStore = nil
-	out, gk, md, state, incomplete, _, err := t.executeWorkMutant(ctx, w, m, unscheduled, runEnv)
+	out, gk, md, state, incomplete, _, err := t.executeWorkMutant(ctx, w, m, opts.unscheduled(), runEnv)
 	return out, gk, md, state, incomplete, err
 }
 
@@ -1066,7 +1087,7 @@ type scopedBaselineKey struct {
 // non-pass — a standalone failure, a timeout, a probe error —
 // answers false and the confirmation falls back to the full oracle;
 // the probe is best-effort ground, never a campaign abort.
-func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scopedBaselineKey]bool, opts Options, runEnv []string) bool {
+func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scopedBaselineKey]bool, opts runOptions, runEnv []string) bool {
 	key := scopedBaselineKey{pkg: g.pkgs[0], run: g.runRegex, flags: strings.Join(g.flags, "\x00"), moduleDir: g.moduleDir, packageDir: g.packageDir}
 	if passed, ok := memo[key]; ok {
 		return passed
@@ -1083,7 +1104,7 @@ func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scope
 // NARROWED survivor: one whose non-reaching remainder was exempt from
 // execution on the schedule's sound batch coverage
 // (REQ-exec-oracle-run's narrowed-survivor clause).
-func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, error) {
+func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, error) {
 	outcome, killer, memoryDecided, state, incomplete, narrowedSurvivor, degrade, err := t.runSteps(ctx, w, m, opts, runEnv, t.scheduleSteps(w, m, opts))
 	if err != nil || degrade == degradeNone {
 		return outcome, killer, memoryDecided, state, incomplete, narrowedSurvivor, err
@@ -1142,7 +1163,7 @@ type stepResult struct {
 // shape symmetry on the run-regex axis). A package-scope kill already
 // ran its differential baseline under this very pattern inside the
 // engine.
-func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string, g group, narrowed bool, timeout time.Duration) (stepResult, error) {
+func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string, g group, narrowed bool, timeout time.Duration) (stepResult, error) {
 	out, killer, memoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, timeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
 	res := stepResult{out: out, killer: killer, memoryDecided: memoryDecided, state: state, incomplete: incomplete, diagnostic: diagnostic}
 	if err != nil {
@@ -1176,7 +1197,7 @@ func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts O
 // runSteps executes one mutant's schedule. A non-none degrade reports
 // a schedule that must not score — the caller re-runs unsplit
 // (REQ-exec-oracle-run's verdict-preserving schedule).
-func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string, steps []scheduleStep) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, scheduleDegrade, error) {
+func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string, steps []scheduleStep) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, scheduleDegrade, error) {
 	outcome := engine.MutantSurvived
 	killer := ""
 	memoryDecided := false
@@ -1323,7 +1344,7 @@ func mergeScoredFacts(rec Finding, scores windowScores, currentPin int64, curren
 
 // maxGroupBudget is the loosest bound any of the work's verdict-bearing
 // processes ran under — the value a derived record pins.
-func maxGroupBudget(w work, opts Options) time.Duration {
+func maxGroupBudget(w work, opts runOptions) time.Duration {
 	budget := time.Duration(0)
 	for _, g := range w.groups {
 		if b := stepBudget(g, opts); b > budget {
@@ -1378,7 +1399,7 @@ func (s windowScores) narrowedAt(mi int) bool {
 // measured under the record's own verifiable conditions — like its
 // dispositions and attestations, immune to a suffix-local divergence
 // stamp or re-probe.
-func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, opts Options, runEnv []string, cache map[string]engine.Coverage, from int) error {
+func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, opts runOptions, runEnv []string, cache map[string]engine.Coverage, from int) error {
 	if from >= len(f.Survivors) {
 		return nil
 	}
@@ -1637,7 +1658,11 @@ func preflightBracketPaths(ctx context.Context, treeDir string, paths []string) 
 	return nil
 }
 
-func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Finding, error) {
+func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Finding, error) {
+	// The run's view of its options: the caller's surface beside the
+	// services this function installs — the one constructor of
+	// runOptions.
+	opts := runOptions{Options: caller}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -1670,7 +1695,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	if deriveOracleBudgets {
 		opts.OracleTimeout = campaignBaselineLeash
 	}
-	opts = lockCallbacks(opts)
+	opts.Options = lockCallbacks(opts.Options)
 	targets = snapshotTargets(targets)
 	opts.Prior = snapshotFindings(opts.Prior)
 	runStart := time.Now()
@@ -2075,6 +2100,9 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 	// holds it exclusively (REQ-exec-attribution).
 	var probeGate sync.RWMutex
 	opts.probeGate = &probeGate
+	if probeGateInstalled != nil {
+		probeGateInstalled(&probeGate)
+	}
 	// One observed union over every target and oracle replaces the
 	// per-target proof builds the campaign previously paid (the measured
 	// ~270 observation passes per warm campaign): per-subject evidence is
@@ -3283,6 +3311,22 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			memoryDecided[wi] = make([]bool, len(window[wi].candidates))
 			narrowedFlags[wi] = make([]bool, len(window[wi].candidates))
 		}
+		// score is the window's ONE score writer: every measurement of a
+		// candidate — the parallel worker's, the serial confirmation's,
+		// the audit's — records its six channels through it, so a
+		// measurement cannot replace the verdict and keep another
+		// channel's stale value.
+		// The outcome is written last: an unwritten outcome reads as
+		// the discard zero value, never as a verdict, so it is the
+		// row's sentinel and the other channels are in place before it.
+		score := func(wi, mi int, outcome engine.MutantOutcome, killer string, decided bool, state runtimeinput.Observation, incomplete string, narrowed bool) {
+			killers[wi][mi] = killer
+			memoryDecided[wi][mi] = decided
+			observations[wi][mi] = interner.intern(state)
+			incompletes[wi][mi] = incomplete
+			narrowedFlags[wi][mi] = narrowed
+			outcomes[wi][mi] = outcome
+		}
 		windowBase := mutantsDone.Load()
 		reportExecuting(opts.Executing, ExecutionEvent{
 			Phase:       "executing",
@@ -3379,12 +3423,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						})
 						return
 					}
-					observations[j.wi][j.mi] = interner.intern(state)
-					incompletes[j.wi][j.mi] = incompleteReason
-					memoryDecided[j.wi][j.mi] = candidateMemoryDecided
-					narrowedFlags[j.wi][j.mi] = narrowedSurvivor
-					killers[j.wi][j.mi] = killer
-					outcomes[j.wi][j.mi] = outcome
+					score(j.wi, j.mi, outcome, killer, candidateMemoryDecided, state, incompleteReason, narrowedSurvivor)
 					// The completion tick: done advances candidate by
 					// candidate instead of window by window, the pace
 					// ground a multi-hour window would otherwise hide
@@ -3511,6 +3550,34 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 			windowTotal += int64(len(window[wi].candidates))
 		}
 		mutantsDone.Store(advanceDone(windowBase, windowTotal, mutantsDone.Load()))
+		// rescore is the window's ONE serial re-score discipline, shared
+		// by the kill confirmation and the narrowed-survivor audit: the
+		// candidate re-executes alone under the exclusively held probe
+		// gate — so no pipelined sibling's preparation probe shares its
+		// isolation window — and the scored serial run replaces the
+		// window's verdict for it wholesale through the same score
+		// writer the parallel workers use: outcome, killer, memory
+		// disposition, observation, and incompleteness, as one value.
+		// A re-scored candidate is never a narrowed survivor: the
+		// confirmation re-scores kills and the audit's full run is the
+		// authority that clears the mark. Each pass supplies its own
+		// execution (the confirmation's killer-scoped confirmMutant,
+		// the audit's unscheduled full run) and keeps its own
+		// bookkeeping around the call; the replacement itself cannot
+		// diverge between them (REQ-exec-attribution,
+		// REQ-exec-oracle-run's narrowed-survivor clause).
+		rescore := func(wi, mi int, run func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error)) (engine.MutantOutcome, string, error) {
+			w := scopedWork(window[wi], mi)
+			m, _ := window[wi].candidates[mi].Mutant()
+			opts.probeGate.Lock()
+			outcome, killer, decided, state, incomplete, err := run(w, m)
+			opts.probeGate.Unlock()
+			if err != nil {
+				return outcome, killer, err
+			}
+			score(wi, mi, outcome, killer, decided, state, incomplete, false)
+			return outcome, killer, nil
+		}
 		if jobs > 1 {
 			// Each confirmation re-runs a full oracle, so per-confirmation
 			// events are naturally sparse; a window with nothing to
@@ -3560,7 +3627,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						return confirmInconclusive, err
 					}
 					wi := k.target
-					m, _ := window[wi].candidates[k.mi].Mutant()
 					reportExecuting(opts.Executing, ExecutionEvent{
 						Phase: "confirming",
 						// The confirmed kill's own target, not the
@@ -3574,21 +3640,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
 						ConfirmationMode: confirmMode,
 					})
-					probeGate.Lock()
-					outcome, killer, confirmedMemoryDecided, state, incomplete, err := t.confirmMutant(ctx, scopedWork(window[wi], k.mi), m, killers[wi][k.mi], scopedBaselines, opts, runEnv)
-					probeGate.Unlock()
+					initialKiller := killers[wi][k.mi]
+					outcome, killer, err := rescore(wi, k.mi, func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+						return t.confirmMutant(ctx, w, m, initialKiller, scopedBaselines, opts, runEnv)
+					})
 					if err != nil {
 						return confirmInconclusive, err
 					}
 					confirmDone++
-					initialKiller := killers[wi][k.mi]
-					outcomes[wi][k.mi] = outcome
-					killers[wi][k.mi] = killer
-					// The confirmation's verdict is the scored one; its
-					// memory disposition replaces the initial run's.
-					memoryDecided[wi][k.mi] = confirmedMemoryDecided
-					observations[wi][k.mi] = interner.intern(state)
-					incompletes[wi][k.mi] = incomplete
 					classified := classifyConfirmation(outcome, killer)
 					if classified == confirmFlipped {
 						if flips[wi] == nil {
@@ -3637,21 +3696,17 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 					return nil, err
 				}
 				w := scopedWork(window[pick.wi], pick.mi)
-				m, runnable := w.candidates[pick.mi].Mutant()
-				if !runnable {
+				if _, runnable := w.candidates[pick.mi].Mutant(); !runnable {
 					continue
 				}
-				unscheduled := opts
-				unscheduled.scheduleStore = nil
-				// The audit's re-score is a SCORED serial run exactly
-				// like a confirmation's: it holds the probe gate
-				// exclusively so a pipelined sibling's preparation
-				// probe cannot interfere with the verdict it mints —
-				// an audit-minted kill is terminal, never confirmed
-				// again.
-				probeGate.Lock()
-				outcome, killer, auditMemoryDecided, state, incompleteReason, _, err := t.executeWorkMutant(ctx, w, m, unscheduled, runEnv)
-				probeGate.Unlock()
+				// The audit's re-score is the full unsplit run — the
+				// authority either way — under the window's one rescore
+				// discipline; an audit-minted kill is terminal, never
+				// confirmed again.
+				outcome, killer, err := rescore(pick.wi, pick.mi, func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+					outcome, killer, decided, state, incomplete, _, err := t.executeWorkMutant(ctx, w, m, opts.unscheduled(), runEnv)
+					return outcome, killer, decided, state, incomplete, err
+				})
 				if err != nil {
 					return nil, err
 				}
@@ -3668,15 +3723,6 @@ func (t *Tree) Run(ctx context.Context, targets []Target, opts Options) ([]Findi
 						FlipKiller:   killer,
 					})
 				}
-				// The full unsplit run is the authority either way: its
-				// verdict, observation, and evidence replace the
-				// narrowed measurement wholesale.
-				outcomes[pick.wi][pick.mi] = outcome
-				killers[pick.wi][pick.mi] = killer
-				memoryDecided[pick.wi][pick.mi] = auditMemoryDecided
-				observations[pick.wi][pick.mi] = interner.intern(state)
-				incompletes[pick.wi][pick.mi] = incompleteReason
-				narrowedFlags[pick.wi][pick.mi] = false
 			}
 			if len(pool) > 0 {
 				// The summary spans the window's targets; no single
@@ -4723,7 +4769,7 @@ func outcomeDisposition(outcome engine.MutantOutcome) string {
 // attribution: the probes run once per set, not per finding. A budget
 // extension owes the same attribution as a whole measure — its suffix
 // processes are what landed the merged record unverifiable.
-func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol string, opts Options, runEnv []string, guidanceCache map[string]oracleAttribution) error {
+func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol string, opts runOptions, runEnv []string, guidanceCache map[string]oracleAttribution) error {
 	if opts.Guidance == nil || !unstableForBuckets(&f, opts.Exemptions) || f.OracleExplicit {
 		return nil
 	}
@@ -5198,7 +5244,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 // groups over the target's package, cached per (package, run pattern, cover
 // package) across the run; probed reports false when any group cannot be
 // probed (best-effort advisory data, never a refusal).
-func (t *Tree) oracleCoverage(ctx context.Context, w work, opts Options, runEnv []string, cache map[string]engine.Coverage) (engine.Coverage, bool, error) {
+func (t *Tree) oracleCoverage(ctx context.Context, w work, opts runOptions, runEnv []string, cache map[string]engine.Coverage) (engine.Coverage, bool, error) {
 	coverPkg := w.targetView.subject.Package
 	coverage := engine.Coverage{}
 	for _, g := range w.groups {

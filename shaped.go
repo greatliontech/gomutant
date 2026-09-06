@@ -373,7 +373,7 @@ func (t *Tree) vendorActive() string {
 // unobserved (runtime manifests would name scratch paths no view
 // describes); the finding's evidence is the oracle rows attached to the
 // baseline observations, which ran observed on the real tree.
-func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Mutant, opts Options, runEnv []string) (engine.MutantOutcome, string, bool, error) {
+func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, error) {
 	scratch, err := os.MkdirTemp("", "gomutant-shaped-*")
 	if err != nil {
 		return engine.MutantSurvived, "", false, fmt.Errorf("shaped scratch: %w", err)

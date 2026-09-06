@@ -3977,7 +3977,7 @@ func TestEmitOracleGuidanceGuards(t *testing.T) {
 	unstable := Finding{TargetEvidence: SubjectEvidence{RuntimeUnverifiable: true, RuntimeReason: "diverged"}}
 
 	var got []OracleGuidance
-	opts := Options{Guidance: func(g OracleGuidance) { got = append(got, g) }}
+	opts := runOptions{Options: Options{Guidance: func(g OracleGuidance) { got = append(got, g) }}}
 	if err := tree.emitOracleGuidance(ctx, unstable, w, "example.com/empty.F", opts, nil, cache); err != nil {
 		t.Fatal(err)
 	}
@@ -3994,7 +3994,7 @@ func TestEmitOracleGuidanceGuards(t *testing.T) {
 	if err := tree.emitOracleGuidance(ctx, explicit, w, "example.com/empty.F", opts, nil, cache); err != nil {
 		t.Fatal(err)
 	}
-	if err := tree.emitOracleGuidance(ctx, unstable, w, "example.com/empty.F", Options{}, nil, cache); err != nil {
+	if err := tree.emitOracleGuidance(ctx, unstable, w, "example.com/empty.F", runOptions{}, nil, cache); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 0 {
@@ -4026,7 +4026,7 @@ func TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets(t *testing.T) {
 			{Position: "f.go:2:2", Operator: "op-a"},
 		},
 	}
-	if err := tree.bucketSurvivorExecution(context.Background(), &f, work{}, Options{}, nil, nil, 1); err != nil {
+	if err := tree.bucketSurvivorExecution(context.Background(), &f, work{}, runOptions{}, nil, nil, 1); err != nil {
 		t.Fatal(err)
 	}
 	if f.Survivors[0].Execution != "executed-and-passed" {

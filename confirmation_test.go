@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -27,13 +28,39 @@ func TestRunConfirmsKillsSerially(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := Target{Symbol: "example.com/fixture/counting.Value", Oracle: []string{"example.com/fixture/counting.TestCountingStrict"}}
-	fs, err := tr.Run(context.Background(), []Target{target}, Options{Jobs: 2})
+	// Each confirmation runs under the producer-probe gate held
+	// EXCLUSIVELY, so no pipelined preparation probe shares its
+	// isolation window (REQ-exec-attribution). Observed from inside the
+	// confirmation: a shared acquisition must fail deterministically
+	// while the confirmation holds the gate — it succeeds the instant
+	// the exclusive hold is dropped, readers or not.
+	var gate *sync.RWMutex
+	probeGateInstalled = func(g *sync.RWMutex) { gate = g }
+	t.Cleanup(func() { probeGateInstalled = nil })
+	confirmations, unguarded := 0, 0
+	fs, err := tr.Run(context.Background(), []Target{target}, Options{Jobs: 2, confirmScoped: func(string, string, []string) {
+		confirmations++
+		if gate == nil {
+			t.Error("confirmation ran before the probe gate was installed")
+			return
+		}
+		if gate.TryRLock() {
+			gate.RUnlock()
+			unguarded++
+		}
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := fs[0]
 	if f.Killed == 0 {
 		t.Fatalf("counting fixture killed nothing: %+v", f)
+	}
+	// One confirmation per recorded kill holds on this fixture because
+	// no kill is a timeout kill (those are never confirmed) and no
+	// confirmation flips its kill (the strict oracle reproduces alone).
+	if confirmations != f.Killed || unguarded != 0 {
+		t.Fatalf("confirmations = %d (kills %d; a mismatch means a timeout kill or a confirmation flip entered the fixture), %d ran with the probe gate acquirable shared — every confirmation holds it exclusively", confirmations, f.Killed, unguarded)
 	}
 	data, _ := os.ReadFile(counter)
 	// The baseline validity repeat runs the oracle twice before any
