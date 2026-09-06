@@ -102,7 +102,10 @@ func TestEphemeralRefusesReplacementOutsideOracleLinkedSet(t *testing.T) {
 	if mutatedGen == string(genSource) {
 		t.Fatal("gen.go mutation anchor missing")
 	}
-	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutatedGen), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err != nil {
-		t.Fatalf("linked-dependency replacement refused: %v", err)
+	// The linkage gate admits it; what refuses is the probe's own
+	// no-verdict judgment — TestAdd never reaches gen.go — never the
+	// linkage refusal.
+	if _, err := tr.RunEphemeral(t.Context(), EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutatedGen), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "never reached genp/gen.go") {
+		t.Fatalf("linked-dependency replacement = %v; want the gate to admit it and the unexercised judgment to refuse", err)
 	}
 }

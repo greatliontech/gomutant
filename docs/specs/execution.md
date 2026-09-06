@@ -551,7 +551,20 @@ survivor, and an unparseable edit of such a file refuses on this ground
 first, before any build could diagnose it (a linked set the derivation
 cannot resolve leaves this gate standing down: a closure that does not
 build refuses at the baseline probe with the compiler's own diagnostic,
-this requirement's canonical framing). Before running the mutant gomutant probes the named
+this requirement's canonical framing). Before the build, the imports a
+replacement no longer references are pruned — an import whose bound name
+is known (an alias, or the declared name the loaded package imports it
+under) and that no selector in the mutant uses; blank and dot imports and
+an import of unknown name stay — because a probe declares no import
+intent, so pruning cannot change the mutant's meaning where a deletion
+probe would otherwise strand its guard's imports and be unwritable; the
+result names every pruned import, and the edit digest stays the caller's
+own spelling. The cli batch is the `{"edits": […]}` object or the bare
+array of edits, one batch either way, any other shape refused naming both
+forms. A compiler signal death or panic under the baseline or a mutant
+run is the toolchain's, not the mutant's: retried once, and recurring
+reported as the crash it is — never as a mutant that does not compile
+and never as a verdict. Before running the mutant gomutant probes the named
 test on the unmutated tree: a `-run` matching zero tests cannot attribute any
 outcome, and a test already failing clean would fail against the mutant too
 and read as a fabricated kill — the flattering direction
@@ -578,24 +591,34 @@ derived bound names that bound's true provenance (the leash, the
 derived budget, or a command deadline that undercut them) rather than
 the oracle knob that never governed it. The honest-naming duty
 attaches to refusals and kills; the advisory coverage probe's bound
-expiry is the recorded probe-failure posture (exercise state unknown,
-the label absent), never a named refusal. A manual mutant that fails to build, and a baseline
+expiry — and a replacement whose profile entry the probe could not
+soundly attribute — is the recorded probe-failure posture (exercise
+state unknown for the files concerned, named as unknown, the label
+absent), never a named refusal and never a vouch. A manual mutant that fails to build, and a baseline
 probe whose test package fails to build, each refuse with the compiler's own
 diagnostic in the message — manual probes are interactive evidence gathering,
 so the caller repairs the edit from the compiler's reason, never from a
 guess. The result reports whether the named test killed the
 mutant and the attributed failing test; it is evidence for the caller to act
-on, never persisted to a finding record (REQ-result-record). A survivor
-verdict additionally names the replacement files no baseline-covered block
-touches - the file is linked into the oracle's binary (an unlinked
-replacement refuses at validation), yet the probed run never reached it, so
-killed=false over an unexercised
-replacement is not evidence the oracle noticed anything (the ephemeral twin
-of the survivor-evidence buckets); the classification comes from one baseline
-coverage probe run only when the verdict is not a kill (plain survival and
-the mixed killed-some-runs outcome alike - both leave the false-survivor
-reading open), is advisory, and is absent when
-the probe fails - a probe failure never fails a sound measurement. A kill
+on, never persisted to a finding record (REQ-result-record). A plain
+survivor over a replacement file no baseline-covered block touches - the
+file is linked into the oracle's binary (an unlinked replacement refuses at
+validation), yet the probed run never reached it - is no verdict at all
+and is refused naming the files and the repair: killed=false over an
+unexercised replacement would assert what the classification exists to
+deny, the shape of a guard that observes the tree (a source-reading test,
+a `go list`-based check) and so sees the unmutated sources, whose honest
+probe mutates the guard's own input, which does link into the binary; the
+mixed killed-some-runs outcome keeps the files as an advisory (some run
+reached them); the classification comes from one baseline coverage probe
+run only when the verdict is not a kill, never covers a mutated test file
+(the coverage instruments the code under test), and is absent when the
+probe fails - a probe failure never fails a sound measurement. A mutated
+test file is admitted and named in the result: its verdict is about the
+test - whether the edited part was load-bearing for the named run - never
+about the code under test (where a campaign never targets a test file, the
+ephemeral probe may: the campaign measures the code's coverage, the probe
+answers the caller's one question, which may be about the oracle itself). A kill
 additionally carries its interactive evidence in the result — a bounded
 excerpt of the killing test's own output anchored at its end, where Go
 emits the failure block, with the dropped earlier remainder counted (a

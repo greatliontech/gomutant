@@ -1437,6 +1437,10 @@ func validateRequiredObject(raw json.RawMessage, known map[string]bool, required
 	return fields, nil
 }
 
+// errExpectedObject is decodeKnownObject's refusal of a non-object
+// document; callers that admit another top-level shape name it.
+var errExpectedObject = errors.New("expected object")
+
 func decodeKnownObject(data []byte, known map[string]bool) (map[string]json.RawMessage, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	token, err := dec.Token()
@@ -1444,7 +1448,7 @@ func decodeKnownObject(data []byte, known map[string]bool) (map[string]json.RawM
 		return nil, err
 	}
 	if delim, ok := token.(json.Delim); !ok || delim != '{' {
-		return nil, fmt.Errorf("expected object")
+		return nil, errExpectedObject
 	}
 	fields := map[string]json.RawMessage{}
 	for dec.More() {

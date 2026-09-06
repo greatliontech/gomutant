@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -21,10 +22,21 @@ type BatchEdit struct {
 	NewString string `json:"new_string"`
 }
 
-// ParseEditBatch parses the CLI's strict JSON edit-batch document.
+// ParseEditBatch parses the CLI's strict JSON edit-batch document: the
+// object form `{"edits": [{file, old_string, new_string}, …]}`, or the
+// bare array of edits the object wraps — the same batch either way, so
+// a caller who writes the array the guidance describes is not refused
+// for the wrapper (REQ-exec-ephemeral). Any other top-level shape is
+// refused naming both forms.
 func ParseEditBatch(data []byte) ([]BatchEdit, error) {
+	if trimmed := bytes.TrimSpace(data); len(trimmed) > 0 && trimmed[0] == '[' {
+		data = append(append([]byte(`{"edits":`), trimmed...), '}')
+	}
 	fields, err := decodeKnownObject(data, map[string]bool{"edits": true})
 	if err != nil {
+		if errors.Is(err, errExpectedObject) {
+			err = fmt.Errorf(`expected an object with an edits array ({"edits": [{file, old_string, new_string}, …]}) or the bare array`)
+		}
 		return nil, fmt.Errorf("gomutant: parse edit batch: %w", err)
 	}
 	var strict struct {

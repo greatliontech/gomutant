@@ -62,7 +62,18 @@ func TestParseEditBatch(t *testing.T) {
 	if err != nil || len(edits) != 1 || edits[0].File != "a.go" || edits[0].OldString != "old" || edits[0].NewString != "new" {
 		t.Fatalf("parsed edits = %+v, %v", edits, err)
 	}
+	// The bare array is the same batch (the wrapper the guidance names
+	// is not a trap), and any other top-level shape names both forms.
+	bare, err := ParseEditBatch([]byte(` [{"file":"a.go","old_string":"old","new_string":"new"}]`))
+	if err != nil || len(bare) != 1 || bare[0].File != "a.go" {
+		t.Fatalf("bare array batch = %+v, %v", bare, err)
+	}
+	if _, err := ParseEditBatch([]byte(`"edits"`)); err == nil || !strings.Contains(err.Error(), `{"edits": [`) || !strings.Contains(err.Error(), "bare array") {
+		t.Fatalf("non-object batch refusal = %v; want both forms named", err)
+	}
 	for _, input := range []string{
+		`[]`,
+		`[{"file":"a.go","old_string":"x","new_string":"y"}] {}`,
 		`{"edits":[]}`,
 		`{"edits":[],"unknown":true}`,
 		`{"edits":[],"edits":[]}`,

@@ -748,6 +748,33 @@ func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame) []string {
 // reads record, the conservative direction.
 var oracleBookkeepingPaths = []string{".stipulator", ".gomutant"}
 
+// BaselineBuildError is the baseline probe's build failure, carrying
+// the compiler's own diagnostic (empty when the stream held none): a
+// caller tells a compiler crash from a compile diagnostic by the text
+// (CompilerCrashed) and retries the former.
+type BaselineBuildError struct {
+	Diagnostic string
+}
+
+func (e *BaselineBuildError) Error() string {
+	if e.Diagnostic == "" {
+		return "baseline test failed to build"
+	}
+	return "baseline test failed to build:\n" + e.Diagnostic
+}
+
+// CompilerCrashed reports whether a build diagnostic is a compiler
+// signal death or panic rather than a compile error: the go tool names
+// the compiler and a signal, or the compiler's own panic dumps its
+// goroutines, where a compile error carries positions
+// (REQ-exec-ephemeral's retry).
+func CompilerCrashed(diagnostic string) bool {
+	if !strings.Contains(diagnostic, "cmd/compile") && !strings.Contains(diagnostic, "/compile:") {
+		return false
+	}
+	return strings.Contains(diagnostic, "signal:") || strings.Contains(diagnostic, "panic:") || strings.Contains(diagnostic, "goroutine ")
+}
+
 // PreflightBracket captures the declared bracket paths under the tree
 // root with exactly the frame's option set — the VCS and bookkeeping
 // exclusions every spawn's capture applies — and reports the capture's
@@ -1091,10 +1118,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		return probeResult{state: state}, ctx2.Err()
 	}
 	if strings.Contains(buf.String(), "[build failed]") {
-		if diagnostic := compileDiagnostics(buf.Bytes(), nil); diagnostic != "" {
-			return probeResult{}, fmt.Errorf("baseline test failed to build:\n%s", diagnostic)
-		}
-		return probeResult{}, fmt.Errorf("baseline test failed to build")
+		return probeResult{}, &BaselineBuildError{Diagnostic: compileDiagnostics(buf.Bytes(), nil)}
 	}
 	stream, err := parseTestStream(buf.Bytes())
 	if err != nil {

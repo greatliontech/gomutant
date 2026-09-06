@@ -34,7 +34,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.file, "file", "", "tree-relative source file to replace")
 	selectionFlags(f, &o.tags, &o.toolchain)
 	f.StringVar(&o.replacement, "replacement", "", "path to the whole replacement source")
-	f.StringVar(&o.batch, "batch", "", "JSON edit-batch path, or - for stdin: {\"edits\":[{\"file\",\"old_string\",\"new_string\"},…]}, every match resolving against the original file")
+	f.StringVar(&o.batch, "batch", "", "JSON edit-batch path, or - for stdin: {\"edits\":[{\"file\",\"old_string\",\"new_string\"},…]} or the bare array, every match resolving against the original file")
 	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill: an import path, or a package directory spelled like go test does (. or ./x) resolved against --dir")
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
@@ -42,7 +42,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "maximum duration of the baseline and mutant oracle processes; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
 	f.IntVar(&o.runs, "runs", 1, "run the mutant this many times (1-10): killed means every run killed - consecutive kills split deterministic kills from a property generator's draw luck")
-	f.StringVar(&o.attest, "attest", "", "record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or never exercised the edit")
+	f.StringVar(&o.attest, "attest", "", "record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or could not establish that it reached the edit (a never-reached plain survivor is refused by the probe itself)")
 	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document whose sibling ephemeral-attestation record --attest writes")
 	return cmd
 }
@@ -200,6 +200,15 @@ func renderEphemeralVerdict(w io.Writer, res *gomutant.EphemeralResult) {
 	// learns what budget the derivation produced.
 	if res.OracleBudget != "" {
 		fmt.Fprintf(w, "oracle budget %s  (baseline measured %s)\n", res.OracleBudget, res.MeasuredBaseline)
+	}
+	for _, f := range res.MutatedTests {
+		fmt.Fprintf(w, "mutated test  %s  — the oracle's own source changed: the verdict is about the test (was the edited part load-bearing for %s?), never about the code under test\n", f, res.Run)
+	}
+	if len(res.PrunedImports) > 0 {
+		fmt.Fprintf(w, "imports pruned  %s  — unreferenced in the mutant, dropped before compiling\n", strings.Join(res.PrunedImports, ", "))
+	}
+	if res.CoverageUnknown && !res.Killed {
+		fmt.Fprintf(w, "coverage unknown  %s  — whether the probed run reached this replacement could not be established (the coverage probe failed or could not attribute it); this survival is unverified\n", strings.Join(res.CoverageUnknownFiles, ", "))
 	}
 	for _, f := range res.UnexercisedFiles {
 		fmt.Fprintf(w, "unexercised  %s  — no baseline-covered block reaches this replacement (linked into the oracle's binary, never reached by the probed run); its survival is not evidence the oracle noticed anything\n", f)

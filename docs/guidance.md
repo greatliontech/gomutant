@@ -181,7 +181,7 @@ to=example.com/new. after a package rename, then for real.
 - `file` (mcp, cli) — tree-relative source file for replacement or edits; omit for batch edits.
 - `replacement` (mcp, cli) — the whole replacement source: inline content on mcp, a path to it on the cli.
 - `edits` (mcp) — exact-match edits ({old, new}) applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file.
-- `batch_edits` (mcp, cli as `batch`) — atomic file-scoped exact-match edits ({file, old_string, new_string}; on the cli a JSON file `{"edits":[…]}` or - for stdin); every match resolves against the original file snapshot. Inline on mcp; a JSON path or - for stdin on the cli.
+- `batch_edits` (mcp, cli as `batch`) — atomic file-scoped exact-match edits ({file, old_string, new_string}; on the cli a JSON file holding `{"edits":[…]}` or the bare array `[…]`, or - for stdin); every match resolves against the original file snapshot. Inline on mcp; a JSON path or - for stdin on the cli.
 - `test_pkg` (mcp, cli as `test-pkg`) — package whose named test decides the kill: an import path, or a package directory spelled like go test does (`.` or `./x`) resolved against the tree root.
 - `run` (mcp, cli) — -run pattern naming the deciding test.
 - `timeout_sec` (mcp, cli as `timeout`) — cancel work before attributed result completion; on mcp omitted means 300 seconds and an explicit 0 unlimited, on the cli a duration defaulting to unlimited.
@@ -189,7 +189,7 @@ to=example.com/new. after a package rename, then for real.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling for the probe's oracle process tree in MiB: absent inherits the server's installed ceiling (mcp), 0 derives RAM/2 floored at 1 GiB, -1 disables; refused while a run is in flight — the campaign owns the process ceiling.
 - `runs` (mcp, cli) — run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed — N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result.
 - `progress-interval` (cli) — cadence of the progress line naming the phase in flight and the elapsed time; 0 disables.
-- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document (`ephemeral-attestations.json`); a blank reasoning refuses before any load or probe; refused after the probe when it killed, was mixed, or never exercised the edit.
+- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document (`ephemeral-attestations.json`); a blank reasoning refuses before any load or probe; refused after the probe when it killed, was mixed, or could not establish that it reached the edit (a never-reached plain survivor is refused by the probe itself).
 - `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes (default .gomutant/findings.json).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
@@ -215,6 +215,29 @@ the phase in flight (`progress-interval`), the mcp face as progress
 notifications with a heartbeat naming the phase; an interrupted cli
 probe reports the phase it cut short (the load included) after its
 cadence stops.
+A deletion probe that strands its guard's imports still compiles:
+imports nothing in the mutant references are pruned before the
+build (a probe declares no import intent) and the result names them
+(`imports pruned`), so delete the guard whole rather than neutering
+it. The batch on the cli is `{"edits":[…]}` or the bare array of
+edits — the same batch. Three blind spots the probe names rather than
+scoring: a guard that observes the TREE — a source-reading test
+(`os.ReadDir`/`go/parser` over the module's own files) or a `go
+list`-based layering check — sees the unmutated sources, since the
+mutant links into the binary and the tree is never touched, so a
+survivor over a file the probed run never reached is a REFUSAL (no
+verdict; mutate the guard's own input instead — a kind added to the
+scanned set, an edge added to the parsed table — which links into the
+binary, or route the guard to review); a mutated test file is
+admitted and named (`mutated test`): its verdict is about the test —
+was the edited part load-bearing for the named run — never about the
+code under test. A compiler signal death under the baseline or a mutant run is retried
+once and, recurring, reported as the crash it is (`compiler crashed
+twice — re-run to confirm`), never as a mutant that does not compile
+and never as the baseline failing to build. A survivor whose exercise
+could not be established (`coverage unknown`: the coverage probe
+failed, or a file's profile entry could not be attributed) is
+unverified, neither refused nor vouched.
 **example:** ephemeral with a batch edit neutering one guard and
 run naming the test that must notice.
 

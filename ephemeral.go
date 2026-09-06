@@ -29,6 +29,10 @@ var coveredPositions = engine.CoveredPositions
 // without constructing a genuinely slow baseline.
 var testProbe = engine.TestProbeEnv
 
+// runMutantEvidence is the mutant runner seam: tests plant a compiler
+// crash the probe must retry once and never read as a verdict.
+var runMutantEvidence = engine.RunMutantEvidenceEnv
+
 // EphemeralResult is one manual mutant's evidence (REQ-exec-ephemeral): what
 // was mutated, the test it ran against, whether that test killed it, and the
 // attributed killer. It is evidence for the caller to act on, never
@@ -80,13 +84,34 @@ type EphemeralResult struct {
 	// explicit-timeout mode too: it is a measurement either way), as a
 	// canonical duration string.
 	MeasuredBaseline string `json:"measuredBaseline"`
+	// MutatedTests names the replacement files that are test files: a
+	// probe may mutate the oracle's own source (to ask whether an
+	// assertion is load-bearing), but its verdict is then about the
+	// test, never about the code under test — a survivor over a mutated
+	// test says the edited part was not load-bearing for the named run
+	// and says nothing about coverage (REQ-exec-ephemeral's blind
+	// spots).
+	MutatedTests []string `json:"mutatedTests,omitempty"`
+	// PrunedImports names the imports the probe dropped from each
+	// replacement before compiling it — "path (file)" — because nothing
+	// in the mutant referenced them: a deletion probe strands its
+	// guard's imports, and a probe declares no import intent, so the
+	// prune changes no meaning; stated so a verdict over a pruned
+	// mutant reads honestly (REQ-exec-ephemeral).
+	PrunedImports []string `json:"prunedImports,omitempty"`
 	// CoverageUnknown marks a non-kill verdict whose exercise state
-	// could not be established (the baseline coverage probe failed):
-	// UnexercisedFiles absent then means UNKNOWN, not exercised — the
-	// two must never share one encoding, or an unverifiable survivor
-	// reads as a vouched one (REQ-exec-ephemeral,
-	// REQ-result-ephemeral-attest's unverifiable refusal).
+	// could not be established for some replacement — the baseline
+	// coverage probe failed (every file unknown), or a file's profile
+	// entry could not be soundly attributed (that file unknown, named
+	// in CoverageUnknownFiles): UnexercisedFiles absent then means
+	// UNKNOWN, not exercised — the two must never share one encoding,
+	// or an unverifiable survivor reads as a vouched one
+	// (REQ-exec-ephemeral, REQ-result-ephemeral-attest's unverifiable
+	// refusal).
 	CoverageUnknown bool `json:"coverageUnknown,omitempty"`
+	// CoverageUnknownFiles names the replacement files whose exercise
+	// state is unknown; every file when the probe itself failed.
+	CoverageUnknownFiles []string `json:"coverageUnknownFiles,omitempty"`
 }
 
 // SetOracleMemoryLimit installs the per-oracle-process memory ceiling
@@ -577,6 +602,16 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	report(PreparationEvent{Stage: PreparationBaseline, Symbol: run, Package: testPkg, OracleBudget: baselineBound.String()})
 	baselineStart := time.Now()
 	ran, passed, diagnostic, err := testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env)
+	if baselineCompilerCrashed(err) {
+		// The baseline's compiler died: a toolchain transient, retried
+		// once so it never reads as the baseline failing to build; a
+		// second death is reported as the crash it is.
+		report(PreparationEvent{Stage: PreparationBaseline, Symbol: run + " (compiler crashed; retrying once)", Package: testPkg, OracleBudget: baselineBound.String()})
+		ran, passed, diagnostic, err = testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env)
+		if baselineCompilerCrashed(err) {
+			return nil, fmt.Errorf("compiler crashed twice on the baseline — re-run to confirm; not a verdict, and not the baseline failing to build:\n%w", err)
+		}
+	}
 	if err != nil {
 		if derive {
 			return nil, derivedBaselineRefusal(err, baselineBound)
@@ -611,12 +646,25 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 
 	files := make([]string, len(replacements))
 	engineReplacements := make([]engine.Replacement, len(replacements))
+	var prunedImports, mutatedTests []string
 	for i, replacement := range replacements {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		files[i] = replacement.File
-		engineReplacements[i] = engine.Replacement{File: replacement.Abs, Source: replacement.Source}
+		if strings.HasSuffix(replacement.File, "_test.go") {
+			mutatedTests = append(mutatedTests, replacement.File)
+		}
+		// The edit digest identifies the caller's own spelling
+		// (computed over the given replacements); the compiled mutant
+		// is the pruned source.
+		source, pruned := pruneUnusedImports(replacement.Source, func(importPath string) (string, bool) {
+			return t.eng.ImportedPackageName(replacement.Abs, importPath)
+		})
+		for _, path := range pruned {
+			prunedImports = append(prunedImports, path+" ("+replacement.File+")")
+		}
+		engineReplacements[i] = engine.Replacement{File: replacement.Abs, Source: source}
 	}
 	m := engine.Mutant{Replacements: engineReplacements}
 	res := &EphemeralResult{
@@ -627,15 +675,31 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		EditDigest:       ephemeralEditDigest(t.dir, replacements),
 		OracleBudget:     mutantBudget.String(),
 		MeasuredBaseline: measuredBaseline.String(),
+		PrunedImports:    prunedImports,
+		MutatedTests:     mutatedTests,
 	}
 	// N runs against the once-probed baseline: per-run verdicts split a
 	// deterministic kill (every run killed) from a property generator's
 	// draw luck (REQ-exec-ephemeral).
 	for i := 0; i < runs; i++ {
 		report(PreparationEvent{Stage: PreparationMutantRun, Symbol: fmt.Sprintf("%d/%d", i+1, runs), Package: testPkg, OracleBudget: mutantBudget.String()})
-		outcome, killer, evidence, diagnostic, err := engine.RunMutantEvidenceEnv(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env)
+		outcome, killer, evidence, diagnostic, err := runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env)
 		if err != nil {
 			return nil, err
+		}
+		if outcome == engine.MutantDiscarded && engine.CompilerCrashed(diagnostic) {
+			// A compiler signal death is the toolchain's, not the
+			// mutant's: one retry tells a transient from a mutant that
+			// crashes the compiler, and neither reads as "did not
+			// compile" (REQ-exec-ephemeral).
+			report(PreparationEvent{Stage: PreparationMutantRun, Symbol: fmt.Sprintf("%d/%d (compiler crashed; retrying once)", i+1, runs), Package: testPkg, OracleBudget: mutantBudget.String()})
+			outcome, killer, evidence, diagnostic, err = runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env)
+			if err != nil {
+				return nil, err
+			}
+			if outcome == engine.MutantDiscarded && engine.CompilerCrashed(diagnostic) {
+				return nil, fmt.Errorf("compiler crashed twice on this mutant — re-run to confirm; not a verdict, and not the mutant failing to compile:\n%s", diagnostic)
+			}
 		}
 		if outcome == engine.MutantDiscarded {
 			return nil, discardError(files, diagnostic)
@@ -677,16 +741,34 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// the advisory posture, never a verdict — CoverageUnknown, the
 		// label absent — and the command timeout still bounds.
 		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", probeLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err != nil {
-			res.CoverageUnknown = true
+			// Every measured file is unknown; a mutated test file is
+			// never measured, so it is not unknown either.
+			for _, file := range files {
+				if !strings.HasSuffix(file, "_test.go") {
+					res.CoverageUnknownFiles = append(res.CoverageUnknownFiles, file)
+				}
+			}
+			res.CoverageUnknown = len(res.CoverageUnknownFiles) > 0
 		} else {
 			for i, replacement := range replacements {
+				if strings.HasSuffix(replacement.File, "_test.go") {
+					// The coverage probe instruments the code under
+					// test, never the test files: a mutated test's
+					// exercise is not measured, and its verdict is
+					// about the test itself (MutatedTests).
+					continue
+				}
 				pkgPath := t.eng.FileImportPath(replacement.Abs)
 				if pkgPath != "" && coverage.Unsound(pkgPath+"/"+filepath.Base(replacement.Abs)) {
 					// A refused re-keying is not evidence of anything:
 					// claiming "unexercised" for a file whose profile
 					// entry the seam could not soundly attribute would
-					// manufacture the advisory (REQ-exec-ephemeral's
-					// probe-failure posture: the label stays absent).
+					// manufacture the advisory, and claiming exercised
+					// would manufacture the vouch — the state is
+					// UNKNOWN, said so (REQ-exec-ephemeral's
+					// probe-failure posture).
+					res.CoverageUnknown = true
+					res.CoverageUnknownFiles = append(res.CoverageUnknownFiles, files[i])
 					continue
 				}
 				if pkgPath == "" || !coverage.CoversFile(pkgPath+"/"+filepath.Base(replacement.Abs)) {
@@ -694,8 +776,29 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 				}
 			}
 		}
+		// A plain survivor over a replacement the probed run never
+		// reached is no verdict at all: the file is linked but
+		// unexercised, so "did not notice" would assert what the label
+		// exists to deny — a guard that observes the TREE (a
+		// source-reading test, a `go list`-based layering check) sees
+		// the unmutated sources and can never kill. Refused, naming the
+		// reachable repair; a mixed killed-some-runs outcome keeps the
+		// advisory, since some run did reach it (REQ-exec-ephemeral).
+		if res.KilledRuns == 0 && len(res.UnexercisedFiles) > 0 {
+			return nil, fmt.Errorf("no verdict: the probed run never reached %s (linked into %s's binary, unexercised by %s) — survival would prove nothing; a guard that observes the tree (a source-reading test, a go list-based check) sees the unmutated sources: mutate the guard's own input instead, or route it to review", cappedNameList(res.UnexercisedFiles, "files"), testPkg, run)
+		}
 	}
 	return res, nil
+}
+
+// baselineCompilerCrashed reports whether the baseline probe's error is
+// its build failing under a compiler crash — the one baseline failure
+// that is the toolchain's, not the tree's (a failing test's own output
+// is never consulted: a test printing crash-shaped text is a failing
+// test).
+func baselineCompilerCrashed(err error) bool {
+	var build *engine.BaselineBuildError
+	return errors.As(err, &build) && engine.CompilerCrashed(build.Diagnostic)
 }
 
 func (t *Tree) ephemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent)) (*EphemeralResult, error) {

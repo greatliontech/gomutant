@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -314,40 +315,16 @@ func TestDiscardErrorSplitsNoiseFromCompileFailure(t *testing.T) {
 	}
 }
 
-// A survivor verdict over a replacement outside the probed oracle's
-// exercised set is labeled, never silent: the linked-but-unexecuted
-// file lands in UnexercisedFiles, while a covered file's
-// untested-branch survivor carries no label (REQ-exec-ephemeral).
+// A covered file's untested-branch survivor carries no unexercised
+// label: the file was reached, the branch was not, and that is an
+// honest survivor (the unreached-file shape is a refusal, pinned in
+// TestEphemeralRefusesBlindSpotTargets) (REQ-exec-ephemeral).
 func TestEphemeralLabelsUnexercisedReplacement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per probe")
 	}
 	tr := fixtureTree(t)
 	ctx := context.Background()
-
-	// A LINKED file the probed run never executes: genp is compiled
-	// into lib's test binary (lib.go embeds genp.G), but gen.go holds
-	// no statement the probe covers, so a surviving mutant of it earns
-	// the unexercised label — the only reachable arm now that an
-	// unlinked replacement refuses at validation.
-	linkedIdle, err := os.ReadFile("internal/engine/testdata/fixturemod/genp/gen.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mutated := strings.Replace(string(linkedIdle), "type G struct{}", "type G struct{ X int }", 1)
-	if mutated == string(linkedIdle) {
-		t.Fatal("fixture edit failed")
-	}
-	res, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Killed {
-		t.Fatalf("linked-unexecuted replacement killed: %+v", res)
-	}
-	if len(res.UnexercisedFiles) != 1 || res.UnexercisedFiles[0] != "genp/gen.go" {
-		t.Fatalf("unexercised label = %v, want the linked-unexecuted file named", res.UnexercisedFiles)
-	}
 
 	inside, err := os.ReadFile("internal/engine/testdata/fixturemod/lib/lib.go")
 	if err != nil {
@@ -359,7 +336,7 @@ func TestEphemeralLabelsUnexercisedReplacement(t *testing.T) {
 	if inMutated == string(inside) {
 		t.Fatal("fixture edit failed")
 	}
-	res, err = tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(inMutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1})
+	res, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(inMutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,8 +379,17 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 	// The absent label must never read as exercised: the failed probe
 	// marks the exercise state UNKNOWN distinctly, the fact the
 	// attestation refusal consumes (REQ-result-ephemeral-attest).
-	if !res.CoverageUnknown {
-		t.Fatal("failed coverage probe left CoverageUnknown unset — absence would read as exercised")
+	if !res.CoverageUnknown || !slices.Equal(res.CoverageUnknownFiles, []string{"genp/gen.go"}) {
+		t.Fatalf("failed coverage probe left CoverageUnknown unset or unnamed (%v) — absence would read as exercised", res.CoverageUnknownFiles)
+	}
+	// A mutated test file is never measured, so a failed probe does
+	// not name it unknown either — nothing unknown, nothing flagged.
+	res, err = tr.RunEphemeral(context.Background(), EphemeralRequest{File: "lib/ext_test.go", Mutant: []byte("package lib_test\n"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CoverageUnknown || res.CoverageUnknownFiles != nil || !slices.Equal(res.MutatedTests, []string{"lib/ext_test.go"}) {
+		t.Fatalf("a mutated test file under a failed probe = %+v; want no unknown state, the test named", res)
 	}
 }
 
@@ -570,7 +556,7 @@ func TestDerivedBoundsNamedHonestly(t *testing.T) {
 	if cancelled := derivedBaselineRefusal(context.Canceled, ephemeralBaselineLeash); cancelled != context.Canceled {
 		t.Fatalf("cancellation was rewritten: %v", cancelled)
 	}
-	other := errors.New("baseline test failed to build")
+	other := &engine.BaselineBuildError{Diagnostic: "./lib.go:1:1: undefined: x"}
 	if got := derivedBaselineRefusal(other, ephemeralBaselineLeash); got != other {
 		t.Fatalf("non-timeout refusal was rewritten: %v", got)
 	}

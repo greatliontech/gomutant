@@ -141,6 +141,17 @@ func TestRenderEphemeralVerdictNamesUnexercisedFiles(t *testing.T) {
 	if text := out.String(); !strings.Contains(text, "FLAKY") || !strings.Contains(text, "unexercised  a.go") {
 		t.Fatalf("flaky render missing the unexercised label:\n%s", text)
 	}
+	// The pruned imports, a mutated test file, and an unknown exercise
+	// state each render on their own line: what the probe did to the
+	// mutant, and what it could not establish, are part of the verdict.
+	out.Reset()
+	renderEphemeralVerdict(&out, &gomutant.EphemeralResult{
+		Files: []string{"a.go", "a_test.go"}, Run: "^TestOK$", Runs: 1,
+		PrunedImports: []string{"fmt (a.go)"}, MutatedTests: []string{"a_test.go"}, CoverageUnknown: true, CoverageUnknownFiles: []string{"a.go"},
+	})
+	if text := out.String(); !strings.Contains(text, "imports pruned  fmt (a.go)") || !strings.Contains(text, "mutated test  a_test.go") || !strings.Contains(text, "coverage unknown  a.go  ") || strings.Contains(text, "coverage unknown  a.go, a_test.go") {
+		t.Fatalf("survivor render missing the pruned-imports, mutated-test, or coverage-unknown line:\n%s", text)
+	}
 	out.Reset()
 	renderEphemeralVerdict(&out, &gomutant.EphemeralResult{
 		Files: []string{"a.go"}, Run: "^TestOK$", Runs: 1, KilledRuns: 1, Killed: true, Killer: "TestOK",
