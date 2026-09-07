@@ -46,9 +46,9 @@ actual consumer — an agent paying per token. Counts lead: discovery reports
 its target, skipped, and residue totals before any row, and row lists cap
 (target and residue rows at 50 unless `detail` is requested; run finding rows
 at 50, open survivors per finding at 20; findings-inspection rows at 50,
-rendered as one summary row per record — symbol, state, reason, layer, open
-and attested counts — with the full rows behind `detail` and the roster
-narrowable by state and by symbol) with the omitted remainder counted,
+rendered as one summary row per record — symbol, state, reason, layer, run
+identity, open and attested counts — with the full rows behind `detail` and
+the roster narrowable by state, by symbol, and by run identity) with the omitted remainder counted,
 never silently dropped — the findings document on disk always carries the
 full set and the response names its path. Preparation events and target
 decisions are progress data, not result data: a request carrying a progress

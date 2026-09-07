@@ -37,7 +37,7 @@ func promoteThroughServe(t *testing.T, target Target, setup func(t *testing.T) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := tr.Run(ctx, []Target{target}, Options{Budget: 1, Commit: commit})
+	first, err := tr.Run(ctx, []Target{target}, Options{Budget: 1, Commit: commit, RunID: "promote-one"})
 	if err != nil || len(first) != 1 {
 		t.Fatalf("dirty measure = %+v, %v", first, err)
 	}
@@ -69,9 +69,15 @@ func promoteThroughServe(t *testing.T, target Target, setup func(t *testing.T) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := tr2.Run(ctx, []Target{target}, Options{Budget: 1, Prior: prior, Commit: commit})
+	second, err := tr2.Run(ctx, []Target{target}, Options{Budget: 1, Prior: prior, Commit: commit, RunID: "promote-two"})
 	if err != nil || len(second) != 1 {
 		t.Fatalf("clean serve = %+v, %v", second, err)
+	}
+	// Both promotion serves re-execute candidates (the grown oracle's
+	// survivors, the drifted killer's flagged set): the record names
+	// the serving run as its last measuring run (REQ-result-record).
+	if second[0].Run != "promote-two" {
+		t.Fatalf("re-executing serve run = %q, want promote-two", second[0].Run)
 	}
 	raw, err := os.ReadFile(docPath)
 	if err != nil {

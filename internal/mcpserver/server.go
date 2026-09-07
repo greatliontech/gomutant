@@ -247,7 +247,7 @@ func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (s
 			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
 			Attested: len(f.Attested), Open: open,
 			OmittedOpen: omittedOpen,
-			Cached:      f.Cached, Skipped: f.Skipped,
+			Cached:      f.Cached, Skipped: f.Skipped, Run: f.Run,
 		}
 		if f.Skipped == "" {
 			row.Layer, row.LayerReason = layer(f)
@@ -514,6 +514,7 @@ type findingOut struct {
 	OmittedOpen    int                 `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
 	Cached         bool                `json:"cached,omitempty"`
 	Skipped        string              `json:"skipped,omitempty"`
+	Run            string              `json:"run,omitempty" jsonschema:"identity of the run that last measured any candidate of the record: this run's (the summary's run) on a measured row and on a cached row whose flagged or drifted candidates this run re-executed, the measuring run's on a wholly served row; absent on records measured before runs carried one"`
 	Layer          string              `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
 	LayerReason    string              `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 }
@@ -710,6 +711,11 @@ func (out *runOut) capAdvisories() (fullSheds []string) {
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
+	// The run's identity is minted first: every record this run measures
+	// carries it, and the summary names it even when nothing was
+	// selected (REQ-exec-run-status).
+	runID := gomutant.NewRunID()
+	out.Summary.Run = runID
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, out, err
@@ -851,6 +857,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	priorLayer := map[string]string{}
 	options := gomutant.Options{
+		RunID:             runID,
 		Budget:            in.Budget,
 		OracleTimeout:     oracleTimeout,
 		Jobs:              in.Jobs,
@@ -976,6 +983,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	out.Summary = gomutant.SummarizeRun(rendered)
+	out.Summary.Run = runID
 	runStore := prepared.Store
 	for _, f := range prior {
 		priorLayer[f.Symbol], _ = runStore.Layer(f)
@@ -1191,6 +1199,7 @@ type findingsIn struct {
 	State    string `json:"state,omitempty" jsonschema:"show only findings in this judged state: current, stale, unverifiable, or detached (implies judge=true)"`
 	Judge    bool   `json:"judge,omitempty" jsonschema:"re-derive each record's freshness state against the current tree - minutes-class on large documents; a state filter or a tags/toolchain selection implies it; the default reports recorded facts with state 'recorded' and loads no tree"`
 	Symbol   string `json:"symbol,omitempty" jsonschema:"show only the finding for this mutated symbol"`
+	Run      string `json:"run,omitempty" jsonschema:"show only the records this run last measured - the identity the run tool's summary reports and stamps on every record it measures"`
 	Detail   bool   `json:"detail,omitempty" jsonschema:"full rows - operator tables, open survivors, attested dispositions, candidate evidence; the default is the bounded summary (one row per record: symbol, state, layer, open and attested counts)"`
 	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
 }
@@ -1203,6 +1212,7 @@ type findingSummary struct {
 	State    gomutant.FindingState `json:"state"`
 	Reason   string                `json:"reason,omitempty"`
 	Layer    string                `json:"layer"`
+	Run      string                `json:"run,omitempty" jsonschema:"identity of the run that last measured the record; absent on records measured before runs carried one"`
 	Open     int                   `json:"open"`
 	Attested int                   `json:"attested"`
 }
@@ -1214,6 +1224,7 @@ type inspectedFinding struct {
 	Reason         string                       `json:"reason,omitempty"`
 	Layer          string                       `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
 	LayerReason    string                       `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Run            string                       `json:"run,omitempty" jsonschema:"identity of the run that last measured the record"`
 	CandidateCount int                          `json:"candidateCount"`
 	Generated      int                          `json:"generated"`
 	Mutants        int                          `json:"mutants"`
@@ -1274,10 +1285,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	}
 	matched := make([]gomutant.Finding, 0, len(all))
 	for _, finding := range all {
-		if in.Label != "" && !containsLabel(finding.Labels, in.Label) {
-			continue
-		}
-		if in.Symbol != "" && finding.Symbol != in.Symbol {
+		if !(gomutant.RecordFilter{Label: in.Label, Symbol: in.Symbol, Run: in.Run}).Admits(finding) {
 			continue
 		}
 		matched = append(matched, finding)
@@ -1343,7 +1351,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 			if !in.Detail {
 				res.Summary = append(res.Summary, findingSummary{
 					Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
-					Layer: layer, Open: len(finding.Open()), Attested: len(finding.AttestedDispositions()),
+					Layer: layer, Run: finding.Run, Open: len(finding.Open()), Attested: len(finding.AttestedDispositions()),
 				})
 				continue
 			}
@@ -1351,7 +1359,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 			sort.Strings(labels)
 			res.Findings = append(res.Findings, inspectedFinding{
 				Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-				Layer: layer, LayerReason: layerReason,
+				Layer: layer, LayerReason: layerReason, Run: finding.Run,
 				CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 				Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 				Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
@@ -1492,7 +1500,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 		if err := ctx.Err(); err != nil {
 			return nil, explainOut{}, err
 		}
-		if in.Label != "" && !containsLabel(finding.Labels, in.Label) {
+		if !(gomutant.RecordFilter{Label: in.Label}).Admits(finding) {
 			continue
 		}
 		layer, layerReasons := store.LayerReasons(finding)
@@ -1542,15 +1550,6 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 		out.Promotion = append(out.Promotion, group)
 	}
 	return nil, out, nil
-}
-
-func containsLabel(labels []string, want string) bool {
-	for _, label := range labels {
-		if label == want {
-			return true
-		}
-	}
-	return false
 }
 
 type attestIn struct {

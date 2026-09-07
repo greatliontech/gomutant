@@ -198,13 +198,16 @@ func TestManualRecipeChecksGuardAdequacy(t *testing.T) {
 		}}},
 		Oracle: []string{"example.com/shaped/guard.TestEmptyRefused"}, OracleExplicit: true,
 		Labels: []string{"attacks:empty-input-guard"}}
-	findings, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute})
+	findings, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute, RunID: "shape-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	f := findings[0]
 	if f.Skipped != "" || f.Mutants != 1 || f.Killed != 1 {
 		t.Fatalf("guard recipe not killed: %+v", f)
+	}
+	if f.Run != "shape-one" {
+		t.Fatalf("shaped measurement run = %q, want the run's identity", f.Run)
 	}
 	if len(f.Labels) != 1 || f.Labels[0] != "attacks:empty-input-guard" {
 		t.Fatalf("recipe label lost: %+v", f.Labels)
@@ -218,21 +221,28 @@ func TestManualRecipeChecksGuardAdequacy(t *testing.T) {
 
 	// Wholesale serve on unchanged shape and oracle pins; a changed
 	// edit is a moved shape digest and re-measures (REQ-result-stale).
-	served, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute, Prior: findings})
+	served, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute, Prior: findings, RunID: "shape-two"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !served[0].Cached {
 		t.Fatalf("unchanged recipe did not serve: %+v", served[0])
 	}
+	// A shaped serve keeps the measuring run's identity (REQ-result-record).
+	if served[0].Run != "shape-one" {
+		t.Fatalf("shaped serve run = %q, want the measuring run's shape-one", served[0].Run)
+	}
 	moved := target
 	moved.Manual = &ManualSpec{File: "guard/guard.go", Edits: []ManualEdit{{Find: `if s == "" {`, Replace: `if len(s) > 1_000_000 {`}}}
-	remeasured, err := tree.Run(context.Background(), []Target{moved}, Options{OracleTimeout: 2 * time.Minute, Prior: findings})
+	remeasured, err := tree.Run(context.Background(), []Target{moved}, Options{OracleTimeout: 2 * time.Minute, Prior: findings, RunID: "shape-three"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if remeasured[0].Cached {
 		t.Fatal("a moved recipe served the prior finding")
+	}
+	if remeasured[0].Run != "shape-three" {
+		t.Fatalf("shaped re-measure run = %q, want shape-three", remeasured[0].Run)
 	}
 }
 

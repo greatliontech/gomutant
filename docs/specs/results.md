@@ -68,7 +68,13 @@ pin, where scheduling bounds reach verdicts through wall-clock or the
 recorded environment evidence instead
 (REQ-exec-oracle-parallelism) — carrying the target package's test-variant
 compartment ledger (the declaration-level record the killer-drift carve-out diffs
-at serve time), the capture commit and dirty provenance,
+at serve time), the capture commit and dirty provenance, the identity of
+the run that last measured any of its candidates (a fresh measure, a
+budget extension, or a serve that re-executed flagged or drifted candidates
+— never a wholly served record, which keeps the measuring run's; opaque,
+compared for equality only; audit beside the provenance and no reuse or
+attestation pin, so an inspection scopes to one campaign's measured set by
+it without re-deriving the set from a log),
 the mutant count, the kill count, each kill's candidate identity and killer
 (the killing oracle test's symbol, the timeout marker, or the package-failure
 marker — REQ-core-attributed-kills made durable; a record carries either
@@ -560,7 +566,9 @@ document without it could promote a member-anchored machine-local record. A subj
 never narrow reuse — an old consumer dropping the field changes no
 verdict — so the field rides the current version without a bump, the
 kill-attribution precedent; the recorded package-process discharges are
-the same audit class and ride the same way. The recorded dynamic-state
+the same audit class and ride the same way, as does the run identity a
+record carries (REQ-result-record) — an older consumer dropping it loses
+the campaign scoping of an inspection, never a verdict. The recorded dynamic-state
 STRATEGY is the opposite disposition: it is what stales a record across
 a derivation move, so an older consumer's tolerance would drop the pin
 and serve verdicts computed under semantics its engine does not
@@ -987,8 +995,11 @@ machine-readable JSON export (under the one structured-face flag name
 REQ-exec-run-status fixes) - like the document on disk - stays complete
 regardless of the human default (bounded protocol envelopes cap per their
 own contract). Filtering — by
-an opaque label, by state, or by symbol — changes only which records are
-rendered. The reason leads — it precedes the open survivors in
+an opaque label, by state, by symbol, or by run identity (the records a
+named campaign last measured, REQ-result-record) — changes only which
+records are rendered; every summary row names the record's run identity
+beside its counts when the record carries one, so the identities to scope
+by are discoverable from the default surface. The reason leads — it precedes the open survivors in
 every view — and is self-contained: a subject-caused reason names the
 responsible subject (`target:` or `oracle <symbol>:`), record-level causes
 (a detached symbol, a changed operator set or derived oracle set,

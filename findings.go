@@ -419,6 +419,14 @@ type Finding struct {
 	CompartmentLedger *CompartmentLedger `json:"compartmentLedger,omitempty"`
 	Commit            string             `json:"commit,omitempty"`
 	Dirty             bool               `json:"dirty"`
+	// Run is the identity of the run that last measured any candidate
+	// of the record — a fresh measure, a budget extension, or a serve
+	// that re-executed flagged or drifted candidates — never a wholly
+	// served record, which keeps the measuring run's identity. Opaque, compared for equality only: an inspection
+	// scopes to one campaign's measured set by it. Audit beside the
+	// commit provenance, no reuse or attestation pin, so it rides the
+	// current document version (REQ-result-record, REQ-result-export).
+	Run string `json:"run,omitempty"`
 	// StagedTree is the index tree identity a staged run measured
 	// (REQ-result-staged) - the tree the eventual commit carries when
 	// the staging lands as reviewed; empty for worktree runs.
@@ -628,6 +636,29 @@ var ErrVersionAhead = errors.New("a newer gomutant likely wrote it - if this rea
 // reader preserves its bytes - authored attestation reasoning lives
 // there - and serves nothing from it (REQ-result-tolerant).
 var ErrVersionBehind = errors.New("an older gomutant wrote it - this binary does not read that version")
+
+// RecordFilter selects the records an inspection renders by their
+// recorded facts — an opaque label, the mutated symbol, the run that
+// last measured the record; each empty field admits every record
+// (REQ-result-inspection). The judged state filter is applied after
+// inspection, not here.
+type RecordFilter struct {
+	Label, Symbol, Run string
+}
+
+// Admits reports whether f passes every set field of the filter.
+func (r RecordFilter) Admits(f Finding) bool {
+	if r.Label != "" && !slices.Contains(f.Labels, r.Label) {
+		return false
+	}
+	if r.Symbol != "" && f.Symbol != r.Symbol {
+		return false
+	}
+	if r.Run != "" && f.Run != r.Run {
+		return false
+	}
+	return true
+}
 
 // DocumentVersionError is the refusal a document outside the reader's
 // version range raises: it carries the version read, and unwraps to

@@ -81,6 +81,7 @@ oracleSet integer referencing oracleSets[].id.
 - `state` (mcp, cli) — show only findings in this judged state: current, stale, unverifiable, or detached (implies judge).
 - `judge` (mcp, cli) — re-derive each record's freshness state against the current tree — one pass over the records' shared subject views, seconds-class where it was minutes-class; a state filter or a tags/toolchain selection implies it; the default reports recorded facts with state 'recorded' and loads no tree.
 - `symbol` (mcp, cli) — show only the finding for this mutated symbol.
+- `run` (mcp, cli) — show only the records this run last measured: the identity a run names first (the CLI's first line, the MCP summary's `run`) and stamps on every record it measures; a served record keeps its measuring run's, so the filter answers "what did this campaign measure" without re-deriving the set from a log.
 - `detail` (mcp, cli) — full rows: operator tables, open survivors, attested dispositions, per-candidate unverifiable runtime evidence (candidateEvidence); the default is one bounded summary row per record.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection (implies judge).

@@ -24,6 +24,8 @@ type findingsOptions struct {
 	// errOut carries the human notes the JSON face must keep out of its
 	// document (the preserved legacy overlay line); nil discards them.
 	errOut io.Writer
+	// run scopes the roster to the records one campaign last measured.
+	run string
 }
 
 // judged reports whether any judged-question input was given: the
@@ -41,6 +43,7 @@ type findingView struct {
 	Reason         string                       `json:"reason,omitempty"`
 	Layer          string                       `json:"layer"`
 	LayerReason    string                       `json:"layerReason,omitempty"`
+	Run            string                       `json:"run,omitempty"`
 	CandidateCount int                          `json:"candidateCount"`
 	Generated      int                          `json:"generated"`
 	Mutants        int                          `json:"mutants"`
@@ -66,6 +69,7 @@ func newFindingsCommand() *cobra.Command {
 	f.StringVar(&o.state, "state", "", "show only findings in this judged state: current, stale, unverifiable, or detached (implies --judge)")
 	f.BoolVar(&o.judge, "judge", false, "re-derive each record's freshness state against the current tree - minutes-class on large documents; the default reports recorded facts with state 'recorded'")
 	f.StringVar(&o.symbol, "symbol", "", "show only the finding for this mutated symbol")
+	f.StringVar(&o.run, "run", "", "show only the records this run last measured (the identity a run prints first and stamps on every record it measures)")
 	f.BoolVar(&o.detail, "detail", false, "full rows - operator tables, survivors, dispositions, candidate evidence; the default is one summary row per record")
 	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); inspection judges under the same acceptances the run used (implies --judge)")
 	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable findings")
@@ -144,7 +148,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 			tree.SetDynamicStateVouches(identities...)
 		}
 	}
-	views, err := inspectFindings(ctx, tree, store, all, o.label, o.state, o.symbol, phase)
+	views, err := inspectFindings(ctx, tree, store, all, findingFilters{RecordFilter: gomutant.RecordFilter{Label: o.label, Symbol: o.symbol, Run: o.run}, state: o.state}, phase)
 	// The rows render through the reporter's epilogue when one runs:
 	// the cadence stops and joins before the first row.
 	stop()
@@ -210,7 +214,7 @@ func renderFindingSummaries(w io.Writer, views []findingView, judged bool) {
 		if view.Reason != "" {
 			fmt.Fprintf(w, "  (%s)", view.Reason)
 		}
-		fmt.Fprintln(w)
+		fmt.Fprintln(w, runSuffix(view.Run))
 	}
 	fmt.Fprintf(w, "%d repo-committable, %d machine-local; --detail for survivors and dispositions", repoCount, localOnly)
 	if !judged {
@@ -273,7 +277,16 @@ func renderFindingsJSON(w io.Writer, views []findingView) error {
 	return json.NewEncoder(w).Encode(views)
 }
 
-func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.Store, all []gomutant.Finding, label, state, symbol string, phase func(string)) ([]findingView, error) {
+// findingFilters selects the records an inspection renders: the
+// recorded-fact filter the library defines, plus the judged state
+// applied after inspection (REQ-result-inspection).
+type findingFilters struct {
+	gomutant.RecordFilter
+	state string
+}
+
+func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.Store, all []gomutant.Finding, filters findingFilters, phase func(string)) ([]findingView, error) {
+	state := filters.state
 	if phase == nil {
 		phase = func(string) {}
 	}
@@ -282,10 +295,7 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if label != "" && !contains(finding.Labels, label) {
-			continue
-		}
-		if symbol != "" && finding.Symbol != symbol {
+		if !filters.Admits(finding) {
 			continue
 		}
 		selected = append(selected, finding)
@@ -318,7 +328,7 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 		sort.Strings(labels)
 		views = append(views, findingView{
 			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-			Layer: layer, LayerReason: layerReason,
+			Layer: layer, LayerReason: layerReason, Run: finding.Run,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
@@ -328,13 +338,4 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i].Symbol < views[j].Symbol })
 	return views, nil
-}
-
-func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

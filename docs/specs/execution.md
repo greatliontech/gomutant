@@ -834,6 +834,16 @@ machine-local, with the disqualifying reason (REQ-result-layers in
 [results.md](results.md)) — the CLI as a `machine-local:` sub-row, the MCP
 face as `layer`/`layerReason` row fields — so a run whose record the store
 routes to the local overlay never reads as a healthy repo-document write.
+Every campaign run — the run verb, on both faces — carries an identity
+(REQ-result-record's run identity): each face names it before the first
+decision — the CLI as its first line, the structured stream as a note
+event, refused and plan-only runs included — the structured summaries
+(the CLI's `--json` summary event, the MCP summary) carry it, and every
+result row carries the identity of the run that last measured any
+candidate of the record: the run's own on a measured row and on a served
+row whose flagged or drifted candidates this run re-executed, the
+measuring run's on a wholly served row — so a campaign's measured set is
+recoverable from its output without a log.
 Open survivors remain
 advisory and do not change successful exit semantics.
 

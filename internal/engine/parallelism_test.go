@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,25 +44,31 @@ func TestOracleCPUEnv(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		env  []string
-		want string // appended entry, "" = untouched
+		want []string // the resulting env, nil = untouched
 	}{
-		{name: "absent", env: []string{"A=1"}, want: "GOMAXPROCS=4"},
-		{name: "narrower ambient kept", env: []string{"GOMAXPROCS=2"}, want: ""},
-		{name: "equal ambient kept", env: []string{"GOMAXPROCS=4"}, want: ""},
-		{name: "wider ambient narrowed", env: []string{"GOMAXPROCS=64"}, want: "GOMAXPROCS=4"},
-		{name: "malformed ambient narrowed", env: []string{"GOMAXPROCS=lots"}, want: "GOMAXPROCS=4"},
-		{name: "nonpositive ambient narrowed", env: []string{"GOMAXPROCS=0"}, want: "GOMAXPROCS=4"},
-		{name: "last duplicate decides", env: []string{"GOMAXPROCS=64", "GOMAXPROCS=2"}, want: ""},
+		{name: "absent", env: []string{"A=1"}, want: []string{"A=1", "GOMAXPROCS=4"}},
+		{name: "narrower ambient kept", env: []string{"GOMAXPROCS=2"}},
+		{name: "equal ambient kept", env: []string{"GOMAXPROCS=4"}},
+		{name: "wider ambient replaced", env: []string{"A=1", "GOMAXPROCS=64", "B=2"}, want: []string{"A=1", "B=2", "GOMAXPROCS=4"}},
+		{name: "malformed ambient replaced", env: []string{"GOMAXPROCS=lots"}, want: []string{"GOMAXPROCS=4"}},
+		{name: "nonpositive ambient replaced", env: []string{"GOMAXPROCS=0"}, want: []string{"GOMAXPROCS=4"}},
+		{name: "wider duplicates collapse to one", env: []string{"GOMAXPROCS=2", "GOMAXPROCS=64"}, want: []string{"GOMAXPROCS=4"}},
+		{name: "narrower duplicates collapse to their effective value", env: []string{"A=1", "GOMAXPROCS=64", "GOMAXPROCS=2"}, want: []string{"A=1", "GOMAXPROCS=2"}},
 	} {
 		got := oracleCPUEnv(test.env, 4)
-		if test.want == "" {
-			if len(got) != len(test.env) {
+		if test.want == nil {
+			if !slices.Equal(got, test.env) {
 				t.Errorf("%s: env touched: %v", test.name, got)
 			}
 			continue
 		}
-		if len(got) != len(test.env)+1 || got[len(got)-1] != test.want {
-			t.Errorf("%s: env = %v, want %s appended", test.name, got, test.want)
+		if !slices.Equal(got, test.want) {
+			t.Errorf("%s: env = %v, want %v", test.name, got, test.want)
+		}
+		// The producer env gofresh records refuses a duplicate key: a
+		// narrowed environment carries the cap exactly once.
+		if n := countKey(got, "GOMAXPROCS"); n != 1 {
+			t.Errorf("%s: GOMAXPROCS appears %d times: %v", test.name, n, got)
 		}
 	}
 	// A lowercase key is a different variable on Unix and must not
@@ -75,6 +82,16 @@ func TestOracleCPUEnv(t *testing.T) {
 	} else if len(lower) != 2 || lower[1] != "GOMAXPROCS=4" {
 		t.Errorf("unix lowercase key suppressed the cap: %v", lower)
 	}
+}
+
+func countKey(env []string, key string) int {
+	n := 0
+	for _, entry := range env {
+		if k, _, _ := strings.Cut(entry, "="); k == key {
+			n++
+		}
+	}
+	return n
 }
 
 // On Windows the ambient lookup folds key case - a lowercase

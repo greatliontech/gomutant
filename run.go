@@ -2,6 +2,8 @@ package gomutant
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -145,10 +147,37 @@ func lockCallbacks(opts Options) Options {
 	return opts
 }
 
+// NewRunID mints a run identity: 16 hex characters of entropy, opaque
+// and compared for equality only (Finding.Run).
+func NewRunID() string {
+	var b [8]byte
+	rand.Read(b[:]) // never fails: the runtime aborts the process if the OS entropy source does
+	return hex.EncodeToString(b[:])
+}
+
+// validateRunID refuses a caller-supplied identity the persisted document
+// and the line-oriented faces cannot carry verbatim: 1-64 bytes of
+// letters, digits, `.`, `_`, `-`.
+func validateRunID(id string) error {
+	if len(id) == 0 || len(id) > 64 {
+		return fmt.Errorf("gomutant: run identity %q refused: want 1-64 bytes", id)
+	}
+	for _, c := range []byte(id) {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+			return fmt.Errorf("gomutant: run identity %q refused: want letters, digits, '.', '_', '-'", id)
+		}
+	}
+	return nil
+}
+
 // Options bound a run.
 type Options struct {
 	// Budget caps selected candidates per symbol; 0 means all (REQ-mut-budget).
 	Budget int
+	// RunID is the run's identity, stamped on every record the run
+	// measures (Finding.Run); empty mints one (NewRunID). A face mints
+	// its own so it can name the run before the first decision.
+	RunID string
 	// OracleTimeout bounds each oracle process as a uniform explicit
 	// pin; 0 derives each oracle group's budget from that group's own
 	// measured baseline (a multiple with a 60s floor), the finding
@@ -538,16 +567,19 @@ func propertyOracleNote(pkg, runtime string) (PropertyOracleNote, bool) {
 
 // RunSummary is the aggregate final disposition of one selected target set.
 type RunSummary struct {
-	Targets   int `json:"targets"`
-	Measured  int `json:"measured"`
-	Cached    int `json:"cached"`
-	Skipped   int `json:"skipped"`
-	Generated int `json:"generated"`
-	Discarded int `json:"discarded"`
-	Killed    int `json:"killed"`
-	Survived  int `json:"survived"`
-	Attested  int `json:"attested"`
-	Open      int `json:"open"`
+	// Run is the run's identity (Options.RunID), the value every record
+	// this run measured carries; a face sets it beside the totals.
+	Run       string `json:"run,omitempty"`
+	Targets   int    `json:"targets"`
+	Measured  int    `json:"measured"`
+	Cached    int    `json:"cached"`
+	Skipped   int    `json:"skipped"`
+	Generated int    `json:"generated"`
+	Discarded int    `json:"discarded"`
+	Killed    int    `json:"killed"`
+	Survived  int    `json:"survived"`
+	Attested  int    `json:"attested"`
+	Open      int    `json:"open"`
 	// DarkPackages names packages whose ENTIRE selected target set
 	// skipped - the blast radius a scattered skip count hides: a dark
 	// package carries zero campaign evidence and reads as a coverage
@@ -1667,6 +1699,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 	// runOptions.
 	opts := runOptions{Options: caller}
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if opts.RunID == "" {
+		opts.RunID = NewRunID()
+	} else if err := validateRunID(opts.RunID); err != nil {
 		return nil, err
 	}
 	if err := validateRunBounds(opts.Budget, opts.OracleTimeout); err != nil {
@@ -3813,6 +3850,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
 					continue
 				}
+				spliced.Run = opts.RunID
 				// Evidence beats attestation on the flagged re-execution
 				// exactly as on a fresh measure: an attested flagged
 				// candidate the re-execution killed contradicts its
@@ -3856,6 +3894,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
 					continue
 				}
+				spliced.Run = opts.RunID
 				// With any oracle moved or the set grown, every surviving
 				// candidate's verdict rests on the full current oracle —
 				// recorded passes standing, added and moved re-measured —
@@ -3933,6 +3972,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
 					continue
 				}
+				extended.Run = opts.RunID
 				if err := commitAndAttribute(ctx, extended, w); err != nil {
 					return err
 				}
@@ -4013,6 +4053,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 				refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
 				continue
 			}
+			f.Run = opts.RunID
 			stampExemptions(f, opts.Exemptions)
 			// Fresh path: the memory pin IS the entry-resolved pin, so
 			// its raise is vacuous by construction, while the budget

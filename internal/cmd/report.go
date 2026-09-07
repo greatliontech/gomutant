@@ -471,6 +471,9 @@ type resultRowPayload struct {
 	Operators   []gomutant.OperatorSummary `json:"operators,omitempty"`
 	Layer       string                     `json:"layer,omitempty"`
 	LayerReason string                     `json:"layerReason,omitempty"`
+	// Run is the identity of the run that last measured the record:
+	// this run's on a measured row, the measuring run's on a served one.
+	Run string `json:"run,omitempty"`
 }
 
 type survivorRowPayload struct {
@@ -485,6 +488,7 @@ func resultRow(f gomutant.Finding, layer, layerReason string) resultRowPayload {
 		Generated: f.Generated, Candidates: f.CandidateCount, Mutants: f.Mutants,
 		Killed: f.Killed, Discarded: f.Discarded,
 		Operators: f.Operators, Layer: layer, LayerReason: layerReason,
+		Run: f.Run,
 	}
 	for _, s := range f.Open() {
 		row.Open = append(row.Open, survivorRowPayload{Position: s.Position, Operator: s.Operator, Execution: s.Execution})

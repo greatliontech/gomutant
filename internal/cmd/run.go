@@ -31,6 +31,8 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 }
 
 type runOptions struct {
+	// runID overrides the minted run identity; tests pin output with it.
+	runID                                    string
 	dir, changed, targetsFile, findingsFile  string
 	packages, symbols                        []string
 	tags                                     []string
@@ -100,6 +102,16 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	rep := newRunReporter(out, o.jsonl, 0)
 	defer rep.stop()
+	// The run's identity leads: every record this run measures carries
+	// it, and an inspection scopes to the campaign by it
+	// (REQ-exec-run-status).
+	runID := o.runID
+	if runID == "" {
+		runID = gomutant.NewRunID()
+	}
+	if err := rep.flushProse(renderRunIdentity(runID)); err != nil {
+		return err
+	}
 	// The cadence starts before the load: a long typed load is a
 	// stretch the progress line must name, not a silence.
 	rep.phase("loading")
@@ -200,7 +212,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			terminal.Reset()
 			rep.emit("note", map[string]string{"text": "no targets"})
 			if !o.plan {
-				rep.emit("summary", gomutant.RunSummary{})
+				rep.emit("summary", gomutant.RunSummary{Run: runID})
 			}
 		} else {
 			fmt.Fprintln(&terminal, "no targets")
@@ -284,6 +296,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		defer soft.disarm()
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
+		RunID:    runID,
 		SoftStop: softStop,
 		Budget:   o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
 		OwnWrites: gomutant.RunOwnWrites(docPath),
@@ -492,7 +505,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 			// identical row earns nothing (REQ-exec-run-status's
 			// dedup arm).
 		case f.Cached:
-			fmt.Fprintf(&terminal, "cached    %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
+			// A served row names the run that last measured any of its
+			// candidates: the measuring run's on a wholly served record,
+			// this run's (the head line's) when the serve re-executed
+			// flagged or drifted candidates (REQ-exec-run-status).
+			fmt.Fprintf(&terminal, "cached    %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open%s\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()), runSuffix(f.Run))
 		default:
 			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
 		}
@@ -514,10 +531,12 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// A plan renders its own tallies; the zeroed run summary would
 	// claim a measurement that never happened (REQ-exec-plan).
 	if !o.plan {
+		summary := gomutant.SummarizeRun(rendered)
+		summary.Run = runID
 		if o.jsonl {
-			rep.emit("summary", gomutant.SummarizeRun(rendered))
+			rep.emit("summary", summary)
 		} else {
-			renderRunSummary(&terminal, gomutant.SummarizeRun(rendered))
+			renderRunSummary(&terminal, summary)
 		}
 		// The narrowed-survivor audit's measured rate rides the run
 		// summary (REQ-exec-oracle-run's narrowed-survivor clause).
@@ -760,6 +779,21 @@ func skipClasses(findings []gomutant.Finding) (string, int) {
 func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
 	fmt.Fprintf(w, "summary   %d targets: %d measured, %d cached, %d skipped; %d generated, %d killed, %d survived, %d discarded; %d attested, %d open\n",
 		summary.Targets, summary.Measured, summary.Cached, summary.Skipped, summary.Generated, summary.Killed, summary.Survived, summary.Discarded, summary.Attested, summary.Open)
+}
+
+// renderRunIdentity is the run's first human line, the identity every
+// record it measures carries (REQ-exec-run-status).
+func renderRunIdentity(runID string) string {
+	return "run       " + runID + "\n"
+}
+
+// runSuffix renders a record's run identity as a row suffix; empty for
+// a record measured before runs carried one.
+func runSuffix(run string) string {
+	if run == "" {
+		return ""
+	}
+	return "  [run " + run + "]"
 }
 
 // renderAnalysis prints a payload-bearing analysis event: one line with

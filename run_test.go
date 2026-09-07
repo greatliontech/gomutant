@@ -2089,6 +2089,7 @@ func TestRunPanickedMutantIsCandidateLocalAndServes(t *testing.T) {
 	var preparation []PreparationEvent
 	second, err := tr.Run(context.Background(), []Target{target}, Options{
 		Prior:    prior,
+		RunID:    "reexecute",
 		Decision: func(decision RunDecision) { decisions = append(decisions, decision) },
 		Progress: func(event PreparationEvent) { preparation = append(preparation, event) },
 	})
@@ -2100,6 +2101,12 @@ func TestRunPanickedMutantIsCandidateLocalAndServes(t *testing.T) {
 		Candidates: len(f.CandidateEvidence)}
 	if len(decisions) != 1 || decisions[0] != want {
 		t.Fatalf("serve decision = %+v, want %+v (exactly the flagged candidates re-executed)", decisions, want)
+	}
+	// The serve re-executed candidates: the record names this run as
+	// its last measuring run even though the decision is cached
+	// (REQ-result-record).
+	if second[0].Run != "reexecute" {
+		t.Fatalf("flagged re-execution serve run = %q, want reexecute", second[0].Run)
 	}
 	probed := false
 	for _, event := range preparation {

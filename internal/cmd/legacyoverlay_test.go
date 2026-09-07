@@ -74,8 +74,11 @@ func TestRunCommandNamesPreservedLegacyOverlays(t *testing.T) {
 	if err := runCommand(context.Background(), runOptions{dir: dir, targetsFile: filepath.Join(dir, "empty.json"), findingsFile: docPath, output: &human}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(human.String(), want) {
-		t.Fatalf("human run face did not lead with the legacy line: %q", human.String())
+	// The run's identity leads; the legacy line follows it and precedes
+	// the first preparation event.
+	head, rest, ok := strings.Cut(human.String(), "\n")
+	if !ok || !strings.HasPrefix(head, "run       ") || !strings.HasPrefix(rest, want) {
+		t.Fatalf("human run face did not name the legacy entries right after the run line: %q", human.String())
 	}
 	var stream bytes.Buffer
 	if err := runCommand(context.Background(), runOptions{dir: dir, targetsFile: filepath.Join(dir, "empty.json"), findingsFile: docPath, jsonl: true, output: &stream}); err != nil {

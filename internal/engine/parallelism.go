@@ -32,7 +32,7 @@ func oracleEnv(env []string, bounds OracleBounds) []string {
 	return oracleCPUEnv(oracleMemoryEnv(env, bounds.MemoryBytes), bounds.Width)
 }
 
-// oracleCPUEnv appends the inner-parallelism cap to an oracle
+// oracleCPUEnv sets the inner-parallelism cap on an oracle
 // environment as GOMAXPROCS, which the go tool, its compile and link
 // workers, and the test binary (its t.Parallel width included) all
 // honor - the go tool's package-build -p defaults to its own
@@ -41,21 +41,47 @@ func oracleEnv(env []string, bounds OracleBounds) []string {
 // operator's narrower ambient GOMAXPROCS or GOFLAGS bound, which the
 // env default never does. The cap only ever narrows: an environment
 // already carrying a narrower GOMAXPROCS keeps it - overriding would
-// raise the operator's own bound (REQ-exec-oracle-parallelism).
+// raise the operator's own bound (REQ-exec-oracle-parallelism). When
+// it narrows, the cap REPLACES every ambient GOMAXPROCS entry rather
+// than appending a winning duplicate: the environment is also the
+// producer env gofresh records as evidence, and gofresh refuses a
+// duplicate key, so a run under an exported wider GOMAXPROCS (an
+// operator's shell, or a gomutant oracle measuring a gomutant run)
+// would otherwise skip every target as evidence-unavailable. An
+// ambient narrower value is kept — but as ONE entry: an operator's
+// duplicated narrower entries collapse to their effective (last)
+// value, so the recorded env carries the key once whichever side wins.
 func oracleCPUEnv(env []string, width int) []string {
 	if width <= 0 {
 		return env
 	}
+	effective := width
 	if ambient, ok := envGOMAXPROCS(env); ok && ambient <= width {
+		effective = ambient
+	}
+	foldCase := runtime.GOOS == "windows"
+	out := make([]string, 0, len(env)+1)
+	seen := 0
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if key == "GOMAXPROCS" || foldCase && strings.EqualFold(key, "GOMAXPROCS") {
+			seen++
+			continue
+		}
+		out = append(out, entry)
+	}
+	if seen == 1 && effective != width {
+		// One well-formed narrower entry: the env is already in its
+		// one-key form; hand it back untouched.
 		return env
 	}
-	return append(append([]string(nil), env...), fmt.Sprintf("GOMAXPROCS=%d", width))
+	return append(out, fmt.Sprintf("GOMAXPROCS=%d", effective))
 }
 
 // envGOMAXPROCS reports the environment's effective GOMAXPROCS - the
 // last entry, when well-formed and positive, matching os/exec's
 // duplicate-key semantics. A malformed last entry reports absent, so
-// the cap's append (which wins the duplicate) narrows it.
+// the cap replaces it.
 func envGOMAXPROCS(env []string) (int, bool) {
 	return envGOMAXPROCSFold(env, runtime.GOOS == "windows")
 }
