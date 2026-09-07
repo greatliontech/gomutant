@@ -542,6 +542,8 @@ type runOut struct {
 	Decisions                 []gomutant.RunDecision      `json:"decisions,omitempty" jsonschema:"absent when a progress token streamed the decisions; decisionsCount still totals them"`
 	DecisionsCount            int                         `json:"decisionsCount"`
 	Note                      string                      `json:"note,omitempty" jsonschema:"set when the run measured nothing (names the input that selected zero targets and the next step) or when a whole-tree reconcile dropped records whose targets left the code"`
+	LegacyOverlays            []gomutant.LegacyEntry      `json:"legacyOverlays,omitempty" jsonschema:"machine-local overlay entries preserved unread because their document version predates this binary's range: an older gomutant's records, attested dispositions included, never served and never deleted; capped, the overlay directory holds the full set"`
+	OmittedLegacyOverlays     int                         `json:"omittedLegacyOverlays,omitempty" jsonschema:"legacy overlay rows beyond the response cap - counted, never silent"`
 }
 
 // envelope is the response envelope's one bounding policy
@@ -768,6 +770,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	targets, wholeTree = sel.targets, sel.wholeTree
 	out.Residue = sel.residue
 	prior := prepared.Prior
+	out.LegacyOverlays, out.OmittedLegacyOverlays = capRows(prepared.Store.LegacyEntries())
 	if out.Residue, err = tree.OracleClosureSignpostContext(ctx, out.Residue, prior, targets, func(stage string) {
 		if notify != nil {
 			notify(stage)
@@ -1232,6 +1235,8 @@ type findingsOut struct {
 	Note                         string                          `json:"note,omitempty" jsonschema:"set when there are no rows: says whether the document is empty or the filters matched nothing, and the next step"`
 	EphemeralAttestations        []gomutant.EphemeralAttestation `json:"ephemeralAttestations,omitempty" jsonschema:"committed ephemeral-equivalence attestations beside the document - judged-equivalent manual probes with their edit digests and reasoning; capped, the record on disk carries the full set"`
 	OmittedEphemeralAttestations int                             `json:"omittedEphemeralAttestations,omitempty" jsonschema:"attestation rows beyond the response cap - counted, never silent"`
+	LegacyOverlays               []gomutant.LegacyEntry          `json:"legacyOverlays,omitempty" jsonschema:"machine-local overlay entries preserved unread because their document version predates this binary's range: an older gomutant's records, attested dispositions included, never served and never deleted; capped, the overlay directory holds the full set"`
+	OmittedLegacyOverlays        int                             `json:"omittedLegacyOverlays,omitempty" jsonschema:"legacy overlay rows beyond the response cap - counted, never silent"`
 }
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
@@ -1256,6 +1261,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
+	out.LegacyOverlays, out.OmittedLegacyOverlays = capRows(store.LegacyEntries())
 	if err := ctx.Err(); err != nil {
 		return nil, out, err
 	}

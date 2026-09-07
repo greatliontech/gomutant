@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -652,6 +653,411 @@ func TestOverlayVersionAheadRefusesInsteadOfDeleting(t *testing.T) {
 	}
 	if _, statErr := os.Stat(garbage); !os.IsNotExist(statErr) {
 		t.Fatal("garbage overlay entry survived the sweep")
+	}
+}
+
+// An overlay entry whose document version lies outside the reader's
+// range — behind it or ahead of it — is a well-formed record of another
+// binary, never corruption: a read leaves its bytes intact and serves
+// nothing from it. Behind, the read succeeds and names the entry;
+// ahead, it refuses with the restart signal (REQ-result-tolerant). The
+// version boundary precedes any record parse, so the attested and bare
+// shapes exercise one path each side; the attested shape is the payload
+// the preservation exists for, pinned byte-identical over two reads.
+func TestOverlayUnreadableVersionsArePreservedByteIdentical(t *testing.T) {
+	attested := `{"version": %d, "findings": [{"symbol": "p.Legacy", "operatorSet": "go/1", "mutants": 1, "killed": 0,
+		"survivors": [{"position": "a.go:1:1", "operator": "x"}],
+		"attested": [{"position": "a.go:1:1", "operator": "x", "reason": "diagnostic text only"}]}]}`
+	bare := `{"version": %d, "findings": [{"symbol": "p.Legacy"}]}`
+	for _, tc := range []struct {
+		name    string
+		version int
+		shape   string
+		ahead   bool
+	}{
+		{"behind-attested", 2, attested, false},
+		{"behind-bare", OldestReadableDocumentVersion - 1, bare, false},
+		{"ahead-attested", DocumentVersion + 1, attested, true},
+		{"ahead-bare", 99, bare, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			dir := t.TempDir()
+			store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := store.entryPath("p.Legacy")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			original := []byte(fmt.Sprintf(tc.shape, tc.version))
+			if err := os.WriteFile(path, original, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for pass := 0; pass < 2; pass++ {
+				findings, err := store.Load(context.Background())
+				if tc.ahead {
+					if !errors.Is(err, ErrVersionAhead) {
+						t.Fatalf("pass %d: version-ahead read = %v, want the restart-signal refusal", pass, err)
+					}
+				} else {
+					if err != nil {
+						t.Fatalf("pass %d: version-behind read failed: %v", pass, err)
+					}
+					if len(findings) != 0 {
+						t.Fatalf("pass %d: version-behind entry served: %+v", pass, findings)
+					}
+					legacy := store.LegacyEntries()
+					if len(legacy) != 1 || legacy[0].Path != path || legacy[0].Version != tc.version {
+						t.Fatalf("pass %d: legacy entries = %+v, want %s at version %d", pass, legacy, path, tc.version)
+					}
+				}
+				after, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("pass %d: entry destroyed: %v", pass, err)
+				}
+				if !bytes.Equal(after, original) {
+					t.Fatalf("pass %d: entry bytes changed", pass)
+				}
+			}
+		})
+	}
+}
+
+// A preserved legacy entry does not keep the sweep from genuine
+// garbage beside it, and a read after the entry is removed names
+// nothing (REQ-result-layers).
+func TestOverlayLegacyEntryCoexistsWithTheGarbageSweep(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := store.entryPath("p.Legacy")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`{"version": 2, "findings": [{"symbol": "p.Legacy"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	garbage := store.entryPath("p.Garbage")
+	if err := os.WriteFile(garbage, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(garbage); !os.IsNotExist(statErr) {
+		t.Fatal("garbage overlay entry survived the sweep beside a legacy entry")
+	}
+	if _, statErr := os.Stat(legacy); statErr != nil {
+		t.Fatalf("legacy entry swept with the garbage: %v", statErr)
+	}
+	if err := os.Remove(legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Load(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.LegacyEntries(); len(got) != 0 {
+		t.Fatalf("legacy entries after removal = %+v, want none", got)
+	}
+}
+
+// A write never destroys a legacy entry: a current machine-local
+// record for the symbol whose entry path the legacy entry holds moves
+// it aside under a name a later read still preserves and names, and a
+// second legacy generation at the same path survives beside the first
+// (REQ-result-layers).
+func TestStoreUpdateSidelinesLegacyEntriesInsteadOfOverwriting(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	path := store.entryPath("p.Legacy")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte(`{"version": 2, "findings": [{"symbol": "p.Legacy", "attested": [{"position": "a.go:1:1", "operator": "x", "reason": "authored"}]}]}`)
+	if err := os.WriteFile(path, legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := storeFinding("p.Legacy", func(f *Finding) { f.Dirty = true })
+	install := func() {
+		t.Helper()
+		if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install()
+	sidelined := strings.TrimSuffix(path, ".json") + ".legacy-v2.json"
+	if got, err := os.ReadFile(sidelined); err != nil || !bytes.Equal(got, legacy) {
+		t.Fatalf("legacy entry not sidelined byte-identical: %v", err)
+	}
+	// The exported answer follows the move before any further read.
+	if got := store.LegacyEntries(); len(got) != 1 || got[0].Path != sidelined {
+		t.Fatalf("legacy entries after the sideline = %+v, want the sidelined path", got)
+	}
+	merged, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged) != 1 || merged[0].Symbol != "p.Legacy" || !merged[0].Dirty {
+		t.Fatalf("current record not served after the sideline: %+v", merged)
+	}
+	if got := store.LegacyEntries(); len(got) != 1 || got[0].Path != sidelined || got[0].Version != 2 {
+		t.Fatalf("sidelined entry not named: %+v", got)
+	}
+	// A second legacy generation lands at the canonical path (an older
+	// binary measuring the symbol again); the next current write keeps
+	// both.
+	if err := os.WriteFile(path, legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local.BodyHash = "h2"
+	install()
+	second := strings.TrimSuffix(path, ".json") + ".legacy-v2-2.json"
+	for _, p := range []string{sidelined, second} {
+		if got, err := os.ReadFile(p); err != nil || !bytes.Equal(got, legacy) {
+			t.Fatalf("legacy generation %s lost: %v", p, err)
+		}
+	}
+	if got := store.LegacyEntries(); len(got) != 2 {
+		t.Fatalf("legacy entries after two generations = %+v, want both", got)
+	}
+}
+
+// The overlay is shared by every document of the module and the
+// legacy view is a read-time snapshot: when another store has already
+// sidelined the legacy entry and installed a current record at the
+// path, the content-blind rename would park that current record under
+// a legacy name a later read serves. The sideline re-judges the
+// content first and leaves a file that is no longer the legacy
+// document alone (REQ-result-layers).
+func TestStoreSidelineSkipsAnEntryReplacedSinceTheRead(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	path := store.entryPath("p.Legacy")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"version": 2, "findings": [{"symbol": "p.Legacy"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := storeFinding("p.Legacy", func(f *Finding) { f.Dirty = true; f.BodyHash = "other" })
+	current, _, err := persistRecord(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.hooks.beforeSideline = func(p string) {
+		// The interleaved store's install landed between this store's
+		// read and its write.
+		if err := os.WriteFile(p, current, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mine := storeFinding("p.Legacy", func(f *Finding) { f.Dirty = true })
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{mine}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".legacy-") {
+			t.Fatalf("a current record was parked under a legacy name: %s", e.Name())
+		}
+	}
+	merged, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged) != 1 || merged[0].BodyHash != mine.BodyHash {
+		t.Fatalf("merged view after the interleaving = %+v, want this store's record alone", merged)
+	}
+	if got := store.LegacyEntries(); len(got) != 0 {
+		t.Fatalf("legacy entries after the interleaving = %+v, want none", got)
+	}
+}
+
+// A legacy document of a DIFFERENT older version that replaced the one
+// the read saw is preserved just the same, under the content's version;
+// a file that vanished lets the install proceed; a file grown past the
+// ceiling is left for the read path's eviction (REQ-result-layers).
+func TestStoreSidelineFollowsTheContentSinceTheRead(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		replace   func(t *testing.T, path string)
+		sidelined string // suffix of the expected sidelined file, "" for none
+	}{
+		{"other-legacy-version", func(t *testing.T, path string) {
+			if err := os.WriteFile(path, []byte(`{"version": 3, "findings": [{"symbol": "p.Legacy", "attested": [{"position": "b.go:1:1", "operator": "y", "reason": "v3 authored"}]}]}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, ".legacy-v3.json"},
+		{"vanished", func(t *testing.T, path string) {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}, ""},
+		{"over-ceiling", func(t *testing.T, path string) {
+			// A valid version-behind document grown past the ceiling:
+			// judged by content it would be sidelined, so the outcome
+			// pins that size is judged first.
+			head := []byte(`{"version": 2, "findings": [{"symbol": "p.Legacy", "pad": "`)
+			tail := []byte(`"}]}`)
+			pad := bytes.Repeat([]byte("x"), overlayEntryCeiling+1-len(head)-len(tail))
+			if err := os.WriteFile(path, append(append(head, pad...), tail...), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			dir := t.TempDir()
+			store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			path := store.entryPath("p.Legacy")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(`{"version": 2, "findings": [{"symbol": "p.Legacy"}]}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var replaced []byte
+			store.hooks.beforeSideline = func(p string) {
+				tc.replace(t, p)
+				replaced, _ = os.ReadFile(p)
+			}
+			mine := storeFinding("p.Legacy", func(f *Finding) { f.Dirty = true })
+			if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{mine}, nil }); err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(filepath.Dir(path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sidelined []string
+			for _, e := range entries {
+				if strings.Contains(e.Name(), ".legacy-") {
+					sidelined = append(sidelined, e.Name())
+				}
+			}
+			if tc.sidelined == "" {
+				if len(sidelined) != 0 {
+					t.Fatalf("sidelined %v, want nothing", sidelined)
+				}
+			} else {
+				want := strings.TrimSuffix(filepath.Base(path), ".json") + tc.sidelined
+				if len(sidelined) != 1 || sidelined[0] != want {
+					t.Fatalf("sidelined %v, want %s", sidelined, want)
+				}
+				if got, err := os.ReadFile(filepath.Join(filepath.Dir(path), want)); err != nil || !bytes.Equal(got, replaced) {
+					t.Fatalf("sidelined bytes are not the replacing document: %v", err)
+				}
+				if got := store.LegacyEntries(); len(got) != 1 || got[0].Version != 3 {
+					t.Fatalf("legacy entries = %+v, want the content's version 3", got)
+				}
+			}
+			merged, err := store.Load(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(merged) != 1 || merged[0].BodyHash != mine.BodyHash {
+				t.Fatalf("merged view = %+v, want this store's record alone", merged)
+			}
+		})
+	}
+}
+
+// A sidelined entry is preserved and never served by its NAME, whatever
+// it holds: a current record parked under a legacy name inside the
+// sideline's check-then-act window costs one lost measurement, never a
+// served duplicate row (REQ-result-layers).
+func TestOverlaySidelinedNamesAreNeverServed(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	path := store.entryPath("p.Parked")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := persistRecord(storeFinding("p.Parked", func(f *Finding) { f.Dirty = true }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parked := strings.TrimSuffix(path, ".json") + ".legacy-v2-2.json"
+	if err := os.WriteFile(parked, current, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged) != 0 {
+		t.Fatalf("a parked current record was served: %+v", merged)
+	}
+	if got := store.LegacyEntries(); len(got) != 1 || got[0].Path != parked || got[0].Version != 2 {
+		t.Fatalf("legacy entries = %+v, want the parked file at version 2", got)
+	}
+	if after, err := os.ReadFile(parked); err != nil || !bytes.Equal(after, current) {
+		t.Fatalf("parked file not preserved: %v", err)
+	}
+	for _, name := range []string{"x.legacy-v.json", "x.legacy-vabc.json", "x.legacy-v01.json", "x.legacy-v2.txt"} {
+		if _, ok := sidelinedVersion(name); ok {
+			t.Fatalf("%s read as a sidelined name", name)
+		}
+	}
+}
+
+// Pruning a symbol whose repo row is dropped never removes a legacy
+// entry at that symbol's entry path: the legacy file is not the record
+// being pruned (REQ-result-layers).
+func TestStoreUpdatePruneLeavesLegacyEntries(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.Legacy", nil)}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	path := store.entryPath("p.Legacy")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte(`{"version": 2, "findings": [{"symbol": "p.Legacy"}]}`)
+	if err := os.WriteFile(path, legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, legacy) {
+		t.Fatalf("legacy entry pruned with its symbol: %v", err)
+	}
+	if merged, err := store.Load(ctx); err != nil || len(merged) != 0 {
+		t.Fatalf("pruned symbol still served: %+v, %v", merged, err)
 	}
 }
 

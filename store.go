@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,12 @@ type Store struct {
 	// costs a re-measure, never a wrong verdict.
 	mu    sync.Mutex
 	cache map[string]overlayCacheEntry
+	// legacy lists the overlay entries the last read preserved unread:
+	// well-formed documents of a version below the reader's range. They
+	// are records, not cache — an older binary's attested dispositions
+	// live there — so a read names them and never sweeps them
+	// (REQ-result-tolerant).
+	legacy []LegacyEntry
 	// judged memoizes each symbol's committability by the persisted
 	// form of the record it was judged for: a commit re-judges only
 	// the records it changed — the portable-line walk parses every
@@ -86,6 +93,11 @@ type storeHooks struct {
 	walk          func(symbol string)
 	documentParse func()
 	recordParse   func(symbol string)
+	// beforeSideline runs after a sideline's target path is chosen and
+	// before the entry's content is re-checked — the seam for the
+	// shared-overlay interleaving in which another store replaced the
+	// legacy file between this store's read and its write.
+	beforeSideline func(path string)
 }
 
 // documentCache is the repo document's parse with the hash of the
@@ -276,6 +288,7 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 	defer s.mu.Unlock()
 	retained := make(map[string]bool, len(entries))
 	var out []Finding
+	s.legacy = nil
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -299,6 +312,18 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 			_ = os.Remove(path)
 			continue
 		}
+		// A sidelined legacy entry is preserved and never served by its
+		// NAME, whatever its content: the sideline's rename is
+		// check-then-act over a shared directory, so a current record
+		// another store installed inside that window could be parked
+		// under the name — served, it would be a duplicate row for its
+		// symbol that no write ever clears; unserved, it costs one lost
+		// measurement, the overlay's tolerated stale-winner shape
+		// (REQ-result-layers).
+		if version, ok := sidelinedVersion(name); ok {
+			s.legacy = append(s.legacy, LegacyEntry{Path: path, Version: version})
+			continue
+		}
 		if cached, ok := s.cache[name]; ok && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
 			retained[name] = true
 			out = append(out, cloneFinding(cached.finding))
@@ -310,15 +335,24 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 		}
 		findings, err := ParseFindings(data)
 		if err != nil || len(findings) != 1 {
-			// A version AHEAD of this reader is a newer binary's record,
-			// not corruption: deleting it would silently destroy
-			// machine-local evidence (including overlay-resident
-			// attestation reasoning) every time a stale long-lived
-			// server touches a document an upgraded CLI wrote. Refuse
-			// the whole read instead - the same loud restart signal the
-			// repo document's parse gives (REQ-result-export).
-			if errors.Is(err, ErrVersionAhead) {
-				return nil, fmt.Errorf("machine-local overlay %s: %w", name, err)
+			// A document of a version outside the reader's range is
+			// another binary's well-formed record, not corruption.
+			// AHEAD: deleting it would silently destroy machine-local
+			// evidence (including overlay-resident attestation
+			// reasoning) every time a stale long-lived server touches a
+			// document an upgraded CLI wrote — refuse the whole read,
+			// the same loud restart signal the repo document's parse
+			// gives (REQ-result-export). BEHIND: its bytes stay — the
+			// authored attestation reasoning is unrecoverable by
+			// re-measurement — and the read serves nothing from it,
+			// naming it for the faces instead (REQ-result-tolerant).
+			var versionErr *DocumentVersionError
+			if errors.As(err, &versionErr) {
+				if versionErr.Sentinel == ErrVersionAhead {
+					return nil, fmt.Errorf("machine-local overlay %s: %w", name, err)
+				}
+				s.legacy = append(s.legacy, LegacyEntry{Path: path, Version: versionErr.Version})
+				continue
 			}
 			_ = os.Remove(path)
 			continue
@@ -334,6 +368,164 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
 	return out, nil
+}
+
+// LegacyEntry names a machine-local overlay entry the last read
+// preserved unread: a well-formed findings document of a version below
+// the reader's range, holding an older binary's records — attested
+// dispositions included — that no re-measurement can recover
+// (REQ-result-tolerant).
+type LegacyEntry struct {
+	// Path is the entry file, so a reader can export or migrate it.
+	Path string
+	// Version is the document version the entry declares — for a
+	// sidelined entry, the version its NAME declares: the name is the
+	// authority there and the content is never read.
+	Version int
+}
+
+// LegacyEntries returns the overlay entries the most recent read
+// preserved unread, in directory order.
+func (s *Store) LegacyEntries() []LegacyEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]LegacyEntry(nil), s.legacy...)
+}
+
+// legacyAt reports the legacy entry the most recent read preserved at
+// path, if any.
+func (s *Store) legacyAt(path string) (LegacyEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.legacy {
+		if e.Path == path {
+			return e, true
+		}
+	}
+	return LegacyEntry{}, false
+}
+
+// sidelinedVersion reports the document version a sidelined legacy
+// entry's name declares (`<stem>.legacy-v<version>[-<n>].json`).
+func sidelinedVersion(name string) (int, bool) {
+	rest, ok := strings.CutSuffix(name, ".json")
+	if !ok {
+		return 0, false
+	}
+	_, tail, ok := strings.Cut(rest, ".legacy-v")
+	if !ok {
+		return 0, false
+	}
+	version, _, _ := strings.Cut(tail, "-")
+	v, err := strconv.Atoi(version)
+	if err != nil || v < 0 || strconv.Itoa(v) != version {
+		return 0, false
+	}
+	return v, true
+}
+
+// sidelineLegacy moves a preserved legacy entry out of the path a
+// current record is about to install at: a fresh measurement of the
+// symbol must not overwrite the older binary's authored reasoning
+// (REQ-result-layers). The sidelined file keeps the entry suffix so a
+// later read preserves and names it exactly as before; the name
+// carries the document version and, on a collision, the first free
+// ordinal, so two generations of one symbol's legacy records both
+// survive. Nothing to do when the path holds no legacy entry.
+func (s *Store) sidelineLegacy(path string) error {
+	if _, ok := s.legacyAt(path); !ok {
+		return nil
+	}
+	if s.hooks.beforeSideline != nil {
+		s.hooks.beforeSideline(path)
+	}
+	// The legacy view is the read's snapshot and the overlay is shared
+	// by every document of the module (only the document lock is held
+	// here): another store may have sidelined this entry and installed
+	// its current record at the path since. The rename is content-blind,
+	// so the content is re-judged first — a file that is no longer a
+	// version-behind document of the same version is not sidelined,
+	// and the install overwrites it as any current entry.
+	// The ceiling is judged by size before any bytes are read, as on
+	// the read path; an over-ceiling file is the read path's to evict.
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Size() > overlayEntryCeiling {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	// Still a version-behind document — of whatever version: a
+	// different older binary's record that replaced the one the read
+	// saw is exactly as worth preserving — and the name carries the
+	// content's version, not the snapshot's.
+	var versionErr *DocumentVersionError
+	if _, perr := ParseFindings(data); !errors.As(perr, &versionErr) || versionErr.Sentinel != ErrVersionBehind {
+		return nil
+	}
+	stem := strings.TrimSuffix(path, ".json")
+	for n := 1; ; n++ {
+		target := fmt.Sprintf("%s.legacy-v%d.json", stem, versionErr.Version)
+		if n > 1 {
+			target = fmt.Sprintf("%s.legacy-v%d-%d.json", stem, versionErr.Version, n)
+		}
+		if _, err := os.Lstat(target); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.Rename(path, target); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		for i := range s.legacy {
+			if s.legacy[i].Path == path {
+				s.legacy[i].Path, s.legacy[i].Version = target, versionErr.Version
+			}
+		}
+		s.mu.Unlock()
+		return nil
+	}
+}
+
+// LegacyOverlayLine renders the one human line the reading faces print
+// for preserved legacy entries: their count, the document versions they
+// declare, the range this binary reads, and their directory — so a
+// legacy record is never a silent hole (REQ-result-layers). Empty when
+// there are none.
+func LegacyOverlayLine(entries []LegacyEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	seen := map[int]bool{}
+	var versions []int
+	for _, e := range entries {
+		if !seen[e.Version] {
+			seen[e.Version] = true
+			versions = append(versions, e.Version)
+		}
+	}
+	sort.Ints(versions)
+	spelled := make([]string, len(versions))
+	for i, v := range versions {
+		spelled[i] = strconv.Itoa(v)
+	}
+	noun := "entries"
+	if len(entries) == 1 {
+		noun = "entry"
+	}
+	return fmt.Sprintf("machine-local overlay: %d legacy %s preserved unread (document version %s; this binary reads %d-%d) under %s — an older gomutant wrote them; their attested dispositions are not served",
+		len(entries), noun, strings.Join(spelled, ", "), OldestReadableDocumentVersion, DocumentVersion, filepath.Dir(entries[0].Path))
 }
 
 // Load merges the repo document with the local overlay, the overlay
@@ -689,12 +881,22 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			case holds && reflect.DeepEqual(prior, forms[f.Symbol]):
 				// The overlay already holds this record: nothing to rewrite.
 			default:
+				if err := s.sidelineLegacy(s.entryPath(f.Symbol)); err != nil {
+					return err
+				}
 				if err := s.installEntry(f); err != nil {
 					return err
 				}
 			}
 		}
 		for _, symbol := range pruned {
+			// A pruned symbol's entry path may hold a legacy entry
+			// instead of the pruned record (which lived in the repo
+			// document): the legacy file is not the record being
+			// pruned and stays (REQ-result-layers).
+			if _, legacy := s.legacyAt(s.entryPath(symbol)); legacy {
+				continue
+			}
 			if err := os.Remove(s.entryPath(symbol)); err != nil && !os.IsNotExist(err) {
 				return err
 			}

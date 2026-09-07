@@ -129,6 +129,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	defer prepared.ReleaseCampaign()
 	scratchNamespaces, exemptions, docStore, prior := prepared.ScratchNamespaces, prepared.Exemptions, prepared.Store, prepared.Prior
+	if line := gomutant.LegacyOverlayLine(docStore.LegacyEntries()); line != "" {
+		if err := rep.flushProse(line + "\n"); err != nil {
+			return err
+		}
+	}
 	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {

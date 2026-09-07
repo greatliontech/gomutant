@@ -57,7 +57,8 @@ totals; a request without one keeps them inline, capped, with honest totals.
 Candidate evidence is drill-down via the findings tool, never run payload.
 Advisory lists — oracle guidance, attestation sheds and carries,
 attestation contradictions, property-oracle statements, discovery's oracle
-sets, the findings response's ephemeral-equivalence attestations — cap at
+sets, the findings response's ephemeral-equivalence attestations, the run
+and findings responses' preserved legacy overlay rows — cap at
 the same row bound with their remainders counted (the
 error-riding shed fold keeps its own exemplar bound over the full set).
 And an empty answer is an answer, never a bare zero-row success: a run or

@@ -622,6 +622,29 @@ const DocumentVersion = 11
 // corruption (REQ-result-export).
 var ErrVersionAhead = errors.New("a newer gomutant likely wrote it - if this reader is a long-lived process (an MCP server), restart it on the upgraded binary")
 
+// ErrVersionBehind marks a findings document (or overlay entry) whose
+// version predates the oldest this reader upgrades on read: a
+// well-formed record of an older gomutant, never corruption, so a
+// reader preserves its bytes - authored attestation reasoning lives
+// there - and serves nothing from it (REQ-result-tolerant).
+var ErrVersionBehind = errors.New("an older gomutant wrote it - this binary does not read that version")
+
+// DocumentVersionError is the refusal a document outside the reader's
+// version range raises: it carries the version read, and unwraps to
+// ErrVersionAhead or ErrVersionBehind so a reader can tell the stale
+// binary from the legacy record without re-parsing.
+type DocumentVersionError struct {
+	Version int
+	// Sentinel is ErrVersionAhead or ErrVersionBehind.
+	Sentinel error
+}
+
+func (e *DocumentVersionError) Error() string {
+	return fmt.Sprintf("gomutant: findings document version %d not understood (this binary reads %d-%d): %v", e.Version, OldestReadableDocumentVersion, DocumentVersion, e.Sentinel)
+}
+
+func (e *DocumentVersionError) Unwrap() error { return e.Sentinel }
+
 // OldestReadableDocumentVersion bounds the known older document versions the
 // parser upgrades on read (REQ-result-tolerant).
 const OldestReadableDocumentVersion = 4
@@ -909,10 +932,10 @@ func ParseFindings(data []byte) ([]Finding, error) {
 		// path, its surface dead until someone realizes the process
 		// itself is stale. Name the probable cause and the signal, so
 		// the reader is not sent hunting for document corruption.
-		return nil, fmt.Errorf("gomutant: findings document version %d not understood (this binary reads %d-%d): %w", version, OldestReadableDocumentVersion, DocumentVersion, ErrVersionAhead)
+		return nil, &DocumentVersionError{Version: version, Sentinel: ErrVersionAhead}
 	}
 	if version < OldestReadableDocumentVersion {
-		return nil, fmt.Errorf("gomutant: findings document version %d not understood (want %d-%d)", version, OldestReadableDocumentVersion, DocumentVersion)
+		return nil, &DocumentVersionError{Version: version, Sentinel: ErrVersionBehind}
 	}
 	if version >= 11 {
 		return parseInternedFindings(data)

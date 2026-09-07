@@ -21,6 +21,9 @@ type findingsOptions struct {
 	vouches                  []string
 	tags                     []string
 	toolchain                string
+	// errOut carries the human notes the JSON face must keep out of its
+	// document (the preserved legacy overlay line); nil discards them.
+	errOut io.Writer
 }
 
 // judged reports whether any judged-question input was given: the
@@ -52,6 +55,7 @@ type findingView struct {
 func newFindingsCommand() *cobra.Command {
 	o := findingsOptions{}
 	cmd := &cobra.Command{Use: "findings", Short: guidanceShort("findings"), Long: guidanceHelp("findings"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		o.errOut = os.Stderr
 		return findingsCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()
@@ -86,6 +90,18 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	// Preserved legacy entries are named before any row on the human
+	// face and beside the document on the JSON face, whose output is
+	// the document itself (REQ-result-layers).
+	if line := gomutant.LegacyOverlayLine(store.LegacyEntries()); line != "" {
+		notes := out
+		if o.json {
+			notes = o.errOut
+		}
+		if notes != nil {
+			fmt.Fprintln(notes, line)
+		}
 	}
 	if len(all) == 0 {
 		if o.json {

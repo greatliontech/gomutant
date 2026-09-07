@@ -162,7 +162,10 @@ surface dead until someone suspects the process rather than the document
 while a known older version reads with its absent fields in their stated
 grandfathered form (a version-4 document's siteless survivors and
 dispositions are the match-by-position form that adopts sites on first
-carry).
+carry), and a version BEHIND the reader's range is the same structural
+boundary in the other direction: a well-formed record of an older binary,
+never corruption — the reader preserves its bytes and serves nothing from
+it, naming the probable cause (an older gomutant wrote it).
 
 **REQ-result-stale** (behavior): gomutant MUST re-measure a target rather
 than serve a record whose pins no longer cover the request — an edit to the
@@ -635,7 +638,25 @@ always carries - is what keeps the record from promoting. Every other record —
 unverifiable observations, machine-local input identities — lives in a
 machine-local overlay under the user cache directory keyed by the resolved
 module root, one atomically written entry per symbol; a malformed overlay entry
-is discarded, never surfaced — the overlay is a cache, not a record. An
+is discarded, never surfaced — the overlay is a cache, not a record — but an
+entry that is a well-formed document of a version outside the reader's range
+is a record, not cache: it is preserved byte-identical and never served (an
+older binary's attested dispositions live there and no re-measurement
+recovers them), a version ahead refusing the read with the restart signal
+(REQ-result-tolerant) and a version behind letting the read proceed without
+it, the reading faces — run and findings, both faces — naming the preserved
+entries' count, versions, and directory so a legacy record is never a
+silent hole; a write never overwrites or removes one either — a current
+record installing at a path a legacy entry holds moves the legacy entry
+aside under a name a later read still preserves and names — by the name
+alone, whatever the file holds: the move is check-then-act over a
+directory every document of the module shares, so a current record another
+session installed inside that window may be parked there, and unserved it
+costs one lost measurement (the tolerated stale-winner shape) where served
+it would be a duplicate row no write clears — and a pruned symbol's legacy
+entry is not the record being pruned and stays. The size
+ceiling below judges by size before any bytes are read, so it precedes the
+version boundary: an over-ceiling entry is evicted whatever its version. An
 overlay entry larger than 64 MiB is discarded the same way, judged by the
 size of the content a read would consume (symlinks followed) before any of
 its bytes are read: a cache's cost discipline is a content discipline —
