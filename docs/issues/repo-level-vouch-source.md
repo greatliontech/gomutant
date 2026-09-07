@@ -24,4 +24,4 @@ Two shapes, the second the collapse:
 Invariants preserved either way: the load-bearing set rides each
 record as it does today; a flag never removes a reviewed acceptance.
 
-Lands: user decision
+Lands: cross-tool train chunk 162 (gofresh owns the convention; the gomutant twin file is not built)

@@ -1,6 +1,6 @@
 # The MCP server disconnected mid-session with no call in flight
 
-`Lands: user decision`
+`Lands: cross-tool train chunk 165 (the exit logging); the idle-session liveness witness rides mcp-liveness-cancellation-witness`
 
 Observed 2026-09-03 in bldc's adversarial loop: after some sixty
 `ephemeral` calls over one host session, every one served, the MCP

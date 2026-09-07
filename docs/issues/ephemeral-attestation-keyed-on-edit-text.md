@@ -1,6 +1,6 @@
 # An ephemeral attestation is keyed on the edit's exact text
 
-`Lands: user decision`
+`Lands: cross-tool train chunk 160`
 
 A consumer report (bldc, 2026-09-05). An `ephemeral` survivor attested
 with `--attest` is recorded under the digest of its batch's edits. A

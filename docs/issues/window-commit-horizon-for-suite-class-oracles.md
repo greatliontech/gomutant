@@ -19,4 +19,4 @@ the window-scoped flip signal; the audit's nesting across runs. The bank's longe
 lookup is sound for lifts only (a lift never tightens) and must not
 feed a window derivation, which shrinks.
 
-Lands: user decision
+Lands: cross-tool train chunk 164

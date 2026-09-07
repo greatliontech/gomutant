@@ -1,6 +1,6 @@
 # An ephemeral probe's rapid failfile lands in the caller's tree
 
-`Lands: user decision`
+`Lands: cross-tool train chunk 160`
 
 `ephemeral` promises the caller's tree is never touched: the mutant is
 built and tested in a copy. A property test under pgregory.net/rapid

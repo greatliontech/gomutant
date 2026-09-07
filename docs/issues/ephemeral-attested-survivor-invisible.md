@@ -19,4 +19,4 @@ such rather than silently appending a second row.
 Reproduction: attest any equivalent survivor with `ephemeral --attest
 "…"`, then run the identical batch again without `--attest`.
 
-Lands: user decision.
+Lands: cross-tool train chunk 160
