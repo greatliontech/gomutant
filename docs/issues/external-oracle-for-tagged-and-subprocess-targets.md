@@ -43,4 +43,4 @@ reporting zero silently.
 Field report: wisp, 2026-09-05 (docs/issues/wasm-oracle-campaign-gap.md
 there), on gomutant v0.52.0.
 
-Lands: user decision on the external-oracle mode and materialized mutation (a new oracle capability); the stated-coverage-bound interim lands at cross-tool train chunk 163
+Lands: the stated-coverage-bound interim lands at cross-tool train chunk 163; the external-oracle mode is deferred 2026-09-07 (user decision: revisit when a consumer needs the tagged leg measured rather than declared)

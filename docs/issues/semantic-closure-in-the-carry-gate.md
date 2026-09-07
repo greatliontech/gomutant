@@ -53,9 +53,4 @@ landed: SubjectEvidence records the closure identity's derivation
 (`closureStrategy`), so the day the identity is subject-scoped the gate
 compares within one derivation and bridges a derivation change.
 
-Lands: user decision — the gate needs a subject-scoped closure identity
-on gofresh's fingerprint (closure motion meaning motion reachable from
-the target), which no train chunk charters: gofresh states the package
-scoping as a deliberate accepted price (REQ-closure-view-maximal), and
-the precision band (116–125) narrows observability, not the closure.
-Chartering that identity is the user's scope call.
+Lands: cross-tool train chunk 175 (a design chunk opening with the user)

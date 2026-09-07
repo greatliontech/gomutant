@@ -33,5 +33,4 @@ costs test-architecture work in each tool repo. With decomposed
 suites, the chunk-137 machinery (narrowing, banking, cost model)
 multiplies the win instead of fighting the suite shape.
 
-Lands: user decision — chartering suite decomposition is the (a)
-half of the campaign-scale fork the user ruled (b) on.
+Lands: user decision — deferred 2026-09-07 (the ephemeral gate carries chunk work; decomposition pays only for a full-face campaign)
