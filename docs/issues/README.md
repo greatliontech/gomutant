@@ -6,6 +6,9 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [measured-findings-reuse-diagnostics](measured-findings-reuse-diagnostics.md) | distinguish measured outcomes, committability, and reuse refusal at run/attestation surfaces; explain reason channels and linked-package default oracles without weakening freshness | user decision |
+| [vmm-finding-admission-refusals](vmm-finding-admission-refusals.md) | adopt the Go 1.27 experiment-identity repair and independently reduce VMM's file-I/O, testing-receiver and dynamic-carrier freshness refusals | user decision |
+| [explicit-testdata-package-selection](explicit-testdata-package-selection.md) | an explicit fixture directory/import selector cannot load a package excluded by ./...; package-local ephemeral success does not establish campaign freshness | user decision |
 | [semantic-closure-in-the-carry-gate](semantic-closure-in-the-carry-gate.md) | a subject-scoped, comment-insensitive closure identity would dominate both poles of the carry gate; the package-scoped one shed on sibling edits (refuted in chunk 130) | cross-tool train chunk 175 (a design chunk opening with the user) |
 | [engine-run-scoped-oracle-value](engine-run-scoped-oracle-value.md) | fourteen engine spawn signatures thread a run-constant bounds value beside env/flags/brackets/namespaces; one engine-side run value would collapse them | with the next change set touching the engine's spawn signatures |
 | [plan-cost-is-candidate-materialization](plan-cost-is-candidate-materialization.md) | a warm --plan spends 64% of its CPU rendering every candidate (go/format + imports per candidate) though it executes nothing; observation is a small share after the one-view-set fold | with the next change set touching candidate materialization |
