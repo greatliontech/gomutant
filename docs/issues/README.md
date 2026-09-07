@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [engine-run-scoped-oracle-value](engine-run-scoped-oracle-value.md) | fourteen engine spawn signatures thread a run-constant bounds value beside env/flags/brackets/namespaces; one engine-side run value would collapse them | with the next change set touching the engine's spawn signatures |
 | [plan-cost-is-candidate-materialization](plan-cost-is-candidate-materialization.md) | a warm --plan spends 64% of its CPU rendering every candidate (go/format + imports per candidate) though it executes nothing; observation is a small share after the one-view-set fold | with the next change set touching candidate materialization |
 | [legacy-overlay-read-deletes-attestations](legacy-overlay-read-deletes-attestations.md) | a below-minimum-version overlay is deleted as corrupt, losing authored equivalence reasoning; only newer versions are preserved | cross-tool train chunk 139 |
 | [mcp-liveness-cancellation-witness](mcp-liveness-cancellation-witness.md) | keepalive config pinned but the ping-failure cancellation propagation has no witness over the SDK transport seam | transport-seam fault injection lands in the mcpserver harness |

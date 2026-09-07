@@ -26,7 +26,7 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	env := engine.OracleEvidenceEnv(tree.eng.GoEnv())
+	env := engine.OracleEvidenceEnv(tree.eng.GoEnv(), 0)
 	subDir := filepath.Join(tree.dir, "sub")
 	if err := os.WriteFile(filepath.Join(subDir, "data.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestApplySplicedUnionAcceptsRelativeEraRecords(t *testing.T) {
 	}
 	evidence := SubjectEvidence{Symbol: "example.com/splice.F", RuntimeInputs: relState.Manifest, RuntimeDigest: relState.Digest}
 	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
-	_, same, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, engine.OracleEvidenceEnv(env)), root)
+	_, same, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, env), root)
 	if err != nil {
 		t.Fatal(err)
 	}

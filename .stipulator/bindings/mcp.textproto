@@ -93,7 +93,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-lifecycle"
-  content_hash: "a00e169a0fb826e55d2f231751385aaef1048e381e3c0b02e905ea4a5918f0e8"
+  content_hash: "58836fea35a2477e9ca1dd2c397c169bd634183282ced90c678232aeb333eb4b"
+  source_hash: "c74bd43f3f618f59ae15f2416e82fc56d2d5889ae7036bdf06e46590175890be"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestServerOptionsCarryKeepalive"
   role: BINDING_ROLE_TESTS
@@ -102,7 +103,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-lifecycle"
-  content_hash: "a00e169a0fb826e55d2f231751385aaef1048e381e3c0b02e905ea4a5918f0e8"
+  content_hash: "58836fea35a2477e9ca1dd2c397c169bd634183282ced90c678232aeb333eb4b"
+  source_hash: "c74bd43f3f618f59ae15f2416e82fc56d2d5889ae7036bdf06e46590175890be"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolLifecycleEchoBounds"
   role: BINDING_ROLE_TESTS
@@ -111,7 +113,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-lifecycle"
-  content_hash: "a00e169a0fb826e55d2f231751385aaef1048e381e3c0b02e905ea4a5918f0e8"
+  content_hash: "58836fea35a2477e9ca1dd2c397c169bd634183282ced90c678232aeb333eb4b"
+  source_hash: "c74bd43f3f618f59ae15f2416e82fc56d2d5889ae7036bdf06e46590175890be"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolPruneAndRetarget"
   role: BINDING_ROLE_TESTS
@@ -356,4 +359,14 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestBatchShapeIsStatedWhereItIsRead"
   role: BINDING_ROLE_TESTS
   shape_hash: "33657b8038e2b9e831919e8dc86290d89f9cbd5fc41956d7615c302b83a5978c"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-lifecycle"
+  content_hash: "58836fea35a2477e9ca1dd2c397c169bd634183282ced90c678232aeb333eb4b"
+  source_hash: "c74bd43f3f618f59ae15f2416e82fc56d2d5889ae7036bdf06e46590175890be"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestCampaignAndProbeKeepTheirOwnBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8dc4d047ee684cc22586b1cd284631283c30c4be190f83b1888b730718136c2f"
 }

@@ -27,7 +27,7 @@ func TestProbeBuildFailureNamesCompilerDiagnostic(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, _, _, err := TestProbe(context.Background(), dir, "example.com/broken", "^TestValue$", time.Minute, nil)
+	_, _, _, err := TestProbe(context.Background(), dir, "example.com/broken", "^TestValue$", time.Minute, nil, OracleBounds{})
 	if err == nil || !strings.Contains(err.Error(), "failed to build") {
 		t.Fatalf("broken test package probe = %v, want a build refusal", err)
 	}
@@ -83,7 +83,7 @@ func TestRunMutantExecutesExactlyOnce(t *testing.T) {
 	counter := filepath.Join(t.TempDir(), "executions")
 	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_EXECUTION_COUNTER="+counter)
 	out, _, _, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", ms[pick],
-		[]string{"example.com/fixture/counting"}, "^TestCounting$", time.Minute, nil, moduleDir, packageDir, nil, nil, env)
+		[]string{"example.com/fixture/counting"}, "^TestCounting$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, OracleBounds{})
 	if err != nil {
 		t.Fatal(err)
 	}

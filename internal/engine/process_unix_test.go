@@ -72,7 +72,7 @@ func TestOracleRunsAtLowPriority(t *testing.T) {
 	var out bytes.Buffer
 	cmd := commandContext(context.Background(), "sh", "-c", "sleep 2; ps -o nice= -p $$")
 	cmd.Stdout = &out
-	if err := runOracleProcess(cmd); err != nil {
+	if err := runOracleProcess(cmd, OracleBounds{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.TrimSpace(out.String()); got != strconv.Itoa(oracleNiceness) {

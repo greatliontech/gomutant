@@ -20,3 +20,17 @@ func TestOracleEnvHasParallelismCap(t *testing.T) {
 		t.Fatal("no inner-parallelism cap in the oracle environment")
 	}
 }
+
+// TestOracleEnvHasMemoryCeiling is the memory analog: when the
+// spawning harness requests the assertion it fails exactly when that
+// harness delivered no soft memory ceiling, so a harness test can tell
+// a ceilinged spawn from an unbounded one on both the mutant and the
+// baseline-probe paths.
+func TestOracleEnvHasMemoryCeiling(t *testing.T) {
+	if os.Getenv("FIXTURE_REQUIRE_MEMORY_CEILING") == "" {
+		t.Skip("ceiling assertion not requested")
+	}
+	if os.Getenv("GOMEMLIMIT") == "" {
+		t.Fatal("no memory ceiling in the oracle environment")
+	}
+}

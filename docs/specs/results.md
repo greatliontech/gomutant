@@ -198,8 +198,12 @@ premise is that the recorded pin bounds every verdict's measurement
 ceiling, so any serve arm that re-executes candidates raises the
 recorded pin to the larger effective ceiling as it merges — the
 ENTRY-RESOLVED current ceiling the serve gate compared, never a live
-re-read of the process setting, so a mid-campaign change cannot
-ratchet the record. This is
+re-read of any process setting, so a sibling run cannot ratchet the
+record. A standalone inspection — one that runs no oracle — judges
+under no ceiling: a directional record serves, and a ceiling-decided
+record reads as stale until a run's own ceiling judges it, the
+direction being a spurious re-measure report, never a spurious serve.
+This is
 the split the machine-local evidence fault demanded: the ceiling's
 BYTES are machine circumstance (RAM-derived by default), the
 ceiling's DECISIONS are measurement identity. Every target and

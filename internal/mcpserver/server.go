@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -45,74 +44,6 @@ type Server struct {
 	tree    *gomutant.Tree
 	treeKey string
 	vouches []string
-	// widthMu guards the in-flight campaigns' shared claim on the
-	// process-wide oracle-parallelism width and the ephemeral probe's
-	// process-wide overrides: the first campaign's job count owns the
-	// width until every claiming run exits, and a probe's override
-	// excludes campaigns entirely for its duration.
-	widthMu        sync.Mutex
-	widthJobs      int
-	widthClaims    int
-	probeOverrides int
-}
-
-// claimRunWidth admits a run into the shared process-width claim: the
-// first in-flight campaign's job count owns the width; a concurrent
-// run requesting a different count refuses loudly instead of splitting
-// the owner's oracle environments from its evidence environment
-// (REQ-exec-oracle-parallelism).
-func (s *Server) claimRunWidth(jobs int) error {
-	resolved := resolveJobs(jobs)
-	s.widthMu.Lock()
-	defer s.widthMu.Unlock()
-	if s.probeOverrides > 0 {
-		return fmt.Errorf("run: an in-flight ephemeral probe holds a process-wide override (width or memory ceiling); retry after it finishes")
-	}
-	if s.widthClaims > 0 && resolved != s.widthJobs {
-		return fmt.Errorf("run: an in-flight campaign with jobs=%d owns the process's oracle-parallelism width; request jobs=%d, a different width, after it finishes (or match its job count)", s.widthJobs, resolved)
-	}
-	if s.widthClaims == 0 {
-		s.widthJobs = resolved
-	}
-	s.widthClaims++
-	return nil
-}
-
-func (s *Server) releaseRunWidth() {
-	s.widthMu.Lock()
-	defer s.widthMu.Unlock()
-	s.widthClaims--
-}
-
-// resolveJobs mirrors the run's own derivation (jobs<=0 means half the
-// CPUs, floored at 1), so two spellings of the same effective width
-// share one claim and the refusal names a count the agent can request.
-func resolveJobs(jobs int) int {
-	if jobs <= 0 {
-		return max(1, runtime.NumCPU()/2)
-	}
-	return jobs
-}
-
-// claimProbeOverride admits an ephemeral probe's process-wide override
-// (memory ceiling or width) only while no campaign is in flight, and
-// blocks campaigns from starting until the probe releases - the same
-// shared-state discipline as the width claim, closing the gap where a
-// probe's deferred restore could land mid-campaign.
-func (s *Server) claimProbeOverride() error {
-	s.widthMu.Lock()
-	defer s.widthMu.Unlock()
-	if s.widthClaims > 0 {
-		return fmt.Errorf("ephemeral: a run in flight owns the process's oracle width and memory ceiling; omit the overrides or retry after the run")
-	}
-	s.probeOverrides++
-	return nil
-}
-
-func (s *Server) releaseProbeOverride() {
-	s.widthMu.Lock()
-	defer s.widthMu.Unlock()
-	s.probeOverrides--
 }
 
 // New builds a server rooted at dir.
@@ -777,19 +708,6 @@ func (out *runOut) capAdvisories() (fullSheds []string) {
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
-	// The oracle-parallelism width is process state every in-flight
-	// campaign shares (REQ-exec-oracle-parallelism): concurrent runs
-	// against different documents are legal, but a second campaign
-	// installing a NARROWER width would rewrite the first campaign's
-	// later spawn widths downward, splitting those oracles' recorded
-	// environment from the campaign's evidence environment (degrade or
-	// re-measure - fail-safe, and refused here instead). Symmetric with
-	// the ephemeral probe-override refusal: the width owner is the
-	// first in-flight campaign's resolved job count.
-	if err := s.claimRunWidth(in.Jobs); err != nil {
-		return nil, out, err
-	}
-	defer s.releaseRunWidth()
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, out, err
@@ -1814,7 +1732,7 @@ type ephemeralIn struct {
 	Run              string               `json:"run" jsonschema:"-run pattern naming the deciding test"`
 	TimeoutSec       *int                 `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before attributed result completion after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
 	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of the baseline and mutant oracle processes in seconds; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way; the result reports the effective budget"`
-	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling for the probe's oracle process tree in MiB: absent inherits the server's installed ceiling, 0 derives RAM/2 floored at 1 GiB for this probe, -1 disables for this probe; refused while a run is in flight - the campaign owns the process ceiling"`
+	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling for the probe's oracle process tree in MiB: absent or 0 derives RAM/2 floored at 1 GiB for this probe, -1 disables for this probe; the probe's bounds are its own, a run in flight keeps its"`
 	Runs             int                  `json:"runs,omitempty" jsonschema:"run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed - N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result"`
 	Attest           string               `json:"attest,omitempty" jsonschema:"record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or could not establish that it reached the edit (a never-reached plain survivor is refused by the probe itself)"`
 	Findings         string               `json:"findings,omitempty" jsonschema:"findings document path whose sibling ephemeral-attestation record attest writes (default .gomutant/findings.json)"`
@@ -1829,46 +1747,13 @@ type ephemeralOut struct {
 }
 
 func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in ephemeralIn) (*mcp.CallToolResult, *ephemeralOut, error) {
-	// The ceiling is process state a running campaign owns: an explicit
-	// probe ceiling while a run is in flight would diverge the campaign's
-	// evidence from its stamped pin (a mutant and its baseline could even
-	// straddle the two ceilings), so it refuses loudly instead of racing.
-	// Without a run in flight the probe's ceiling installs for the
-	// probe's duration and the exact prior state - the installed flag
-	// included - restores after.
-	// Process-wide overrides (memory ceiling, probe width) install only
-	// under the shared width-claim guard: the old check-then-install
-	// read runsInFlight atomically but installed outside any lock, so a
-	// campaign admitted concurrently could interleave with the probe's
-	// deferred restore and run later spawns under a ceiling diverged
-	// from its recorded pin. The claim admits the probe only while no
-	// campaign is in flight AND blocks campaigns until release, closing
-	// the probe-vs-campaign window (REQ-exec-oracle-parallelism,
-	// REQ-exec-oracle-memory). Probe-vs-probe interleaving remains: two
-	// concurrent probes' restores can interleave, bounded and
-	// self-healing (results are never persisted; the next install
-	// resets) - tracked in the train plan.
-	if err := s.claimProbeOverride(); err != nil {
-		if in.OracleMemoryMiB != nil {
-			return nil, nil, err
-		}
-		// No explicit override requested: the probe correctly inherits
-		// the in-flight campaign's width and ceiling.
-	} else {
-		defer s.releaseProbeOverride()
-		if in.OracleMemoryMiB != nil {
-			prior := gomutant.SnapshotOracleMemory()
-			gomutant.SetOracleMemoryLimit(mcpOracleMemoryBytes(in.OracleMemoryMiB), 1)
-			defer gomutant.RestoreOracleMemory(prior)
-		}
-		// A prior run's inner-parallelism cap must not throttle a lone
-		// probe in this long-lived process: between campaigns the probe
-		// is the only oracle tree, so it runs at jobs=1 width (full),
-		// the prior state restored after (REQ-exec-oracle-parallelism).
-		prior := gomutant.SnapshotOracleParallelism()
-		gomutant.SetOracleParallelism(1)
-		defer gomutant.RestoreOracleParallelism(prior)
-	}
+	// The probe's bounds are its own value, derived per call and handed
+	// to every oracle spawn it makes — never process state a campaign or
+	// a sibling probe could move (REQ-exec-oracle-memory,
+	// REQ-exec-oracle-parallelism): the ceiling as requested (absent
+	// derives a lone tree's default), the width a lone tree's, the full
+	// host, exactly as a second gomutant process would budget itself.
+	bounds := gomutant.DeriveOracleBounds(mcpOracleMemoryBytes(in.OracleMemoryMiB), 1)
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, nil, err
@@ -1935,7 +1820,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	// and name the heartbeat's stretch (REQ-exec-run-status).
 	var phase atomic.Value
 	phase.Store("ephemeral oracle")
-	probe := gomutant.EphemeralRequest{File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, Progress: func(event gomutant.PreparationEvent) {
+	probe := gomutant.EphemeralRequest{File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: bounds.MemoryBytes, Progress: func(event gomutant.PreparationEvent) {
 		phase.Store(event.Text())
 		if notify != nil {
 			notify(preparationMessage(event))
@@ -1971,16 +1856,13 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	return nil, out, nil
 }
 
-// mcpOracleMemoryBytes converts the optional MiB input: absent or 0
-// derives the default, negative disables.
+// mcpOracleMemoryBytes converts the optional MiB input: absent is the
+// derived default, the rest the one MiB policy both faces share.
 func mcpOracleMemoryBytes(mib *int64) int64 {
-	if mib == nil || *mib == 0 {
+	if mib == nil {
 		return 0
 	}
-	if *mib < 0 {
-		return -1
-	}
-	return *mib << 20
+	return gomutant.OracleMemoryBytesFromMiB(*mib)
 }
 
 // guidanceDoc is the embedded guidance document; a malformed document

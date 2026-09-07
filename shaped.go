@@ -444,7 +444,7 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 		// budget). maxGroupBudget's "loosest bound any verdict-bearing
 		// process ran under" holds for shaped records through exactly
 		// this stepBudget.
-		out, groupKiller, groupMemoryDecided, diagnostic, err := engine.RunMutantBaselineDirEnv(ctx, scratch, cleanScratch, scratchMutant, g.pkgs, g.runRegex, stepBudget(g, opts), g.flags, env, cleanEnv)
+		out, groupKiller, groupMemoryDecided, diagnostic, err := engine.RunMutantBaselineDirEnv(ctx, scratch, cleanScratch, scratchMutant, g.pkgs, g.runRegex, stepBudget(g, opts), g.flags, env, cleanEnv, opts.bounds)
 		if diagnostic != "" {
 			if m.Operator == "structural: interface-satisfaction" {
 				// A satisfaction assertion's natural teeth are the
@@ -453,7 +453,7 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 				// but only after the clean twin proves the scratch
 				// infrastructure itself builds, or nothing ran and the
 				// kill would be fabricated.
-				ran, passed, _, cleanErr := engine.TestProbeEnv(ctx, cleanScratch, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, cleanEnv)
+				ran, passed, _, cleanErr := engine.TestProbeEnv(ctx, cleanScratch, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, cleanEnv, opts.bounds)
 				if cleanErr == nil && ran > 0 && passed {
 					return engine.MutantKilled, "compile: " + firstLine(diagnostic), false, nil
 				}

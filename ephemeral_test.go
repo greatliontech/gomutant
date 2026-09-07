@@ -170,9 +170,9 @@ func TestEphemeral(t *testing.T) {
 	probes := 0
 	probe := testProbe
 	defer func() { testProbe = probe }()
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, string, error) {
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
 		probes++
-		return probe(ctx, dir, testPkg, run, timeout, binFlags, env)
+		return probe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}
 	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestNoSuch$", OracleTimeout: time.Nanosecond, Runs: 1}); err == nil || !strings.Contains(err.Error(), "matched no tests") {
 		t.Fatalf("zero-match probe scored: %v", err)
@@ -191,7 +191,7 @@ func TestEphemeral(t *testing.T) {
 	// A failing baseline with nothing rendered (an output-less failure)
 	// refuses on one line — no dangling diagnostic separator.
 	counting := testProbe
-	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string) (int, bool, string, error) {
+	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
 		return 1, false, "", nil
 	}
 	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") || strings.HasSuffix(err.Error(), "\n") {
@@ -356,7 +356,7 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 		t.Skip("runs go test per probe")
 	}
 	restore := coveredPositions
-	coveredPositions = func(context.Context, string, string, string, string, time.Duration, []string, []string, engine.DirectiveCoverageView) (engine.Coverage, error) {
+	coveredPositions = func(context.Context, string, string, string, string, time.Duration, []string, []string, engine.DirectiveCoverageView, engine.OracleBounds) (engine.Coverage, error) {
 		return engine.Coverage{}, errors.New("probe refused")
 	}
 	defer func() { coveredPositions = restore }()
@@ -407,7 +407,7 @@ func TestEphemeralCoverageProbeRunsUnderMeasurementLeash(t *testing.T) {
 	}
 	restore := coveredPositions
 	var got []time.Duration
-	coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView) (engine.Coverage, error) {
+	coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
 		got = append(got, timeout)
 		return engine.Coverage{}, errors.New("probe refused")
 	}
@@ -443,9 +443,9 @@ func TestEphemeralBaselineRunsUnderLeash(t *testing.T) {
 	}
 	restore := testProbe
 	var bounds []time.Duration
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, string, error) {
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, oracleBounds engine.OracleBounds) (int, bool, string, error) {
 		bounds = append(bounds, timeout)
-		return restore(ctx, dir, testPkg, run, timeout, binFlags, env)
+		return restore(ctx, dir, testPkg, run, timeout, binFlags, env, oracleBounds)
 	}
 	defer func() { testProbe = restore }()
 	tr := fixtureTree(t)

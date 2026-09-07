@@ -63,6 +63,9 @@ type runOptions struct {
 	// oracle probe, so it never shares a window with a serial
 	// confirmation's scored run (REQ-exec-attribution).
 	probeGate *sync.RWMutex
+	// bounds are the run's oracle resource bounds, derived once at
+	// Run's entry and applied to every oracle spawn.
+	bounds engine.OracleBounds
 }
 
 // advisoryLeash is the bound an advisory probe of g runs under
@@ -789,7 +792,7 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 		if pkg == "" || fn == "" || !ok {
 			continue
 		}
-		_, passed, _, _, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.advisoryLeash(g), g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		_, passed, _, _, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.advisoryLeash(g), g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return oracleAttribution{}, ctx.Err()
@@ -1050,7 +1053,7 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 		return nil
 	}()
 	if scopedGroup != nil && t.scopedBaselinePasses(ctx, *scopedGroup, scopedBaselines, opts, runEnv) {
-		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, confirmBudget, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, confirmBudget, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		if err != nil {
 			return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: killer-scoped confirmation: %w", m.Symbol, m.Position, m.Operator, err)
 		}
@@ -1092,7 +1095,7 @@ func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scope
 	if passed, ok := memo[key]; ok {
 		return passed
 	}
-	ran, passed, _, _, _, err := engine.TestProbeObservedEnv(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+	ran, passed, _, _, _, err := engine.TestProbeObservedEnv(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 	ok := err == nil && ran > 0 && passed
 	memo[key] = ok
 	return ok
@@ -1164,7 +1167,7 @@ type stepResult struct {
 // ran its differential baseline under this very pattern inside the
 // engine.
 func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string, g group, narrowed bool, timeout time.Duration) (stepResult, error) {
-	out, killer, memoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, timeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+	out, killer, memoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, timeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 	res := stepResult{out: out, killer: killer, memoryDecided: memoryDecided, state: state, incomplete: incomplete, diagnostic: diagnostic}
 	if err != nil {
 		return res, fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
@@ -1724,27 +1727,23 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 	if jobs <= 0 {
 		jobs = max(1, runtime.NumCPU()/2)
 	}
-	engine.SetOracleMemoryLimit(opts.OracleMemoryBytes, jobs)
-	// The inner-parallelism cap is a scheduling bound, deliberately
-	// unpinned: it reaches verdicts through the wall-clock oracle
-	// timeout like ambient load, and through the recorded environment
-	// evidence exactly where an oracle observably reads it
-	// (REQ-exec-oracle-parallelism). Installed before the subject
-	// engines: their evidence env - the revalidation and producer env -
-	// captures the delivered width at construction.
-	engine.SetOracleParallelism(jobs)
+	// The run's oracle bounds — the memory ceiling and the
+	// inner-parallelism width — are ONE value derived here and handed
+	// to every oracle spawn, ingest mirror, merge, and splice below:
+	// never process state, so a concurrent probe or campaign in the
+	// same process cannot move them under this run
+	// (REQ-exec-oracle-memory, REQ-exec-oracle-parallelism). The width
+	// is a scheduling bound, deliberately unpinned: it reaches verdicts
+	// through the wall-clock oracle timeout like ambient load, and
+	// through the recorded environment evidence exactly where an oracle
+	// observably reads it.
+	opts.bounds = engine.DeriveOracleBounds(opts.OracleMemoryBytes, jobs)
 	// The campaign's one evidence environment, mode-independent (env plus
-	// the installed width; the per-mode engine sets are built after
-	// resolution, when each target's attestation is known): every oracle
-	// spawn, ingest mirror, merge, and splice below judges under this
-	// single width-composed value, so a mid-campaign move of the
-	// process-wide width atomic (a scoped probe override in a long-lived
-	// server) cannot split the campaign's evidence - the engine-level
-	// compositions are idempotent on an already-composed environment.
-	runEnv := engine.OracleEvidenceEnv(t.eng.GoEnv())
-	// The pin the run's evidence records and compares: resolved once, so
-	// gates never read ambient process state.
-	oracleMemoryPin := engine.OracleMemoryLimitBytes()
+	// the run's width; the per-mode engine sets are built after
+	// resolution, when each target's attestation is known).
+	runEnv := engine.OracleEvidenceEnv(t.eng.GoEnv(), opts.bounds.Width)
+	// The pin the run's evidence records and compares.
+	oracleMemoryPin := opts.bounds.MemoryBytes
 	// First match wins; duplicate symbols occur only in hand-edited
 	// documents.
 	prior := map[string]*Finding{}
@@ -2031,10 +2030,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 		mv, ok := modes[attested]
 		if !ok {
 			mv = &modeViews{
-				engines:        t.newSubjectEngines(opts.AnalysisEvent, attested),
-				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}},
+				engines:        t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds.Width),
+				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width},
 				viewFaults:     map[string]error{},
-				producerUnion:  &observedViewSet{&subjectViewSet{bySymbol: map[string]*subjectView{}}},
+				producerUnion:  &observedViewSet{&subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width}},
 				producerFaults: map[string]error{},
 			}
 			modes[attested] = mv
@@ -2344,7 +2343,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 				}
 				baselineStart := time.Now()
 				probeGate.RLock()
-				ran, passed, failedTests, diagnostic, observed, err := groupBaselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+				ran, passed, failedTests, diagnostic, observed, err := groupBaselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 				probeGate.RUnlock()
 				baselineElapsed := time.Since(baselineStart)
 				var reason string
@@ -3962,7 +3961,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 				return err
 			}
 			f.CandidateEvidence = candidateEvidence
-			portable := newPortableUnion(state, engine.OracleEvidenceEnv(runEnv))
+			portable := newPortableUnion(state, runEnv)
 			// The relative conversion inside the attach revalidates the
 			// union against disk, so an input moving between execution
 			// and attach surfaces here; that is this target's drift, not
@@ -4646,12 +4645,11 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.Observation{}, err
 	}
-	// The finding union is judged under the oracle evidence env - the
-	// injected width included - because its children were ingested under
-	// it; a raw-env merge reads a width-reading oracle's records as
-	// moved and degrades the union (REQ-exec-oracle-parallelism).
-	// Idempotent when the caller already passes the evidence env.
-	env = engine.OracleEvidenceEnv(env)
+	// The finding union is judged under the oracle evidence env the
+	// caller composed for its run — the injected width included —
+	// because its children were ingested under it; a raw-env merge
+	// would read a width-reading oracle's records as moved and degrade
+	// the union (REQ-exec-oracle-parallelism).
 	state, err := runtimeinput.MergeEnv(root, env, states...)
 	if cancelErr := ctx.Err(); cancelErr != nil {
 		return runtimeinput.Observation{}, cancelErr
@@ -5261,7 +5259,7 @@ func (t *Tree) oracleCoverage(ctx context.Context, w work, opts runOptions, runE
 		key := coverageKey(g, coverPkg)
 		got, ok := cache[key]
 		if !ok {
-			probed, err := campaignCoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.advisoryLeash(g), g.flags, runEnv, t.eng.DirectiveCoverage())
+			probed, err := campaignCoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.advisoryLeash(g), g.flags, runEnv, t.eng.DirectiveCoverage(), opts.bounds)
 			if err != nil {
 				if ctx.Err() != nil {
 					return engine.Coverage{}, false, ctx.Err()
@@ -5602,7 +5600,7 @@ func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Fin
 			return splicedEvidence{}, err
 		}
 	}
-	portable := newPortableUnion(union, engine.OracleEvidenceEnv(env))
+	portable := newPortableUnion(union, env)
 	union, rec, err = t.applySplicedUnion(ctx, env, rec, union, portable, evidenceBase(t.dir, rec.TargetEvidence))
 	if err != nil {
 		return splicedEvidence{}, err
@@ -5629,10 +5627,10 @@ func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Fin
 // (REQ-result-stale's fail-closed bound).
 func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding, moduleDir string, union runtimeinput.Observation) (runtimeinput.Observation, error) {
 	// Adoption re-evaluates the persisted union's digests; the record was
-	// ingested under the oracle evidence env, so adopting under the raw
-	// env would read a width-reading record as moved and stamp the
-	// extension non-reusable (REQ-exec-oracle-parallelism).
-	env = engine.OracleEvidenceEnv(env)
+	// ingested under the oracle evidence env the caller passes, so
+	// adopting under a raw env would read a width-reading record as
+	// moved and stamp the extension non-reusable
+	// (REQ-exec-oracle-parallelism).
 	adopted, adoptErr := runtimeinput.AdoptEnv(rec.TargetEvidence.RuntimeInputs, moduleDir, fmt.Sprintf("gomutant-extend-%d", findingObservationSequence.Add(1)), env)
 	if adoptErr != nil {
 		if err := ctx.Err(); err != nil {

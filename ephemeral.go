@@ -73,6 +73,12 @@ type EphemeralResult struct {
 	// content), the identity an equivalence attestation records
 	// (REQ-result-ephemeral-attest).
 	EditDigest string `json:"editDigest"`
+	// OracleMemoryBytes is the memory ceiling every oracle process of
+	// the probe — the baseline and the mutant runs — ran under; 0 when
+	// disabled (REQ-exec-oracle-memory). The probe's own bounds, stated
+	// so a reader judging a memory-shaped verdict knows the ceiling it
+	// was measured under.
+	OracleMemoryBytes int64 `json:"oracleMemoryBytes"`
 	// OracleBudget is the effective per-process oracle bound the
 	// mutant runs used — the caller's explicit timeout, or the budget
 	// derived from the measured baseline (REQ-exec-ephemeral's
@@ -114,54 +120,33 @@ type EphemeralResult struct {
 	CoverageUnknownFiles []string `json:"coverageUnknownFiles,omitempty"`
 }
 
-// SetOracleMemoryLimit installs the per-oracle-process memory ceiling
-// for this process's runs and ephemeral probes
-// (REQ-exec-oracle-memory): bytes > 0 is the explicit cap, 0 derives
-// RAM / (2 x jobs) floored at 1 GiB, negative disables. Run installs
-// it from RunOptions; ephemeral callers install it directly, and an
-// uninstalled process derives the default at its first probe.
-func SetOracleMemoryLimit(bytes int64, jobs int) {
-	engine.SetOracleMemoryLimit(bytes, jobs)
+// OracleBounds are the resource bounds a run or a probe applies to
+// every oracle process tree it spawns; DeriveOracleBounds derives them
+// from a memory choice (bytes > 0 explicit, 0 derived RAM/(2 x jobs)
+// floored at 1 GiB, negative disabled) and a job count
+// (REQ-exec-oracle-memory, REQ-exec-oracle-parallelism). Bounds are a
+// value each run derives for itself, never process state: a campaign
+// and a probe in one process, or two probes, each spawn under their
+// own.
+type OracleBounds = engine.OracleBounds
+
+// DeriveOracleBounds derives a run's bounds from its memory choice and
+// job count: memoryBytes > 0 is the explicit ceiling, 0 derives total
+// RAM over twice the job count floored at 1 GiB, negative disables;
+// the width is max(1, NumCPU/jobs).
+func DeriveOracleBounds(memoryBytes int64, jobs int) OracleBounds {
+	return engine.DeriveOracleBounds(memoryBytes, jobs)
 }
 
-// OracleMemoryLimitBytes reports the installed per-oracle ceiling; 0
-// means disabled or not yet derived.
-func OracleMemoryLimitBytes() int64 {
-	return engine.OracleMemoryLimitBytes()
+// OracleMemoryBytesFromMiB is the one MiB-to-bytes policy every face's
+// memory knob shares: a positive count is the ceiling in MiB, 0 derives
+// the default, a negative count disables the ceiling.
+func OracleMemoryBytesFromMiB(mib int64) int64 {
+	if mib <= 0 {
+		return mib
+	}
+	return mib << 20
 }
-
-// OracleMemorySnapshot mirrors the engine's ceiling state for exact
-// restore around a scoped override.
-type OracleMemorySnapshot = engine.OracleMemorySnapshot
-
-// SnapshotOracleMemory captures the ceiling state; RestoreOracleMemory
-// reinstates it verbatim, the installed flag included.
-func SnapshotOracleMemory() OracleMemorySnapshot { return engine.SnapshotOracleMemory() }
-
-// RestoreOracleMemory reinstates a snapshot captured by
-// SnapshotOracleMemory.
-func RestoreOracleMemory(s OracleMemorySnapshot) { engine.RestoreOracleMemory(s) }
-
-// SetOracleParallelism installs the per-oracle inner-parallelism cap
-// for this process's runs (REQ-exec-oracle-parallelism): each oracle
-// tree's width becomes max(1, NumCPU/jobs). Run installs it from its
-// job count; a long-lived caller probing between campaigns installs
-// jobs=1 (full width for the lone tree) around the probe.
-func SetOracleParallelism(jobs int) { engine.SetOracleParallelism(jobs) }
-
-// OracleParallelismSnapshot mirrors the engine's width state for exact
-// restore around a scoped override.
-type OracleParallelismSnapshot = engine.OracleParallelismSnapshot
-
-// SnapshotOracleParallelism captures the width state;
-// RestoreOracleParallelism reinstates it verbatim.
-func SnapshotOracleParallelism() OracleParallelismSnapshot {
-	return engine.SnapshotOracleParallelism()
-}
-
-// RestoreOracleParallelism reinstates a snapshot captured by
-// SnapshotOracleParallelism.
-func RestoreOracleParallelism(s OracleParallelismSnapshot) { engine.RestoreOracleParallelism(s) }
 
 // EphemeralRequest is one ephemeral probe in any of its three edit forms
 // — exactly one of Mutant (a whole replacement of File), Edits
@@ -179,6 +164,10 @@ type EphemeralRequest struct {
 	OracleTimeout time.Duration
 	Runs          int
 	Progress      func(PreparationEvent)
+	// OracleMemoryBytes chooses the probe's memory ceiling: > 0 explicit,
+	// 0 derived for a lone oracle tree, negative disabled. The probe's
+	// width is a lone tree's — the full host (REQ-exec-oracle-parallelism).
+	OracleMemoryBytes int64
 }
 
 // RunEphemeral runs the request's probe.
@@ -194,16 +183,15 @@ func (t *Tree) RunEphemeral(ctx context.Context, req EphemeralRequest) (*Ephemer
 	}
 	switch {
 	case len(req.BatchEdits) != 0:
-		return t.ephemeralBatch(ctx, req.BatchEdits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress)
+		return t.ephemeralBatch(ctx, req.BatchEdits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1))
 	case len(req.Edits) != 0:
-		return t.ephemeralEdits(ctx, req.File, req.Edits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress)
+		return t.ephemeralEdits(ctx, req.File, req.Edits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1))
 	default:
-		return t.ephemeral(ctx, req.File, req.Mutant, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress)
+		return t.ephemeral(ctx, req.File, req.Mutant, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1))
 	}
 }
 
-func (t *Tree) ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent)) (*EphemeralResult, error) {
-	engine.EnsureOracleMemoryDefault(1)
+func (t *Tree) ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds) (*EphemeralResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -225,7 +213,7 @@ func (t *Tree) ephemeral(ctx context.Context, file string, mutant []byte, testPk
 		return nil, fmt.Errorf("mutant is identical to %s: nothing to measure", file)
 	}
 
-	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, oracleTimeout, runs, progress)
+	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, oracleTimeout, runs, progress, bounds)
 }
 
 // refuseUnselectedRun refuses a run pattern that selects none of the
@@ -484,13 +472,12 @@ func timeoutEvidenceForMode(derive bool, killer, evidence string, mutantBudget, 
 	return evidence
 }
 
-func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent)) (*EphemeralResult, error) {
+func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds) (*EphemeralResult, error) {
 	report := func(event PreparationEvent) {
 		if progress != nil {
 			progress(event)
 		}
 	}
-	engine.EnsureOracleMemoryDefault(1)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -601,13 +588,13 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	report(PreparationEvent{Stage: PreparationBaseline, Symbol: run, Package: testPkg, OracleBudget: baselineBound.String()})
 	baselineStart := time.Now()
-	ran, passed, diagnostic, err := testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env)
+	ran, passed, diagnostic, err := testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
 	if baselineCompilerCrashed(err) {
 		// The baseline's compiler died: a toolchain transient, retried
 		// once so it never reads as the baseline failing to build; a
 		// second death is reported as the crash it is.
 		report(PreparationEvent{Stage: PreparationBaseline, Symbol: run + " (compiler crashed; retrying once)", Package: testPkg, OracleBudget: baselineBound.String()})
-		ran, passed, diagnostic, err = testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env)
+		ran, passed, diagnostic, err = testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
 		if baselineCompilerCrashed(err) {
 			return nil, fmt.Errorf("compiler crashed twice on the baseline — re-run to confirm; not a verdict, and not the baseline failing to build:\n%w", err)
 		}
@@ -668,22 +655,23 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	m := engine.Mutant{Replacements: engineReplacements}
 	res := &EphemeralResult{
-		Files:            files,
-		TestPkg:          testPkg,
-		Run:              run,
-		Runs:             runs,
-		EditDigest:       ephemeralEditDigest(t.dir, replacements),
-		OracleBudget:     mutantBudget.String(),
-		MeasuredBaseline: measuredBaseline.String(),
-		PrunedImports:    prunedImports,
-		MutatedTests:     mutatedTests,
+		Files:             files,
+		TestPkg:           testPkg,
+		Run:               run,
+		Runs:              runs,
+		OracleMemoryBytes: bounds.MemoryBytes,
+		EditDigest:        ephemeralEditDigest(t.dir, replacements),
+		OracleBudget:      mutantBudget.String(),
+		MeasuredBaseline:  measuredBaseline.String(),
+		PrunedImports:     prunedImports,
+		MutatedTests:      mutatedTests,
 	}
 	// N runs against the once-probed baseline: per-run verdicts split a
 	// deterministic kill (every run killed) from a property generator's
 	// draw luck (REQ-exec-ephemeral).
 	for i := 0; i < runs; i++ {
 		report(PreparationEvent{Stage: PreparationMutantRun, Symbol: fmt.Sprintf("%d/%d", i+1, runs), Package: testPkg, OracleBudget: mutantBudget.String()})
-		outcome, killer, evidence, diagnostic, err := runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env)
+		outcome, killer, evidence, diagnostic, err := runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env, bounds)
 		if err != nil {
 			return nil, err
 		}
@@ -693,7 +681,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 			// crashes the compiler, and neither reads as "did not
 			// compile" (REQ-exec-ephemeral).
 			report(PreparationEvent{Stage: PreparationMutantRun, Symbol: fmt.Sprintf("%d/%d (compiler crashed; retrying once)", i+1, runs), Package: testPkg, OracleBudget: mutantBudget.String()})
-			outcome, killer, evidence, diagnostic, err = runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env)
+			outcome, killer, evidence, diagnostic, err = runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env, bounds)
 			if err != nil {
 				return nil, err
 			}
@@ -740,7 +728,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// runs under the measurement leash in both modes. Its expiry is
 		// the advisory posture, never a verdict — CoverageUnknown, the
 		// label absent — and the command timeout still bounds.
-		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", probeLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage()); err != nil {
+		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", probeLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage(), bounds); err != nil {
 			// Every measured file is unknown; a mutated test file is
 			// never measured, so it is not unknown either.
 			for _, file := range files {
@@ -801,12 +789,12 @@ func baselineCompilerCrashed(err error) bool {
 	return errors.As(err, &build) && engine.CompilerCrashed(build.Diagnostic)
 }
 
-func (t *Tree) ephemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent)) (*EphemeralResult, error) {
+func (t *Tree) ephemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds) (*EphemeralResult, error) {
 	replacements, err := prepareEditBatchContext(ctx, t.dir, edits)
 	if err != nil {
 		return nil, err
 	}
-	return t.runEphemeral(ctx, replacements, testPkg, run, oracleTimeout, runs, progress)
+	return t.runEphemeral(ctx, replacements, testPkg, run, oracleTimeout, runs, progress, bounds)
 }
 
 // Edit is one exact-match replacement inside an ephemeral mutant's source:
@@ -877,7 +865,7 @@ func overlappingMatchStarts(s, pattern string) int {
 	}
 }
 
-func (t *Tree) ephemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent)) (*EphemeralResult, error) {
+func (t *Tree) ephemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds) (*EphemeralResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -896,7 +884,7 @@ func (t *Tree) ephemeralEdits(ctx context.Context, file string, edits []Edit, te
 	if err != nil {
 		return nil, err
 	}
-	return t.ephemeral(ctx, file, mutant, testPkg, run, oracleTimeout, runs, progress)
+	return t.ephemeral(ctx, file, mutant, testPkg, run, oracleTimeout, runs, progress, bounds)
 }
 
 func readFileContext(ctx context.Context, path string) ([]byte, error) {

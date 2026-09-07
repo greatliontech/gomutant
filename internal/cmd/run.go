@@ -280,7 +280,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		SoftStop: softStop,
-		Budget:   o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: oracleMemoryBytes(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
+		Budget:   o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
 		OwnWrites: gomutant.RunOwnWrites(docPath),
 		PlanOnly:  o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
@@ -755,15 +755,6 @@ func skipClasses(findings []gomutant.Finding) (string, int) {
 func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
 	fmt.Fprintf(w, "summary   %d targets: %d measured, %d cached, %d skipped; %d generated, %d killed, %d survived, %d discarded; %d attested, %d open\n",
 		summary.Targets, summary.Measured, summary.Cached, summary.Skipped, summary.Generated, summary.Killed, summary.Survived, summary.Discarded, summary.Attested, summary.Open)
-}
-
-// oracleMemoryBytes converts the MiB flag: 0 stays 0 (derive), negative
-// stays negative (disabled).
-func oracleMemoryBytes(mib int64) int64 {
-	if mib <= 0 {
-		return mib
-	}
-	return mib << 20
 }
 
 // renderAnalysis prints a payload-bearing analysis event: one line with

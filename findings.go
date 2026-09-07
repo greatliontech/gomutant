@@ -1525,6 +1525,14 @@ func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget
 	return t.freshForContext(ctx, f, tg, budget, timeout, false)
 }
 
+// standaloneMemoryPin is the ceiling a standalone freshness judgment
+// compares a record against: none — inspection runs no oracle, so it
+// judges under no ceiling (REQ-result-stale's standalone-inspection
+// arm): a directional record serves, a ceiling-decided record's exact
+// pin reads as stale until a run's own ceiling judges it — a spurious
+// re-measure report, never a spurious serve.
+const standaloneMemoryPin int64 = 0
+
 func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget int, timeout time.Duration, timeoutDerived bool) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -1540,7 +1548,7 @@ func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget
 		return false, err
 	}
 	symbols := append([]string{tg.Symbol}, oracle...)
-	views, err := t.newSubjectViews(ctx, symbols, packageProcessAttestable(tg.Symbol, oracle))
+	views, err := t.newSubjectViews(ctx, symbols, packageProcessAttestable(tg.Symbol, oracle), 0)
 	if err != nil {
 		return false, err
 	}
@@ -1580,7 +1588,7 @@ func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget
 	// record's: an explicit caller timeout invalidates a derived
 	// record exactly as an explicit Run would re-measure it, and the
 	// derive-posture default relaxes to the timeout-kill rule.
-	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String(), timeoutDerived, engine.OracleMemoryLimitBytes(), regime)
+	matches, err := evidenceSetMatchesContext(ctx, f, targetView, oracleViews, tg.OracleExplicit || len(tg.Oracle) != 0, engine.OperatorSet, timeout.String(), timeoutDerived, standaloneMemoryPin, regime)
 	if err != nil || !matches {
 		return matches, err
 	}

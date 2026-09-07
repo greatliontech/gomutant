@@ -585,8 +585,11 @@ recompiles the mutated package inside its bound — so the floor is
 never below the fixed default the derivation replaced: that relation
 is contract; the particular multiple and leash values are incidental.
 An explicit timeout remains the
-caller's override; the result reports the effective budget and the
-measured baseline either way; and a refusal or timeout kill under a
+caller's override; the result reports the effective budget, the
+measured baseline, and the memory ceiling the probe's oracle processes
+ran under (0 spelled as unlimited, never elided — an uncapped run and
+an absent field must not share one encoding) either way; and a refusal
+or timeout kill under a
 derived bound names that bound's true provenance (the leash, the
 derived budget, or a command deadline that undercut them) rather than
 the oracle knob that never governed it. The honest-naming duty
@@ -1140,11 +1143,18 @@ is bounded by max(1, NumCPU/J), and the cap only ever narrows: an
 environment already carrying a narrower width keeps it. Without the cap
 every job spawns a full-width toolchain tree — jobs × NumCPU runnable
 threads, quadratic in cores at the default job count — starving the
-host and its neighbor processes. Oracle trees additionally run at low
-scheduling priority where the host provides one, so a saturated
-campaign yields to interactive work. The width and priority are
-scheduling bounds, never measurement pins — pinning a
-host-geometry-derived value would machine-localize every finding — but
+host and its neighbor processes. The bound is each run's own: a run
+beside another in one process — a probe beside a campaign, two
+probes — caps its trees at its own job count, so the host carries the
+sum of the runs' widths exactly as it would carry two gomutant
+processes, never one run's width rewritten by another's — with no
+headroom halving of the memory clause's kind: a width is a scheduling
+bound the host absorbs by time-slicing, a ceiling is a budget the host
+cannot. Oracle trees additionally run at low scheduling priority where
+the host provides one, so a saturated campaign yields to interactive
+work. The width and priority are scheduling bounds, never measurement
+pins — pinning a host-geometry-derived value would machine-localize
+every finding — but
 the injected width is part of the observed oracle environment: the
 observation ingest mirror carries the effective GOMAXPROCS, so an
 oracle that observably reads it records the value it actually saw as

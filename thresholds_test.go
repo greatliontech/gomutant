@@ -48,7 +48,7 @@ func TestEphemeralLeashLiftsFromTheBank(t *testing.T) {
 	var bound time.Duration
 	probe := testProbe
 	defer func() { testProbe = probe }()
-	testProbe = func(_ context.Context, _, _, _ string, timeout time.Duration, _, _ []string) (int, bool, string, error) {
+	testProbe = func(_ context.Context, _, _, _ string, timeout time.Duration, _, _ []string, bounds engine.OracleBounds) (int, bool, string, error) {
 		bound = timeout
 		return 0, false, "", captured
 	}
@@ -75,7 +75,7 @@ func TestEphemeralLeashLiftsFromTheBank(t *testing.T) {
 		t.Fatalf("banked leash = %s; want the lift to %s (the package's LONGEST entry; another package's entry must not lift it)", bound, want)
 	}
 	// The command-deadline refusal names the leash that governed.
-	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string) (int, bool, string, error) {
+	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
 		return 0, false, "", fmt.Errorf("running baseline: %w", context.DeadlineExceeded)
 	}
 	if _, err := tr.RunEphemeral(context.Background(), req); err == nil || !strings.Contains(err.Error(), want.String()+"-leashed") {
@@ -94,7 +94,7 @@ func TestEphemeralCoverageProbeLeashLiftsFromTheBank(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	restore := coveredPositions
 	var got []time.Duration
-	coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView) (engine.Coverage, error) {
+	coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
 		got = append(got, timeout)
 		return engine.Coverage{}, errors.New("probe refused")
 	}
@@ -149,13 +149,13 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 		scheduleMinCandidates = restoreMinC
 	})
 	var bounds, probeBounds []time.Duration
-	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string) (int, bool, []string, string, runtimeinput.Observation, error) {
+	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
 		bounds = append(bounds, timeout)
-		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env)
+		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, oracleBounds)
 	}
-	campaignCoveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView) (engine.Coverage, error) {
+	campaignCoveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView, oracleBounds engine.OracleBounds) (engine.Coverage, error) {
 		probeBounds = append(probeBounds, timeout)
-		return engine.CoveredPositions(ctx, dir, testPkg, runRegex, coverPkg, timeout, flags, env, view)
+		return engine.CoveredPositions(ctx, dir, testPkg, runRegex, coverPkg, timeout, flags, env, view, oracleBounds)
 	}
 	dir := t.TempDir()
 	files := map[string]string{

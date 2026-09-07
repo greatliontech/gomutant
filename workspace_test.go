@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
-	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // workspaceFixture builds a committed go.work workspace: a root module
@@ -362,7 +361,7 @@ func TestApplySplicedUnionAnchorsAWorkspaceMemberAtTheTree(t *testing.T) {
 	}
 	evidence := SubjectEvidence{Symbol: "example.com/root/tools.F", RuntimeInputs: relState.Manifest, RuntimeDigest: relState.Digest}
 	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
-	_, same, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, engine.OracleEvidenceEnv(env)), evidenceBase(tree.dir, rec.TargetEvidence))
+	_, same, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, env), evidenceBase(tree.dir, rec.TargetEvidence))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +373,7 @@ func TestApplySplicedUnionAnchorsAWorkspaceMemberAtTheTree(t *testing.T) {
 	}
 	// Judged at the member instead, the same record reads diverged: the
 	// two bases are not interchangeable.
-	_, diverged, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, engine.OracleEvidenceEnv(env)), member)
+	_, diverged, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, env), member)
 	if err != nil {
 		t.Fatal(err)
 	}

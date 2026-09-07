@@ -159,13 +159,13 @@ func TestRunServesBankedBaselinesAcrossRuns(t *testing.T) {
 		scheduleMinCandidates = restoreMinC
 	})
 	var baselineProbes, coverageProbes atomic.Int64
-	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string) (int, bool, []string, string, runtimeinput.Observation, error) {
+	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
 		baselineProbes.Add(1)
-		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env)
+		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 	}
-	campaignCoveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView) (engine.Coverage, error) {
+	campaignCoveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView, bounds engine.OracleBounds) (engine.Coverage, error) {
 		coverageProbes.Add(1)
-		return engine.CoveredPositions(ctx, dir, testPkg, runRegex, coverPkg, timeout, flags, env, view)
+		return engine.CoveredPositions(ctx, dir, testPkg, runRegex, coverPkg, timeout, flags, env, view, bounds)
 	}
 
 	dir := t.TempDir()

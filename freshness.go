@@ -78,6 +78,11 @@ type moduleSubjectView struct {
 type subjectViewSet struct {
 	bySymbol map[string]*subjectView
 	modules  []*moduleSubjectView
+	// width is the oracle width the set's evidence environment carries
+	// — the run's for a campaign's sets, none for a standalone
+	// inspection's — so a supplementary view built beside this set
+	// judges under the same environment.
+	width int
 }
 
 // subjectEngines shares one gofresh engine per module-directory configuration
@@ -96,8 +101,10 @@ type subjectEngines struct {
 	// serving loads and analysis. Captured at construction, so the
 	// width install must precede newSubjectEngines.
 	evidenceEnv []string
-	vouches     []string
-	event       func(phase, pkg, detail string)
+	// width is the oracle width evidenceEnv carries.
+	width   int
+	vouches []string
+	event   func(phase, pkg, detail string)
 	// packageProcess carries the package-process attestation
 	// (gofresh WithPackageProcessExecution) for the engines this set
 	// builds, fixed at construction: gomutant runs every oracle as
@@ -116,9 +123,9 @@ type subjectEngines struct {
 	byDir   map[string]*gofresh.Engine
 }
 
-func (t *Tree) newSubjectEngines(event func(phase, pkg, detail string), packageProcess bool) *subjectEngines {
+func (t *Tree) newSubjectEngines(event func(phase, pkg, detail string), packageProcess bool, width int) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env), vouches: t.vouches, event: event, packageProcess: packageProcess, treeDir: t.dir, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env, width), width: width, vouches: t.vouches, event: event, packageProcess: packageProcess, treeDir: t.dir, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
@@ -238,8 +245,13 @@ var subjectViewBuildHook func(symbols []string)
 // build's construction and its proof capture). Sequential tests only.
 var observedUnionHook func(symbols []string)
 
-func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packageProcess bool) (*subjectViewSet, error) {
-	return t.newStrictSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess))
+// newSubjectViews is the standalone inspection's strict build: its
+// evidence environment carries the width the caller names — a
+// campaign's, when the views supplement a campaign's own set; none
+// for a standalone inspection, which judges under the inspecting
+// process's own width (REQ-exec-oracle-parallelism).
+func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packageProcess bool, width int) (*subjectViewSet, error) {
+	return t.newStrictSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess, width))
 }
 
 // buildSubjectViews is the ONE view-set build: symbols resolve and
@@ -280,7 +292,7 @@ func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups [
 	if subjectViewBuildHook != nil {
 		subjectViewBuildHook(requested)
 	}
-	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(requested))}
+	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(requested)), width: engines.width}
 	env := engines.evidenceEnv
 	capture := func(ctx context.Context, view *gofresh.View, module *moduleSubjectView, resolved []resolvedSubject) error {
 		for _, r := range resolved {
@@ -543,7 +555,7 @@ type observedViewSet struct {
 // fault faults that module's symbols, never the union.
 func (s *subjectViewSet) observed(ctx context.Context) (*observedViewSet, map[string]error, error) {
 	faults := map[string]error{}
-	union := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(s.bySymbol))}
+	union := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(s.bySymbol)), width: s.width}
 	symbols := make([]string, 0, len(s.bySymbol))
 	for symbol := range s.bySymbol {
 		symbols = append(symbols, symbol)
@@ -605,7 +617,7 @@ func (s *subjectViewSet) observed(ctx context.Context) (*observedViewSet, map[st
 // never a partial narrowing; a sibling derivation failure is
 // target-local like any evidence-construction fault.
 func (s *observedViewSet) forTarget(target string, oracle []string, faults map[string]error) (*subjectViewSet, error) {
-	narrowed := &subjectViewSet{bySymbol: make(map[string]*subjectView, 1+len(oracle))}
+	narrowed := &subjectViewSet{bySymbol: make(map[string]*subjectView, 1+len(oracle)), width: s.width}
 	symbols := append([]string{target}, oracle...)
 	for _, symbol := range symbols {
 		if _, ok := s.bySymbol[symbol]; !ok {
@@ -636,7 +648,7 @@ func (s *observedViewSet) forTarget(target string, oracle []string, faults map[s
 }
 
 func (t *Tree) newSubjectView(symbol string) (*subjectView, error) {
-	views, err := t.newSubjectViews(context.Background(), []string{symbol}, false)
+	views, err := t.newSubjectViews(context.Background(), []string{symbol}, false, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -922,7 +934,7 @@ func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress
 		// Fault-tolerant: a subject the build cannot serve stays out of
 		// the set, and the record reading it builds its own view — the
 		// per-record judgment's own path, failing that record alone.
-		views, _, err := t.buildSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess))
+		views, _, err := t.buildSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess, 0))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1144,6 +1156,18 @@ func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgment
 
 // viewsFor serves each symbol's view from the prebuilt set, building
 // one supplementary set for the rest.
+// supplementaryViews builds views a prebuilt set lacks, beside it: the
+// one construction every inspection-time supplement shares, so a view
+// built beside a campaign's set judges under the set's width and a
+// standalone inspection's under none (REQ-exec-oracle-parallelism).
+func (t *Tree) supplementaryViews(ctx context.Context, symbols []string, prebuilt *subjectViewSet, packageProcess bool) (*subjectViewSet, error) {
+	width := 0
+	if prebuilt != nil {
+		width = prebuilt.width
+	}
+	return t.newSubjectViews(ctx, symbols, packageProcess, width)
+}
+
 func (t *Tree) viewsFor(ctx context.Context, symbols []string, prebuilt *subjectViewSet, packageProcess bool) (map[string]*subjectView, error) {
 	viewFor := make(map[string]*subjectView, len(symbols))
 	var missing []string
@@ -1160,7 +1184,7 @@ func (t *Tree) viewsFor(ctx context.Context, symbols []string, prebuilt *subject
 		if inspectionSupplementaryViewHook != nil {
 			inspectionSupplementaryViewHook(missing)
 		}
-		supplementary, err := t.newSubjectViews(ctx, missing, packageProcess)
+		supplementary, err := t.supplementaryViews(ctx, missing, prebuilt, packageProcess)
 		if err != nil {
 			return nil, err
 		}
@@ -1445,7 +1469,7 @@ func (t *Tree) modifiedOracleNames(ctx context.Context, f Finding, currentOracle
 		target = prebuilt.bySymbol[f.Symbol]
 	}
 	if target == nil {
-		views, err := t.newSubjectViews(ctx, []string{f.Symbol}, findingPackageProcessAttestable(f))
+		views, err := t.supplementaryViews(ctx, []string{f.Symbol}, prebuilt, findingPackageProcessAttestable(f))
 		if err != nil {
 			return nil
 		}

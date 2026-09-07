@@ -197,12 +197,12 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 	restore := testProbe
 	defer func() { testProbe = restore }()
 	calls := 0
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (int, bool, string, error) {
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
 		calls++
 		if calls == 1 {
 			return 0, false, "", crash
 		}
-		return restore(ctx, dir, testPkg, run, timeout, binFlags, env)
+		return restore(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}
 	req := EphemeralRequest{File: "lib/lib.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1}
 	res, err := tr.RunEphemeral(context.Background(), req)
@@ -213,7 +213,7 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 		t.Fatalf("baseline probed %d times, result %+v; want the crash retried once and the measured survivor", calls, res)
 	}
 	calls = 0
-	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string) (int, bool, string, error) {
+	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
 		calls++
 		return 0, false, "", crash
 	}
@@ -223,7 +223,7 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 	// A baseline test that FAILS printing crash-shaped output is a
 	// failing test: no retry, the ordinary refusal.
 	calls = 0
-	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string) (int, bool, string, error) {
+	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
 		calls++
 		return 1, false, "--- FAIL: TestWeak\n    cmd/compile panic: signal: goroutine dump quoted by the test", nil
 	}
@@ -250,12 +250,12 @@ func TestEphemeralMixedOutcomeKeepsTheUnexercisedAdvisory(t *testing.T) {
 	restore := runMutantEvidence
 	defer func() { runMutantEvidence = restore }()
 	calls := 0
-	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (engine.MutantOutcome, string, string, string, error) {
+	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		if calls == 1 {
 			return engine.MutantKilled, "TestWeak", "planted kill", "", nil
 		}
-		return restore(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env)
+		return restore(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env, bounds)
 	}
 	res, err := tr.RunEphemeral(context.Background(), EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 2})
 	if err != nil {
@@ -287,12 +287,12 @@ func TestEphemeralRetriesACompilerCrashOnce(t *testing.T) {
 	restore := runMutantEvidence
 	defer func() { runMutantEvidence = restore }()
 	calls := 0
-	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (engine.MutantOutcome, string, string, string, error) {
+	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		if calls == 1 {
 			return engine.MutantDiscarded, "", "", crash, nil
 		}
-		return restore(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env)
+		return restore(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env, bounds)
 	}
 	req := EphemeralRequest{File: "lib/lib.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1}
 	res, err := tr.RunEphemeral(context.Background(), req)
@@ -303,7 +303,7 @@ func TestEphemeralRetriesACompilerCrashOnce(t *testing.T) {
 		t.Fatalf("calls = %d, result = %+v; want one retry and the measured survivor", calls, res)
 	}
 	calls = 0
-	runMutantEvidence = func(context.Context, string, engine.Mutant, []string, string, time.Duration, []string, []string) (engine.MutantOutcome, string, string, string, error) {
+	runMutantEvidence = func(context.Context, string, engine.Mutant, []string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		return engine.MutantDiscarded, "", "", crash, nil
 	}
@@ -315,7 +315,7 @@ func TestEphemeralRetriesACompilerCrashOnce(t *testing.T) {
 	}
 	// A genuine compile diagnostic is not retried.
 	calls = 0
-	runMutantEvidence = func(context.Context, string, engine.Mutant, []string, string, time.Duration, []string, []string) (engine.MutantOutcome, string, string, string, error) {
+	runMutantEvidence = func(context.Context, string, engine.Mutant, []string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		return engine.MutantDiscarded, "", "", "# example.com/fixture/lib\n./lib.go:9:2: undefined: nope", nil
 	}

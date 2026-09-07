@@ -370,7 +370,7 @@ func (t *Tree) probeScheduleUnit(ctx context.Context, unit probeUnit, opts runOp
 			return err
 		}
 		probeStart := time.Now()
-		cov, err := campaignCoveredPositions(ctx, t.dir, unit.g.pkgs[0], testRunRegex(batch), unit.coverPkg, opts.advisoryLeash(unit.g), unit.g.flags, runEnv, t.eng.DirectiveCoverage())
+		cov, err := campaignCoveredPositions(ctx, t.dir, unit.g.pkgs[0], testRunRegex(batch), unit.coverPkg, opts.advisoryLeash(unit.g), unit.g.flags, runEnv, t.eng.DirectiveCoverage(), opts.bounds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -530,7 +530,7 @@ func (t *Tree) phaseKillVouched(ctx context.Context, g group, bound time.Duratio
 			opts.probeGate.RLock()
 			defer opts.probeGate.RUnlock()
 		}
-		ran, passed, _, _, _, err := phaseBaselineProbe(ctx, t.dir, g.pkgs[0], g.runRegex, bound, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv)
+		ran, passed, _, _, _, err := phaseBaselineProbe(ctx, t.dir, g.pkgs[0], g.runRegex, bound, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		return err == nil && ran > 0 && passed
 	})
 }

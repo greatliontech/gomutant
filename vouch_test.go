@@ -7,9 +7,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
@@ -276,31 +279,182 @@ func TestOracleMemoryPinGatesReuse(t *testing.T) {
 	}
 }
 
-// The measurement pin is resolved once at run entry: a mid-campaign
-// change to the process ceiling (a misbehaving concurrent caller)
-// never diverges the stamped evidence from the compared pin
-// (REQ-exec-oracle-memory, REQ-result-record).
-func TestRunStampsTheResolvedMemoryPin(t *testing.T) {
+// The measurement pin is the run's own bounds, derived once at entry
+// and stamped: a campaign and any concurrent probe in the same process
+// each carry their own, so no caller can move a run's ceiling under
+// it (REQ-exec-oracle-memory, REQ-result-record).
+func TestRunStampsItsOwnMemoryPin(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
 	tr := fixtureTree(t)
-	t.Cleanup(func() { engine.SetOracleMemoryLimit(-1, 1) })
 	want := engine.DefaultOracleMemoryLimit(1)
-	if want == 0 || want == 8<<30 {
+	if want == 0 {
 		t.Skip("total RAM unreadable on this host")
 	}
 	findings, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}, Options{
 		Budget: 1, Jobs: 1,
-		Progress: func(PreparationEvent) {
-			engine.SetOracleMemoryLimit(8<<30, 1)
-		},
 	})
 	if err != nil || len(findings) != 1 {
 		t.Fatalf("run = %+v, %v", findings, err)
 	}
 	if findings[0].OracleMemoryBytes != want {
-		t.Fatalf("stamped pin = %d, want the entry-resolved %d (mid-campaign flip leaked)", findings[0].OracleMemoryBytes, want)
+		t.Fatalf("stamped pin = %d, want the run's derived %d", findings[0].OracleMemoryBytes, want)
+	}
+	explicit, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}, Options{
+		Budget: 1, Jobs: 1, OracleMemoryBytes: 3 << 30,
+	})
+	if err != nil || len(explicit) != 1 || explicit[0].OracleMemoryBytes != 3<<30 {
+		t.Fatalf("explicit run = %+v, %v; want the 3 GiB pin stamped", explicit, err)
+	}
+}
+
+// Two probes in one process, each asking a different ceiling, spawn
+// every one of their oracle processes — the baseline probe and the
+// mutant runs alike — under their own bounds: bounds are a value each
+// run carries, never process state a sibling's install could move
+// (REQ-exec-oracle-memory, REQ-exec-attribution-symmetry's "differ in
+// the overlay alone").
+func TestConcurrentProbesSpawnUnderTheirOwnBounds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	original, err := os.ReadFile(filepath.Join(fixtureDir, "lib", "lib.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(original), "return a + b", "return a - b", 1)
+	if broken == string(original) {
+		t.Fatal("fixture Add body moved; update the replacement")
+	}
+	var mu sync.Mutex
+	spawns := map[string][]engine.OracleBounds{} // run pattern → bounds seen by each spawn
+	record := func(run string, bounds engine.OracleBounds) {
+		mu.Lock()
+		defer mu.Unlock()
+		spawns[run] = append(spawns[run], bounds)
+	}
+	priorProbe, priorMutant := testProbe, runMutantEvidence
+	defer func() { testProbe, runMutantEvidence = priorProbe, priorMutant }()
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+		record(run, bounds)
+		return priorProbe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
+	}
+	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
+		record(runRegex, bounds)
+		return priorMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env, bounds)
+	}
+	probes := []struct {
+		run    string
+		memory int64
+	}{{"^TestAdd$", 1 << 30}, {"^TestWeak$", 2 << 30}}
+	var wg sync.WaitGroup
+	errs := make([]error, len(probes))
+	for i, p := range probes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = tr.RunEphemeral(context.Background(), EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: p.run, OracleTimeout: time.Minute, Runs: 1, OracleMemoryBytes: p.memory})
+		}()
+	}
+	wg.Wait()
+	for i, p := range probes {
+		if errs[i] != nil {
+			t.Fatalf("probe %s: %v", p.run, errs[i])
+		}
+		seen := spawns[p.run]
+		if len(seen) < 2 {
+			t.Fatalf("probe %s spawned %d oracle processes, want its baseline and its mutant", p.run, len(seen))
+		}
+		for _, b := range seen {
+			if b.MemoryBytes != p.memory || b.Width != runtime.NumCPU() {
+				t.Fatalf("probe %s spawned under %+v, want its own ceiling %d and a lone tree's width %d", p.run, b, p.memory, runtime.NumCPU())
+			}
+		}
+	}
+}
+
+// A campaign and a probe in one process each spawn under their own
+// bounds: the campaign's every oracle process carries the ceiling and
+// the width its job count derives, the probe's carry its own, and the
+// campaign's stamped pin is the campaign's — a sibling call moves
+// nothing (REQ-exec-oracle-memory's concurrent-runs clause,
+// REQ-exec-oracle-parallelism's sibling-run clause, the MCP
+// lifecycle's concurrency paragraph).
+func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	original, err := os.ReadFile(filepath.Join(fixtureDir, "lib", "lib.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(original), "return a + b", "return a - b", 1)
+	var mu sync.Mutex
+	var campaignSpawns, probeSpawns []engine.OracleBounds
+	priorProbe, priorMutant, priorCampaign, priorBaseline := testProbe, runMutantEvidence, runMutantObservedEnv, groupBaselineProbe
+	defer func() {
+		testProbe, runMutantEvidence, runMutantObservedEnv, groupBaselineProbe = priorProbe, priorMutant, priorCampaign, priorBaseline
+	}()
+	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+		mu.Lock()
+		probeSpawns = append(probeSpawns, bounds)
+		mu.Unlock()
+		return priorProbe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
+	}
+	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
+		mu.Lock()
+		probeSpawns = append(probeSpawns, bounds)
+		mu.Unlock()
+		return priorMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env, bounds)
+	}
+	runMutantObservedEnv = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+		mu.Lock()
+		campaignSpawns = append(campaignSpawns, bounds)
+		mu.Unlock()
+		return priorCampaign(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
+	}
+	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+		mu.Lock()
+		campaignSpawns = append(campaignSpawns, bounds)
+		mu.Unlock()
+		return priorBaseline(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
+	}
+	const campaignMemory, probeMemory = int64(3) << 30, int64(1) << 30
+	var wg sync.WaitGroup
+	var findings []Finding
+	var campaignErr, probeErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		findings, campaignErr = tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}, Options{Budget: 1, Jobs: 2, OracleMemoryBytes: campaignMemory})
+	}()
+	go func() {
+		defer wg.Done()
+		_, probeErr = tr.RunEphemeral(context.Background(), EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1, OracleMemoryBytes: probeMemory})
+	}()
+	wg.Wait()
+	if campaignErr != nil || probeErr != nil {
+		t.Fatalf("campaign %v, probe %v", campaignErr, probeErr)
+	}
+	if len(findings) != 1 || findings[0].OracleMemoryBytes != campaignMemory {
+		t.Fatalf("campaign stamped %+v, want its own %d pin beside the probe", findings, campaignMemory)
+	}
+	campaignBounds := engine.DeriveOracleBounds(campaignMemory, 2)
+	if len(campaignSpawns) == 0 || len(probeSpawns) < 2 {
+		t.Fatalf("spawns: campaign %d, probe %d — want both measured", len(campaignSpawns), len(probeSpawns))
+	}
+	for _, b := range campaignSpawns {
+		if b != campaignBounds {
+			t.Fatalf("campaign spawned under %+v beside the probe, want its own %+v", b, campaignBounds)
+		}
+	}
+	for _, b := range probeSpawns {
+		if b.MemoryBytes != probeMemory || b.Width != runtime.NumCPU() {
+			t.Fatalf("probe spawned under %+v beside the campaign, want its own ceiling %d at a lone tree's width", b, probeMemory)
+		}
 	}
 }
 

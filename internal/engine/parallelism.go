@@ -5,62 +5,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync/atomic"
 )
-
-// oracleParallelWidth is the per-oracle-process-tree inner-parallelism
-// width in scheduler threads, installed once per run before oracle work
-// starts (SetOracleParallelism); zero leaves oracle trees uncapped.
-// Process-wide for the same reason the memory ceiling is: the engine's
-// oracle entry points are package functions and one process runs one
-// campaign.
-var oracleParallelWidth atomic.Int64
-
-// SetOracleParallelism installs the inner-parallelism cap for this
-// process's runs - between campaigns, never during one, like the memory
-// ceiling: each oracle tree's width becomes max(1, NumCPU/jobs), so the
-// campaign's jobs concurrent trees together stay within the host
-// instead of each spawning a full-width toolchain tree - jobs x NumCPU
-// runnable threads, quadratic in cores at the default job count
-// (REQ-exec-oracle-parallelism). The width is a scheduling bound, never
-// a measurement pin: it reaches verdicts only through the wall-clock
-// oracle timeout, exactly as ambient host load does.
-func SetOracleParallelism(jobs int) {
-	oracleParallelWidth.Store(int64(oracleParallelismWidth(jobs)))
-}
-
-// OracleParallelismWidth reports the installed per-tree width; 0 means
-// uncapped. A read-only surface for callers auditing the installed
-// bound - the width is never a measurement pin.
-func OracleParallelismWidth() int {
-	return int(oracleParallelWidth.Load())
-}
-
-// OracleParallelismSnapshot captures the installed width so a scoped
-// override (a probe between campaigns) can restore the exact prior
-// state.
-type OracleParallelismSnapshot struct {
-	width int64
-}
-
-// SnapshotOracleParallelism captures the current width state.
-func SnapshotOracleParallelism() OracleParallelismSnapshot {
-	return OracleParallelismSnapshot{width: oracleParallelWidth.Load()}
-}
-
-// RestoreOracleParallelism reinstates a snapshot verbatim.
-func RestoreOracleParallelism(s OracleParallelismSnapshot) {
-	oracleParallelWidth.Store(s.width)
-}
-
-// oracleParallelismWidth derives the per-tree width: host width over
-// the job count, floored at one.
-func oracleParallelismWidth(jobs int) int {
-	if jobs < 1 {
-		jobs = 1
-	}
-	return max(1, runtime.NumCPU()/jobs)
-}
 
 // OracleEvidenceEnv is the environment oracle evidence digests under:
 // the frozen tree environment with the inner-parallelism cap applied -
@@ -72,8 +17,8 @@ func oracleParallelismWidth(jobs int) int {
 // makes a width-reading oracle's evidence unreproducible - perpetual
 // re-measure - or, when an ambient value matches an old record, serves
 // stale across a width change (REQ-exec-oracle-parallelism).
-func OracleEvidenceEnv(env []string) []string {
-	return oracleCPUEnv(env)
+func OracleEvidenceEnv(env []string, width int) []string {
+	return oracleCPUEnv(env, width)
 }
 
 // oracleEnv composes the per-oracle resource bounds onto a spawn
@@ -83,8 +28,8 @@ func OracleEvidenceEnv(env []string) []string {
 // failure always execute under identical bounds - differential
 // attribution is sound only when the two runs differ in the overlay
 // alone.
-func oracleEnv(env []string) []string {
-	return oracleCPUEnv(oracleMemoryEnv(env))
+func oracleEnv(env []string, bounds OracleBounds) []string {
+	return oracleCPUEnv(oracleMemoryEnv(env, bounds.MemoryBytes), bounds.Width)
 }
 
 // oracleCPUEnv appends the inner-parallelism cap to an oracle
@@ -97,12 +42,11 @@ func oracleEnv(env []string) []string {
 // env default never does. The cap only ever narrows: an environment
 // already carrying a narrower GOMAXPROCS keeps it - overriding would
 // raise the operator's own bound (REQ-exec-oracle-parallelism).
-func oracleCPUEnv(env []string) []string {
-	width := oracleParallelWidth.Load()
+func oracleCPUEnv(env []string, width int) []string {
 	if width <= 0 {
 		return env
 	}
-	if ambient, ok := envGOMAXPROCS(env); ok && int64(ambient) <= width {
+	if ambient, ok := envGOMAXPROCS(env); ok && ambient <= width {
 		return env
 	}
 	return append(append([]string(nil), env...), fmt.Sprintf("GOMAXPROCS=%d", width))

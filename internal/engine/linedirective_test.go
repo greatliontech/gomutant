@@ -357,7 +357,7 @@ func TestCoverageNormalizesDirectiveNames(t *testing.T) {
 			t.Fatalf("unsound set %v wrongly marks %s", view.Unsound, f)
 		}
 	}
-	coverage, err := CoveredPositions(context.Background(), dir, "example.com/ld", "TestAll", "example.com/ld", time.Minute, nil, tr.GoEnv(), view)
+	coverage, err := CoveredPositions(context.Background(), dir, "example.com/ld", "TestAll", "example.com/ld", time.Minute, nil, tr.GoEnv(), view, OracleBounds{})
 	if err != nil {
 		t.Fatalf("coverage probe: %v", err)
 	}

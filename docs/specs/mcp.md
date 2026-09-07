@@ -137,13 +137,15 @@ destructive call deletes - the one sanctioned exception to
 REQ-mcp-envelope's row caps; retarget rows cap with counted omissions
 as usual.
 
-Concurrent runs against different findings documents are legal, but the
-oracle-parallelism width is process state every in-flight campaign shares
-(REQ-exec-oracle-parallelism in [execution.md](execution.md)): the first
-in-flight campaign's job count owns the width, and a concurrent run
-requesting a different count is refused with the owner's count named —
-never installed over the owner, which would split its oracles' recorded
-environments from the campaign's evidence environment.
+Concurrent runs against different findings documents are legal, and so
+are probes beside them: a run's oracle bounds — its inner-parallelism
+width and its memory ceiling (REQ-exec-oracle-parallelism and
+REQ-exec-oracle-memory in [execution.md](execution.md)) — are the run's
+own value, handed to every oracle process it spawns, never process state
+another call could move, so a concurrent campaign or probe with a
+different job count or ceiling runs under its own and leaves the first
+run's oracles, evidence environment, and recorded pin exactly as that
+run derived them.
 
 **REQ-mcp-liveness** (behavior): The server MUST detect a dead client
 transport while a campaign is in

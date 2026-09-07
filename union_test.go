@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // The observed union shares the decision set's gofresh views: one
@@ -27,7 +29,7 @@ func TestObservedUnionSharesTheDecisionViews(t *testing.T) {
 		if phase == "observe" {
 			observes.Add(1)
 		}
-	}, false)
+	}, false, 0)
 	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, engines)
 	if err != nil || len(faults) != 0 {
 		t.Fatalf("decision build: %v %v", faults, err)
@@ -158,7 +160,7 @@ func TestObservedUnionRoutesACaptureFaultToTheModulesSymbols(t *testing.T) {
 	}
 	ctx := context.Background()
 	symbols := []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}
-	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false))
+	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0))
 	if err != nil || len(faults) != 0 {
 		t.Fatalf("decision build: %v %v", faults, err)
 	}
@@ -223,7 +225,7 @@ func TestStrictObservedBuildPromotesACaptureFault(t *testing.T) {
 		}
 	}
 	defer func() { observedUnionHook = prior }()
-	union, err := tr.newStrictObservedViews(context.Background(), []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false))
+	union, err := tr.newStrictObservedViews(context.Background(), []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0))
 	if err == nil {
 		t.Fatalf("strict observed build over a tree that moved at the proof capture returned a union of %d symbols, want the capture fault", len(union.bySymbol))
 	}
@@ -233,4 +235,67 @@ func TestStrictObservedBuildPromotesACaptureFault(t *testing.T) {
 	if !strings.Contains(err.Error(), "not found in selected source") {
 		t.Fatalf("strict observed build fault = %v, want the proof capture's refusal", err)
 	}
+}
+
+// A supplementary view built beside a campaign's set carries the set's
+// width in its evidence environment: a width-reading oracle the set
+// lacks (the moved-pin attribution's case) is judged under the same
+// environment as its siblings, never named moved because a standalone
+// inspection's unbounded width crept in (REQ-exec-oracle-parallelism).
+//
+//gofresh:pure
+func TestSupplementaryViewsCarryThePrebuiltSetsWidth(t *testing.T) {
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	set, faults, err := tr.buildSubjectViews(ctx, []string{"example.com/fixture/lib.Add"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 3))
+	if err != nil || len(faults) != 0 {
+		t.Fatalf("build: %v %v", faults, err)
+	}
+	views, err := tr.viewsFor(ctx, []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, set, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The expectation is the evidence composition itself — the cap only
+	// narrows, so under an ambient GOMAXPROCS at or below 3 (the
+	// self-host check's own witness width, say) nothing is injected on
+	// either side and the two compositions agree; under a wider ambient
+	// the set's width is injected and the standalone's is not.
+	want := strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), 3), " ")
+	for _, symbol := range []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"} {
+		if env := strings.Join(views[symbol].env, " "); env != want {
+			t.Fatalf("%s judges under %q, want the set's evidence environment %q", symbol, env, want)
+		}
+	}
+	standalone, err := tr.viewsFor(ctx, []string{"example.com/fixture/lib.TestAdd"}, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env, plain := strings.Join(standalone["example.com/fixture/lib.TestAdd"].env, " "), strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), 0), " "); env != plain {
+		t.Fatalf("a standalone inspection's view judges under %q, want the width-free environment %q", env, plain)
+	}
+	if ambient, ok := engineGOMAXPROCS(tr.eng.GoEnv()); !ok || ambient > 3 {
+		if want == strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), 0), " ") {
+			t.Fatal("the set's width was not injected over a wider ambient — the pin would be vacuous")
+		}
+	}
+}
+
+// engineGOMAXPROCS reports the environment's last well-formed
+// positive GOMAXPROCS, mirroring the engine's own reading.
+func engineGOMAXPROCS(env []string) (int, bool) {
+	value, ok := 0, false
+	for _, kv := range env {
+		if rest, found := strings.CutPrefix(kv, "GOMAXPROCS="); found {
+			n := 0
+			for _, r := range rest {
+				if r < '0' || r > '9' {
+					n = -1
+					break
+				}
+				n = n*10 + int(r-'0')
+			}
+			value, ok = n, n > 0
+		}
+	}
+	return value, ok
 }

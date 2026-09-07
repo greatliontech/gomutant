@@ -107,7 +107,6 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 			return err
 		}
 	}
-	gomutant.SetOracleMemoryLimit(oracleMemoryBytes(o.oracleMemoryMiB), 1)
 	// The reporter names every phase as it begins and keeps a cadenced
 	// progress line through the long stretches (the load, the baseline
 	// probe, each mutant run, the coverage probe) so an interrupted
@@ -139,7 +138,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	if err != nil {
 		return interrupted(err)
 	}
-	req := gomutant.EphemeralRequest{TestPkg: o.testPkg, Run: o.runPat, OracleTimeout: o.oracleTimeout, Runs: o.runs, Progress: rep.preparation}
+	req := gomutant.EphemeralRequest{TestPkg: o.testPkg, Run: o.runPat, OracleTimeout: o.oracleTimeout, Runs: o.runs, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Progress: rep.preparation}
 	if o.batch != "" {
 		req.BatchEdits = batchEdits
 	} else {
@@ -200,6 +199,14 @@ func renderEphemeralVerdict(w io.Writer, res *gomutant.EphemeralResult) {
 	// learns what budget the derivation produced.
 	if res.OracleBudget != "" {
 		fmt.Fprintf(w, "oracle budget %s  (baseline measured %s)\n", res.OracleBudget, res.MeasuredBaseline)
+	}
+	// The ceiling is the same class of fact: a memory-shaped verdict
+	// means what it means under the ceiling the probe ran under, and
+	// this line is where the caller learns the derived one.
+	if res.OracleMemoryBytes > 0 {
+		fmt.Fprintf(w, "oracle memory %d MiB\n", res.OracleMemoryBytes>>20)
+	} else {
+		fmt.Fprintln(w, "oracle memory unlimited")
 	}
 	for _, f := range res.MutatedTests {
 		fmt.Fprintf(w, "mutated test  %s  — the oracle's own source changed: the verdict is about the test (was the edited part load-bearing for %s?), never about the code under test\n", f, res.Run)

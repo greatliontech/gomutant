@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"reflect"
-	"strings"
 	"testing"
 
 	gomutant "github.com/greatliontech/gomutant"
@@ -35,37 +34,5 @@ func TestServerInstallsVouchesOnLoadedTrees(t *testing.T) {
 	}
 	if New(s.dir, WithDynamicStateVouches(want...)).vouches[0] != want[0] {
 		t.Fatal("construction option did not install the set")
-	}
-}
-
-// An explicit probe ceiling refuses while a run is in flight - the
-// campaign owns the process ceiling - and the probe path restores the
-// exact prior state, the installed flag included
-// (REQ-exec-oracle-memory).
-func TestEphemeralCeilingRefusesDuringRunAndRestores(t *testing.T) {
-	s := serverAt(t)
-	// The campaign's admission path is the width claim - the same guard
-	// the probe override checks, closing the old check-then-install
-	// window (REQ-exec-oracle-parallelism, REQ-exec-oracle-memory).
-	if err := s.claimRunWidth(4); err != nil {
-		t.Fatal(err)
-	}
-	mib := int64(256)
-	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{OracleMemoryMiB: &mib}); err == nil || !strings.Contains(err.Error(), "owns the process's oracle width and memory ceiling") {
-		t.Fatalf("in-flight explicit ceiling accepted: %v", err)
-	}
-	s.releaseRunWidth()
-
-	gomutant.SetOracleMemoryLimit(-1, 1)
-	before := gomutant.SnapshotOracleMemory()
-	prior := gomutant.OracleMemoryLimitBytes()
-	if prior != 0 {
-		t.Fatalf("disabled ceiling reads %d", prior)
-	}
-	snap := gomutant.SnapshotOracleMemory()
-	gomutant.SetOracleMemoryLimit(512<<20, 1)
-	gomutant.RestoreOracleMemory(snap)
-	if gomutant.OracleMemoryLimitBytes() != 0 || gomutant.SnapshotOracleMemory() != before {
-		t.Fatal("restore did not reinstate the exact prior state")
 	}
 }

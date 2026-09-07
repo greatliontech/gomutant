@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1724,31 +1723,6 @@ func TestWidthReadingOracleEvidenceServes(t *testing.T) {
 	}
 }
 
-// TestRunInstallsOracleParallelism pins the campaign's install of the
-// inner-parallelism cap (REQ-exec-oracle-parallelism): a run derives
-// the per-tree width from its job count before any oracle work. The
-// duplicate-target refusal fires just after the install, keeping the
-// witness cheap; jobs at the host width makes the installed value
-// unmistakable.
-func TestRunInstallsOracleParallelism(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test over a fixture module")
-	}
-	tr := fixtureTree(t)
-	prior := engine.SnapshotOracleParallelism()
-	t.Cleanup(func() { engine.RestoreOracleParallelism(prior) })
-	_, err := tr.Run(context.Background(), []Target{
-		{Symbol: "example.com/fixture/lib.Add"},
-		{Symbol: "example.com/fixture/lib.Add"},
-	}, Options{Jobs: runtime.NumCPU()})
-	if err == nil || !strings.Contains(err.Error(), "duplicate target symbol") {
-		t.Fatalf("expected the duplicate refusal, got %v", err)
-	}
-	if got := engine.OracleParallelismWidth(); got != 1 {
-		t.Fatalf("installed width = %d, want 1 at jobs = host width", got)
-	}
-}
-
 func TestRunRejectsNegativeBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
@@ -2415,7 +2389,7 @@ func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	}
 	views, err := grown.newSubjectViews(context.Background(), []string{
 		"example.com/driftgate.Value", "example.com/driftgate.TestSmall", "example.com/driftgate.TestMore",
-	}, false)
+	}, false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2914,7 +2888,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	evidence := SubjectEvidence{Symbol: "example.com/empty.Gone", RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest}
 	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
 
-	_, same, err := tree.applySplicedUnion(ctx, env, rec, recorded, newPortableUnion(recorded, engine.OracleEvidenceEnv(env)), root)
+	_, same, err := tree.applySplicedUnion(ctx, env, rec, recorded, newPortableUnion(recorded, env), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2929,7 +2903,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, marked, err := tree.applySplicedUnion(ctx, env, rec, fresh, newPortableUnion(fresh, engine.OracleEvidenceEnv(env)), root)
+	_, marked, err := tree.applySplicedUnion(ctx, env, rec, fresh, newPortableUnion(fresh, env), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3646,7 +3620,7 @@ func TestStrictViewBuildRefusesUnresolvableSymbol(t *testing.T) {
 		t.Skip("builds views")
 	}
 	tr := fixtureTree(t)
-	if _, err := tr.newSubjectViews(context.Background(), []string{"example.com/fixture/nosuchpackage.F"}, false); err == nil {
+	if _, err := tr.newSubjectViews(context.Background(), []string{"example.com/fixture/nosuchpackage.F"}, false, 0); err == nil {
 		t.Fatal("strict view build tolerated an unresolvable symbol, want refusal")
 	}
 }
@@ -4226,7 +4200,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, same, err := tree.applySplicedUnion(ctx, env, rec, folded, newPortableUnion(folded, engine.OracleEvidenceEnv(env)), root)
+	_, same, err := tree.applySplicedUnion(ctx, env, rec, folded, newPortableUnion(folded, env), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4257,7 +4231,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, marked, err := tree.applySplicedUnion(ctx, env, sparseRec, folded, newPortableUnion(folded, engine.OracleEvidenceEnv(env)), root)
+	_, marked, err := tree.applySplicedUnion(ctx, env, sparseRec, folded, newPortableUnion(folded, env), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4280,7 +4254,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, stamped, err := tree.applySplicedUnion(ctx, env, rec, folded, newPortableUnion(folded, engine.OracleEvidenceEnv(env)), root)
+	_, stamped, err := tree.applySplicedUnion(ctx, env, rec, folded, newPortableUnion(folded, env), root)
 	if err != nil {
 		t.Fatal(err)
 	}

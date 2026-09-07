@@ -57,11 +57,11 @@ const oracleNiceness = 10
 // gomutant already running below oracleNiceness cannot lower its
 // children to it, which is already the yielded state the drop exists
 // to reach.
-func runOracleProcess(cmd *exec.Cmd) error {
+func runOracleProcess(cmd *exec.Cmd, bounds OracleBounds) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	startOracleCeiling(cmd)
+	applyMemoryCeiling(cmd, bounds.MemoryBytes)
 	// Setpgid on the SysProcAttr above pins the child's pgid to its own
 	// pid before exec, so the group id is its pid by the time Start
 	// returns.

@@ -223,14 +223,14 @@ const PackageKillerPrefix = "(package failure: "
 // the reason instead of leaving the caller to guess (REQ-exec-ephemeral).
 // Ambient-environment convenience: selection-bearing paths use the Env
 // form with the tree's frozen environment.
-func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string) (MutantOutcome, string, string, error) {
-	outcome, killer, _, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, GoEnv(dir))
+func RunMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, bounds OracleBounds) (MutantOutcome, string, string, error) {
+	outcome, killer, _, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, GoEnv(dir), bounds)
 	return outcome, killer, diagnostic, err
 }
 
 // RunMutantEnv is RunMutant under an already-frozen complete environment.
-func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (MutantOutcome, string, string, error) {
-	outcome, killer, _, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env)
+func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds OracleBounds) (MutantOutcome, string, string, error) {
+	outcome, killer, _, _, _, diagnostic, err := runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, bounds)
 	return outcome, killer, diagnostic, err
 }
 
@@ -241,9 +241,9 @@ func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, 
 // text - so acting on a kill needs no parallel oracle re-run
 // (REQ-exec-ephemeral). The evidence is empty when the mutant survived
 // or was discarded.
-func RunMutantEvidenceEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string) (MutantOutcome, string, string, string, error) {
+func RunMutantEvidenceEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds OracleBounds) (MutantOutcome, string, string, string, error) {
 	var sink bytes.Buffer
-	outcome, killer, _, _, diagnostic, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, &sink, nil)
+	outcome, killer, _, _, diagnostic, err := runMutantOnce(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, &sink, nil, bounds)
 	evidence := ""
 	if err == nil && outcome == MutantKilled {
 		evidence = killEvidence(sink.Bytes(), killer, timeout)
@@ -353,14 +353,14 @@ func outputTail(stream []byte, keep func(pkg, test string) bool) string {
 // The third return reports a memory-decided kill: the oracle memory
 // ceiling decided this verdict, so the record must pin the exact
 // ceiling rather than serve directionally (REQ-exec-oracle-memory).
-func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
-	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, GoEnv(dir))
+func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, bounds OracleBounds) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, GoEnv(dir), bounds)
 }
 
 // RunMutantObservedEnv is RunMutantObserved under an already-frozen complete
 // environment.
-func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
-	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 }
 
 // runMutant executes each mutant exactly once: the pre-spawn observation
@@ -368,9 +368,9 @@ func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []
 // discovery-then-score double execution and its evidence-drift
 // comparison are retired - bracket verdicts are the truth
 // (REQ-exec-observation).
-func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 	var memoryDecided bool
-	outcome, killer, state, incomplete, diagnostic, err := runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, nil, &memoryDecided)
+	outcome, killer, state, incomplete, diagnostic, err := runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, nil, &memoryDecided, bounds)
 	return outcome, killer, memoryDecided, state, incomplete, diagnostic, err
 }
 
@@ -380,14 +380,14 @@ func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, run
 // the mutant against itself — a probe-caused package crash would read
 // as environmental noise and a flake as a false kill
 // (REQ-exec-attribution's differential, scratch form).
-func RunMutantBaselineDirEnv(ctx context.Context, dir, baselineDir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env, baselineEnv []string) (MutantOutcome, string, bool, string, error) {
+func RunMutantBaselineDirEnv(ctx context.Context, dir, baselineDir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env, baselineEnv []string, bounds OracleBounds) (MutantOutcome, string, bool, string, error) {
 	var memoryDecided bool
-	outcome, killer, _, _, diagnostic, err := runMutantBase(ctx, dir, baselineDir, baselineEnv, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, nil, &memoryDecided)
+	outcome, killer, _, _, diagnostic, err := runMutantBase(ctx, dir, baselineDir, baselineEnv, m, testPkgs, runRegex, timeout, binFlags, "", "", nil, nil, env, nil, &memoryDecided, bounds)
 	return outcome, killer, memoryDecided, diagnostic, err
 }
 
-func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
-	return runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink, memoryDecided)
+func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool, bounds OracleBounds) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+	return runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink, memoryDecided, bounds)
 }
 
 // markMemoryDecided applies the signature scan to both output streams
@@ -430,7 +430,7 @@ func memoryDecidedKill(stream []byte) bool {
 // kill's output carries the memory-exhaustion signature — an
 // out-parameter so the six-way return tuple does not widen for a fact
 // only the observed campaign path consumes.
-func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool, bounds OracleBounds) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
 	if err := ctx.Err(); err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
@@ -524,7 +524,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	}
 	cmd := commandContext(runCtx, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = oracleEnv(scratchEnv)
+	cmd.Env = oracleEnv(scratchEnv, bounds)
 	// The sink, when given, receives the mutant run's raw -json stream -
 	// the evidence surface RunMutantEvidenceEnv derives kill output from.
 	stdout := &bytes.Buffer{}
@@ -534,7 +534,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	var stderr bytes.Buffer
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
-	runErr := runOracleProcess(cmd)
+	runErr := runOracleProcess(cmd, bounds)
 	// The sweep precedes observation finalization: the evidence union
 	// merges this observation with the probes' under revalidation, and
 	// a content digest of a swept file would read moved - the input's
@@ -542,11 +542,11 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	sweepScratch()
 
 	if oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), runCtx) {
-		state, incomplete, err := processObservationContext(ctx, testlog, dir, "mutant test process timed out", env, scratchRoot, capture, oracleFrame, namespaces)
+		state, incomplete, err := processObservationContext(ctx, testlog, dir, "mutant test process timed out", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		return MutantKilled, TimeoutKiller, state, incomplete, "", err
 	}
 	if oracleRunCancelled(runErr, runCtx) {
-		state, incomplete, observationErr := processObservationContext(ctx, testlog, dir, "mutant test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces)
+		state, incomplete, observationErr := processObservationContext(ctx, testlog, dir, "mutant test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
 		}
@@ -554,7 +554,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	}
 	killer, parseErr := firstFailingTest(stdout.Bytes())
 	if parseErr != nil {
-		state, incomplete, observationErr := processObservationContext(ctx, testlog, dir, "go test output was malformed before observation finalization", env, scratchRoot, capture, oracleFrame, namespaces)
+		state, incomplete, observationErr := processObservationContext(ctx, testlog, dir, "go test output was malformed before observation finalization", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
 		}
@@ -562,7 +562,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	}
 	switch {
 	case runErr == nil:
-		state, incomplete, err := processObservationContext(ctx, testlog, dir, "", env, scratchRoot, capture, oracleFrame, namespaces)
+		state, incomplete, err := processObservationContext(ctx, testlog, dir, "", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		return MutantSurvived, "", state, incomplete, "", err
 	case buildRejected(stdout.Bytes()):
 		// The harness itself reported the failed build: no test process
@@ -581,7 +581,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 				reason = "mutant test process exited before observation finalization"
 			}
 		}
-		state, incomplete, err := processObservationContext(ctx, testlog, dir, reason, env, scratchRoot, capture, oracleFrame, namespaces)
+		state, incomplete, err := processObservationContext(ctx, testlog, dir, reason, env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
 		return MutantKilled, killer, state, incomplete, "", err
 	}
@@ -613,22 +613,22 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
 	defer removeBaseScratch()
-	base.Env = oracleEnv(baseScratchEnv)
-	baseErr := runOracleProcess(base)
+	base.Env = oracleEnv(baseScratchEnv, bounds)
+	baseErr := runOracleProcess(base, bounds)
 	// Sweep before finalization - the record captures the swept truth
 	// (see the mutant site). The defer above is the panic backstop;
 	// the sweep is idempotent.
 	sweepBaseScratch()
-	mutantState, mutantIncomplete, err := processObservationContext(ctx, testlog, dir, "mutant test process exited before observation finalization", env, scratchRoot, capture, oracleFrame, namespaces)
+	mutantState, mutantIncomplete, err := processObservationContext(ctx, testlog, dir, "mutant test process exited before observation finalization", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
 	if baseCtx.Err() != nil {
-		baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process did not complete", env, baseScratchRoot, capture, oracleFrame, namespaces)
+		baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process did not complete", env, baseScratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
 		}
-		state, mergeErr := mergeProcessObservationsContext(ctx, dir, env, capture, mutantState, baselineState)
+		state, mergeErr := mergeProcessObservationsContext(ctx, dir, env, capture, bounds, mutantState, baselineState)
 		if mergeErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", mergeErr
 		}
@@ -648,11 +648,11 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		return MutantDiscarded, "", state, diagnostic, "", nil
 	}
 	if baseErr == nil {
-		baselineState, _, err := processObservationContext(ctx, baseTestlog, dir, "", env, baseScratchRoot, capture, oracleFrame, namespaces)
+		baselineState, _, err := processObservationContext(ctx, baseTestlog, dir, "", env, baseScratchRoot, capture, oracleFrame, namespaces, bounds)
 		if err != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 		}
-		state, err := mergeProcessObservationsContext(ctx, dir, env, capture, mutantState, baselineState)
+		state, err := mergeProcessObservationsContext(ctx, dir, env, capture, bounds, mutantState, baselineState)
 		killer := PackageKillerPrefix + "unattributed crash)"
 		if pkg != "" {
 			killer = PackageKillerPrefix + pkg + ")"
@@ -664,11 +664,11 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	// odd mutant records candidate-locally with its diagnostic and the
 	// campaign continues; an abort is reserved for corrupted
 	// orchestration state (REQ-exec-attribution).
-	baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process failed before observation finalization", env, baseScratchRoot, capture, oracleFrame, namespaces)
+	baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process failed before observation finalization", env, baseScratchRoot, capture, oracleFrame, namespaces, bounds)
 	if observationErr != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
 	}
-	state, mergeErr := mergeProcessObservationsContext(ctx, dir, env, capture, mutantState, baselineState)
+	state, mergeErr := mergeProcessObservationsContext(ctx, dir, env, capture, bounds, mutantState, baselineState)
 	if mergeErr != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", mergeErr
 	}
@@ -726,9 +726,9 @@ func captureOracleFrame(ctx context.Context, treeRoot, packageDir string, bracke
 // serve stale verdicts to width-sensitive oracles across jobs changes
 // (REQ-exec-oracle-parallelism). Applying the same composer the spawn
 // used reproduces the spawn's exact narrowing decision.
-func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame) []string {
+func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame, bounds OracleBounds) []string {
 	if frame.PkgDir == "" {
-		return oracleCPUEnv(env)
+		return oracleCPUEnv(env, bounds.Width)
 	}
 	out := make([]string, 0, len(env)+1)
 	for _, entry := range env {
@@ -736,7 +736,7 @@ func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame) []string {
 			out = append(out, entry)
 		}
 	}
-	return oracleCPUEnv(append(out, "PWD="+frame.PkgDir))
+	return oracleCPUEnv(append(out, "PWD="+frame.PkgDir), bounds.Width)
 }
 
 // oracleBookkeepingPaths are the tree-relative tool-bookkeeping
@@ -801,7 +801,7 @@ func PreflightBracket(ctx context.Context, treeRoot string, bracketPaths []strin
 // observation that later fails absolute finalization keeps an empty reason
 // because that is input movement, which stays finding-wide
 // (REQ-exec-observation).
-func processObservationContext(ctx context.Context, path, treeRoot, incompleteReason string, env []string, scratchRoot string, capture bool, frame runtimeinput.ProducerFrame, namespaces []runtimeinput.ScratchNamespace) (runtimeinput.Observation, string, error) {
+func processObservationContext(ctx context.Context, path, treeRoot, incompleteReason string, env []string, scratchRoot string, capture bool, frame runtimeinput.ProducerFrame, namespaces []runtimeinput.ScratchNamespace, bounds OracleBounds) (runtimeinput.Observation, string, error) {
 	if abs, err := filepath.Abs(treeRoot); err == nil {
 		treeRoot = abs
 	}
@@ -837,7 +837,7 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	// the root as an uncovered
 	// runtime input and seals verifiability for every temp-touching
 	// oracle (REQ-exec-oracle-scratch-declared).
-	ingestEnv := oracleIngestEnv(env, frame)
+	ingestEnv := oracleIngestEnv(env, frame, bounds)
 	observation, reason, err := frame.Observe(ctx, path, runtimeinput.ProducerIngest{
 		Identity:          path,
 		Env:               ingestEnv,
@@ -906,11 +906,11 @@ func absoluteNonReusableRuntimeEvidence(ctx context.Context, incomplete runtimei
 	return absolute, err
 }
 
-func mergeProcessObservations(root string, env []string, capture bool, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
-	return mergeProcessObservationsContext(context.Background(), root, env, capture, states...)
+func mergeProcessObservations(root string, env []string, capture bool, bounds OracleBounds, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
+	return mergeProcessObservationsContext(context.Background(), root, env, capture, bounds, states...)
 }
 
-func mergeProcessObservationsContext(ctx context.Context, root string, env []string, capture bool, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
+func mergeProcessObservationsContext(ctx context.Context, root string, env []string, capture bool, bounds OracleBounds, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
 	if !capture {
 		return runtimeinput.Observation{}, nil
 	}
@@ -920,7 +920,7 @@ func mergeProcessObservationsContext(ctx context.Context, root string, env []str
 	// would read a width-reading oracle's records as moved and degrade
 	// the union to incomplete - silent evidence loss on exactly the
 	// differential-attribution path (REQ-exec-oracle-parallelism).
-	return mergeRuntimeEvidenceContext(ctx, root, OracleEvidenceEnv(env), states...)
+	return mergeRuntimeEvidenceContext(ctx, root, OracleEvidenceEnv(env, bounds.Width), states...)
 }
 
 func mergeRuntimeEvidence(root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
@@ -977,16 +977,16 @@ func addRuntimeEvidenceReasonContext(ctx context.Context, root string, env []str
 // ephemeral run needs before scoring anything (REQ-exec-ephemeral): a -run
 // matching zero tests, or a test already failing on the clean tree, cannot
 // attribute a mutant, so a verdict against it would be a fabricated finding.
-func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string) (ran int, passed bool, diagnostic string, err error) {
-	return TestProbeEnv(ctx, dir, testPkg, run, timeout, binFlags, GoEnv(dir))
+func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, bounds OracleBounds) (ran int, passed bool, diagnostic string, err error) {
+	return TestProbeEnv(ctx, dir, testPkg, run, timeout, binFlags, GoEnv(dir), bounds)
 }
 
 // TestProbeEnv is TestProbe under an already-frozen complete environment.
 // When the probe ran and failed, diagnostic carries the failing tests'
 // names and their own output, so a refusal built on the failure can
 // show what the oracle saw.
-func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string) (ran int, passed bool, diagnostic string, err error) {
-	result, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, nil, env)
+func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds OracleBounds) (ran int, passed bool, diagnostic string, err error) {
+	result, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, nil, env, bounds)
 	return result.ran, result.passed, result.diagnostic, err
 }
 
@@ -994,8 +994,8 @@ func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Du
 // runtime-input observation rooted at moduleDir and packageDir; a
 // failing run — reported, or drifting between the discovery and
 // measurement runs — carries the failing tests' output as diagnostic.
-func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (ran int, passed bool, failed []string, diagnostic string, state runtimeinput.Observation, err error) {
-	once, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (ran int, passed bool, failed []string, diagnostic string, state runtimeinput.Observation, err error) {
+	once, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 	ran, passed, failed, first := once.ran, once.passed, once.failed, once.state
 	if err != nil {
 		return ran, passed, failed, "", first, err
@@ -1031,7 +1031,7 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if !first.Unverifiable && first.State == empty.State {
 		return ran, passed, nil, "", first, nil
 	}
-	again, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env)
+	again, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 	secondRan, secondPassed, secondFailed, second := again.ran, again.passed, again.failed, again.state
 	if err != nil {
 		return secondRan, secondPassed, secondFailed, "", second, err
@@ -1060,7 +1060,7 @@ type probeResult struct {
 	state      runtimeinput.Observation
 }
 
-func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string) (probeResult, error) {
+func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (probeResult, error) {
 	// The oracle bound carries its own cause exactly as the mutant
 	// run's: a parent expiry must read as cancellation, never as the
 	// oracle bound firing (REQ-exec-attribution).
@@ -1095,23 +1095,23 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	}
 	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir
-	cmd.Env = oracleEnv(scratchEnv)
+	cmd.Env = oracleEnv(scratchEnv, bounds)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	runErr := runOracleProcess(cmd)
+	runErr := runOracleProcess(cmd, bounds)
 	// Sweep before finalization - the record captures the swept truth
 	// (see the mutant site).
 	sweepScratch()
 	if oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), ctx2) {
-		state, _, observationErr := processObservationContext(ctx, testlog, dir, "baseline test process timed out", env, scratchRoot, capture, oracleFrame, namespaces)
+		state, _, observationErr := processObservationContext(ctx, testlog, dir, "baseline test process timed out", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
 			return probeResult{}, observationErr
 		}
 		return probeResult{state: state}, &BaselineTimeoutError{Bound: timeout}
 	}
 	if oracleRunCancelled(runErr, ctx2) {
-		state, _, observationErr := processObservationContext(ctx, testlog, dir, "baseline test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces)
+		state, _, observationErr := processObservationContext(ctx, testlog, dir, "baseline test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
 			return probeResult{}, observationErr
 		}
@@ -1124,7 +1124,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if err != nil {
 		return probeResult{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
-	state, _, err := processObservationContext(ctx, testlog, dir, "", env, scratchRoot, capture, oracleFrame, namespaces)
+	state, _, err := processObservationContext(ctx, testlog, dir, "", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 	if err != nil {
 		return probeResult{}, err
 	}

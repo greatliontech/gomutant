@@ -172,7 +172,7 @@ func (t *Tree) DirectiveCoverage() DirectiveCoverageView {
 // carries the known-unsound files into the result
 // (DirectiveCoverage), so coverage joins speak the engine's one
 // coordinate system and refusals stay representable.
-func CoveredPositions(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, binFlags, env []string, view DirectiveCoverageView) (Coverage, error) {
+func CoveredPositions(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, binFlags, env []string, view DirectiveCoverageView, bounds OracleBounds) (Coverage, error) {
 	tmp, err := os.MkdirTemp("", "gomutant-cover-*")
 	if err != nil {
 		return Coverage{}, err
@@ -190,11 +190,11 @@ func CoveredPositions(ctx context.Context, dir, testPkg, runRegex, coverPkg stri
 		return Coverage{}, err
 	}
 	defer removeScratch()
-	cmd.Env = oracleEnv(scratchEnv)
+	cmd.Env = oracleEnv(scratchEnv, bounds)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	if err := runOracleProcess(cmd); err != nil {
+	if err := runOracleProcess(cmd, bounds); err != nil {
 		return Coverage{}, fmt.Errorf("coverage probe for %s under %s: %v: %s", coverPkg, testPkg, err, coverageTail(out.String(), 300))
 	}
 	profiles, err := cover.ParseProfiles(profile)

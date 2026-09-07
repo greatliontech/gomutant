@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"sync"
@@ -50,7 +51,7 @@ func TestToolEphemeralNotifiesItsPhases(t *testing.T) {
 	defer clientSession.Close()
 	params := &mcp.CallToolParams{Name: "ephemeral", Arguments: map[string]any{
 		"file": "lib/lib.go", "edits": []map[string]any{{"old": "return x - 1", "new": "return x - 2"}},
-		"test_pkg": "example.com/fixture/lib", "run": "^TestWeak$", "oracle_timeout_sec": 60,
+		"test_pkg": "example.com/fixture/lib", "run": "^TestWeak$", "oracle_timeout_sec": 60, "oracle_memory_mib": 512,
 	}}
 	params.SetProgressToken("tok")
 	result, err := clientSession.CallTool(ctx, params)
@@ -59,6 +60,22 @@ func TestToolEphemeralNotifiesItsPhases(t *testing.T) {
 	}
 	if result.IsError {
 		t.Fatalf("ephemeral tool errored: %+v", result)
+	}
+	// The probe ran under the ceiling the call asked for: the request's
+	// knob reaches the probe's own bounds and the result states them
+	// (REQ-exec-oracle-memory's per-run configuration).
+	var decoded struct {
+		OracleMemoryBytes int64 `json:"oracleMemoryBytes"`
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.OracleMemoryBytes != 512<<20 {
+		t.Fatalf("probe ran under ceiling %d, want the requested 512 MiB", decoded.OracleMemoryBytes)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {

@@ -37,12 +37,9 @@ func TestOracleParallelismWidth(t *testing.T) {
 // overridden by the appended entry, which wins os/exec's duplicate-key
 // resolution (REQ-exec-oracle-parallelism).
 func TestOracleCPUEnv(t *testing.T) {
-	oracleParallelWidth.Store(0)
-	if env := oracleCPUEnv([]string{"A=1"}); len(env) != 1 {
-		t.Fatalf("uninstalled cap touched the env: %v", env)
+	if env := oracleCPUEnv([]string{"A=1"}, 0); len(env) != 1 {
+		t.Fatalf("unbounded width touched the env: %v", env)
 	}
-	oracleParallelWidth.Store(4)
-	t.Cleanup(func() { oracleParallelWidth.Store(0) })
 	for _, test := range []struct {
 		name string
 		env  []string
@@ -56,7 +53,7 @@ func TestOracleCPUEnv(t *testing.T) {
 		{name: "nonpositive ambient narrowed", env: []string{"GOMAXPROCS=0"}, want: "GOMAXPROCS=4"},
 		{name: "last duplicate decides", env: []string{"GOMAXPROCS=64", "GOMAXPROCS=2"}, want: ""},
 	} {
-		got := oracleCPUEnv(test.env)
+		got := oracleCPUEnv(test.env, 4)
 		if test.want == "" {
 			if len(got) != len(test.env) {
 				t.Errorf("%s: env touched: %v", test.name, got)
@@ -70,7 +67,7 @@ func TestOracleCPUEnv(t *testing.T) {
 	// A lowercase key is a different variable on Unix and must not
 	// suppress the cap; on Windows the same entry IS the variable and
 	// an already-narrower value is kept.
-	lower := oracleCPUEnv([]string{"gomaxprocs=2"})
+	lower := oracleCPUEnv([]string{"gomaxprocs=2"}, 4)
 	if runtime.GOOS == "windows" {
 		if len(lower) != 1 {
 			t.Errorf("windows lowercase ambient not kept: %v", lower)
@@ -94,32 +91,13 @@ func TestEnvGOMAXPROCSKeyCase(t *testing.T) {
 	}
 }
 
-// A snapshot restores the exact prior width, so a scoped override (a
-// probe between campaigns) leaves no residue.
-func TestOracleParallelismSnapshotRoundTrip(t *testing.T) {
-	oracleParallelWidth.Store(0)
-	before := SnapshotOracleParallelism()
-	SetOracleParallelism(runtime.NumCPU())
-	snap := SnapshotOracleParallelism()
-	RestoreOracleParallelism(before)
-	if OracleParallelismWidth() != 0 {
-		t.Fatalf("restore left width %d, want uninstalled", OracleParallelismWidth())
-	}
-	RestoreOracleParallelism(snap)
-	if OracleParallelismWidth() != 1 {
-		t.Fatalf("restore left width %d, want 1", OracleParallelismWidth())
-	}
-	oracleParallelWidth.Store(0)
-}
-
 // Merging re-evaluates children against the oracle evidence env - the
 // injected width included - so a width-reading oracle's observation
 // merges cleanly instead of reading as moved and silently degrading
 // the union to unverifiable on exactly the differential-attribution
 // path (REQ-exec-oracle-parallelism).
 func TestMergePreservesWidthReadingEvidence(t *testing.T) {
-	SetOracleParallelism(runtime.NumCPU()) // width 1: injection guaranteed
-	t.Cleanup(func() { oracleParallelWidth.Store(0) })
+	bounds := OracleBounds{Width: 1} // injection guaranteed
 	root := t.TempDir()
 	env := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
@@ -127,11 +105,11 @@ func TestMergePreservesWidthReadingEvidence(t *testing.T) {
 			env = append(env, kv)
 		}
 	}
-	obs, err := runtimeinput.FromTestLogEnv([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env), runtimeinput.WithCompletedProcess("width"), runtimeinput.WithBracket(testBracket(t, root)))
+	obs, err := runtimeinput.FromTestLogEnv([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env, bounds.Width), runtimeinput.WithCompletedProcess("width"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged, err := mergeProcessObservations(root, env, true, obs)
+	merged, err := mergeProcessObservations(root, env, true, bounds, obs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,20 +123,18 @@ func TestMergePreservesWidthReadingEvidence(t *testing.T) {
 // recorded as runtime-input evidence, so width-sensitive verdicts
 // stale exactly when the width moves (REQ-exec-oracle-parallelism).
 func TestOracleIngestEnvCarriesInnerParallelismCap(t *testing.T) {
-	oracleParallelWidth.Store(4)
-	t.Cleanup(func() { oracleParallelWidth.Store(0) })
+	four := OracleBounds{Width: 4}
 	frame := runtimeinput.ProducerFrame{PkgDir: "/pkg"}
-	env := oracleIngestEnv([]string{"A=1", "PWD=/elsewhere"}, frame)
+	env := oracleIngestEnv([]string{"A=1", "PWD=/elsewhere"}, frame, four)
 	joined := strings.Join(env, " ")
 	if !strings.Contains(joined, "PWD=/pkg") || !strings.Contains(joined, "GOMAXPROCS=4") {
 		t.Fatalf("mirror = %v, want PWD pinned and the effective GOMAXPROCS", env)
 	}
-	if refused := oracleIngestEnv([]string{"A=1"}, runtimeinput.ProducerFrame{}); !strings.Contains(strings.Join(refused, " "), "GOMAXPROCS=4") {
+	if refused := oracleIngestEnv([]string{"A=1"}, runtimeinput.ProducerFrame{}, four); !strings.Contains(strings.Join(refused, " "), "GOMAXPROCS=4") {
 		t.Fatalf("refused-frame mirror = %v, want the effective GOMAXPROCS", refused)
 	}
-	oracleParallelWidth.Store(0)
-	if plain := oracleIngestEnv([]string{"A=1"}, frame); strings.Contains(strings.Join(plain, " "), "GOMAXPROCS") {
-		t.Fatalf("uninstalled cap reached the mirror: %v", plain)
+	if plain := oracleIngestEnv([]string{"A=1"}, frame, OracleBounds{}); strings.Contains(strings.Join(plain, " "), "GOMAXPROCS") {
+		t.Fatalf("unbounded width reached the mirror: %v", plain)
 	}
 }
 
@@ -197,8 +173,7 @@ func TestOracleEnvCarriesInnerParallelismCap(t *testing.T) {
 	sensing = strings.Replace(sensing, "package lib\n", "package lib\n\nimport \"os\"\n", 1)
 
 	// Width 1: jobs at the full host width leaves one thread per tree.
-	SetOracleParallelism(runtime.NumCPU())
-	t.Cleanup(func() { oracleParallelWidth.Store(0) })
+	bounds := DeriveOracleBounds(-1, runtime.NumCPU())
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +191,7 @@ func TestOracleEnvCarriesInnerParallelismCap(t *testing.T) {
 		}
 	}
 	out, killer, _, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
-		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env)
+		[]string{"example.com/fixture/lib"}, "^TestWeak$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env, bounds)
 	if err != nil {
 		t.Fatalf("sensing mutant aborted the campaign: %v", err)
 	}
@@ -260,8 +235,7 @@ func TestBaselineProbeRunsUnderOracleBounds(t *testing.T) {
 	exiting := strings.Replace(string(original), weakBody, "func Weak(x int) int {\n\tos.Exit(3)\n\treturn x\n}", 1)
 	exiting = strings.Replace(exiting, "package lib\n", "package lib\n\nimport \"os\"\n", 1)
 
-	SetOracleParallelism(runtime.NumCPU())
-	t.Cleanup(func() { oracleParallelWidth.Store(0) })
+	bounds := DeriveOracleBounds(-1, runtime.NumCPU())
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
 	if err != nil {
 		t.Fatal(err)
@@ -280,7 +254,7 @@ func TestBaselineProbeRunsUnderOracleBounds(t *testing.T) {
 	// Arm the fixture's cap assertion; it skips in every other selection.
 	env = append(env, "FIXTURE_REQUIRE_PARALLELISM_CAP=1")
 	out, killer, _, _, _, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
-		[]string{"example.com/fixture/lib"}, "^(TestWeak|TestOracleEnvHasParallelismCap)$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env)
+		[]string{"example.com/fixture/lib"}, "^(TestWeak|TestOracleEnvHasParallelismCap)$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env, bounds)
 	if err != nil {
 		t.Fatalf("exiting mutant aborted the campaign: %v", err)
 	}
@@ -293,9 +267,8 @@ func TestBaselineProbeRunsUnderOracleBounds(t *testing.T) {
 	// proving the sentinel runs (not skips) on the baseline probe and
 	// that the positive arm's sentinel kill really discriminated the
 	// baseline's environment.
-	oracleParallelWidth.Store(0)
 	out, killer, _, _, incomplete, _, err := RunMutantObservedEnv(context.Background(), "testdata/fixturemod", m,
-		[]string{"example.com/fixture/lib"}, "^(TestWeak|TestOracleEnvHasParallelismCap)$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env)
+		[]string{"example.com/fixture/lib"}, "^(TestWeak|TestOracleEnvHasParallelismCap)$", 120*time.Second, nil, moduleDir, packageDir, nil, nil, env, OracleBounds{})
 	if err != nil {
 		t.Fatalf("uncapped arm aborted the campaign: %v", err)
 	}
@@ -310,7 +283,7 @@ func TestBaselineProbeRunsUnderOracleBounds(t *testing.T) {
 // completed observation (REQ-exec-observation).
 func TestObservedRunRefusesMultiplePackages(t *testing.T) {
 	_, _, _, _, _, _, err := RunMutantObservedEnv(context.Background(), ".", Mutant{},
-		[]string{"example.com/a", "example.com/b"}, ".", time.Minute, nil, "/m", "/m/p", nil, nil, []string{"A=1"})
+		[]string{"example.com/a", "example.com/b"}, ".", time.Minute, nil, "/m", "/m/p", nil, nil, []string{"A=1"}, OracleBounds{})
 	if err == nil || !strings.Contains(err.Error(), "one test package per process") {
 		t.Fatalf("multi-package observed run = %v, want the refusal", err)
 	}
