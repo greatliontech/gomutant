@@ -2008,7 +2008,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 		symbols        []string
 		views          *subjectViewSet
 		viewFaults     map[string]error
-		producerUnion  *subjectViewSet
+		producerUnion  *observedViewSet
 		producerFaults map[string]error
 		producerBuilt  bool
 	}
@@ -2034,7 +2034,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 				engines:        t.newSubjectEngines(opts.AnalysisEvent, attested),
 				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}},
 				viewFaults:     map[string]error{},
-				producerUnion:  &subjectViewSet{bySymbol: map[string]*subjectView{}},
+				producerUnion:  &observedViewSet{&subjectViewSet{bySymbol: map[string]*subjectView{}}},
 				producerFaults: map[string]error{},
 			}
 			modes[attested] = mv
@@ -2053,7 +2053,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 			return nil
 		}
 		var err error
-		mv.views, mv.viewFaults, err = t.newSubjectViewsFaultTolerant(ctx, mv.symbols, preparation.packageContext, mv.engines)
+		mv.views, mv.viewFaults, err = t.buildSubjectViews(ctx, mv.symbols, preparation.packageContext, mv.engines)
 		if err != nil {
 			return fmt.Errorf("freshness: %w", err)
 		}
@@ -2129,7 +2129,10 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 		probeGate.RLock()
 		defer probeGate.RUnlock()
 		var err error
-		mv.producerUnion, mv.producerFaults, err = t.newObservedUnionViews(ctx, mv.symbols, preparation.packageContext, mv.engines)
+		// Every symbol a surviving target needs has a decision view
+		// (a decision fault skipped its targets before this point), so
+		// the union's faults are the proof captures' alone.
+		mv.producerUnion, mv.producerFaults, err = mv.views.observed(ctx)
 		if err != nil {
 			return fmt.Errorf("freshness proofs (union over %d subjects): %w", len(mv.symbols), err)
 		}
@@ -2183,7 +2186,11 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 				opts.proofAttempt(target, 2)
 			}
 			probeGate.RLock()
-			views, fault = t.newSubjectViewsWithPackageContext(ctx, rebuild, preparation.packageContext, true, mv.engines)
+			var rebuilt *observedViewSet
+			rebuilt, fault = t.newStrictObservedViews(ctx, rebuild, preparation.packageContext, mv.engines)
+			if fault == nil {
+				views = rebuilt.subjectViewSet
+			}
 			probeGate.RUnlock()
 		}
 		return views, fault, nil

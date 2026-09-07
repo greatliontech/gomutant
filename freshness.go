@@ -223,26 +223,35 @@ func findingPackageProcessAttestable(f Finding) bool {
 }
 
 // subjectViewBuildHook observes each subject-view build with its
-// symbols — a test seam for the batched judge's one-build claim.
+// requested symbols — a test seam for the one-build claims (the batched
+// judge's one set per posture, the campaign's one build per mode shared
+// by the decision and the producer roles). Fired from the one build
+// loop over resolved groups, so every build is counted whatever its
+// caller's fault disposition; a strict call aborting at resolution
+// built nothing and fires nothing. Sequential tests only, as every
+// package-level seam.
 var subjectViewBuildHook func(symbols []string)
 
+// observedUnionHook observes each proof capture pass with the symbols
+// it covers, fired before the first module's capture — a test seam for
+// the capture-time fault routes (a tree moving between a strict
+// build's construction and its proof capture). Sequential tests only.
+var observedUnionHook func(symbols []string)
+
 func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packageProcess bool) (*subjectViewSet, error) {
-	if subjectViewBuildHook != nil {
-		subjectViewBuildHook(symbols)
-	}
-	return t.newSubjectViewsWithPackageContext(ctx, symbols, t.eng.PackageContextContext, false, t.newSubjectEngines(nil, packageProcess))
+	return t.newStrictSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess))
 }
 
-// newSubjectViewsFaultTolerant builds the decision-evidence view set
-// with per-symbol fault routing: a symbol that fails to resolve, or a
-// module group whose engine, view, or capture fails, records the fault
-// for each affected symbol instead of aborting the set - the same
-// target-locality the observed union carries (REQ-exec-quiescence);
-// only the run's own cancellation aborts.
-func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*subjectViewSet, map[string]error, error) {
-	if subjectViewBuildHook != nil {
-		subjectViewBuildHook(symbols)
-	}
+// buildSubjectViews is the ONE view-set build: symbols resolve and
+// group by module directory, each group gets one gofresh view (one
+// observation), each subject its base fingerprint; a symbol that fails
+// to resolve, or a module group whose engine, view, or capture fails,
+// records the fault for each affected symbol instead of aborting the
+// set — target-local evidence faults (REQ-exec-quiescence); only the
+// run's own cancellation aborts. The decision set is this set; the
+// observed union captures its proofs on these same views (observed);
+// the strict callers promote the faults (newSubjectViewsWithPackageContext).
+func (t *Tree) buildSubjectViews(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*subjectViewSet, map[string]error, error) {
 	faults := map[string]error{}
 	groups, err := t.resolveModuleGroups(ctx, symbols, packageContext, func(symbol string, err error) error {
 		faults[symbol] = err
@@ -251,7 +260,27 @@ func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []strin
 	if err != nil {
 		return nil, nil, err
 	}
-	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(symbols))}
+	set, err := t.buildGroupViews(ctx, symbols, groups, engines, faults)
+	if err != nil {
+		return nil, nil, err
+	}
+	return set, faults, nil
+}
+
+// buildGroupViews is the build half of the one loop: one gofresh view
+// per resolved module group (splintered per package on failure), each
+// subject's base fingerprint; a group or capture fault records into
+// faults for each affected symbol. The resolution half is the caller's,
+// with its own fault policy (tolerant: record; strict: abort before any
+// view is built — no wasted construction behind a resolution fault).
+// requested is the symbol list groups was resolved from — the build
+// hook's argument (the requested set, unresolvable symbols included),
+// never read for the build itself.
+func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups []moduleGroup, engines *subjectEngines, faults map[string]error) (*subjectViewSet, error) {
+	if subjectViewBuildHook != nil {
+		subjectViewBuildHook(requested)
+	}
+	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(requested))}
 	env := engines.evidenceEnv
 	capture := func(ctx context.Context, view *gofresh.View, module *moduleSubjectView, resolved []resolvedSubject) error {
 		for _, r := range resolved {
@@ -280,7 +309,7 @@ func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []strin
 	}
 	for _, group := range groups {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		groupEngine, err := engines.engineFor(group.dir)
 		if err != nil {
@@ -294,12 +323,12 @@ func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []strin
 			module := &moduleSubjectView{view: view, validate: view.Validate}
 			set.modules = append(set.modules, module)
 			if err := capture(ctx, view, module, group.resolved); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			continue
 		}
 		if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
+			return nil, ctx.Err()
 		}
 		// Splinter retry: the module group batches every subject into
 		// one view, so one broken package would fault its healthy
@@ -324,7 +353,7 @@ func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []strin
 			subView, subErr := groupEngine.NewViewFor(ctx, subjects, group.dir, gofresh.CodeResult)
 			if subErr != nil {
 				if ctx.Err() != nil {
-					return nil, nil, ctx.Err()
+					return nil, ctx.Err()
 				}
 				for _, r := range subset {
 					faults[r.symbol] = subErr
@@ -334,11 +363,11 @@ func (t *Tree) newSubjectViewsFaultTolerant(ctx context.Context, symbols []strin
 			subModule := &moduleSubjectView{view: subView, validate: subView.Validate}
 			set.modules = append(set.modules, subModule)
 			if err := capture(ctx, subView, subModule, subset); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		}
 	}
-	return set, faults, nil
+	return set, nil
 }
 
 // resolvedSubject and moduleGroup carry symbol resolution grouped by
@@ -404,65 +433,23 @@ func (t *Tree) resolveModuleGroups(ctx context.Context, symbols []string, packag
 	return groups, nil
 }
 
-func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), observed bool, engines *subjectEngines) (*subjectViewSet, error) {
+// newStrictSubjectViews is the strict build: a resolution fault aborts
+// before any view is constructed, and a build fault is the error — the
+// first in the caller's symbol order, so a caller learns its own
+// symbol's failure after the splinter narrowed it rather than the
+// group's.
+func (t *Tree) newStrictSubjectViews(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*subjectViewSet, error) {
 	groups, err := t.resolveModuleGroups(ctx, symbols, packageContext, func(_ string, err error) error { return err })
 	if err != nil {
 		return nil, err
 	}
-	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(symbols))}
-	env := engines.evidenceEnv
-	for _, group := range groups {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		engine, err := engines.engineFor(group.dir)
-		if err != nil {
-			return nil, err
-		}
-		view, err := engine.NewViewFor(ctx, group.subjects, group.dir, gofresh.CodeResult)
-		if err != nil {
-			return nil, err
-		}
-		// One Validate covers every capture class: the view revalidates
-		// whatever it captured (the collapsed evidence-tier surface).
-		module := &moduleSubjectView{view: view, validate: view.Validate}
-		var observedFingerprints map[gofresh.Subject]gofresh.Fingerprint
-		if observed {
-			// One batched proof pass per view: the observability analysis is
-			// shared across the view's whole subject set instead of re-run per
-			// subject, with per-subject fingerprints read from the batch.
-			observedFingerprints, err = view.CaptureObservedBatch(ctx)
-			if err != nil {
-				return nil, err
-			}
-		}
-		set.modules = append(set.modules, module)
-		for _, resolved := range group.resolved {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			var fp gofresh.Fingerprint
-			if observed {
-				captured, ok := observedFingerprints[resolved.subject]
-				if !ok {
-					return nil, fmt.Errorf("gomutant: batched observation capture omitted subject %s.%s", resolved.subject.Package, resolved.subject.Symbol)
-				}
-				fp = captured
-			} else {
-				fp, err = view.Capture(ctx, resolved.subject)
-				if err != nil {
-					return nil, err
-				}
-			}
-			sourceFiles, err := view.SourceFilesFor(resolved.subject)
-			if err != nil {
-				return nil, err
-			}
-			set.bySymbol[resolved.symbol] = &subjectView{
-				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir, evidenceDir: t.dir,
-				env: env, view: view, fp: fp, sourceFiles: sourceFiles, module: module,
-			}
-		}
+	faults := map[string]error{}
+	set, err := t.buildGroupViews(ctx, symbols, groups, engines, faults)
+	if err != nil {
+		return nil, err
+	}
+	if err := firstFault(symbols, faults); err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -470,85 +457,141 @@ func (t *Tree) newSubjectViewsWithPackageContext(ctx context.Context, symbols []
 	return set, nil
 }
 
-// newObservedUnionViews builds one observed view set over every symbol,
-// tolerating per-symbol faults: a symbol that fails to resolve, or whose
-// module group's view or batched proof pass fails, lands in the fault
-// map instead of failing the union — evidence-construction failures stay
-// target-local (REQ-exec-quiescence), and one shared observation pass
-// replaces the per-target passes the campaign previously paid. Only the
-// campaign's own cancellation aborts.
-func (t *Tree) newObservedUnionViews(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*subjectViewSet, map[string]error, error) {
-	faults := map[string]error{}
-	groups, err := t.resolveModuleGroups(ctx, symbols, packageContext, func(symbol string, err error) error {
-		faults[symbol] = err
-		return nil
-	})
+// newStrictObservedViews is the strict build with the observation
+// proofs captured: the per-target rebuild's shape, returning the
+// observed set so a narrowing over uncaptured proofs stays
+// unrepresentable on that path too.
+func (t *Tree) newStrictObservedViews(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*observedViewSet, error) {
+	set, err := t.newStrictSubjectViews(ctx, symbols, packageContext, engines)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(symbols))}
-	env := engines.evidenceEnv
-	for _, group := range groups {
+	union, faults, err := set.observed(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := firstFault(symbols, faults); err != nil {
+		return nil, err
+	}
+	return union, nil
+}
+
+// firstFault promotes a fault map to one error: the first faulting
+// symbol in the caller's order.
+func firstFault(symbols []string, faults map[string]error) error {
+	for _, symbol := range symbols {
+		if fault, ok := faults[symbol]; ok {
+			return fault
+		}
+	}
+	return nil
+}
+
+// moduleMembers is one module view's members of a symbol list, in the
+// list's order — the one grouping the proof capture and the per-target
+// narrowing share, so a sibling is always derived over exactly the
+// subjects the caller named.
+type moduleMembers struct {
+	module   *moduleSubjectView
+	views    []*subjectView
+	subjects []gofresh.Subject
+}
+
+// groupByModule groups the named symbols by their module view, in
+// first-seen order. Symbols the set lacks are skipped (a caller that
+// must refuse them checks membership first); a repeated symbol repeats
+// its subject, which the sibling derivation deduplicates by its own
+// scope recipe (a target named in its own oracle is the common case).
+func (s *subjectViewSet) groupByModule(symbols []string) []*moduleMembers {
+	var order []*moduleMembers
+	groups := map[*moduleSubjectView]*moduleMembers{}
+	for _, symbol := range symbols {
+		sv, ok := s.bySymbol[symbol]
+		if !ok {
+			continue
+		}
+		group, ok := groups[sv.module]
+		if !ok {
+			group = &moduleMembers{module: sv.module}
+			groups[sv.module] = group
+			order = append(order, group)
+		}
+		group.views = append(group.views, sv)
+		group.subjects = append(group.subjects, sv.subject)
+	}
+	return order
+}
+
+// observedViewSet is a view set whose fingerprints carry the
+// observation proof: the producer union. It is the only set a
+// per-target narrowing derives from, so a narrowing over uncaptured
+// proofs — whose evidence attachment would be refused after the
+// measurement — is unrepresentable.
+type observedViewSet struct {
+	*subjectViewSet
+}
+
+// observed derives the producer union from the set's own views: per
+// module view, one full-scope sibling (sharing the view's one
+// observation — no second construction) carries the observation proof
+// batch, captured once for the sibling's whole subject set. The
+// decision view stays base-only, so the run-end and plan-end
+// validations compare the base facts the decision read; the proof
+// sibling validates through the observed arm — on the union path via
+// each measured target's own narrowing derived from it, on the
+// per-target rebuild path directly (REQ-exec-quiescence). A capture
+// fault faults that module's symbols, never the union.
+func (s *subjectViewSet) observed(ctx context.Context) (*observedViewSet, map[string]error, error) {
+	faults := map[string]error{}
+	union := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(s.bySymbol))}
+	symbols := make([]string, 0, len(s.bySymbol))
+	for symbol := range s.bySymbol {
+		symbols = append(symbols, symbol)
+	}
+	sort.Strings(symbols)
+	if observedUnionHook != nil {
+		observedUnionHook(symbols)
+	}
+	for _, group := range s.groupByModule(symbols) {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		groupFault := func(err error) {
-			for _, resolved := range group.resolved {
-				faults[resolved.symbol] = err
+		views := group.views
+		moduleFault := func(err error) {
+			for _, sv := range views {
+				faults[sv.symbol] = err
 			}
 		}
-		engine, err := engines.engineFor(group.dir)
+		proofView, err := group.module.view.Sibling(group.subjects)
 		if err != nil {
-			groupFault(err)
+			moduleFault(err)
 			continue
 		}
-		view, err := engine.NewViewFor(ctx, group.subjects, group.dir, gofresh.CodeResult)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, nil, ctx.Err()
-			}
-			groupFault(err)
-			continue
-		}
-		// The union's parent views are never validated directly — no
-		// reader consumes the union's modules list. Each measured target
-		// validates its own sibling narrowing, which re-observes the
-		// same facts, so the parents are covered transitively; a module
-		// with no measured target stays unvalidated exactly as a skipped
-		// target's module does.
-		module := &moduleSubjectView{view: view, validate: view.Validate}
-		observedFingerprints, err := view.CaptureObservedBatch(ctx)
+		observedFingerprints, err := proofView.CaptureObservedBatch(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
 			}
-			groupFault(err)
+			moduleFault(err)
 			continue
 		}
-		for _, resolved := range group.resolved {
-			if err := ctx.Err(); err != nil {
-				return nil, nil, err
-			}
-			captured, ok := observedFingerprints[resolved.subject]
+		proofModule := &moduleSubjectView{view: proofView, validate: proofView.Validate}
+		union.modules = append(union.modules, proofModule)
+		for _, sv := range views {
+			captured, ok := observedFingerprints[sv.subject]
 			if !ok {
-				faults[resolved.symbol] = fmt.Errorf("gomutant: batched observation capture omitted subject %s.%s", resolved.subject.Package, resolved.subject.Symbol)
+				faults[sv.symbol] = fmt.Errorf("gomutant: batched observation capture omitted subject %s.%s", sv.subject.Package, sv.subject.Symbol)
 				continue
 			}
-			sourceFiles, err := view.SourceFilesFor(resolved.subject)
-			if err != nil {
-				faults[resolved.symbol] = err
-				continue
-			}
-			set.bySymbol[resolved.symbol] = &subjectView{
-				symbol: resolved.symbol, subject: resolved.subject, moduleDir: resolved.moduleDir, evidenceDir: t.dir,
-				env: env, view: view, fp: captured, sourceFiles: sourceFiles, module: module,
-			}
+			copied := *sv
+			copied.fp, copied.view, copied.module = captured, proofView, proofModule
+			union.bySymbol[sv.symbol] = &copied
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	return set, faults, nil
+	return &observedViewSet{union}, faults, nil
 }
 
 // forTarget narrows the union to one target's proof surface — the
@@ -561,42 +604,22 @@ func (t *Tree) newObservedUnionViews(ctx context.Context, symbols []string, pack
 // missing symbol returns its union fault (or a resolution miss),
 // never a partial narrowing; a sibling derivation failure is
 // target-local like any evidence-construction fault.
-func (s *subjectViewSet) forTarget(target string, oracle []string, faults map[string]error) (*subjectViewSet, error) {
+func (s *observedViewSet) forTarget(target string, oracle []string, faults map[string]error) (*subjectViewSet, error) {
 	narrowed := &subjectViewSet{bySymbol: make(map[string]*subjectView, 1+len(oracle))}
-	type siblingGroup struct {
-		views    []*subjectView
-		subjects []gofresh.Subject
-	}
-	var order []*moduleSubjectView
-	groups := map[*moduleSubjectView]*siblingGroup{}
-	// narrowed.bySymbol is populated only from sibling derivations below:
-	// a raw union-backed entry would share the union's attach-once state
-	// and seal — the exact collision this narrowing exists to prevent.
-	seen := map[string]bool{}
-	for _, symbol := range append([]string{target}, oracle...) {
-		if seen[symbol] {
-			continue
-		}
-		seen[symbol] = true
-		sv, ok := s.bySymbol[symbol]
-		if !ok {
+	symbols := append([]string{target}, oracle...)
+	for _, symbol := range symbols {
+		if _, ok := s.bySymbol[symbol]; !ok {
 			if err, faulted := faults[symbol]; faulted {
 				return nil, err
 			}
 			return nil, fmt.Errorf("union view set carries no subject %s", symbol)
 		}
-		group, ok := groups[sv.module]
-		if !ok {
-			group = &siblingGroup{}
-			groups[sv.module] = group
-			order = append(order, sv.module)
-		}
-		group.views = append(group.views, sv)
-		group.subjects = append(group.subjects, sv.subject)
 	}
-	for _, module := range order {
-		group := groups[module]
-		sibling, err := module.view.Sibling(group.subjects)
+	// narrowed.bySymbol is populated only from sibling derivations below:
+	// a raw union-backed entry would share the union's attach-once state
+	// and seal — the exact collision this narrowing exists to prevent.
+	for _, group := range s.groupByModule(symbols) {
+		sibling, err := group.module.view.Sibling(group.subjects)
 		if err != nil {
 			return nil, err
 		}
@@ -899,7 +922,7 @@ func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress
 		// Fault-tolerant: a subject the build cannot serve stays out of
 		// the set, and the record reading it builds its own view — the
 		// per-record judgment's own path, failing that record alone.
-		views, _, err := t.newSubjectViewsFaultTolerant(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess))
+		views, _, err := t.buildSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess))
 		if err != nil {
 			return nil, nil, err
 		}
