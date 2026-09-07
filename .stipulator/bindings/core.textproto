@@ -4,6 +4,7 @@
 bindings {
   requirement_id: "REQ-core-attributed-kills"
   content_hash: "90842a6c5a7ccbf67b9a3dfdc80023df5058de543dab8bb9af59ed89538196d0"
+  source_hash: "75c4dbc51026d11e46deee5991358119bcb17cdecdbdfaffa99fd7168931579f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestParseFindingsKillAttribution"
   role: BINDING_ROLE_TESTS
@@ -13,6 +14,7 @@ bindings {
 bindings {
   requirement_id: "REQ-core-attributed-kills"
   content_hash: "90842a6c5a7ccbf67b9a3dfdc80023df5058de543dab8bb9af59ed89538196d0"
+  source_hash: "75c4dbc51026d11e46deee5991358119bcb17cdecdbdfaffa99fd7168931579f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunServesDriftedKillsKeyedToUnmovedOracles"
   role: BINDING_ROLE_TESTS

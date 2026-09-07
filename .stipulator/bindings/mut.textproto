@@ -4,6 +4,7 @@
 bindings {
   requirement_id: "REQ-mut-budget"
   content_hash: "77ac09d6daa8e5b987665087aabfc3b3c2bee6b2cd6150ed5d4bd12722c00ac0"
+  source_hash: "446e3151124e96bb83b772e1224009120d575099a7eb0d7648ba113ff13630ba"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestBudgetCovers"
   role: BINDING_ROLE_TESTS
@@ -13,6 +14,7 @@ bindings {
 bindings {
   requirement_id: "REQ-mut-budget"
   content_hash: "77ac09d6daa8e5b987665087aabfc3b3c2bee6b2cd6150ed5d4bd12722c00ac0"
+  source_hash: "446e3151124e96bb83b772e1224009120d575099a7eb0d7648ba113ff13630ba"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunEndToEnd"
   role: BINDING_ROLE_TESTS
@@ -22,6 +24,7 @@ bindings {
 bindings {
   requirement_id: "REQ-mut-budget"
   content_hash: "77ac09d6daa8e5b987665087aabfc3b3c2bee6b2cd6150ed5d4bd12722c00ac0"
+  source_hash: "446e3151124e96bb83b772e1224009120d575099a7eb0d7648ba113ff13630ba"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunExtendsCappedFindingMeasuringOnlyTheSuffix"
   role: BINDING_ROLE_TESTS
@@ -31,6 +34,7 @@ bindings {
 bindings {
   requirement_id: "REQ-mut-budget"
   content_hash: "77ac09d6daa8e5b987665087aabfc3b3c2bee6b2cd6150ed5d4bd12722c00ac0"
+  source_hash: "446e3151124e96bb83b772e1224009120d575099a7eb0d7648ba113ff13630ba"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestMutants"
   role: BINDING_ROLE_TESTS
@@ -40,6 +44,7 @@ bindings {
 bindings {
   requirement_id: "REQ-mut-operators"
   content_hash: "815ee5bb31238d20fa0ccd2fce1d4926b6307820e3f589095b4110414261fb61"
+  source_hash: "52e12a6b57faaf9307e518ca3d91f1cdc674984c5cea79870587df9e81b6f710"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestMutants"
   role: BINDING_ROLE_TESTS
@@ -49,6 +54,7 @@ bindings {
 bindings {
   requirement_id: "REQ-mut-operators"
   content_hash: "815ee5bb31238d20fa0ccd2fce1d4926b6307820e3f589095b4110414261fb61"
+  source_hash: "52e12a6b57faaf9307e518ca3d91f1cdc674984c5cea79870587df9e81b6f710"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantBuildFailureIsDiscarded"
   role: BINDING_ROLE_TESTS
@@ -58,6 +64,7 @@ bindings {
 bindings {
   requirement_id: "REQ-mut-overlay"
   content_hash: "31d280c4a3d5d958df16e74cca0c8d07e75bd87cb0943f2949f3f90856098864"
+  source_hash: "a2a5239d0ca754034bfbdb638cfb30a142846b912beb2aaa469968d0f93c334e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantOutcomes"
   role: BINDING_ROLE_TESTS
@@ -67,6 +74,7 @@ bindings {
 bindings {
   requirement_id: "REQ-mut-overlay"
   content_hash: "31d280c4a3d5d958df16e74cca0c8d07e75bd87cb0943f2949f3f90856098864"
+  source_hash: "a2a5239d0ca754034bfbdb638cfb30a142846b912beb2aaa469968d0f93c334e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestSplitRapidPkgs"
   role: BINDING_ROLE_TESTS

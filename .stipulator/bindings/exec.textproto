@@ -4,6 +4,7 @@
 bindings {
   requirement_id: "REQ-exec-attribution-symmetry"
   content_hash: "26f1d53b5a45428c2b7cf2b2a152512073e33a7a7baf40ddade92256909b543e"
+  source_hash: "a01b0b22045d9c7e58c77d8f5542914915bcd5aa51a69f4f244ad25f07765b42"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestBaselineProbeRunsUnderOracleBounds"
   role: BINDING_ROLE_TESTS
@@ -13,6 +14,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-banked-summary"
   content_hash: "93eb78e78e0222b4f7633202d55cf8d665a2861a7717f01147e1cdacaa158ce0"
+  source_hash: "95450c962b0d88d1e5d21a8a42e958c17f3f3d8f936baa915c69e1ea0a423383"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestBankedStateExcludesFailedCommits"
   role: BINDING_ROLE_TESTS
@@ -22,6 +24,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-banked-summary"
   content_hash: "93eb78e78e0222b4f7633202d55cf8d665a2861a7717f01147e1cdacaa158ce0"
+  source_hash: "95450c962b0d88d1e5d21a8a42e958c17f3f3d8f936baa915c69e1ea0a423383"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestBankedStateNamesOnlyCommittedFindings"
   role: BINDING_ROLE_TESTS
@@ -31,6 +34,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-banked-summary"
   content_hash: "93eb78e78e0222b4f7633202d55cf8d665a2861a7717f01147e1cdacaa158ce0"
+  source_hash: "95450c962b0d88d1e5d21a8a42e958c17f3f3d8f936baa915c69e1ea0a423383"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCommandInterruptRendersBankedState"
   role: BINDING_ROLE_TESTS
@@ -40,6 +44,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-completion"
   content_hash: "bd7dcc6b79f532885382a2ed31e96d355adc1eb56f80590816ea79d13ba6df70"
+  source_hash: "b51d84fba667be6afbb0b716e4fd0252eb66b307554d338b5a01a6812466db06"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestTruncatedPipelineFailsLoudlyNamingUnfinishedTargets"
   role: BINDING_ROLE_TESTS
@@ -49,6 +54,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCampaignLockExcludesSecondCampaign"
   role: BINDING_ROLE_TESTS
@@ -58,6 +64,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCampaignLockIgnoreMinted"
   role: BINDING_ROLE_TESTS
@@ -67,6 +74,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDocumentLockAbsorbsCrashedHolderResidue"
   role: BINDING_ROLE_TESTS
@@ -76,6 +84,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDocumentLockRefusalNamesLiveHolder"
   role: BINDING_ROLE_TESTS
@@ -85,6 +94,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunRefusesWhileCampaignLockHeld"
   role: BINDING_ROLE_TESTS
@@ -94,6 +104,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed"
   role: BINDING_ROLE_TESTS
@@ -103,6 +114,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestUpdateDocument"
   role: BINDING_ROLE_TESTS
@@ -112,6 +124,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
   content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
+  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestBuildOracleGuidanceArms"
   role: BINDING_ROLE_TESTS
@@ -121,6 +134,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
   content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
+  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEmitOracleGuidanceGuards"
   role: BINDING_ROLE_TESTS
@@ -130,6 +144,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
   content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
+  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunAttributesOracleInstability"
   role: BINDING_ROLE_TESTS
@@ -139,6 +154,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
   content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
+  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunExtensionDivergenceStampsAndAttributes"
   role: BINDING_ROLE_TESTS
@@ -148,6 +164,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-memory"
   content_hash: "99cea7ac5199479f30088956fee4f6118d87df6b25d51134d0e95e4666d259de"
+  source_hash: "8b70203a7157d3f2b924696bfdff9d46d40205e583a57986e252bec4cd1ddecc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestDefaultOracleMemoryLimit"
   role: BINDING_ROLE_TESTS
@@ -157,6 +174,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-memory"
   content_hash: "99cea7ac5199479f30088956fee4f6118d87df6b25d51134d0e95e4666d259de"
+  source_hash: "8b70203a7157d3f2b924696bfdff9d46d40205e583a57986e252bec4cd1ddecc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestMemoryDecidedKillSignatures"
   role: BINDING_ROLE_TESTS
@@ -166,6 +184,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-memory"
   content_hash: "99cea7ac5199479f30088956fee4f6118d87df6b25d51134d0e95e4666d259de"
+  source_hash: "8b70203a7157d3f2b924696bfdff9d46d40205e583a57986e252bec4cd1ddecc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestMemoryPinStaleIsDirectional"
   role: BINDING_ROLE_TESTS
@@ -175,6 +194,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-memory"
   content_hash: "99cea7ac5199479f30088956fee4f6118d87df6b25d51134d0e95e4666d259de"
+  source_hash: "8b70203a7157d3f2b924696bfdff9d46d40205e583a57986e252bec4cd1ddecc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestMergeScoredFactsJoinsCeilingFacts"
   role: BINDING_ROLE_TESTS
@@ -184,6 +204,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-memory"
   content_hash: "99cea7ac5199479f30088956fee4f6118d87df6b25d51134d0e95e4666d259de"
+  source_hash: "8b70203a7157d3f2b924696bfdff9d46d40205e583a57986e252bec4cd1ddecc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestOracleMemoryCeilingContainsRunawayMutant"
   role: BINDING_ROLE_TESTS
@@ -193,6 +214,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-memory"
   content_hash: "99cea7ac5199479f30088956fee4f6118d87df6b25d51134d0e95e4666d259de"
+  source_hash: "8b70203a7157d3f2b924696bfdff9d46d40205e583a57986e252bec4cd1ddecc"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestOracleMemoryEnv"
   role: BINDING_ROLE_TESTS
@@ -202,6 +224,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestMergePreservesWidthReadingEvidence"
   role: BINDING_ROLE_TESTS
@@ -211,6 +234,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestOracleCPUEnv"
   role: BINDING_ROLE_TESTS
@@ -220,6 +244,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestOracleEnvCarriesInnerParallelismCap"
   role: BINDING_ROLE_TESTS
@@ -229,6 +254,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestOracleIngestEnvCarriesInnerParallelismCap"
   role: BINDING_ROLE_TESTS
@@ -238,6 +264,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestOracleParallelismWidth"
   role: BINDING_ROLE_TESTS
@@ -247,6 +274,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestOracleRunsAtLowPriority"
   role: BINDING_ROLE_TESTS
@@ -256,6 +284,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunInstallsOracleParallelism"
   role: BINDING_ROLE_TESTS
@@ -265,6 +294,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestWidthReadingOracleEvidenceServes"
   role: BINDING_ROLE_TESTS
@@ -274,6 +304,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-scratch"
   content_hash: "9324528680cfcaef2b0ae8e3967c9cfb3ff6d5003543d00318766d7f7c70a8a4"
+  source_hash: "56e48ca53599727f8237cfbc33df1e35595201418e45dfb72e96a492500e6a64"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestOracleScratchContainsAndSweepsTempDirs"
   role: BINDING_ROLE_TESTS
@@ -283,6 +314,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-scratch-declared"
   content_hash: "31f22837845939c0a7d7a23561ae5ee413943618496ec78593b74f6994e35a48"
+  source_hash: "5c06f3ed5c169dcf37ffe15798811a9322aeb30d308ab92b5acde6e723f2b4ad"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestTempTouchingOracleFinalizesVerifiable"
   role: BINDING_ROLE_TESTS
@@ -292,6 +324,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-scratch-order"
   content_hash: "a9d0275700f3ff2c5f65fb70ee9f29246e23181c87914814fd2f5f71c4b53da6"
+  source_hash: "ece50e510de3194779125396c254e318adb31fe1e67bd30b03ed85d181edfd0b"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestOracleScratchContainsAndSweepsTempDirs"
   role: BINDING_ROLE_TESTS
@@ -301,6 +334,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-provenance"
   content_hash: "753c49ed1f627ce0073096459e25d83be105dfb7e21a24914fb1a5abc91a9bd1"
+  source_hash: "2f235f93da0ba876580617c65f00d4404019d9ade8df576b45b859126889d6e1"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestAttestRefusesToolchainSkewBeforeWriting"
   role: BINDING_ROLE_TESTS
@@ -310,6 +344,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-provenance"
   content_hash: "753c49ed1f627ce0073096459e25d83be105dfb7e21a24914fb1a5abc91a9bd1"
+  source_hash: "2f235f93da0ba876580617c65f00d4404019d9ade8df576b45b859126889d6e1"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestCheckToolchainProvenanceSharesTheGuard"
   role: BINDING_ROLE_TESTS
@@ -319,6 +354,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-provenance"
   content_hash: "753c49ed1f627ce0073096459e25d83be105dfb7e21a24914fb1a5abc91a9bd1"
+  source_hash: "2f235f93da0ba876580617c65f00d4404019d9ade8df576b45b859126889d6e1"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestLoadRefusesToolchainSkewUnderSelectionEnv"
   role: BINDING_ROLE_TESTS
@@ -328,6 +364,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-quiescence"
   content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
+  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunSkipsBrokenTargetLocally"
   role: BINDING_ROLE_TESTS
@@ -337,6 +374,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-quiescence"
   content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
+  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunSkipsFailingBaselineTargetLocally"
   role: BINDING_ROLE_TESTS
@@ -346,6 +384,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-scratch-namespace"
   content_hash: "014d91275a1f6e5ddf91eb3ebc4bb5a9b86c75a56e006131014b1dbc5b369285"
+  source_hash: "af44b5027032a18bc98b01bddaa4b87af759471338617104698775da81614093"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestParseScratchNamespaces"
   role: BINDING_ROLE_TESTS
@@ -355,6 +394,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-scratch-namespace"
   content_hash: "014d91275a1f6e5ddf91eb3ebc4bb5a9b86c75a56e006131014b1dbc5b369285"
+  source_hash: "af44b5027032a18bc98b01bddaa4b87af759471338617104698775da81614093"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRefusesMalformedScratchNamespace"
   role: BINDING_ROLE_TESTS
@@ -364,6 +404,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-scratch-namespace"
   content_hash: "014d91275a1f6e5ddf91eb3ebc4bb5a9b86c75a56e006131014b1dbc5b369285"
+  source_hash: "af44b5027032a18bc98b01bddaa4b87af759471338617104698775da81614093"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestScratchNamespaceOracleScratchRecordless"
   role: BINDING_ROLE_TESTS
@@ -373,6 +414,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets"
   role: BINDING_ROLE_TESTS
@@ -382,6 +424,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestCoverageIntersectsHalfOpenBoundaries"
   role: BINDING_ROLE_TESTS
@@ -391,6 +434,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestCoverageNormalizesDirectiveNames"
   role: BINDING_ROLE_TESTS
@@ -400,6 +444,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestDirectiveCoverageRequiresCompiledOnDiskSource"
   role: BINDING_ROLE_TESTS
@@ -409,6 +454,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestDirectiveCoverageSkipsCgoIntermediates"
   role: BINDING_ROLE_TESTS
@@ -418,6 +464,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDiskReadingOracleSurvivorsBucketOverlayBypassed"
   role: BINDING_ROLE_TESTS
@@ -427,6 +474,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestLineDirectiveTargetsKeepOnDiskIdentity"
   role: BINDING_ROLE_TESTS
@@ -436,6 +484,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunBucketsSurvivorExecution"
   role: BINDING_ROLE_TESTS
@@ -445,6 +494,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunEndToEnd"
   role: BINDING_ROLE_TESTS
@@ -454,6 +504,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunExtendsCappedFindingMeasuringOnlyTheSuffix"
   role: BINDING_ROLE_TESTS
@@ -463,6 +514,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence"
   role: BINDING_ROLE_TESTS
@@ -472,6 +524,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestSurvivorCoverageRefusesUnsoundFiles"
   role: BINDING_ROLE_TESTS
@@ -481,6 +534,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-truncation"
   content_hash: "812e4a291cf3993be806578dfc4ff47822e1ea23c3bd67602775e4bea85b64b2"
+  source_hash: "d3f770903b6f30129f1bbb3e4c02963cc33e5baf1a93d2e4a79073e6470c4966"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestTruncatedPipelineFailsLoudlyNamingUnfinishedTargets"
   role: BINDING_ROLE_TESTS
@@ -490,6 +544,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestConfirmationGateStrides"
   role: BINDING_ROLE_TESTS
@@ -499,6 +554,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestGatherWindowBlocksUntilBudgetOrEnd"
   role: BINDING_ROLE_TESTS
@@ -508,6 +564,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunConfirmationIsKillerScoped"
   role: BINDING_ROLE_TESTS
@@ -517,6 +574,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunConfirmsKillsSerially"
   role: BINDING_ROLE_TESTS
@@ -526,6 +584,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunKillerScopedFlipFallsBackToFullOracle"
   role: BINDING_ROLE_TESTS
@@ -535,6 +594,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunKillerScopedRefusesOrderDependentKiller"
   role: BINDING_ROLE_TESTS
@@ -544,6 +604,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPreparationErrorCommitsHeldWindow"
   role: BINDING_ROLE_TESTS
@@ -553,6 +614,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunSerialConfirmationReplacesNonReproducingKill"
   role: BINDING_ROLE_TESTS
@@ -562,6 +624,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCommitFindingDeliversPastRefMotion"
   role: BINDING_ROLE_TESTS
@@ -571,6 +634,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunCancellationKeepsCommittedFindings"
   role: BINDING_ROLE_TESTS
@@ -580,6 +644,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunCommitsEarlierWindowsBeforeLaterOnesDispatch"
   role: BINDING_ROLE_TESTS
@@ -589,6 +654,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunJoinsPreparationOnEarlyReturn"
   role: BINDING_ROLE_TESTS
@@ -598,6 +664,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPersistsAcrossMidRunRefOnlyCommit"
   role: BINDING_ROLE_TESTS
@@ -607,6 +674,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestBankedStateExcludesFailedCommits"
   role: BINDING_ROLE_TESTS
@@ -616,6 +684,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestBankedStateNamesOnlyCommittedFindings"
   role: BINDING_ROLE_TESTS
@@ -625,6 +694,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCommandAbortAfterCommitReportsSheds"
   role: BINDING_ROLE_TESTS
@@ -634,6 +704,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestApplyEdits"
   role: BINDING_ROLE_TESTS
@@ -643,6 +714,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEditUniquenessCountsOverlappingStarts"
   role: BINDING_ROLE_TESTS
@@ -652,6 +724,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeral"
   role: BINDING_ROLE_TESTS
@@ -661,6 +734,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralLabelsUnexercisedReplacement"
   role: BINDING_ROLE_TESTS
@@ -670,6 +744,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralProbeFailureLeavesLabelAbsent"
   role: BINDING_ROLE_TESTS
@@ -679,6 +754,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralRefusesUnloadedPackageAndUncompiledFile"
   role: BINDING_ROLE_TESTS
@@ -688,6 +764,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRenderEphemeralVerdictNamesUnexercisedFiles"
   role: BINDING_ROLE_TESTS
@@ -697,6 +774,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestProbeBaseline"
   role: BINDING_ROLE_TESTS
@@ -706,6 +784,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCompletedObservationUnionIsCandidateGranular"
   role: BINDING_ROLE_TESTS
@@ -715,6 +794,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestIncompleteObservationCannotBeFresh"
   role: BINDING_ROLE_TESTS
@@ -724,6 +804,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunCallerDeclaredBracketPathBindsExternalInput"
   role: BINDING_ROLE_TESTS
@@ -733,6 +814,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPanickedMutantIsCandidateLocalAndServes"
   role: BINDING_ROLE_TESTS
@@ -742,6 +824,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRefusesAbsentBracketPath"
   role: BINDING_ROLE_TESTS
@@ -751,6 +834,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRefusesUnhonorableBracketPaths"
   role: BINDING_ROLE_TESTS
@@ -760,6 +844,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRemeasuresGeneratedFixtureEvidence"
   role: BINDING_ROLE_TESTS
@@ -769,6 +854,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunUnionsEveryProcessObservation"
   role: BINDING_ROLE_TESTS
@@ -778,6 +864,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPkgRuns"
   role: BINDING_ROLE_TESTS
@@ -787,6 +874,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantOutcomes"
   role: BINDING_ROLE_TESTS
@@ -796,6 +884,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-plan-only"
   content_hash: "d4050dc0d472cab61ea0dd1d576b440b9efa65d34881d22e3db94fe655ab1e5e"
+  source_hash: "c3e9bbb090d0eb9f3a769fc771970a3247fe3b835f1d8fd1080b5fe7466fe6c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestStagedPlanSurfacesDriftRefusedServe"
   role: BINDING_ROLE_TESTS
@@ -805,6 +894,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-property-oracles"
   content_hash: "f4a53c8b68d699e4954e69e986d138e492a643fc6e49e9833f575b3ceb761033"
+  source_hash: "a5d4be9b81d379693d8be3757d7acbc21c0ae7a581dc4ea308c92977b8c4e1ce"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralDeliversPinnedRapidFlags"
   role: BINDING_ROLE_TESTS
@@ -814,6 +904,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-property-oracles"
   content_hash: "f4a53c8b68d699e4954e69e986d138e492a643fc6e49e9833f575b3ceb761033"
+  source_hash: "a5d4be9b81d379693d8be3757d7acbc21c0ae7a581dc4ea308c92977b8c4e1ce"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPropertyOracleFlagsAndNotes"
   role: BINDING_ROLE_TESTS
@@ -823,6 +914,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-property-oracles"
   content_hash: "f4a53c8b68d699e4954e69e986d138e492a643fc6e49e9833f575b3ceb761033"
+  source_hash: "a5d4be9b81d379693d8be3757d7acbc21c0ae7a581dc4ea308c92977b8c4e1ce"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPropertyRegimePinGatesServe"
   role: BINDING_ROLE_TESTS
@@ -832,6 +924,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-property-oracles"
   content_hash: "f4a53c8b68d699e4954e69e986d138e492a643fc6e49e9833f575b3ceb761033"
+  source_hash: "a5d4be9b81d379693d8be3757d7acbc21c0ae7a581dc4ea308c92977b8c4e1ce"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestShapedServeMatcherPinsRegime"
   role: BINDING_ROLE_TESTS
@@ -841,6 +934,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-property-oracles"
   content_hash: "f4a53c8b68d699e4954e69e986d138e492a643fc6e49e9833f575b3ceb761033"
+  source_hash: "a5d4be9b81d379693d8be3757d7acbc21c0ae7a581dc4ea308c92977b8c4e1ce"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestPropertyRuntimesContext"
   role: BINDING_ROLE_TESTS
@@ -850,6 +944,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestConfirmWindowKillsNamesConfirmationMode"
   role: BINDING_ROLE_TESTS
@@ -859,6 +954,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestReportConfirmationFlipCarriesThePayload"
   role: BINDING_ROLE_TESTS
@@ -868,6 +964,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunExecutingEventsAdvisory"
   role: BINDING_ROLE_TESTS
@@ -877,6 +974,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunJoinsPreparationOnEarlyReturn"
   role: BINDING_ROLE_TESTS
@@ -886,6 +984,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPipelinesPreparationWithExecution"
   role: BINDING_ROLE_TESTS
@@ -895,6 +994,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPlanOnlyStopsBeforeExecution"
   role: BINDING_ROLE_TESTS
@@ -904,6 +1004,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRefusesVanishedTargetOnceInOrder"
   role: BINDING_ROLE_TESTS
@@ -913,6 +1014,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRenderExecutionEventFlipLine"
   role: BINDING_ROLE_TESTS
@@ -922,6 +1024,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestObservedRunRefusesMultiplePackages"
   role: BINDING_ROLE_TESTS
@@ -931,6 +1034,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantExecutesExactlyOnce"
   role: BINDING_ROLE_TESTS
@@ -940,6 +1044,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantNoiseIsNeverAKill"
   role: BINDING_ROLE_TESTS
@@ -949,6 +1054,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "7d02509d2425b5775771dea0ebd9cf0458ec9f6f1b3167d1c15529b750cb50f7"
+  source_hash: "51fd71869d9356f41a0173b2c92465f8f5b27a4d0c3e48033e34c69ce1d0b963"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestRunWidthClaimRefusesDifferingJobs"
   role: BINDING_ROLE_TESTS
@@ -958,6 +1064,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-survivor-evidence"
   content_hash: "f4b243d041c9410c985d59d110d061566f9e2355ea06c4bfcd1e823294575f36"
+  source_hash: "1434ef2fd9c75d055a72483ccfe0aced5889ee44c6762db9bd41c8ed9e55cca0"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunDriftAddedOnlyServesKillsAndBucketsSurvivors"
   role: BINDING_ROLE_TESTS
@@ -967,6 +1074,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralDerivesOracleBudgetFromBaseline"
   role: BINDING_ROLE_TESTS
@@ -976,6 +1084,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralBaselineRunsUnderLeash"
   role: BINDING_ROLE_TESTS
@@ -985,6 +1094,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralCoverageProbeRunsUnderMeasurementLeash"
   role: BINDING_ROLE_TESTS
@@ -994,6 +1104,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDerivedOracleBudget"
   role: BINDING_ROLE_TESTS
@@ -1003,6 +1114,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDerivedBoundsNamedHonestly"
   role: BINDING_ROLE_TESTS
@@ -1012,6 +1124,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestParentDeadlineIsCancellationNotTimeoutKill"
   role: BINDING_ROLE_TESTS
@@ -1021,6 +1134,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-attribution"
   content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestOracleBudgetFiredDiscriminates"
   role: BINDING_ROLE_TESTS
@@ -1030,6 +1144,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRenderEphemeralVerdictReportsOracleBudget"
   role: BINDING_ROLE_TESTS
@@ -1039,6 +1154,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestEphemeralOracleTimeoutDefaultsToDerived"
   role: BINDING_ROLE_TESTS
@@ -1048,6 +1164,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestScheduleBatchesPartition"
   role: BINDING_ROLE_TESTS
@@ -1057,6 +1174,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestScheduledGroupsPartitionAndOrder"
   role: BINDING_ROLE_TESTS
@@ -1066,6 +1184,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPhaseKillWithoutPhaseBaselineDegradesToUnsplit"
   role: BINDING_ROLE_TESTS
@@ -1075,6 +1194,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestProbeScheduleCoverageGatesAndDegrades"
   role: BINDING_ROLE_TESTS
@@ -1084,6 +1204,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestSerialConfirmationRunsUnscheduled"
   role: BINDING_ROLE_TESTS
@@ -1093,6 +1214,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestNarrowedPhaseTimeoutDegradesToUnsplit"
   role: BINDING_ROLE_TESTS
@@ -1102,6 +1224,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunDerivesOracleBudgetsAndServesAcrossThem"
   role: BINDING_ROLE_TESTS
@@ -1111,6 +1234,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunMeasuresDerivedBudgetFromBaseline"
   role: BINDING_ROLE_TESTS
@@ -1120,6 +1244,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestShapedMutantRunsUnderDerivedBudget"
   role: BINDING_ROLE_TESTS
@@ -1129,6 +1254,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPhaseKillVouchRunsUnderRunWideBound"
   role: BINDING_ROLE_TESTS
@@ -1138,6 +1264,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-quiescence"
   content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
+  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestMethodProbesRefuseMovedDeclaringFile"
   role: BINDING_ROLE_TESTS
@@ -1147,6 +1274,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-quiescence"
   content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
+  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestMethodProbesRefuseContentDriftedDeclaringFile"
   role: BINDING_ROLE_TESTS
@@ -1156,6 +1284,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-quiescence"
   content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
+  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRefusesShapedTargetOnSourceDrift"
   role: BINDING_ROLE_TESTS
@@ -1165,6 +1294,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-quiescence"
   content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
+  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunSkipsTargetWhenSourceDriftsAfterLoad"
   role: BINDING_ROLE_TESTS
@@ -1174,6 +1304,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunGracefulInterruptCommitsCappedPrefix"
   role: BINDING_ROLE_TESTS
@@ -1183,6 +1314,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunGracefulInterruptDiscardsServeWorkWhole"
   role: BINDING_ROLE_TESTS
@@ -1192,6 +1324,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestSoftInterruptTwoStagePolicy"
   role: BINDING_ROLE_TESTS
@@ -1201,6 +1334,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunGracefulInterruptDiscardsUndispatchedSiblings"
   role: BINDING_ROLE_TESTS
@@ -1210,6 +1344,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestNarrowedSurvivorSkipsNonCoveringRemainder"
   role: BINDING_ROLE_TESTS
@@ -1219,6 +1354,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunNarrowsSurvivorsToCoveringTests"
   role: BINDING_ROLE_TESTS
@@ -1228,6 +1364,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEstimateWindowPricesOnlyMeasuredDurations"
   role: BINDING_ROLE_TESTS
@@ -1237,6 +1374,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEstimateWindowMirrorsExecutingSelection"
   role: BINDING_ROLE_TESTS
@@ -1246,6 +1384,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestProgressLinePaceAndEstimateRendering"
   role: BINDING_ROLE_TESTS
@@ -1255,6 +1394,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestAdvanceDoneNeverRegresses"
   role: BINDING_ROLE_TESTS
@@ -1264,6 +1404,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEstimateRenderStringsFabricateNothing"
   role: BINDING_ROLE_TESTS
@@ -1273,6 +1414,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestNextReadyWindowOrdersByCost"
   role: BINDING_ROLE_TESTS
@@ -1282,6 +1424,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunExecutesCheapestReadyWindowFirst"
   role: BINDING_ROLE_TESTS
@@ -1291,6 +1434,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestSIGTERMJoinsGracefulPolicy"
   role: BINDING_ROLE_TESTS
@@ -1300,6 +1444,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-cancellation"
   content_hash: "dc4089fa31a05f83580b4203b62ee9ef2ef3023051ccb3dce05a2905537a5a11"
+  source_hash: "82336d5eac900847446cdd72b596e79e957ede7f712916eb7f231825a48bc05a"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestDrainDeadlineArmsOnSIGTERMOnly"
   role: BINDING_ROLE_TESTS
@@ -1309,6 +1454,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDerivedAuditCapSharesSavings"
   role: BINDING_ROLE_TESTS
@@ -1318,6 +1464,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCandidateNarrowingSavingsFabricatesNothing"
   role: BINDING_ROLE_TESTS
@@ -1327,6 +1474,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestAuditSampleDerivesDepthFromSavings"
   role: BINDING_ROLE_TESTS
@@ -1336,6 +1484,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.PrepareCampaign"
   role: BINDING_ROLE_IMPLEMENTS
@@ -1345,6 +1494,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunRefusesItsInputsBeforeAnyLoad"
   role: BINDING_ROLE_TESTS
@@ -1354,6 +1504,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestEphemeralRefusesItsInputsBeforeAnyLoad"
   role: BINDING_ROLE_TESTS
@@ -1363,6 +1514,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRetargetRefusesItsPairBeforeAnyLoad"
   role: BINDING_ROLE_TESTS
@@ -1372,6 +1524,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestDiscoverRefusesTwoTargetSourcesBeforeAnyLoad"
   role: BINDING_ROLE_TESTS
@@ -1381,6 +1534,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestRunToolRefusesItsInputsBeforeAnyLoad"
   role: BINDING_ROLE_TESTS
@@ -1390,6 +1544,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunRefusesItsInputsBeforeAnyLoad"
   role: BINDING_ROLE_TESTS
@@ -1399,6 +1554,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-exclusivity"
   content_hash: "772de1b6d697589e99d9c12224f103f78c4eb62c30c06f7507eac3404bb83bb1"
+  source_hash: "d5ffbf601a58e0d353de9f85fe798cfd8983b8724f0e50d1a5e402e748ae3bf6"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestRunToolRefusesItsInputsBeforeAnyLoad"
   role: BINDING_ROLE_TESTS
@@ -1408,6 +1564,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPlanRefusesAbsentBracketPath"
   role: BINDING_ROLE_TESTS
@@ -1417,6 +1574,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestShapedRunRefusesAbsentBracketPath"
   role: BINDING_ROLE_TESTS
@@ -1426,6 +1584,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestStagedRunRefusesExternalInputAtPreparation"
   role: BINDING_ROLE_TESTS
@@ -1435,6 +1594,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestStagedRunRefusesExternalInputForShapedTarget"
   role: BINDING_ROLE_TESTS
@@ -1444,6 +1604,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e12c6f69eb2904e2c04b32e37939a4bd449a0e1106ee6f76c0aa3d127cce2e1f"
+  source_hash: "e86f04f0fe343a7bff4fb8f0bdcaa0e8c0165deecdeeef9a9fd297f8ec0775c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeral"
   role: BINDING_ROLE_TESTS
@@ -1453,6 +1614,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunPatternFirstElementsMirrorTheHarness"
   role: BINDING_ROLE_TESTS
@@ -1462,6 +1624,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunSelectableNamesMatchTheHarness"
   role: BINDING_ROLE_TESTS
@@ -1471,6 +1634,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-plan-only"
   content_hash: "d4050dc0d472cab61ea0dd1d576b440b9efa65d34881d22e3db94fe655ab1e5e"
+  source_hash: "c3e9bbb090d0eb9f3a769fc771970a3247fe3b835f1d8fd1080b5fe7466fe6c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPlanDecisionsMatchExecution"
   role: BINDING_ROLE_TESTS
@@ -1480,6 +1644,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-plan-only"
   content_hash: "d4050dc0d472cab61ea0dd1d576b440b9efa65d34881d22e3db94fe655ab1e5e"
+  source_hash: "c3e9bbb090d0eb9f3a769fc771970a3247fe3b835f1d8fd1080b5fe7466fe6c5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestShapedPlanDecisionsMatchExecution"
   role: BINDING_ROLE_TESTS
@@ -1489,6 +1654,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestFailedTestsDiagnosticRendersWhatTheOracleSaw"
   role: BINDING_ROLE_TESTS
@@ -1498,6 +1664,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunEphemeralReportsItsPhases"
   role: BINDING_ROLE_TESTS
@@ -1507,6 +1674,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestProgressLineNamesThePhaseInFlight"
   role: BINDING_ROLE_TESTS
@@ -1516,6 +1684,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestProgressLineYieldsToTheTalliesAtTheFirstDecision"
   role: BINDING_ROLE_TESTS
@@ -1525,6 +1694,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestEpilogueEndsTheCadenceBeforeTheRows"
   role: BINDING_ROLE_TESTS
@@ -1534,6 +1704,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestFindingsFacesUnderTheCadence"
   role: BINDING_ROLE_TESTS
@@ -1543,6 +1714,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestLifecycleVerbsAnnounceTheLoadAndEndOnTheirRows"
   role: BINDING_ROLE_TESTS
@@ -1552,6 +1724,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestEphemeralCommandReportsPhasesAndInterruptions"
   role: BINDING_ROLE_TESTS
@@ -1561,6 +1734,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolEphemeralNotifiesItsPhases"
   role: BINDING_ROLE_TESTS
@@ -1570,6 +1744,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolsAnnounceTheLoad"
   role: BINDING_ROLE_TESTS
@@ -1579,6 +1754,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunNarrowsSurvivorsToCoveringTests"
   role: BINDING_ROLE_TESTS
@@ -1588,6 +1764,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestProbePlanCostCountsUnpricedBatches"
   role: BINDING_ROLE_TESTS
@@ -1597,6 +1774,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCampaignBaselineFailureCarriesTheOracleOutput"
   role: BINDING_ROLE_TESTS
@@ -1606,6 +1784,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCampaignBaselineDriftCarriesTheOracleOutput"
   role: BINDING_ROLE_TESTS
@@ -1615,6 +1794,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRenderProbingPhase"
   role: BINDING_ROLE_TESTS
@@ -1624,6 +1804,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRenderAnalysisIndentsMultiLineDetail"
   role: BINDING_ROLE_TESTS
@@ -1633,6 +1814,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestRunStreamsNameTheProbePhase"
   role: BINDING_ROLE_TESTS
@@ -1642,6 +1824,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunForwardsExecutionEvents"
   role: BINDING_ROLE_TESTS
@@ -1651,6 +1834,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestLeashForLiftsAndNeverTightens"
   role: BINDING_ROLE_TESTS
@@ -1660,6 +1844,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralLeashLiftsFromTheBank"
   role: BINDING_ROLE_TESTS
@@ -1669,6 +1854,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCampaignLeashLiftsFromTheBank"
   role: BINDING_ROLE_TESTS
@@ -1678,6 +1864,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-run"
   content_hash: "69ecd541a2d69365da266498b14277634a59b2011b4d5210e3756983e6eee20a"
+  source_hash: "b62853e4112b15631f4488e76742c56033d1b7a6895e664fcea910ca5abcba9d"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralCoverageProbeLeashLiftsFromTheBank"
   role: BINDING_ROLE_TESTS
@@ -1687,6 +1874,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestStructuredOutputIsOneFlagName"
   role: BINDING_ROLE_TESTS
@@ -1696,6 +1884,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-run-status"
   content_hash: "6bcba9b2d37f5d26c65f7a90f7a1c6813f9349b073d239bfe68d10033472cfdf"
+  source_hash: "ab970abf2024e12defb86bc067488650beafc5a91c47d2b7a32a64c7d28580a4"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestProgressCadenceIsOnePolicy"
   role: BINDING_ROLE_TESTS
@@ -1705,6 +1894,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-oracle-scratch-declared"
   content_hash: "31f22837845939c0a7d7a23561ae5ee413943618496ec78593b74f6994e35a48"
+  source_hash: "5c06f3ed5c169dcf37ffe15798811a9322aeb30d308ab92b5acde6e723f2b4ad"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestObservationWithoutAMintedScratchRootRefuses"
   role: BINDING_ROLE_TESTS
@@ -1714,6 +1904,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestWorkspaceMemberBracketPathResolvesAgainstTheTreeRoot"
   role: BINDING_ROLE_TESTS
@@ -1723,6 +1914,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestAbsoluteDirectoryBracketPathIsOneDeclaredSurface"
   role: BINDING_ROLE_TESTS
@@ -1732,6 +1924,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestBracketPathValidationAndPreflightRefuseBeforeMeasurement"
   role: BINDING_ROLE_TESTS
@@ -1741,6 +1934,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-observation"
   content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestWorkspaceMemberBracketPathIsTreeRelative"
   role: BINDING_ROLE_TESTS
@@ -1750,6 +1944,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-scratch-namespace"
   content_hash: "014d91275a1f6e5ddf91eb3ebc4bb5a9b86c75a56e006131014b1dbc5b369285"
+  source_hash: "af44b5027032a18bc98b01bddaa4b87af759471338617104698775da81614093"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestWorkspaceMemberScratchNamespaceIsTreeRelative"
   role: BINDING_ROLE_TESTS
@@ -1759,6 +1954,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralTestPackageDirectoryShorthand"
   role: BINDING_ROLE_TESTS
@@ -1768,6 +1964,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPruneUnusedImportsDropsOnlyKnownUnreferencedImports"
   role: BINDING_ROLE_TESTS
@@ -1777,6 +1974,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralPrunesStrandedImports"
   role: BINDING_ROLE_TESTS
@@ -1786,6 +1984,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralRefusesBlindSpotTargets"
   role: BINDING_ROLE_TESTS
@@ -1795,6 +1994,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestCompilerCrashedDetectsSignalDeaths"
   role: BINDING_ROLE_TESTS
@@ -1804,6 +2004,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralRetriesACompilerCrashOnce"
   role: BINDING_ROLE_TESTS
@@ -1813,6 +2014,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestParseEditBatch"
   role: BINDING_ROLE_TESTS
@@ -1822,6 +2024,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralRetriesABaselineCompilerCrashOnce"
   role: BINDING_ROLE_TESTS
@@ -1831,6 +2034,7 @@ bindings {
 bindings {
   requirement_id: "REQ-exec-ephemeral"
   content_hash: "ef214ebc652e440b32ea31962fed447c852bd39c458f0328f5a9056fac28e8a8"
+  source_hash: "be1954603f0802b12dd52dfdce964a067bdd5d9ef19eaac35c4b25a51ba0d24c"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralMixedOutcomeKeepsTheUnexercisedAdvisory"
   role: BINDING_ROLE_TESTS
