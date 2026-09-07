@@ -843,7 +843,26 @@ result row carries the identity of the run that last measured any
 candidate of the record: the run's own on a measured row and on a served
 row whose flagged or drifted candidates this run re-executed, the
 measuring run's on a wholly served row — so a campaign's measured set is
-recoverable from its output without a log.
+recoverable from its output without a log. A changed-ref run additionally
+cuts every result row's open survivors by the delta: the survivors whose
+line the working tree added since the ref (git's added-line surface,
+REQ-target-changed) are listed and counted distinctly from the symbol's
+pre-existing remainder on every face — the CLI marks each such survivor
+and states the on-delta count beside the row's open count and in the
+summary, the structured faces carry them as their own row list and a
+summary object naming the ref — because a large symbol that gained a few
+lines reports hundreds of open survivors of which a handful sit on the
+change, the number a change's own judgment needs. The cut is advisory
+geometry derived at report time against the run's ref and persisted
+nowhere, and it places a survivor only when its record can be placed: the
+mutated symbol is one the ref's changed surface names canonically changed
+(a formatting reflow names none, so its reflowed lines cut nothing) and
+the record's body is the symbol's current one (positions measured against
+another body do not mean the current file's lines) — a run's own rows
+always are, an inspection's rows may not be. Whatever cannot be placed —
+the record, its package, its path, a position — is remainder, never on the
+delta: the cut never widens the delta it cannot place. A plan measures
+nothing and cuts nothing.
 Open survivors remain
 advisory and do not change successful exit semantics.
 

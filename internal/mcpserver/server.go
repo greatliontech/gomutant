@@ -229,8 +229,18 @@ func commandTimeout(name string, seconds *int) (time.Duration, error) {
 // the record is safe to stage is answered by the response, never by a
 // second findings call after a run that rendered healthy counts while
 // the store routed the record to the machine-local overlay.
-func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (string, string)) (rows []findingOut, omitted int) {
+func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (string, string), onDelta func(gomutant.Finding) ([]gomutant.Survivor, error)) (rows []findingOut, omitted, deltaOpen int, err error) {
 	for _, f := range findings {
+		// The cut is derived for every measured or cached record — the
+		// summary's total counts rows past the cap too — and listed on
+		// the rows within it.
+		var delta []gomutant.Survivor
+		if onDelta != nil && f.Skipped == "" {
+			if delta, err = onDelta(f); err != nil {
+				return nil, 0, 0, err
+			}
+			deltaOpen += len(delta)
+		}
 		if len(rows) == envelope.rows {
 			omitted++
 			continue
@@ -251,10 +261,17 @@ func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (s
 		}
 		if f.Skipped == "" {
 			row.Layer, row.LayerReason = layer(f)
+			if onDelta != nil {
+				if len(delta) > envelope.open {
+					row.OmittedDeltaOpen = len(delta) - envelope.open
+					delta = delta[:envelope.open]
+				}
+				row.DeltaOpen = delta
+			}
 		}
 		rows = append(rows, row)
 	}
-	return rows, omitted
+	return rows, omitted, deltaOpen, nil
 }
 
 // guidanceOut is one oracle set's instability attribution shared by the
@@ -502,21 +519,23 @@ type runIn struct {
 }
 
 type findingOut struct {
-	Symbol         string              `json:"symbol"`
-	Labels         []string            `json:"labels,omitempty"`
-	CandidateCount int                 `json:"candidateCount"`
-	Generated      int                 `json:"generated"`
-	Mutants        int                 `json:"mutants"`
-	Killed         int                 `json:"killed"`
-	Discarded      int                 `json:"discarded"`
-	Attested       int                 `json:"attested,omitempty"`
-	Open           []gomutant.Survivor `json:"open,omitempty"`
-	OmittedOpen    int                 `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
-	Cached         bool                `json:"cached,omitempty"`
-	Skipped        string              `json:"skipped,omitempty"`
-	Run            string              `json:"run,omitempty" jsonschema:"identity of the run that last measured any candidate of the record: this run's (the summary's run) on a measured row and on a cached row whose flagged or drifted candidates this run re-executed, the measuring run's on a wholly served row; absent on records measured before runs carried one"`
-	Layer          string              `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
-	LayerReason    string              `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Symbol           string              `json:"symbol"`
+	Labels           []string            `json:"labels,omitempty"`
+	CandidateCount   int                 `json:"candidateCount"`
+	Generated        int                 `json:"generated"`
+	Mutants          int                 `json:"mutants"`
+	Killed           int                 `json:"killed"`
+	Discarded        int                 `json:"discarded"`
+	Attested         int                 `json:"attested,omitempty"`
+	Open             []gomutant.Survivor `json:"open,omitempty"`
+	OmittedOpen      int                 `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
+	Cached           bool                `json:"cached,omitempty"`
+	Skipped          string              `json:"skipped,omitempty"`
+	DeltaOpen        []gomutant.Survivor `json:"deltaOpen,omitempty" jsonschema:"on a changed-ref run, the open survivors on lines the working tree added since the ref - a subset of open, listed distinctly; capped like open"`
+	OmittedDeltaOpen int                 `json:"omittedDeltaOpen,omitempty" jsonschema:"on-delta survivors beyond the response cap"`
+	Run              string              `json:"run,omitempty" jsonschema:"identity of the run that last measured any candidate of the record: this run's (the summary's run) on a measured row and on a cached row whose flagged or drifted candidates this run re-executed, the measuring run's on a wholly served row; absent on records measured before runs carried one"`
+	Layer            string              `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
+	LayerReason      string              `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 }
 
 type runOut struct {
@@ -629,6 +648,9 @@ type targetSelection struct {
 	targets   []gomutant.Target
 	residue   []gomutant.Residue
 	wholeTree bool
+	// cut is a changed-ref selection's added-line surface, the run's
+	// survivor cut (REQ-exec-run-status); nil otherwise.
+	cut *gomutant.DeltaCut
 }
 
 // selectTargets resolves a selection request through the one preamble
@@ -660,16 +682,18 @@ func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, targets
 			return sel, err
 		}
 	case changed != "":
-		paths, err := gitref.ChangedPathsContext(ctx, s.dir, changed)
+		surface, err := gitref.ChangedSurfaceContext(ctx, s.dir, changed)
 		if err != nil {
 			return sel, err
 		}
-		sel.targets, sel.residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
+		var delta gomutant.DeltaCut
+		sel.targets, sel.residue, delta, err = tree.DiscoverChangedSurfaceContext(ctx, surface, func(p string) ([]byte, bool) {
 			return gitref.ShowContext(ctx, s.dir, changed, p)
 		})
 		if err != nil {
 			return sel, err
 		}
+		sel.cut = &delta
 	default:
 		if sel.targets, err = tree.DiscoverContext(ctx); err != nil {
 			return sel, err
@@ -988,7 +1012,22 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	for _, f := range prior {
 		priorLayer[f.Symbol], _ = runStore.Layer(f)
 	}
-	out.Findings, out.OmittedFindings = capRunFindings(rendered, runStore.Layer)
+	// The cut is derived once per row; the summary sums the rows. The
+	// rows beyond the response cap are cut too, so the total is exact.
+	var onDelta func(gomutant.Finding) ([]gomutant.Survivor, error)
+	if sel.cut != nil {
+		onDelta = func(f gomutant.Finding) ([]gomutant.Survivor, error) {
+			split, err := tree.CutSurvivorsContext(ctx, f, *sel.cut)
+			return split.OnDelta, err
+		}
+	}
+	var deltaOpen int
+	if out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(rendered, runStore.Layer, onDelta); err != nil {
+		return nil, out, err
+	}
+	if sel.cut != nil {
+		out.Summary.Delta = &gomutant.DeltaSummary{Ref: sel.cut.Ref, Open: deltaOpen}
+	}
 	out.Residue, out.OmittedResidue = capRows(out.Residue)
 	// A shed disposition is surfaced once, never silently dropped
 	// (REQ-attest-survivor): the first report wins - a shed the
@@ -1199,6 +1238,7 @@ type findingsIn struct {
 	State    string `json:"state,omitempty" jsonschema:"show only findings in this judged state: current, stale, unverifiable, or detached (implies judge=true)"`
 	Judge    bool   `json:"judge,omitempty" jsonschema:"re-derive each record's freshness state against the current tree - minutes-class on large documents; a state filter or a tags/toolchain selection implies it; the default reports recorded facts with state 'recorded' and loads no tree"`
 	Symbol   string `json:"symbol,omitempty" jsonschema:"show only the finding for this mutated symbol"`
+	Changed  string `json:"changed,omitempty" jsonschema:"cut every record's open survivors against this git ref's delta: survivors on lines added since the ref are listed (deltaOpen) and counted distinctly; loads the tree to place positions, derives no freshness"`
 	Run      string `json:"run,omitempty" jsonschema:"show only the records this run last measured - the identity the run tool's summary reports and stamps on every record it measures"`
 	Detail   bool   `json:"detail,omitempty" jsonschema:"full rows - operator tables, open survivors, attested dispositions, candidate evidence; the default is the bounded summary (one row per record: symbol, state, layer, open and attested counts)"`
 	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
@@ -1208,13 +1248,14 @@ type findingsIn struct {
 // record, what state, which layer, how much is open - with the full
 // lists behind detail (REQ-mcp-envelope, REQ-result-inspection).
 type findingSummary struct {
-	Symbol   string                `json:"symbol"`
-	State    gomutant.FindingState `json:"state"`
-	Reason   string                `json:"reason,omitempty"`
-	Layer    string                `json:"layer"`
-	Run      string                `json:"run,omitempty" jsonschema:"identity of the run that last measured the record; absent on records measured before runs carried one"`
-	Open     int                   `json:"open"`
-	Attested int                   `json:"attested"`
+	Symbol    string                `json:"symbol"`
+	State     gomutant.FindingState `json:"state"`
+	Reason    string                `json:"reason,omitempty"`
+	Layer     string                `json:"layer"`
+	Run       string                `json:"run,omitempty" jsonschema:"identity of the run that last measured the record; absent on records measured before runs carried one"`
+	Open      int                   `json:"open"`
+	DeltaOpen *int                  `json:"deltaOpen,omitempty" jsonschema:"under changed: the open survivors on lines added since the ref"`
+	Attested  int                   `json:"attested"`
 }
 
 type inspectedFinding struct {
@@ -1225,6 +1266,7 @@ type inspectedFinding struct {
 	Layer          string                       `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
 	LayerReason    string                       `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 	Run            string                       `json:"run,omitempty" jsonschema:"identity of the run that last measured the record"`
+	DeltaOpen      []gomutant.Survivor          `json:"deltaOpen,omitempty" jsonschema:"under changed: the open survivors on lines added since the ref, listed distinctly"`
 	CandidateCount int                          `json:"candidateCount"`
 	Generated      int                          `json:"generated"`
 	Mutants        int                          `json:"mutants"`
@@ -1300,11 +1342,25 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	// were freshness re-derivation, never parsing.
 	judge := in.judged()
 	var tree *gomutant.Tree
-	if judge {
+	if judge || in.Changed != "" {
 		tree, err = s.loadTreeReporting(ctx, notify, in.selection())
 		if err != nil {
 			return nil, out, err
 		}
+	}
+	var cut *gomutant.DeltaCut
+	if in.Changed != "" {
+		surface, err := gitref.ChangedSurfaceContext(ctx, s.dir, in.Changed)
+		if err != nil {
+			return nil, out, err
+		}
+		_, _, delta, err := tree.DiscoverChangedSurfaceContext(ctx, surface, func(p string) ([]byte, bool) {
+			return gitref.ShowContext(ctx, s.dir, in.Changed, p)
+		})
+		if err != nil {
+			return nil, out, err
+		}
+		cut = &delta
 	}
 	// The inspection stretch announces itself once and rides the
 	// heartbeat: freshness judging over a large document is
@@ -1327,7 +1383,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		for i, finding := range matched {
 			inspections[i] = gomutant.RecordedInspection(finding)
 		}
-		if tree != nil && len(matched) > 0 {
+		if judge && len(matched) > 0 {
 			judged, err := tree.InspectFindingsContext(ctx, matched, nil)
 			if err != nil {
 				return res, err
@@ -1348,10 +1404,21 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 			} else {
 				res.LocalOnly++
 			}
+			var onDelta []gomutant.Survivor
+			var deltaCount *int
+			if cut != nil {
+				split, err := tree.CutSurvivorsContext(ctx, finding, *cut)
+				if err != nil {
+					return res, err
+				}
+				onDelta = append([]gomutant.Survivor{}, split.OnDelta...)
+				n := len(onDelta)
+				deltaCount = &n
+			}
 			if !in.Detail {
 				res.Summary = append(res.Summary, findingSummary{
 					Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
-					Layer: layer, Run: finding.Run, Open: len(finding.Open()), Attested: len(finding.AttestedDispositions()),
+					Layer: layer, Run: finding.Run, Open: len(finding.Open()), DeltaOpen: deltaCount, Attested: len(finding.AttestedDispositions()),
 				})
 				continue
 			}
@@ -1359,7 +1426,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 			sort.Strings(labels)
 			res.Findings = append(res.Findings, inspectedFinding{
 				Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-				Layer: layer, LayerReason: layerReason, Run: finding.Run,
+				Layer: layer, LayerReason: layerReason, Run: finding.Run, DeltaOpen: onDelta,
 				CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 				Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 				Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),

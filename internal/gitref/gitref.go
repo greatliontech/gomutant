@@ -1,6 +1,7 @@
 // Package gitref is the git seam both gomutant faces share: the changed
 // surface vs a ref, and reference content, via the git binary — the library
-// itself stays git-free; only the shells reach here.
+// itself stays git-free (it defines the surface's types and never execs
+// git); only the shells reach here.
 package gitref
 
 import (
@@ -21,29 +22,13 @@ func ChangedPaths(dir, ref string) ([]string, error) {
 }
 
 // ChangedPathsContext is ChangedPaths with caller-owned cancellation.
+// It is the changed surface's path list alone (ChangedSurfaceContext).
 func ChangedPathsContext(ctx context.Context, dir, ref string) ([]string, error) {
-	tracked, err := outputContext(ctx, dir, "-c", "core.quotepath=off", "diff", "--name-only", "--relative", ref)
+	surface, err := ChangedSurfaceContext(ctx, dir, ref)
 	if err != nil {
 		return nil, err
 	}
-	untracked, err := outputContext(ctx, dir, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		return nil, err
-	}
-	seen := map[string]bool{}
-	var paths []string
-	for _, out := range [][]byte{tracked, untracked} {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if line != "" && !seen[line] {
-				seen[line] = true
-				paths = append(paths, line)
-			}
-		}
-	}
-	return paths, nil
+	return surface.Paths, nil
 }
 
 // Show reads a tree-relative path's content at ref; ok=false when the path

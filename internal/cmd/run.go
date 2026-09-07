@@ -155,6 +155,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		tree.SetDynamicStateVouches(prepared.Vouches...)
 	}
 	var targets []gomutant.Target
+	var cut *gomutant.DeltaCut
 	var residue []gomutant.Residue
 	switch {
 	case o.targetsFile != "":
@@ -169,15 +170,21 @@ func runCommand(ctx context.Context, o runOptions) error {
 			return err
 		}
 	case o.changed != "":
-		paths, err := gitref.ChangedPathsContext(ctx, o.dir, o.changed)
+		surface, err := gitref.ChangedSurfaceContext(ctx, o.dir, o.changed)
 		if err != nil {
 			return err
 		}
-		targets, residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
+		// The delta cut and the target set come from the one surface
+		// (REQ-exec-run-status); a plan measures nothing and cuts nothing.
+		var delta gomutant.DeltaCut
+		targets, residue, delta, err = tree.DiscoverChangedSurfaceContext(ctx, surface, func(p string) ([]byte, bool) {
 			return gitref.ShowContext(ctx, o.dir, o.changed, p)
 		})
 		if err != nil {
 			return err
+		}
+		if !o.plan {
+			cut = &delta
 		}
 	default:
 		targets, err = tree.DiscoverContext(ctx)
@@ -476,6 +483,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	localOnly := 0
+	deltaOpen := 0
 	for _, f := range rendered {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -492,11 +500,24 @@ func runCommand(ctx context.Context, o runOptions) error {
 				layer, layerReason = l, reason
 			}
 		}
+		// A changed-ref run cuts the row's open survivors by the
+		// delta's added lines, once per row; the summary sums the rows
+		// (REQ-exec-run-status).
+		var split gomutant.DeltaSurvivors
+		var onDelta []gomutant.Survivor
+		if cut != nil && f.Skipped == "" {
+			var err error
+			if split, err = tree.CutSurvivorsContext(ctx, f, *cut); err != nil {
+				return err
+			}
+			onDelta = split.OnDelta
+			deltaOpen += len(onDelta)
+		}
 		if o.jsonl {
 			if f.Skipped != "" {
 				continue // the decision event already carried the skip
 			}
-			rep.emit("result", resultRow(f, layer, layerReason))
+			rep.emit("result", resultRow(f, layer, layerReason, onDelta))
 			continue
 		}
 		switch {
@@ -509,19 +530,23 @@ func runCommand(ctx context.Context, o runOptions) error {
 			// candidates: the measuring run's on a wholly served record,
 			// this run's (the head line's) when the serve re-executed
 			// flagged or drifted candidates (REQ-exec-run-status).
-			fmt.Fprintf(&terminal, "cached    %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open%s\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()), runSuffix(f.Run))
+			fmt.Fprintf(&terminal, "cached    %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open%s%s\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()), deltaCount(cut, onDelta), runSuffix(f.Run))
 		default:
-			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()))
+			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open%s\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()), deltaCount(cut, onDelta))
 		}
 		if layer == "local" {
 			fmt.Fprintf(&terminal, "          machine-local: %s\n", layerReason)
 		}
-		for _, s := range f.Open() {
+		for i, s := range f.Open() {
+			mark := ""
+			if split.IsOnDelta(i) {
+				mark = "  [delta]"
+			}
 			if s.Execution != "" {
-				fmt.Fprintf(&terminal, "          survivor %s %s  [%s]\n", s.Position, s.Operator, s.Execution)
+				fmt.Fprintf(&terminal, "          survivor %s %s  [%s]%s\n", s.Position, s.Operator, s.Execution, mark)
 				continue
 			}
-			fmt.Fprintf(&terminal, "          survivor %s %s\n", s.Position, s.Operator)
+			fmt.Fprintf(&terminal, "          survivor %s %s%s\n", s.Position, s.Operator, mark)
 		}
 		for _, summary := range f.Operators {
 			fmt.Fprintf(&terminal, "          operator %s: %d generated, %d killed, %d survived, %d discarded\n",
@@ -533,6 +558,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if !o.plan {
 		summary := gomutant.SummarizeRun(rendered)
 		summary.Run = runID
+		if cut != nil {
+			summary.Delta = &gomutant.DeltaSummary{Ref: cut.Ref, Open: deltaOpen}
+		}
 		if o.jsonl {
 			rep.emit("summary", summary)
 		} else {
@@ -777,8 +805,21 @@ func skipClasses(findings []gomutant.Finding) (string, int) {
 }
 
 func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
-	fmt.Fprintf(w, "summary   %d targets: %d measured, %d cached, %d skipped; %d generated, %d killed, %d survived, %d discarded; %d attested, %d open\n",
+	fmt.Fprintf(w, "summary   %d targets: %d measured, %d cached, %d skipped; %d generated, %d killed, %d survived, %d discarded; %d attested, %d open",
 		summary.Targets, summary.Measured, summary.Cached, summary.Skipped, summary.Generated, summary.Killed, summary.Survived, summary.Discarded, summary.Attested, summary.Open)
+	if summary.Delta != nil {
+		fmt.Fprintf(w, "; %d open on the delta of %s", summary.Delta.Open, summary.Delta.Ref)
+	}
+	fmt.Fprintln(w)
+}
+
+// deltaCount renders a row's on-delta open count beside its open
+// count on a changed-ref run; empty on every other run.
+func deltaCount(cut *gomutant.DeltaCut, onDelta []gomutant.Survivor) string {
+	if cut == nil {
+		return ""
+	}
+	return fmt.Sprintf(" (%d on the delta)", len(onDelta))
 }
 
 // renderRunIdentity is the run's first human line, the identity every

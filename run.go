@@ -585,6 +585,9 @@ type RunSummary struct {
 	// package carries zero campaign evidence and reads as a coverage
 	// hole, not a tool hiccup (REQ-result-skip-radius).
 	DarkPackages []string `json:"darkPackages,omitempty"`
+	// Delta is a changed-ref run's cut of the open survivors by the
+	// delta's added lines (DeltaSummary); absent on every other run.
+	Delta *DeltaSummary `json:"delta,omitempty"`
 }
 
 // SummarizeRun derives deterministic aggregate totals from findings.

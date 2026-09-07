@@ -120,7 +120,7 @@ func TestCapRunFindingsCountsTheRemainder(t *testing.T) {
 	}
 	findings[1] = gomutant.Finding{Symbol: "p.S", Skipped: "not a function - for mutation adequacy"}
 	findings[2].Cached = true
-	rows, omitted := capRunFindings(findings, func(gomutant.Finding) (string, string) { return "local", "no commit provenance" })
+	rows, omitted, _, _ := capRunFindings(findings, func(gomutant.Finding) (string, string) { return "local", "no commit provenance" }, nil)
 	if len(rows) != 50 || omitted != 10 {
 		t.Fatalf("finding rows = %d, omitted %d", len(rows), omitted)
 	}

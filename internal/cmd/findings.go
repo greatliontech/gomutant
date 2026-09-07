@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +27,9 @@ type findingsOptions struct {
 	errOut io.Writer
 	// run scopes the roster to the records one campaign last measured.
 	run string
+	// changed cuts every rendered record's open survivors by this git
+	// ref's added lines; loads the tree, derives no freshness.
+	changed string
 }
 
 // judged reports whether any judged-question input was given: the
@@ -37,13 +41,16 @@ func (o findingsOptions) judged() bool {
 }
 
 type findingView struct {
-	Symbol         string                       `json:"symbol"`
-	Labels         []string                     `json:"labels,omitempty"`
-	State          gomutant.FindingState        `json:"state"`
-	Reason         string                       `json:"reason,omitempty"`
-	Layer          string                       `json:"layer"`
-	LayerReason    string                       `json:"layerReason,omitempty"`
-	Run            string                       `json:"run,omitempty"`
+	Symbol      string                `json:"symbol"`
+	Labels      []string              `json:"labels,omitempty"`
+	State       gomutant.FindingState `json:"state"`
+	Reason      string                `json:"reason,omitempty"`
+	Layer       string                `json:"layer"`
+	LayerReason string                `json:"layerReason,omitempty"`
+	Run         string                `json:"run,omitempty"`
+	// DeltaOpen is present exactly when a changed-ref cut ran (an
+	// empty list is "cut ran, none on the delta").
+	DeltaOpen      *[]gomutant.Survivor         `json:"deltaOpen,omitempty"`
 	CandidateCount int                          `json:"candidateCount"`
 	Generated      int                          `json:"generated"`
 	Mutants        int                          `json:"mutants"`
@@ -53,6 +60,8 @@ type findingView struct {
 	Open           []gomutant.Survivor          `json:"open"`
 	Attested       []gomutant.Attestation       `json:"attested"`
 	Candidates     []gomutant.CandidateEvidence `json:"candidateEvidence,omitempty"`
+	// split marks the on-delta survivors for the human detail face.
+	split gomutant.DeltaSurvivors
 }
 
 func newFindingsCommand() *cobra.Command {
@@ -69,6 +78,7 @@ func newFindingsCommand() *cobra.Command {
 	f.StringVar(&o.state, "state", "", "show only findings in this judged state: current, stale, unverifiable, or detached (implies --judge)")
 	f.BoolVar(&o.judge, "judge", false, "re-derive each record's freshness state against the current tree - minutes-class on large documents; the default reports recorded facts with state 'recorded'")
 	f.StringVar(&o.symbol, "symbol", "", "show only the finding for this mutated symbol")
+	f.StringVar(&o.changed, "changed", "", "cut every record's open survivors against this git ref's delta: survivors on lines added since the ref are listed and counted distinctly (loads the tree; no freshness derived)")
 	f.StringVar(&o.run, "run", "", "show only the records this run last measured (the identity a run prints first and stamps on every record it measures)")
 	f.BoolVar(&o.detail, "detail", false, "full rows - operator tables, survivors, dispositions, candidate evidence; the default is one summary row per record")
 	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); inspection judges under the same acceptances the run used (implies --judge)")
@@ -121,7 +131,9 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	judge := o.judged()
 	var tree *gomutant.Tree
 	phase, stop := func(string) {}, func() {}
-	if judge {
+	// The changed-ref cut places survivor positions through the tree
+	// without judging anything (REQ-result-inspection).
+	if judge || o.changed != "" {
 		// Judging derives freshness against the current tree — the
 		// expensive truth. The default path loads no tree at all: the
 		// document's recorded facts answer without one.
@@ -148,7 +160,21 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 			tree.SetDynamicStateVouches(identities...)
 		}
 	}
-	views, err := inspectFindings(ctx, tree, store, all, findingFilters{RecordFilter: gomutant.RecordFilter{Label: o.label, Symbol: o.symbol, Run: o.run}, state: o.state}, phase)
+	var cut *gomutant.DeltaCut
+	if o.changed != "" {
+		surface, err := gitref.ChangedSurfaceContext(ctx, o.dir, o.changed)
+		if err != nil {
+			return err
+		}
+		_, _, delta, err := tree.DiscoverChangedSurfaceContext(ctx, surface, func(p string) ([]byte, bool) {
+			return gitref.ShowContext(ctx, o.dir, o.changed, p)
+		})
+		if err != nil {
+			return err
+		}
+		cut = &delta
+	}
+	views, err := inspectFindings(ctx, tree, store, all, findingFilters{RecordFilter: gomutant.RecordFilter{Label: o.label, Symbol: o.symbol, Run: o.run}, state: o.state, judge: judge, cut: cut}, phase)
 	// The rows render through the reporter's epilogue when one runs:
 	// the cadence stops and joins before the first row.
 	stop()
@@ -163,7 +189,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		return printEphemeralAttestationLine(out, o)
 	}
 	if !o.detail {
-		renderFindingSummaries(out, views, judge)
+		renderFindingSummaries(out, views, judge, cut != nil)
 	} else {
 		renderFindingViews(out, views)
 	}
@@ -198,7 +224,7 @@ func printEphemeralAttestationLine(out io.Writer, o findingsOptions) error {
 // state, symbol, layer, open and attested counts, the cause when the
 // record cannot serve - with the full lists behind --detail
 // (REQ-result-inspection).
-func renderFindingSummaries(w io.Writer, views []findingView, judged bool) {
+func renderFindingSummaries(w io.Writer, views []findingView, judged bool, cut bool) {
 	repoCount, localOnly := 0, 0
 	for _, view := range views {
 		if view.Layer == "repo" {
@@ -210,7 +236,11 @@ func renderFindingSummaries(w io.Writer, views []findingView, judged bool) {
 		if layer == "local" {
 			layer = "machine-local"
 		}
-		fmt.Fprintf(w, "%s  %s  [%s]  %d open, %d attested", view.State, view.Symbol, layer, len(view.Open), len(view.Attested))
+		fmt.Fprintf(w, "%s  %s  [%s]  %d open", view.State, view.Symbol, layer, len(view.Open))
+		if cut && view.DeltaOpen != nil {
+			fmt.Fprintf(w, " (%d on the delta)", len(*view.DeltaOpen))
+		}
+		fmt.Fprintf(w, ", %d attested", len(view.Attested))
 		if view.Reason != "" {
 			fmt.Fprintf(w, "  (%s)", view.Reason)
 		}
@@ -242,19 +272,27 @@ func renderFindingViews(w io.Writer, views []findingView) {
 		}
 		fmt.Fprintf(w, "%s\n", strings.Join(labels, ", "))
 		fmt.Fprintf(w, "  %s  %s", view.State, view.Symbol)
-		fmt.Fprintf(w, "  %d/%d candidates, %d mutants, %d killed, %d discarded; %d open, %d attested\n",
-			view.Generated, view.CandidateCount, view.Mutants, view.Killed, view.Discarded, len(view.Open), len(view.Attested))
+		fmt.Fprintf(w, "  %d/%d candidates, %d mutants, %d killed, %d discarded; %d open",
+			view.Generated, view.CandidateCount, view.Mutants, view.Killed, view.Discarded, len(view.Open))
+		if view.DeltaOpen != nil {
+			fmt.Fprintf(w, " (%d on the delta)", len(*view.DeltaOpen))
+		}
+		fmt.Fprintf(w, ", %d attested\n", len(view.Attested))
 		// The cause leads: a record that cannot be reused says why before
 		// anything it found (REQ-result-inspection).
 		if view.Reason != "" {
 			fmt.Fprintf(w, "    cause: %s\n", view.Reason)
 		}
-		for _, survivor := range view.Open {
+		for i, survivor := range view.Open {
+			mark := ""
+			if view.split.IsOnDelta(i) {
+				mark = "  [delta]"
+			}
 			if survivor.Execution != "" {
-				fmt.Fprintf(w, "    survivor %s %s  [%s]\n", survivor.Position, survivor.Operator, survivor.Execution)
+				fmt.Fprintf(w, "    survivor %s %s  [%s]%s\n", survivor.Position, survivor.Operator, survivor.Execution, mark)
 				continue
 			}
-			fmt.Fprintf(w, "    survivor %s %s\n", survivor.Position, survivor.Operator)
+			fmt.Fprintf(w, "    survivor %s %s%s\n", survivor.Position, survivor.Operator, mark)
 		}
 		for _, summary := range view.Operators {
 			fmt.Fprintf(w, "    operator %s: %d generated, %d killed, %d survived, %d discarded\n",
@@ -283,6 +321,11 @@ func renderFindingsJSON(w io.Writer, views []findingView) error {
 type findingFilters struct {
 	gomutant.RecordFilter
 	state string
+	// judge derives each record's freshness against the tree; the
+	// tree may be loaded for the cut alone, so presence never implies it.
+	judge bool
+	// cut, when set, splits each view's open survivors by the delta.
+	cut *gomutant.DeltaCut
 }
 
 func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.Store, all []gomutant.Finding, filters findingFilters, phase func(string)) ([]findingView, error) {
@@ -306,7 +349,7 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 	for i, finding := range selected {
 		inspections[i] = gomutant.RecordedInspection(finding)
 	}
-	if tree != nil && len(selected) > 0 {
+	if filters.judge && len(selected) > 0 {
 		phase(fmt.Sprintf("judging %d record(s)", len(selected)))
 		judged, err := tree.InspectFindingsContext(ctx, selected, phase)
 		if err != nil {
@@ -326,9 +369,19 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 		layer, layerReason := store.Layer(finding)
 		labels := append([]string(nil), finding.Labels...)
 		sort.Strings(labels)
+		var onDelta *[]gomutant.Survivor
+		var split gomutant.DeltaSurvivors
+		if filters.cut != nil {
+			var err error
+			if split, err = tree.CutSurvivorsContext(ctx, finding, *filters.cut); err != nil {
+				return nil, err
+			}
+			listed := append([]gomutant.Survivor{}, split.OnDelta...)
+			onDelta = &listed
+		}
 		views = append(views, findingView{
 			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-			Layer: layer, LayerReason: layerReason, Run: finding.Run,
+			Layer: layer, LayerReason: layerReason, Run: finding.Run, DeltaOpen: onDelta, split: split,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),

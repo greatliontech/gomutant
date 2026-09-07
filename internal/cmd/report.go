@@ -474,6 +474,9 @@ type resultRowPayload struct {
 	// Run is the identity of the run that last measured the record:
 	// this run's on a measured row, the measuring run's on a served one.
 	Run string `json:"run,omitempty"`
+	// DeltaOpen lists the open survivors on the delta's added lines on
+	// a changed-ref run — a subset of Open, listed distinctly.
+	DeltaOpen []survivorRowPayload `json:"deltaOpen,omitempty"`
 }
 
 type survivorRowPayload struct {
@@ -482,7 +485,7 @@ type survivorRowPayload struct {
 	Execution string `json:"execution,omitempty"`
 }
 
-func resultRow(f gomutant.Finding, layer, layerReason string) resultRowPayload {
+func resultRow(f gomutant.Finding, layer, layerReason string, onDelta []gomutant.Survivor) resultRowPayload {
 	row := resultRowPayload{
 		Symbol: f.Symbol, Cached: f.Cached,
 		Generated: f.Generated, Candidates: f.CandidateCount, Mutants: f.Mutants,
@@ -492,6 +495,9 @@ func resultRow(f gomutant.Finding, layer, layerReason string) resultRowPayload {
 	}
 	for _, s := range f.Open() {
 		row.Open = append(row.Open, survivorRowPayload{Position: s.Position, Operator: s.Operator, Execution: s.Execution})
+	}
+	for _, s := range onDelta {
+		row.DeltaOpen = append(row.DeltaOpen, survivorRowPayload{Position: s.Position, Operator: s.Operator, Execution: s.Execution})
 	}
 	return row
 }

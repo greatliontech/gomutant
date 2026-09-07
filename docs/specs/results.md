@@ -999,7 +999,15 @@ an opaque label, by state, by symbol, or by run identity (the records a
 named campaign last measured, REQ-result-record) — changes only which
 records are rendered; every summary row names the record's run identity
 beside its counts when the record carries one, so the identities to scope
-by are discoverable from the default surface. The reason leads — it precedes the open survivors in
+by are discoverable from the default surface. A changed-ref cut is an
+opt-in of the same class as the judged question: naming a git ref cuts
+every rendered record's open survivors by the delta's added lines exactly
+as the run faces do (REQ-exec-run-status, its placement rule included: a
+record of a canonically unchanged symbol, or one measured against another
+body, is all remainder), loading the tree to place positions and deriving
+no freshness — the rendered state stays `recorded` unless a judged
+question was asked — so a change's own survivor count is re-readable from
+the document after the campaign without re-running it. The reason leads — it precedes the open survivors in
 every view — and is self-contained: a subject-caused reason names the
 responsible subject (`target:` or `oracle <symbol>:`), record-level causes
 (a detached symbol, a changed operator set or derived oracle set,

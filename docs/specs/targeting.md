@@ -152,6 +152,12 @@ target, and reporting the tool's own writes back as residue would put
 self-noise in every incremental run over a tree the tool has measured. A
 caller relocating tool artifacts outside that directory opts back into
 ordinary classification.
+The changed surface's ADDED LINES — git's line diff of the working tree
+against the ref, an untracked file whole — are the delta geometry the run
+and findings faces cut open survivors by (REQ-exec-run-status): a
+line-level surface distinct from the canonical body-hash projection that
+decides targets, so a reformatted line reads as added there while it
+yields no target here.
 This is what keeps an incremental run proportional to the edit rather than
 to the tree.
 

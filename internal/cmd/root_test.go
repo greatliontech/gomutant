@@ -258,7 +258,7 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, CandidateCount: 1, Generated: 1, Mutants: 1,
 		Survivors: []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}},
 		Attested:  []gomutant.Attestation{{Position: "old.go:1:1", Operator: "zero return", Reason: "equivalent"}}}
-	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, findingFilters{RecordFilter: gomutant.RecordFilter{Label: "REQ-A"}}, nil)
+	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, findingFilters{RecordFilter: gomutant.RecordFilter{Label: "REQ-A"}, judge: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 	if views[0].Layer != "local" || views[0].LayerReason == "" {
 		t.Fatalf("dirty finding layer = %q (%q), want machine-local", views[0].Layer, views[0].LayerReason)
 	}
-	views, err = inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, findingFilters{RecordFilter: gomutant.RecordFilter{Label: "REQ-other"}}, nil)
+	views, err = inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, findingFilters{RecordFilter: gomutant.RecordFilter{Label: "REQ-other"}, judge: true}, nil)
 	if err != nil || len(views) != 0 {
 		t.Fatalf("label filter = %+v, %v", views, err)
 	}
@@ -689,7 +689,7 @@ func TestInspectFindingsCarriesCandidateEvidence(t *testing.T) {
 	finding := gomutant.Finding{Symbol: "example.com/empty.Gone", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence, OracleEvidence: []gomutant.SubjectEvidence{evidence}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		CandidateEvidence: []gomutant.CandidateEvidence{{Position: "gone.go:1:1", Operator: "return: zero", Reason: "panicked before observation finalization", Disposition: "killed"}}}
-	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, findingFilters{}, nil)
+	views, err := inspectFindings(context.Background(), tree, testStore(t, dir), []gomutant.Finding{finding}, findingFilters{judge: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
