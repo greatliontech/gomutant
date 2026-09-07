@@ -80,3 +80,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "7991d31cf2d146d3b4bc8f2f6249e255ef6eceeaadd0984bb8601e4f938d5a43"
 }
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "1dfc1de477a26517a8171e1156a728aef5ac468d91e1f4c2e8270ab113462e79"
+  source_hash: "4bdc8b44d8a2e12603cb917c8ec18617f32d09286111878374c561ea41be31f1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestAttestationPinsIgnoreRecordedClosureStrategy"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0760b5a532994ff160bee6dc1066ffe04628ea8978b473744cf2dbfa32d9fb21"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "1dfc1de477a26517a8171e1156a728aef5ac468d91e1f4c2e8270ab113462e79"
+  source_hash: "4bdc8b44d8a2e12603cb917c8ec18617f32d09286111878374c561ea41be31f1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestAttestationPinsIgnoreRecordedPackageProcessDischarges"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7343d8778610f2dc17498c487408a09ef72d0c90c354e2b2b14672995930369c"
+}

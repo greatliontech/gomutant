@@ -26,7 +26,7 @@ func TestSubjectEvidencePreservesObservationProof(t *testing.T) {
 				Observable: observable, Reason: reason, Evidence: "proof",
 			},
 			PurityAssertion: "source directive", DynamicStateVouches: "a.example/dep.Var",
-			PackageProcessDischarges: "a.example/wire.reg", DynamicStateStrategy: gofresh.DynamicStateStrategy,
+			PackageProcessDischarges: "a.example/wire.reg", DynamicStateStrategy: gofresh.DynamicStateStrategy, ClosureStrategy: gofresh.ClosureStrategy,
 			RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
 		}
 		evidence := evidenceFromFingerprint("p.F", fingerprint, runtimeinput.State{})
@@ -198,6 +198,7 @@ func TestEvidenceWireNamesArePinned(t *testing.T) {
 		DynamicStateVouches:      "vouches",
 		PackageProcessDischarges: "discharges",
 		DynamicStateStrategy:     "strategy",
+		ClosureStrategy:          "closure strategy",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -206,6 +207,7 @@ func TestEvidenceWireNamesArePinned(t *testing.T) {
 		`"dynamicStateVouches":"vouches"`,
 		`"packageProcessDischarges":"discharges"`,
 		`"dynamicStateStrategy":"strategy"`,
+		`"closureStrategy":"closure strategy"`,
 	} {
 		if !strings.Contains(string(raw), key) {
 			t.Errorf("wire encoding lacks %s: %s", key, raw)

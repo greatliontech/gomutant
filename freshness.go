@@ -1247,6 +1247,12 @@ func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
 	// walk, never a measured pin: a record grown the field on its first
 	// post-upgrade measure must not shed its dispositions over it.
 	evidence.ModuleBase = ""
+	// ClosureStrategy is recorded beside the closure hashes and no pin
+	// (the hashes are self-describing to the evidence check): the same
+	// first-post-upgrade rule as ModuleBase's, and a derivation change
+	// is not a moved measurement (REQ-result-record's subject-evidence
+	// term).
+	evidence.ClosureStrategy = ""
 	return evidence
 }
 

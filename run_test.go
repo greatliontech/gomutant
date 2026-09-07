@@ -964,7 +964,7 @@ func TestRunValidatesBatchedProducerBeforeFindings(t *testing.T) {
 	}}, Options{
 		Budget: 1,
 		Decision: func(RunDecision) {
-			if writeErr := os.WriteFile(drift, append(original, []byte("\n// drift\n")...), 0o644); writeErr != nil {
+			if writeErr := os.WriteFile(drift, append(original, []byte("\nvar driftMarker int\n")...), 0o644); writeErr != nil {
 				t.Fatal(writeErr)
 			}
 		},
@@ -997,7 +997,7 @@ func TestRunValidatesEveryProducerModule(t *testing.T) {
 	}}, Options{
 		Budget: 1,
 		Decision: func(RunDecision) {
-			if writeErr := os.WriteFile(drift, append(original, []byte("\n// oracle drift\n")...), 0o644); writeErr != nil {
+			if writeErr := os.WriteFile(drift, append(original, []byte("\nvar oracleDriftMarker int\n")...), 0o644); writeErr != nil {
 				t.Fatal(writeErr)
 			}
 		},
@@ -1052,7 +1052,7 @@ func TestRunValidatesZeroMutantProducer(t *testing.T) {
 		Oracle: []string{"example.com/fixture/lib.TestVacuous"},
 	}}, Options{
 		Decision: func(RunDecision) {
-			if writeErr := os.WriteFile(drift, append(original, []byte("\n// zero-mutant drift\n")...), 0o644); writeErr != nil {
+			if writeErr := os.WriteFile(drift, append(original, []byte("\nvar zeroMutantDriftMarker int\n")...), 0o644); writeErr != nil {
 				t.Fatal(writeErr)
 			}
 		},

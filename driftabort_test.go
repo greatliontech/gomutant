@@ -290,7 +290,7 @@ func TestRunServeRefusesContentMovePastViewCapture(t *testing.T) {
 				return
 			}
 			movedOnce = true
-			if err := os.WriteFile(plainPath, append([]byte(nil), append(src, []byte("\n// moved past the capture\n")...)...), 0o644); err != nil {
+			if err := os.WriteFile(plainPath, append([]byte(nil), append(src, []byte("\nvar movedPastTheCapture int\n")...)...), 0o644); err != nil {
 				t.Error(err)
 				return
 			}

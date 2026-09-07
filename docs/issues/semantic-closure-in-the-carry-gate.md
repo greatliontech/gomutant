@@ -35,4 +35,27 @@ soundness — re-execution plus the contradiction guard bounds the
 current gate's risk — so the refinement is scheduled work, not a
 defect.
 
-Lands: when gofresh exposes a comment/format-insensitive closure identity
+## Premise corrected (2026-09-07, train chunk 130)
+
+gofresh now exposes the comment/format-insensitive identity
+(REQ-closure-canonical-member, v0.97.1) with its derivation on the
+fingerprint (REQ-closure-identity-strategy, v0.98.0), and the gate was
+built on it and refuted in review: the fingerprint's closure is the
+PACKAGE's maximal test-binary closure salted by the subject
+(REQ-closure-view-maximal — "an unrelated sibling edit may still stale
+them together"), not a reachability-scoped one as the derivation above
+assumed. In the gate it sheds every disposition in a package on any
+sibling function's semantic edit, and a rename (the salt moves) sheds
+every retargeted record on the next measure — motion provably unable to
+bear on the mutant's meaning, the over-shedding the middle gate exists
+to avoid. The gate stays body hash + operator set. The groundwork
+landed: SubjectEvidence records the closure identity's derivation
+(`closureStrategy`), so the day the identity is subject-scoped the gate
+compares within one derivation and bridges a derivation change.
+
+Lands: user decision — the gate needs a subject-scoped closure identity
+on gofresh's fingerprint (closure motion meaning motion reachable from
+the target), which no train chunk charters: gofresh states the package
+scoping as a deliberate accepted price (REQ-closure-view-maximal), and
+the precision band (116–125) narrows observability, not the closure.
+Chartering that identity is the user's scope call.

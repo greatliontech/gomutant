@@ -75,6 +75,15 @@ type SubjectEvidence struct {
 	// verdicts under semantics it was not computed by. A measured pin,
 	// never zeroed from the attestation-pin view.
 	DynamicStateStrategy string `json:"dynamicStateStrategy,omitempty"`
+	// ClosureStrategy records the closure identity derivation the
+	// closure hashes were folded under (gofresh's ClosureStrategy):
+	// recorded beside them and no pin — the hashes are self-describing
+	// to the evidence check, and a consumer that one day keys a judgment
+	// to a closure hash compares within one recorded derivation and
+	// bridges a derivation change or a pre-field record (empty) rather
+	// than reading it as source motion (REQ-result-record's
+	// subject-evidence term).
+	ClosureStrategy string `json:"closureStrategy,omitempty"`
 	// ModuleBase is the tree-relative slash base a record's manifest is
 	// anchored at when that base is not the tree root: records made
 	// since evidence anchored at the tree carry none (their identities
@@ -107,6 +116,7 @@ func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtim
 		DynamicStateVouches:       fp.DynamicStateVouches,
 		PackageProcessDischarges:  fp.PackageProcessDischarges,
 		DynamicStateStrategy:      fp.DynamicStateStrategy,
+		ClosureStrategy:           fp.ClosureStrategy,
 		RuntimeInputs:             fp.RuntimeInputs,
 		RuntimeDigest:             fp.RuntimeDigest,
 		RuntimeUnverifiable:       state.Unverifiable,
@@ -123,6 +133,7 @@ func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
 		DynamicStateVouches:      e.DynamicStateVouches,
 		PackageProcessDischarges: e.PackageProcessDischarges,
 		DynamicStateStrategy:     e.DynamicStateStrategy,
+		ClosureStrategy:          e.ClosureStrategy,
 		ObservationAssertion:     e.ObservationAssertion,
 		ObservationProof: gofresh.ObservationProof{
 			Strategy:   e.ObservationStrategy,
@@ -1361,6 +1372,7 @@ var subjectEvidenceFields = []struct {
 	{"dynamicStateVouches", false, nil},
 	{"packageProcessDischarges", false, nil},
 	{"dynamicStateStrategy", false, nil},
+	{"closureStrategy", false, nil},
 	{"moduleBase", false, nil},
 	{"runtimeInputs", true, func(e SubjectEvidence) string { return e.RuntimeInputs }},
 	{"runtimeDigest", true, func(e SubjectEvidence) string { return e.RuntimeDigest }},

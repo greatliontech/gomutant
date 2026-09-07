@@ -458,6 +458,29 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 	}
 }
 
+// The recorded closure-identity derivation is audit data beside the
+// closure hashes, never a pin: a record grown the field on its first
+// post-upgrade measure — or a derivation change — must not shed its
+// dispositions over it (REQ-result-record's subject-evidence term).
+//
+//gofresh:pure
+func TestAttestationPinsIgnoreRecordedClosureStrategy(t *testing.T) {
+	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
+		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}}
+	stamped := base
+	stamped.TargetEvidence.ClosureStrategy = "gofresh/closure@1 gofresh/canonical-member@1 gofresh/variant-parse@1"
+	stamped.OracleEvidence = []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o", ClosureStrategy: stamped.TargetEvidence.ClosureStrategy}}
+	if !sameAttestationPins(base, stamped) {
+		t.Fatal("a record grown the closure-strategy field shed its attestation pins")
+	}
+	rederived := stamped
+	rederived.TargetEvidence.ClosureStrategy = "gofresh/closure@2 gofresh/canonical-member@1 gofresh/variant-parse@1"
+	if !sameAttestationPins(stamped, rederived) {
+		t.Fatal("a closure derivation change alone shed attestation pins")
+	}
+}
+
 // The recorded package-process discharges are audit metadata exactly
 // as the vouches: excluded from the attestation-pin comparison, so an
 // execution-mode change alone never sheds a disposition.

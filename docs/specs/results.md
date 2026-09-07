@@ -29,7 +29,12 @@ ground: verdicts re-derive from the current engine, so a mode change
 resurfaces the culprit without any comparison here), the recorded
 dynamic-state strategy (a MEASURED pin, the observation strategy's
 structural twin: a strategy move or a pre-field record re-measures at
-the evidence check), and the completed processes'
+the evidence check), the recorded closure-identity strategy (gofresh's
+derivation of the closure hashes — RECORDED beside them and no pin: the
+hashes are self-describing to the evidence check, and a consumer that
+one day keys a judgment to a closure hash compares within one recorded
+derivation and bridges a derivation change or a pre-field record rather
+than reading it as source motion), and the completed processes'
 merged runtime-input manifest, digest,
 and explicit unverifiable disposition.
 

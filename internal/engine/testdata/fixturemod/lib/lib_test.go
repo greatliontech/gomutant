@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -122,7 +123,7 @@ func TestDriftSource(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, append(data, []byte("\n// mutant drift\n")...), 0o644); err != nil {
+		if err := os.WriteFile(path, append(data, []byte("\nvar mutantDriftMarker"+strconv.Itoa(len(data))+" int\n")...), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
