@@ -27,4 +27,15 @@ ground itself failed), or restore the full-run requirement for an
 extent whose attribution is empty rather than treating emptiness
 as a sound non-reach.
 
-Lands: cross-tool train chunk 158
+Lands: a reproduction on a gomutant carrying the none-reaching arm
+(schedule.go narrowingBatches, 44abf11 — a partition no batch reaches
+runs the group whole, so the extent is never exempt) that records the
+campaign's decision line for the symbol and whether the survivor's
+record was measured in that run or served from a prior finding. The
+chunk-158 triage (2026-09-08) reproduced the report's class over a
+switch on string tags: coverage blocks span the switch header and each
+case body but never a case tag, so a tag mutant's extent intersects no
+block — the campaign still killed the tag mutant (whole-group run) and
+the only never-executed survivors were the untested arm's, correctly
+prescribed coverage. The reported open survivor therefore reached its
+verdict by a path the report does not carry.
