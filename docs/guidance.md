@@ -4,7 +4,6 @@
 
 ### run
 **does:** Measure mutants and update the findings document.
-**coverage bound:** under a declared build selection (`tags`, `toolchain`), the summary states the targets the selection's leg discovers but no oracle reaches — listed by symbol, capped with the remainder counted — and a whole-tree run records the bound in the findings document per selection (an empty bound clears the row; a scoped run records none); a stood-down derivation is a resolution failure, named per package, never this bound.
 **knobs:**
 - `targets_path` (mcp, cli as `targets`) — path to a targets document (gomutant's or a producer's export); overrides discovery.
 - `targets_json` (mcp) — an inline targets document, same formats as targets_path.
@@ -21,7 +20,7 @@
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json), read and updated.
 - `packages` (mcp, cli as `package`) — complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives.
 - `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters, for example **/*emitConditions*; alternatives.
-- `tags` (mcp, cli as `tag`) — build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one.
+- `tags` (mcp, cli as `tag`) — build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one. Under a declared selection (`tags`, `toolchain`) the summary states the coverage bound — the targets the selection's leg discovers but no oracle reaches, listed by symbol, capped with the remainder counted — and a whole-tree run records it in the findings document per selection (an empty bound clears the row; a scoped run records none); a stood-down derivation is a resolution failure named per package, never this bound.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection (e.g. go1.26.5); rides the toolchain measurement pin, so a different selection re-measures rather than serving across.
 - `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence. The repository's reviewed standing set is the `vouches` file at the tree root (one IMPORT-PATH:VARIABLE per line, `#` comments; the engine reads it itself, a malformed line refusing the load); the flags extend that set for one invocation and never remove from it. On mcp vouches are per-server (gomutant mcp --vouch), not per-call.
 - `json` (cli) — structured output as JSON lines: every progress event, decision, result row, and summary as one JSON object per line — the CLI's machine-readable face; the human rendering is suppressed.
@@ -77,7 +76,6 @@ oracleSet integer referencing oracleSets[].id.
 
 ### findings
 **does:** Inspect the findings document: states, survivors, dispositions.
-**coverage bounds:** the document's stated bounds per declared selection ride every inspection after the rows (the human face's tail; `coverageBounds` on mcp, rows and rosters capped with the remainders counted; the JSON face carries rows alone — the document on disk is the machine face for the table) — the population a tagged measurement did not cover, never a silent zero.
 **knobs:**
 - `label` (mcp, cli) — show only findings carrying this label.
 - `state` (mcp, cli) — show only findings in this judged state: current, stale, unverifiable, or detached (implies judge).
@@ -92,7 +90,7 @@ oracleSet integer referencing oracleSets[].id.
 - `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), extending the tree root's `vouches` file; inspection judges under the same acceptances the run used (implies judge). On mcp vouches are per-server.
 - `json` (cli) — render deterministic machine-readable findings.
 - `dir` (cli) — tree root the default document anchors at.
-**when:** use findings to triage without running anything — recorded
+**when:** use findings to triage without running anything — the document's stated coverage bounds per declared selection ride every inspection after the rows (the human face's tail; `coverageBounds` on mcp, rows and rosters capped with the remainders counted; the JSON face carries rows alone, the document on disk being the machine face for the table), the population a tagged measurement did not cover, never a silent zero — recorded
 facts by default, cheap at any document size; layer is repo
 (portable, committed) or local (machine-local overlay, with the
 reason it is not committable). Rows cap at 50 with the remainder
