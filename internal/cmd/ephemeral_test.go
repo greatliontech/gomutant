@@ -210,3 +210,77 @@ func TestSyncWriterSerializesConcurrentWrites(t *testing.T) {
 		}
 	}
 }
+
+// An attested survivor's verdict names the attestation — its digest,
+// provenance, and reasoning — in place of the bare survival
+// (REQ-result-ephemeral-attest).
+func TestEphemeralVerdictNamesTheAttestation(t *testing.T) {
+	var out strings.Builder
+	renderEphemeralVerdict(&out, &gomutant.EphemeralResult{
+		Files: []string{"lib/lib.go"}, Run: "^TestWeak$",
+		Attested: &gomutant.EphemeralAttestation{EditDigest: "0123456789abcdef", TestPkg: "example.com/p", Run: "^TestStrong$", Commit: "fedcba9876543210", Dirty: true, Reason: "known-surviving by design"},
+	})
+	text := out.String()
+	if !strings.Contains(text, "SURVIVED  lib/lib.go  — attested 0123456789ab at fedcba987654, dirty under example.com/p ^TestStrong$: known-surviving by design") {
+		t.Fatalf("verdict = %q, want the attestation named", text)
+	}
+	// A row keyed on another digest form names the form beside the
+	// digest, so the digest shown can be found in the record.
+	out.Reset()
+	renderEphemeralVerdict(&out, &gomutant.EphemeralResult{
+		Files: []string{"lib/lib.go"}, Run: "^TestWeak$",
+		Attested: &gomutant.EphemeralAttestation{EditDigest: "0123456789abcdef", DigestForm: "raw", TestPkg: "example.com/p", Run: "^TestStrong$", Reason: "legacy judgment"},
+	})
+	if !strings.Contains(out.String(), "attested 0123456789ab [raw] at dirty tree under example.com/p ^TestStrong$: legacy judgment") {
+		t.Fatalf("verdict = %q, want the raw-keyed row's form named", out.String())
+	}
+}
+
+// The command attests a surviving probe once; a second --attest of the
+// same mutant refuses before any measurement with the standing row
+// named, and --reattest replaces it (REQ-result-ephemeral-attest).
+func TestEphemeralCommandAttestsOnceAndReattestsByName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per probe")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	inside, err := os.ReadFile(filepath.Join(dir, "lib", "lib.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(inside), "return x - 1", "return x - 2", 1)
+	rep := filepath.Join(t.TempDir(), "lib.go")
+	if err := os.WriteFile(rep, []byte(mutated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings := filepath.Join(t.TempDir(), "findings.json")
+	first := ephemeralOptions{dir: dir, file: "lib/lib.go", replacement: rep, testPkg: "example.com/fixture/lib", runPat: "^TestWeak$", findingsFile: findings, attest: "untested large-x branch: known-surviving by fixture design"}
+	if err := ephemeralCommand(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	var already *gomutant.ErrAlreadyAttested
+	if err := ephemeralCommand(context.Background(), first); !errors.As(err, &already) || !strings.Contains(already.Reason, "known-surviving") {
+		t.Fatalf("second attest = %v, want the standing row refused before measurement", err)
+	}
+	third := first
+	third.attest = "re-judged on a sharper ground"
+	third.reattest = true
+	var out bytes.Buffer
+	third.output = &out
+	if err := ephemeralCommand(context.Background(), third); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "equivalence recorded") || !strings.Contains(out.String(), "(supersedes ") || !strings.Contains(out.String(), "known-surviving") {
+		t.Fatalf("re-attest output = %q, want the recorded line naming the superseded row", out.String())
+	}
+	atts, err := gomutant.LoadEphemeralAttestations(gomutant.EphemeralAttestationsPathFor(findings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(atts) != 1 || atts[0].Reason != "re-judged on a sharper ground" {
+		t.Fatalf("record = %+v, want the one row replaced", atts)
+	}
+}

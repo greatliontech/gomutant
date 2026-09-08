@@ -16,6 +16,7 @@ import (
 type ephemeralOptions struct {
 	dir, file, replacement, batch, testPkg, runPat string
 	attest, findingsFile                           string
+	reattest                                       bool
 	timeout, oracleTimeout, progressEvery          time.Duration
 	oracleMemoryMiB                                int64
 	runs                                           int
@@ -43,7 +44,8 @@ func newEphemeralCommand() *cobra.Command {
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
 	f.IntVar(&o.runs, "runs", 1, "run the mutant this many times (1-10): killed means every run killed - consecutive kills split deterministic kills from a property generator's draw luck")
 	f.StringVar(&o.attest, "attest", "", "record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or could not establish that it reached the edit (a never-reached plain survivor is refused by the probe itself)")
-	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document whose sibling ephemeral-attestation record --attest writes")
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document whose sibling ephemeral-attestation record --attest writes and a surviving probe is matched against")
+	f.BoolVar(&o.reattest, "reattest", false, "with --attest: replace an existing attestation of the same mutant instead of refusing")
 	return cmd
 }
 
@@ -138,7 +140,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	if err != nil {
 		return interrupted(err)
 	}
-	req := gomutant.EphemeralRequest{TestPkg: o.testPkg, Run: o.runPat, OracleTimeout: o.oracleTimeout, Runs: o.runs, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Progress: rep.preparation}
+	req := gomutant.EphemeralRequest{Findings: findingsAt(o.dir, o.findingsFile), RefuseAttested: o.attest != "" && !o.reattest, TestPkg: o.testPkg, Run: o.runPat, OracleTimeout: o.oracleTimeout, Runs: o.runs, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Progress: rep.preparation}
 	if o.batch != "" {
 		req.BatchEdits = batchEdits
 	} else {
@@ -165,12 +167,30 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 			return err
 		}
 		path := gomutant.EphemeralAttestationsPathFor(findingsAt(o.dir, o.findingsFile))
-		if err := gomutant.RecordEphemeralAttestation(ctx, path, att); err != nil {
+		if err := gomutant.RecordEphemeralAttestation(ctx, path, att, o.reattest); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "equivalence recorded  %s  %s — %s\n", att.EditDigest[:min(12, len(att.EditDigest))], path, att.Reason)
+		line := fmt.Sprintf("equivalence recorded  %s  %s — %s", att.EditDigest[:min(12, len(att.EditDigest))], path, att.Reason)
+		if res.Attested != nil {
+			// The verdict above showed the standing row; this write
+			// superseded it, and the face says so beside the new one.
+			line += fmt.Sprintf(" (supersedes %s: %s)", attestedDigest(res.Attested), res.Attested.Reason)
+		}
+		fmt.Fprintln(out, line)
 	}
 	return nil
+}
+
+// attestedDigest spells a row's digest the way every line naming the
+// row spells it: the digest's head, and the digest form beside it
+// where the row keys on another form than the canonical one, so the
+// digest shown can be found in the record.
+func attestedDigest(att *gomutant.EphemeralAttestation) string {
+	head := att.EditDigest[:min(12, len(att.EditDigest))]
+	if att.DigestForm != "" {
+		head += " [" + att.DigestForm + "]"
+	}
+	return head
 }
 
 // renderEphemeralVerdict prints the probe's verdict face. A non-kill
@@ -190,6 +210,18 @@ func renderEphemeralVerdict(w io.Writer, res *gomutant.EphemeralResult) {
 		// A partial kill is a property generator's draw luck, never a
 		// deterministic kill and never plain survival.
 		fmt.Fprintf(w, "FLAKY     %s  — killed %d/%d runs by %s\n", strings.Join(res.Files, ", "), res.KilledRuns, res.Runs, res.Killer)
+	case res.Attested != nil:
+		// An attested survivor reads as one: the judged equivalence,
+		// its digest and provenance, never a bare survival.
+		att := res.Attested
+		provenance := "dirty tree"
+		if att.Commit != "" {
+			provenance = att.Commit[:min(12, len(att.Commit))]
+			if att.Dirty {
+				provenance += ", dirty"
+			}
+		}
+		fmt.Fprintf(w, "SURVIVED  %s  — attested %s at %s under %s %s: %s\n", strings.Join(res.Files, ", "), attestedDigest(att), provenance, att.TestPkg, att.Run, att.Reason)
 	default:
 		fmt.Fprintf(w, "SURVIVED  %s  — %s did not notice the mutation\n", strings.Join(res.Files, ", "), res.Run)
 	}

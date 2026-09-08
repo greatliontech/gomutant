@@ -1535,3 +1535,50 @@ func TestToolAttestRefusesAMalformedExemptionsRecordBeforeWriting(t *testing.T) 
 		t.Fatalf("a refused attest changed the document: %v", err)
 	}
 }
+
+// The served response carries an attested survivor's row, and a second
+// attest of the same mutant refuses before measurement unless reattest
+// asks for the replacement (REQ-result-ephemeral-attest).
+func TestToolEphemeralCarriesTheAttestationAndReattestsByName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per probe")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	ctx := context.Background()
+	findings := filepath.Join(t.TempDir(), "findings.json")
+	inside, err := os.ReadFile(filepath.Join(dir, "lib", "lib.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(string(inside), "return x - 1", "return x - 2", 1)
+	in := ephemeralIn{File: "lib/lib.go", Replacement: mutated, TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", Findings: findings, Attest: "untested large-x branch: known-surviving by fixture design"}
+	_, out, err := s.toolEphemeral(ctx, nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.AttestationRecorded == "" || out.Attested != nil {
+		t.Fatalf("first attest = %+v, want the row recorded and no standing row on the first probe", out)
+	}
+	if _, _, err := s.toolEphemeral(ctx, nil, in); err == nil || !strings.Contains(err.Error(), "already attested") {
+		t.Fatalf("second attest = %v, want the standing row refused", err)
+	}
+	plain := in
+	plain.Attest = ""
+	_, out, err = s.toolEphemeral(ctx, nil, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Attested == nil || out.Attested.EditDigest != out.EditDigest {
+		t.Fatalf("re-probe = %+v, want the attestation row on the served result", out)
+	}
+	again := in
+	again.Attest = "re-judged"
+	again.Reattest = true
+	if _, out, err = s.toolEphemeral(ctx, nil, again); err != nil || out.AttestationRecorded == "" {
+		t.Fatalf("reattest = %+v, %v; want the row replaced", out, err)
+	}
+}

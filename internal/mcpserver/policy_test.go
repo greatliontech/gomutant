@@ -39,8 +39,8 @@ func TestFindingsEphemeralAttestationsCapAtTheRowBound(t *testing.T) {
 	s := serverAt(t)
 	path := gomutant.EphemeralAttestationsPathFor(s.findingsPath(""))
 	for i := 0; i < envelope.rows+3; i++ {
-		att := gomutant.EphemeralAttestation{EditDigest: fmt.Sprintf("d%d", i), Files: []string{"lib/lib.go"}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", Reason: "equivalent", Dirty: true}
-		if err := gomutant.RecordEphemeralAttestation(context.Background(), path, att); err != nil {
+		att := gomutant.EphemeralAttestation{EditDigest: fmt.Sprintf("d%d", i), RawEditDigest: fmt.Sprintf("r%d", i), Files: []string{"lib/lib.go"}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", Reason: "equivalent", Dirty: true}
+		if err := gomutant.RecordEphemeralAttestation(context.Background(), path, att, false); err != nil {
 			t.Fatal(err)
 		}
 	}

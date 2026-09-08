@@ -5,10 +5,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/greatliontech/gomutant"
 	"github.com/spf13/cobra"
 )
 
-const defaultFindings = ".gomutant/findings.json"
+const defaultFindings = gomutant.DefaultFindingsPath
 
 // Execute runs the gomutant command tree with args.
 func Execute(args []string) error {

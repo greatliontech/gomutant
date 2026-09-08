@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"go/format"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -69,10 +70,22 @@ type EphemeralResult struct {
 	// the coverage probe fails (REQ-exec-ephemeral).
 	UnexercisedFiles []string `json:"unexercisedFiles,omitempty"`
 	// EditDigest identifies the measured mutant: a digest over the
-	// ordered replacement set (tree-relative file, full replacement
-	// content), the identity an equivalence attestation records
+	// ordered replacement set (tree-relative file, the gofmt-canonical
+	// form of its full replacement content — its raw bytes where they
+	// do not parse), the identity an equivalence attestation records,
+	// so two spellings of one mutant that gofmt renders alike — spacing,
+	// indentation, alignment, blank-line runs, import order — share one
+	// identity; comments stay content (REQ-result-ephemeral-attest).
+	// RawEditDigest is the same digest over the raw bytes, the form a
+	// version-1 record's rows were keyed on and the row's second key;
+	// an in-process matching detail, never on the wire.
+	EditDigest    string `json:"editDigest"`
+	RawEditDigest string `json:"-"`
+	// Attested is the committed equivalence row whose digest matches a
+	// surviving probe's, so an attested survivor reads as one on every
+	// face; nil for an unattested or non-surviving result
 	// (REQ-result-ephemeral-attest).
-	EditDigest string `json:"editDigest"`
+	Attested *EphemeralAttestation `json:"attested,omitempty"`
 	// OracleMemoryBytes is the memory ceiling every oracle process of
 	// the probe — the baseline and the mutant runs — ran under; 0 when
 	// disabled (REQ-exec-oracle-memory). The probe's own bounds, stated
@@ -168,10 +181,56 @@ type EphemeralRequest struct {
 	// 0 derived for a lone oracle tree, negative disabled. The probe's
 	// width is a lone tree's — the full host (REQ-exec-oracle-parallelism).
 	OracleMemoryBytes int64
+	// Findings is the findings document whose sibling attestation
+	// record a surviving probe is matched against; empty means the
+	// tree's default document. RefuseAttested makes a standing row for
+	// the mutant refuse before any measurement — the caller means to
+	// attest and has not asked for the replacement by name
+	// (REQ-result-ephemeral-attest).
+	Findings       string
+	RefuseAttested bool
 }
+
+// ephemeralPrep is the attestation half of a probe's preparation: the
+// record beside the findings document, read once before the baseline,
+// and the standing row for the mutant if any — an input-decidable fact
+// every refusal on it precedes the load (REQ-exec-preparation).
+type ephemeralPrep struct {
+	findings       string
+	refuseAttested bool
+}
+
+// prepareAttestation reads the record and finds the mutant's standing
+// row before any measurement, for every probe: a record that does not
+// load refuses the probe itself, attesting or not — a verdict never
+// reads as unattested because its record could not be consulted — and
+// a standing row refuses when the caller means to attest without
+// asking for the replacement (REQ-result-ephemeral-attest).
+func (t *Tree) prepareAttestation(prep ephemeralPrep, canonical, raw string) (*EphemeralAttestation, error) {
+	findings := prep.findings
+	if findings == "" {
+		findings = filepath.Join(t.dir, DefaultFindingsPath)
+	}
+	atts, err := LoadEphemeralAttestations(EphemeralAttestationsPathFor(findings))
+	if err != nil {
+		return nil, err
+	}
+	row := standingAttestation(atts, canonical, raw)
+	if row != nil && prep.refuseAttested {
+		return nil, &ErrAlreadyAttested{Digest: row.EditDigest, Reason: row.Reason}
+	}
+	return row, nil
+}
+
+// DefaultFindingsPath is the tree-relative findings document every
+// face reads and writes when none is named; its sibling attestation
+// record is the default home of judged equivalences
+// (REQ-result-ephemeral-attest).
+const DefaultFindingsPath = ".gomutant/findings.json"
 
 // RunEphemeral runs the request's probe.
 func (t *Tree) RunEphemeral(ctx context.Context, req EphemeralRequest) (*EphemeralResult, error) {
+	prep := ephemeralPrep{findings: req.Findings, refuseAttested: req.RefuseAttested}
 	forms := 0
 	for _, given := range []bool{req.Mutant != nil, len(req.Edits) != 0, len(req.BatchEdits) != 0} {
 		if given {
@@ -183,15 +242,15 @@ func (t *Tree) RunEphemeral(ctx context.Context, req EphemeralRequest) (*Ephemer
 	}
 	switch {
 	case len(req.BatchEdits) != 0:
-		return t.ephemeralBatch(ctx, req.BatchEdits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1))
+		return t.ephemeralBatch(ctx, req.BatchEdits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1), prep)
 	case len(req.Edits) != 0:
-		return t.ephemeralEdits(ctx, req.File, req.Edits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1))
+		return t.ephemeralEdits(ctx, req.File, req.Edits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1), prep)
 	default:
-		return t.ephemeral(ctx, req.File, req.Mutant, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1))
+		return t.ephemeral(ctx, req.File, req.Mutant, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1), prep)
 	}
 }
 
-func (t *Tree) ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds) (*EphemeralResult, error) {
+func (t *Tree) ephemeral(ctx context.Context, file string, mutant []byte, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds, prep ephemeralPrep) (*EphemeralResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -213,7 +272,7 @@ func (t *Tree) ephemeral(ctx context.Context, file string, mutant []byte, testPk
 		return nil, fmt.Errorf("mutant is identical to %s: nothing to measure", file)
 	}
 
-	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, oracleTimeout, runs, progress, bounds)
+	return t.runEphemeral(ctx, []fileReplacement{{File: file, Abs: abs, Source: mutant}}, testPkg, run, oracleTimeout, runs, progress, bounds, prep)
 }
 
 // refuseUnselectedRun refuses a run pattern that selects none of the
@@ -327,7 +386,7 @@ func runPatternFirstElements(run string) []string {
 // identity, and the identity travels across checkouts) with its full
 // replacement content. Distinct content, or the same content in a
 // different file, is a different mutant (REQ-result-ephemeral-attest).
-func ephemeralEditDigest(dir string, replacements []fileReplacement) string {
+func ephemeralEditDigest(dir string, replacements []fileReplacement, canonical bool) string {
 	// The root is resolved to its physical form: replacement.Abs is
 	// symlink-resolved by resolveTreeFile, so an aliased tree root
 	// would otherwise make every Rel non-local and fall back to the
@@ -345,7 +404,17 @@ func ephemeralEditDigest(dir string, replacements []fileReplacement) string {
 		if rel, err := filepath.Rel(dir, replacement.Abs); err == nil && filepath.IsLocal(rel) {
 			key = filepath.ToSlash(rel)
 		}
-		content := sha256.Sum256(replacement.Source)
+		source := replacement.Source
+		if canonical {
+			// The canonical form is gofmt's, whatever it normalizes —
+			// spacing, indentation, alignment, blank-line runs, import
+			// order — comments kept; bytes that do not parse keep their
+			// raw form.
+			if formatted, err := format.Source(source); err == nil {
+				source = formatted
+			}
+		}
+		content := sha256.Sum256(source)
 		digest.Write([]byte(key))
 		digest.Write([]byte{0})
 		digest.Write(content[:])
@@ -472,7 +541,7 @@ func timeoutEvidenceForMode(derive bool, killer, evidence string, mutantBudget, 
 	return evidence
 }
 
-func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds) (*EphemeralResult, error) {
+func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds, prep ephemeralPrep) (*EphemeralResult, error) {
 	report := func(event PreparationEvent) {
 		if progress != nil {
 			progress(event)
@@ -497,6 +566,23 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		}
 		seen[replacement.Abs] = true
 	}
+	if runs == 0 {
+		runs = 1
+	}
+	if err := ValidateEphemeralRuns(runs); err != nil {
+		return nil, err
+	}
+	// The mutant's identity and its standing attestation are decided
+	// from the request alone — after its whole shape, before any
+	// loaded-set judgment or process launch: an unloadable record or a
+	// refused standing row never costs a load or a measurement
+	// (REQ-exec-preparation's input-decidable stage).
+	canonicalDigest := ephemeralEditDigest(t.dir, replacements, true)
+	rawDigest := ephemeralEditDigest(t.dir, replacements, false)
+	standing, err := t.prepareAttestation(prep, canonicalDigest, rawDigest)
+	if err != nil {
+		return nil, err
+	}
 	// The oracle budget: an explicit timeout is the caller's override;
 	// zero derives it from the baseline itself — the baseline run IS a
 	// measurement of the oracle's cost, so the budget follows the
@@ -514,18 +600,12 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	// probe (both modes) run under; lifted by the bank just before the
 	// first probe, after every refusal that needs no bank read.
 	probeLeash := ephemeralBaselineLeash
-	if runs == 0 {
-		runs = 1
-	}
-	if err := ValidateEphemeralRuns(runs); err != nil {
-		return nil, err
-	}
 	// The build ignores what it does not compile: an overlay of a
 	// build-excluded or non-Go file measures a mutant that was never
 	// present, and a test package in a go test option position changes
 	// the invocation being measured - both refuse before any process
 	// launches (REQ-exec-ephemeral).
-	testPkg, err := t.resolveTestPackage(testPkg)
+	testPkg, err = t.resolveTestPackage(testPkg)
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +740,8 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		Run:               run,
 		Runs:              runs,
 		OracleMemoryBytes: bounds.MemoryBytes,
-		EditDigest:        ephemeralEditDigest(t.dir, replacements),
+		EditDigest:        canonicalDigest,
+		RawEditDigest:     rawDigest,
 		OracleBudget:      mutantBudget.String(),
 		MeasuredBaseline:  measuredBaseline.String(),
 		PrunedImports:     prunedImports,
@@ -776,6 +857,12 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 			return nil, fmt.Errorf("no verdict: the probed run never reached %s (linked into %s's binary, unexercised by %s) — survival would prove nothing; a guard that observes the tree (a source-reading test, a go list-based check) sees the unmutated sources: mutate the guard's own input instead, or route it to review", cappedNameList(res.UnexercisedFiles, "files"), testPkg, run)
 		}
 	}
+	// An attested survivor reads as one on every face: the standing
+	// row rides the result for a surviving probe (a kill is evidence
+	// against equivalence and carries no row).
+	if standing != nil && !res.Killed && res.KilledRuns == 0 {
+		res.Attested = standing
+	}
 	return res, nil
 }
 
@@ -789,12 +876,12 @@ func baselineCompilerCrashed(err error) bool {
 	return errors.As(err, &build) && engine.CompilerCrashed(build.Diagnostic)
 }
 
-func (t *Tree) ephemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds) (*EphemeralResult, error) {
+func (t *Tree) ephemeralBatch(ctx context.Context, edits []BatchEdit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds, prep ephemeralPrep) (*EphemeralResult, error) {
 	replacements, err := prepareEditBatchContext(ctx, t.dir, edits)
 	if err != nil {
 		return nil, err
 	}
-	return t.runEphemeral(ctx, replacements, testPkg, run, oracleTimeout, runs, progress, bounds)
+	return t.runEphemeral(ctx, replacements, testPkg, run, oracleTimeout, runs, progress, bounds, prep)
 }
 
 // Edit is one exact-match replacement inside an ephemeral mutant's source:
@@ -865,7 +952,7 @@ func overlappingMatchStarts(s, pattern string) int {
 	}
 }
 
-func (t *Tree) ephemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds) (*EphemeralResult, error) {
+func (t *Tree) ephemeralEdits(ctx context.Context, file string, edits []Edit, testPkg, run string, oracleTimeout time.Duration, runs int, progress func(PreparationEvent), bounds OracleBounds, prep ephemeralPrep) (*EphemeralResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -884,7 +971,7 @@ func (t *Tree) ephemeralEdits(ctx context.Context, file string, edits []Edit, te
 	if err != nil {
 		return nil, err
 	}
-	return t.ephemeral(ctx, file, mutant, testPkg, run, oracleTimeout, runs, progress, bounds)
+	return t.ephemeral(ctx, file, mutant, testPkg, run, oracleTimeout, runs, progress, bounds, prep)
 }
 
 func readFileContext(ctx context.Context, path string) ([]byte, error) {

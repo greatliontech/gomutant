@@ -192,7 +192,8 @@ to=example.com/new. after a package rename, then for real.
 - `runs` (mcp, cli) — run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed — N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result.
 - `progress-interval` (cli) — cadence of the progress line naming the phase in flight and the elapsed time; 0 disables.
 - `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document (`ephemeral-attestations.json`); a blank reasoning refuses before any load or probe; refused after the probe when it killed, was mixed, or could not establish that it reached the edit (a never-reached plain survivor is refused by the probe itself).
-- `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes (default .gomutant/findings.json).
+- `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes and a surviving probe is matched against (default .gomutant/findings.json); an attested survivor's verdict names its attestation instead of a bare SURVIVED.
+- `reattest` (mcp, cli) — with `attest`: replace an existing attestation of the same mutant instead of refusing (default false).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
 - `dir` (cli) — tree root (module or workspace).

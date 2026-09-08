@@ -195,7 +195,7 @@ func (s *Server) MCP() *mcp.Server {
 	return srv
 }
 
-const defaultFindings = ".gomutant/findings.json"
+const defaultFindings = gomutant.DefaultFindingsPath
 
 // defaultCommandTimeoutSec bounds MCP tool work when the caller omits
 // timeout_sec: typical MCP clients abandon a request within a few minutes,
@@ -1806,8 +1806,9 @@ type ephemeralIn struct {
 	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of the baseline and mutant oracle processes in seconds; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way; the result reports the effective budget"`
 	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling for the probe's oracle process tree in MiB: absent or 0 derives RAM/2 floored at 1 GiB for this probe, -1 disables for this probe; the probe's bounds are its own, a run in flight keeps its"`
 	Runs             int                  `json:"runs,omitempty" jsonschema:"run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed - N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result"`
+	Reattest         bool                 `json:"reattest,omitempty" jsonschema:"with attest: replace an existing attestation of the same mutant instead of refusing"`
 	Attest           string               `json:"attest,omitempty" jsonschema:"record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or could not establish that it reached the edit (a never-reached plain survivor is refused by the probe itself)"`
-	Findings         string               `json:"findings,omitempty" jsonschema:"findings document path whose sibling ephemeral-attestation record attest writes (default .gomutant/findings.json)"`
+	Findings         string               `json:"findings,omitempty" jsonschema:"findings document path whose sibling ephemeral-attestation record attest writes and a surviving probe is matched against (default .gomutant/findings.json)"`
 }
 
 // ephemeralOut is the probe result plus the attestation confirmation
@@ -1892,7 +1893,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	// and name the heartbeat's stretch (REQ-exec-run-status).
 	var phase atomic.Value
 	phase.Store("ephemeral oracle")
-	probe := gomutant.EphemeralRequest{File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: bounds.MemoryBytes, Progress: func(event gomutant.PreparationEvent) {
+	probe := gomutant.EphemeralRequest{Findings: s.findingsPath(in.Findings), RefuseAttested: in.Attest != "" && !in.Reattest, File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: bounds.MemoryBytes, Progress: func(event gomutant.PreparationEvent) {
 		phase.Store(event.Text())
 		if notify != nil {
 			notify(preparationMessage(event))
@@ -1919,7 +1920,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 			return nil, nil, err
 		}
 		path := gomutant.EphemeralAttestationsPathFor(s.findingsPath(in.Findings))
-		if err := gomutant.RecordEphemeralAttestation(ctx, path, att); err != nil {
+		if err := gomutant.RecordEphemeralAttestation(ctx, path, att, in.Reattest); err != nil {
 			return nil, nil, err
 		}
 		out.AttestationRecorded = att.EditDigest

@@ -118,7 +118,7 @@ func TestEphemeralPrunesStrandedImports(t *testing.T) {
 	}
 	// The digest identifies the caller's spelling, the stranded import
 	// included: the same edit re-probed matches its attestation.
-	if res.EditDigest != ephemeralEditDigest(tr.dir, []fileReplacement{{File: "g/g.go", Abs: filepath.Join(tr.dir, "g", "g.go"), Source: []byte(deleted)}}) {
+	if res.EditDigest != ephemeralEditDigest(tr.dir, []fileReplacement{{File: "g/g.go", Abs: filepath.Join(tr.dir, "g", "g.go"), Source: []byte(deleted)}}, true) {
 		t.Fatal("the edit digest moved with the pruning")
 	}
 }

@@ -693,8 +693,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralAttestationRecordRoundTrip"
   role: BINDING_ROLE_TESTS
@@ -703,8 +703,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralAttestationRecordRefusesMalformedEntries"
   role: BINDING_ROLE_TESTS
@@ -713,8 +713,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestAttestEphemeralEquivalenceRefusals"
   role: BINDING_ROLE_TESTS
@@ -723,8 +723,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestAttestEphemeralEquivalenceRefusesUnknownCoverage"
   role: BINDING_ROLE_TESTS
@@ -733,8 +733,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRecordEphemeralAttestationRefusesInvalidEntry"
   role: BINDING_ROLE_TESTS
@@ -743,8 +743,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestAttestEphemeralEquivalenceStampsDirtyProvenance"
   role: BINDING_ROLE_TESTS
@@ -753,8 +753,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralEditDigestDiscriminates"
   role: BINDING_ROLE_TESTS
@@ -763,8 +763,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEphemeralAttestEndToEnd"
   role: BINDING_ROLE_TESTS
@@ -773,8 +773,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.AttestEphemeralEquivalence"
   role: BINDING_ROLE_IMPLEMENTS
@@ -783,12 +783,12 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-ephemeral-attest"
-  content_hash: "fdc4c703a85a4f734e1999548886c548a1e079cafd6adc3cd33694b947f625a9"
-  source_hash: "5e17b869941bfe2e903d6c84e9e98ec9d43ddba7832451275a200293610ce61b"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.RecordEphemeralAttestation"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "16e82b9aa3d6967e56bbfe3ac53e68da385adccb371ffb4fa81cb611739cbd9c"
+  shape_hash: "c09e9416fc6e220e2c36384ce4d716132c04867f79d672e55fbb8b80eee79be6"
 }
 
 bindings {
@@ -1319,4 +1319,44 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolsCutSurvivorsByTheDelta"
   role: BINDING_ROLE_TESTS
   shape_hash: "1784e31c91632399835cff259320c17cc81bc891526f25ce8c61025519d02eed"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestEphemeralVerdictNamesTheAttestation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "db54260d042b881a3c7a2f6abeb85601ad0eba00292cd4c863fd210bb4b814e3"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestEphemeralCommandAttestsOnceAndReattestsByName"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1380aa3d57ca40ce640b99cb3f97a0207aa15af9361f0816beb0d3fcd9b31c51"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolEphemeralCarriesTheAttestationAndReattestsByName"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f67e82310507b6a772c4ae311a2a7783922aefbc98b3123d090999bd906379fd"
+}
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEphemeralAttestationKeysAndPrecedence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "30e38f54beb453eef5ddbcf08540aac717f80da902a96dd72522fdc378710f03"
 }

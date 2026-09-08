@@ -2,7 +2,6 @@ package gomutant
 
 import (
 	"context"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,33 +9,6 @@ import (
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
-
-// copyFixtureModule clones the fixture module into dst — a second
-// checkout: identical content, a different root, fresh file times.
-func copyFixtureModule(t *testing.T, dst string) {
-	t.Helper()
-	err := filepath.WalkDir(fixtureDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(fixtureDir, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, content, 0o644)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
 
 // The chunk's driving pin: a findings document measured in one
 // checkout serves in a second checkout of the same content. The
@@ -54,8 +26,12 @@ func TestRunServesAcrossCheckoutRoots(t *testing.T) {
 	ctx := context.Background()
 	rootA := filepath.Join(t.TempDir(), "producer")
 	rootB := filepath.Join(t.TempDir(), "clone")
-	copyFixtureModule(t, rootA)
-	copyFixtureModule(t, rootB)
+	// Two checkouts: identical content, different roots, fresh times.
+	for _, root := range []string{rootA, rootB} {
+		if err := os.CopyFS(root, os.DirFS(fixtureDir)); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	targets := []Target{{Symbol: "example.com/fixture/diskread.D", Oracle: []string{"example.com/fixture/diskread.TestDiskVerdict"}, OracleExplicit: true}}
 	treeA, err := Load(rootA)

@@ -477,10 +477,24 @@ whole, a bracketed segment of the path included.
 
 **REQ-result-ephemeral-attest** (behavior): A committed
 ephemeral-equivalence record beside the findings document
-(`ephemeral-attestations.json`, version 1) MUST carry each manual
-probe's judged equivalence as a reviewed entry: the probe's edit digest
-(a digest over the ordered replacement set — each resolved
-tree-relative file with its full replacement content — carried on the
+(`ephemeral-attestations.json`, version 2; a version-1 record is read
+with each row's digest form named `raw`, its rows kept as written and
+carried forward under version 2 at the next write) MUST carry each
+manual probe's judged equivalence as a reviewed entry: the probe's edit
+digest (a digest over the ordered replacement set — each resolved
+tree-relative file with the gofmt-canonical form of its full
+replacement content, the raw bytes where they do not parse — gofmt's
+own rendering is the rule, whatever it normalizes (spacing,
+indentation, alignment, blank-line runs, import order), comments
+staying content — so two spellings gofmt renders alike share one
+identity; each row carries the raw digest beside it as a second key,
+required of every canonical row at the load and the write, so a
+canonicalizer that renders the same bytes differently on another
+toolchain moves the canonical digest and never the row's match to the
+bytes it judged; a version-1 row keyed on the raw bytes is matched by the raw
+digest the result carries beside the canonical one, and where a
+canonical row and a raw-keyed row both name one probe the canonical row
+is the standing one — carried on the
 probe result, so the row names exactly the measured mutant and the
 identity travels across checkouts), the replaced files, the deciding
 oracle (test package and run pattern), the author's reasoning, and the
@@ -493,16 +507,32 @@ reproducibility it does not have (the committed-record coherence
 REQ-result-layers demands). A malformed record refuses; an entry
 missing digest, files, oracle, or reasoning refuses the record — at
 the load AND at the write, one shared predicate, so an invalid row can
-neither serve as authority nor land as a poison pill. Building or
-recording an attestation is refused for every probe state that is
-not an exercised full survivor: a kill or a mixed killed-some-runs
+neither serve as authority nor land as a poison pill. The record is
+read once at every probe's preparation — after the request's own shape
+is judged and before any loaded-set judgment or process launch: a
+record that does not load (malformed, or a version this reader does
+not know) refuses the probe itself, attesting or not, so a verdict
+never reads as unattested because its record could not be consulted,
+and a standing row refuses an attestation the caller did not ask to
+replace before any load or measurement. An attested
+survivor reads as one on every face: a surviving probe whose digest
+matches a row of the record beside the findings document it was run
+against carries that row on its result, the verdict line naming the
+attestation (its digest, provenance, and reasoning) in place of the
+bare survival and the served response carrying the row; recording an
+attestation for a digest the record already carries refuses, naming the
+standing row, unless the caller asks for the replacement by name.
+Building or recording an attestation is refused for every probe state
+that is not an exercised full survivor: a kill or a mixed killed-some-runs
 outcome is evidence against equivalence (evidence beats attestation);
 an unexercised survivor is vacuous — no run reached the edit, so its
 survival supports nothing; and a survivor whose exercise state is
 unknown (the coverage probe failed — the probe result carries that
 fact distinctly, never encoded as the absence of the unexercised
-label) is unverifiable and refuses the same way. Re-attesting the
-identical edit digest replaces the prior entry's reasoning; the record
+label) is unverifiable and refuses the same way. Re-attesting the same
+mutant, asked for by name, supersedes every row naming the mutant by
+either key (a raw-keyed legacy row beside its canonical successor
+included); the record
 stays digest-sorted for stable diffs, and the write holds the
 per-document lock and replaces the file atomically — committed audit
 evidence is never truncated by an interrupted write nor a row lost to
