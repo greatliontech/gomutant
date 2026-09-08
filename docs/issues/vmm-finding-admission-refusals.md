@@ -1,6 +1,9 @@
 # VMM measurements remain unverifiable after successful execution
 
-Lands: user decision
+Lands: cross-tool train chunk 158 — gomutant's next gofresh bump (past
+v0.98.1, whose chunk 119 audited the nodwarf5 key the pinned v0.98.0
+refuses) re-verifies the report at 158's triage; closes if the
+refusals vanish under the audited key, re-slots at their root otherwise.
 
 ## Evidence
 
