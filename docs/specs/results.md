@@ -146,6 +146,31 @@ hole, not a tool hiccup, and a scattered per-reason count provably hid
 one: a field campaign read 567 scattered skips over 14 fully dark
 packages. Partially skipped packages stay in the per-reason class line.
 
+**REQ-result-unreached-bound** (behavior): A run under a declared build
+selection (build tags, a toolchain directive, or both — each toolchain
+under a tag set its own leg, since a release-gated file exists under one
+toolchain and not another) MUST state, on both faces, the targets that
+selection's leg discovers but no oracle of the leg reaches — the targets
+whose derived oracle over their resolved package is empty; an explicit
+empty oracle statement and a symbol in no loaded package are never this
+class — listed by symbol beside the selection as a coverage bound on the
+measured population, a whole-tree run recording the bound in the findings
+document per selection (the latest whole-tree run of a selection
+replacing its row, an empty bound clearing it, a scoped run recording
+none since its population is not the tree's) so a later reader of the
+document sees the population the measurement covered, never a silent
+zero: a tagged leg
+whose tests run outside the runner (a browser-driven suite) discovers
+its targets and reaches none, and a scattered "no oracle" count reads as
+a tool hiccup where it is the leg's whole absence. A derivation that
+stood down on packages is not this class — it names its packages and
+asks for an explicit oracle, a resolution failure rather than a bound —
+and a run under no declared selection states none. The bound is a
+document-level table (version 12), so a reader older than the table
+refuses the document ahead rather than reading the population as whole:
+a dropped bound is the flattering direction REQ-result-tolerant's
+argument never admits.
+
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
 tolerance is safe because its direction is anti-flattering: every open
@@ -583,7 +608,9 @@ inverse of candidate evidence's narrowing precedent), each survivor's
 position and operator, the candidate-evidence
 list when any candidate carries one, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
-it does not understand. A list the document requires — a record's
+it does not understand; version 12 adds the document-level
+coverage-bounds table (REQ-result-unreached-bound), required present
+(empty, never null) in a document of that version. A list the document requires — a record's
 oracle evidence and operator summaries, a manual shape's edit list — is
 written present (empty, never null); a list the document omits when
 empty is absent. A subject's evidence may carry a tree-relative module base

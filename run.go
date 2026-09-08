@@ -585,14 +585,24 @@ type RunSummary struct {
 	// package carries zero campaign evidence and reads as a coverage
 	// hole, not a tool hiccup (REQ-result-skip-radius).
 	DarkPackages []string `json:"darkPackages,omitempty"`
+	// Selection is the run's declared build selection (SelectionKey);
+	// Unreached lists the targets that selection's leg discovered but
+	// no oracle reaches — the stated coverage bound on the measured
+	// population, never a silent zero (REQ-result-unreached-bound).
+	// Absent under no declared selection.
+	Selection string   `json:"selection,omitempty"`
+	Unreached []string `json:"unreached,omitempty"`
 	// Delta is a changed-ref run's cut of the open survivors by the
 	// delta's added lines (DeltaSummary); absent on every other run.
 	Delta *DeltaSummary `json:"delta,omitempty"`
 }
 
 // SummarizeRun derives deterministic aggregate totals from findings.
-func SummarizeRun(findings []Finding) RunSummary {
-	summary := RunSummary{Targets: len(findings)}
+func SummarizeRun(findings []Finding, sel Selection) RunSummary {
+	summary := RunSummary{Targets: len(findings), Selection: SelectionKey(sel)}
+	if bound := CoverageBoundOf(findings, sel, ""); bound != nil {
+		summary.Unreached = bound.Unreached
+	}
 	for _, finding := range findings {
 		switch {
 		case finding.Skipped != "":
@@ -674,29 +684,35 @@ func newRunPreparation(t *Tree) *runPreparation {
 	}
 }
 
-func (p *runPreparation) oracle(ctx context.Context, target Target) ([]string, []string, error) {
+// oracle resolves a target's oracle set: the producer's explicit
+// statement, or the derivation over the target's package. derived
+// reports that the derivation RAN over a resolved package — an explicit
+// (even empty) statement and a symbol in no loaded package are not
+// derivations, so an empty set from them is never the selection's
+// coverage bound (REQ-result-unreached-bound).
+func (p *runPreparation) oracle(ctx context.Context, target Target) (oracle, stoodDown []string, derived bool, err error) {
 	if len(target.Oracle) > 0 || target.OracleExplicit {
-		return slices.Clone(target.Oracle), nil, ctx.Err()
+		return slices.Clone(target.Oracle), nil, false, ctx.Err()
 	}
 	pkg, _, err := p.packageOf(ctx, target.Symbol)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if pkg == "" {
-		return nil, nil, nil
+		return nil, nil, false, nil
 	}
 	if memo, ok := p.derivedOracles[pkg]; ok {
-		return slices.Clone(memo.oracle), slices.Clone(memo.stoodDown), ctx.Err()
+		return slices.Clone(memo.oracle), slices.Clone(memo.stoodDown), true, ctx.Err()
 	}
-	oracle, stoodDown, err := p.deriveOracle(ctx, pkg)
+	oracle, stoodDown, err = p.deriveOracle(ctx, pkg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
 	p.derivedOracles[pkg] = derivedOracleMemo{oracle: slices.Clone(oracle), stoodDown: slices.Clone(stoodDown)}
-	return oracle, stoodDown, nil
+	return oracle, stoodDown, true, nil
 }
 
 func (p *runPreparation) validateOracle(ctx context.Context, oracle []string) error {
@@ -1934,7 +1950,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 				continue
 			}
 		}
-		oracle, oracleStoodDown, err := preparation.oracle(ctx, tg)
+		oracle, oracleStoodDown, oracleDerived, err := preparation.oracle(ctx, tg)
 		if err != nil {
 			return nil, err
 		}
@@ -1964,6 +1980,12 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 				reason += " — derivation stood down on: " + strings.Join(oracleStoodDown, ", ") + "; resolve the closure, or pass an explicit oracle"
 			}
 			skipTarget(i, reason, false)
+			// A derivation that ran over the target's resolved package
+			// and found no test with nothing stood down is the
+			// selection's coverage bound: no test of the declared leg
+			// reaches the target. An explicit empty statement and an
+			// unresolved symbol never are (REQ-result-unreached-bound).
+			findings[i].Unreached = oracleDerived && len(oracleStoodDown) == 0
 			continue
 		}
 		if err := preparation.validateOracle(ctx, oracle); err != nil {

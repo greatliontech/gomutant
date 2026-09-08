@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -809,5 +810,32 @@ func TestRunCommandSurfacesCommitPhaseAttestationSheds(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "attestation shed: ") || !strings.Contains(output.String(), "site content changed") {
 		t.Fatalf("commit-phase shed not surfaced:\n%s", output.String())
+	}
+}
+
+// The summary states the declared selection's coverage bound under the
+// tallies — the unreached symbols by name, capped with the remainder
+// counted — and prints nothing under no declared selection
+// (REQ-result-unreached-bound).
+func TestRunSummaryStatesTheCoverageBound(t *testing.T) {
+	var output bytes.Buffer
+	unreached := make([]string, 0, 22)
+	for i := 0; i < 22; i++ {
+		unreached = append(unreached, fmt.Sprintf("example.com/leg.F%02d", i))
+	}
+	renderRunSummary(&output, gomutant.RunSummary{Targets: 23, Measured: 1, Skipped: 22, Selection: "js,wasm", Unreached: unreached})
+	text := output.String()
+	if !strings.Contains(text, "unreached under selection js,wasm: 22 targets no oracle of the selection's leg reaches — example.com/leg.F00, ") || !strings.Contains(text, "example.com/leg.F19 (+2 more)") || strings.Contains(text, "F20") {
+		t.Fatalf("bound line = %q", text)
+	}
+	output.Reset()
+	renderRunSummary(&output, gomutant.RunSummary{Targets: 2, Measured: 1, Skipped: 1, Selection: "wasm", Unreached: []string{"example.com/leg.G"}})
+	if !strings.Contains(output.String(), "unreached under selection wasm: 1 target no oracle of the selection's leg reaches — example.com/leg.G\n") {
+		t.Fatalf("single bound line = %q", output.String())
+	}
+	output.Reset()
+	renderRunSummary(&output, gomutant.RunSummary{Targets: 2, Measured: 2})
+	if strings.Contains(output.String(), "unreached") {
+		t.Fatalf("no selection yet a bound line: %q", output.String())
 	}
 }

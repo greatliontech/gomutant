@@ -306,7 +306,7 @@ func TestSkippedPackageRadiusNamesDarkPackages(t *testing.T) {
 	if radius[1].Package != "example.com/mod/mixed" || radius[1].Dark() {
 		t.Fatalf("mixed package misreported as dark: %+v", radius[1])
 	}
-	summary := SummarizeRun(findings)
+	summary := SummarizeRun(findings, Selection{})
 	if len(summary.DarkPackages) != 1 || summary.DarkPackages[0] != "example.com/mod/dark" {
 		t.Fatalf("summary dark packages = %+v, want exactly the dark one", summary.DarkPackages)
 	}

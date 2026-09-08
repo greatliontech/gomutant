@@ -234,6 +234,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 			return rep.flushProse(terminal.String())
 		}
 		if wholeTree {
+			// The reconcile against zero targets is a whole-tree run's
+			// write: the selection's bound — empty — rides it and clears
+			// a standing row (REQ-result-unreached-bound).
+			docStore.RecordRunBound(nil, tree.Selection(), runID, wholeTree)
 			if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
@@ -461,6 +465,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// the run is in both or in neither (REQ-mcp-findings-doc).
 	var finalSheds []gomutant.AttestationShed
 	if !o.plan {
+		// The run's coverage bound rides the final merge through the one
+		// recording seam (REQ-result-unreached-bound).
+		docStore.RecordRunBound(findings, tree.Selection(), runID, wholeTree)
 		if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -556,7 +563,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// A plan renders its own tallies; the zeroed run summary would
 	// claim a measurement that never happened (REQ-exec-plan).
 	if !o.plan {
-		summary := gomutant.SummarizeRun(rendered)
+		summary := gomutant.SummarizeRun(rendered, tree.Selection())
 		summary.Run = runID
 		if cut != nil {
 			summary.Delta = &gomutant.DeltaSummary{Ref: cut.Ref, Open: deltaOpen}
@@ -590,6 +597,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		}
 	}
 	if o.plan {
+		planSummary := gomutant.SummarizeRun(rendered, tree.Selection())
 		if o.jsonl {
 			// The structured face carries the radius in plan mode too:
 			// the run summary is suppressed there (a zeroed summary
@@ -602,9 +610,12 @@ func runCommand(ctx context.Context, o runOptions) error {
 				Cached       int      `json:"cached"`
 				Skipped      int      `json:"skipped"`
 				DarkPackages []string `json:"darkPackages,omitempty"`
-			}{planMeasure, planCandidates, planCached, planSkipped, gomutant.SummarizeRun(rendered).DarkPackages})
+				Selection    string   `json:"selection,omitempty"`
+				Unreached    []string `json:"unreached,omitempty"`
+			}{planMeasure, planCandidates, planCached, planSkipped, planSummary.DarkPackages, planSummary.Selection, planSummary.Unreached})
 		}
 		fmt.Fprintf(&terminal, "plan      %d measure (%d candidates), %d cached, %d skipped\n", planMeasure, planCandidates, planCached, planSkipped)
+		renderCoverageBound(&terminal, planSummary.Selection, planSummary.Unreached)
 		fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
 	} else {
 		// A shed disposition is surfaced once, never silently dropped
@@ -811,6 +822,40 @@ func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
 		fmt.Fprintf(w, "; %d open on the delta of %s", summary.Delta.Open, summary.Delta.Ref)
 	}
 	fmt.Fprintln(w)
+	renderCoverageBound(w, summary.Selection, summary.Unreached)
+}
+
+// plural is the count-aware noun suffix.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// unreachedShown bounds the symbols a bound line spells before counting
+// the remainder: a roster a reader acts on, so wider than a summary
+// line's three exemplars, and bounded so a whole dark leg never floods
+// the terminal.
+const unreachedShown = 20
+
+// renderCoverageBound prints the declared selection's stated coverage
+// bound under the summary: the unreached targets by symbol, bounded with
+// the remainder counted, so the population the measurement covered is
+// never read as whole (REQ-result-unreached-bound).
+func renderCoverageBound(w io.Writer, selection string, unreached []string) {
+	if len(unreached) == 0 {
+		return
+	}
+	shown := unreached
+	if len(shown) > unreachedShown {
+		shown = shown[:unreachedShown]
+	}
+	line := fmt.Sprintf("unreached under selection %s: %d target%s no oracle of the selection's leg reaches — %s", selection, len(unreached), plural(len(unreached)), strings.Join(shown, ", "))
+	if len(unreached) > unreachedShown {
+		line += fmt.Sprintf(" (+%d more)", len(unreached)-unreachedShown)
+	}
+	fmt.Fprintln(w, line)
 }
 
 // deltaCount renders a row's on-delta open count beside its open

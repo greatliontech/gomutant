@@ -49,7 +49,9 @@ at 50, open survivors per finding at 20 — a changed-ref run's on-delta
 survivors as their own list under the same bound; findings-inspection rows at 50,
 rendered as one summary row per record — symbol, state, reason, layer, run
 identity, open and attested counts — with the full rows behind `detail` and
-the roster narrowable by state, by symbol, and by run identity) with the omitted remainder counted,
+the roster narrowable by state, by symbol, and by run identity; a run
+summary's unreached roster and the findings inspection's coverage-bound
+rows, each row's roster likewise, at 50) with the omitted remainder counted,
 never silently dropped — the findings document on disk always carries the
 full set and the response names its path. Preparation events and target
 decisions are progress data, not result data: a request carrying a progress

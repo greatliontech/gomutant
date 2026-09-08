@@ -279,6 +279,9 @@ type Residue struct {
 type Tree struct {
 	eng *engine.Tree
 	dir string
+	// selection is the run's declared build selection the tree loaded
+	// under: the leg a coverage bound names (REQ-result-unreached-bound).
+	selection Selection
 	// vouches is the caller's reviewed dynamic-state vouch set in
 	// gofresh's canonical "<import path>.<Variable>" form, installed on
 	// every analysis engine the tree constructs so run verdicts,
@@ -407,8 +410,11 @@ func LoadContextSelection(ctx context.Context, dir string, sel Selection) (*Tree
 	if err != nil {
 		return nil, err
 	}
-	return &Tree{eng: e, dir: abs}, nil
+	return &Tree{eng: e, dir: abs, selection: sel}, nil
 }
+
+// Selection is the declared build selection the tree loaded under.
+func (t *Tree) Selection() Selection { return t.selection }
 
 // DiscoverContext targets every top-level function and method declared in the
 // tree's non-test, non-generated source files — package initializers

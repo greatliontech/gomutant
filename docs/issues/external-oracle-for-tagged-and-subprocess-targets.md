@@ -35,12 +35,14 @@ second needed for both:
   so a subprocess-oracled main() measures against the mutant, not
   the disk.
 
-Until either lands, a consumer's campaign should at least record
-the excluded leg as a stated coverage bound — the target count the
-tag selection discovers but no oracle reaches — rather than
-reporting zero silently.
+The interim landed (cross-tool train chunk 163, 2026-09-08): a run under
+a declared tag selection states the targets the leg discovers but no
+oracle reaches as a coverage bound on both faces, and the findings
+document carries the bound per selection (REQ-result-unreached-bound),
+so the excluded leg never reads as zero silently. What remains here is
+the measurement itself — one of the two shapes above.
 
 Field report: wisp, 2026-09-05 (docs/issues/wasm-oracle-campaign-gap.md
 there), on gomutant v0.52.0.
 
-Lands: the stated-coverage-bound interim lands at cross-tool train chunk 163; the external-oracle mode is deferred 2026-09-07 (user decision: revisit when a consumer needs the tagged leg measured rather than declared)
+Lands: user decision — the external-oracle mode (or materialized mutation), deferred 2026-09-07: revisit when a consumer needs the tagged leg measured rather than declared; the stated-coverage-bound interim landed at cross-tool train chunk 163

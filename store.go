@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,6 +58,11 @@ type Store struct {
 	// live there — so a read names them and never sweeps them
 	// (REQ-result-tolerant).
 	legacy []LegacyEntry
+	// pendingBounds are the coverage bounds a run recorded for the next
+	// document write (RecordCoverageBound), keyed by selection: the
+	// write merges them over the document's standing rows, the latest
+	// run of a selection replacing its row (REQ-result-unreached-bound).
+	pendingBounds map[string]CoverageBound
 	// judged memoizes each symbol's committability by the persisted
 	// form of the record it was judged for: a commit re-judges only
 	// the records it changed — the portable-line walk parses every
@@ -105,6 +111,7 @@ type storeHooks struct {
 type documentCache struct {
 	sum      [sha256.Size]byte
 	findings []Finding
+	bounds   []CoverageBound
 	held     bool
 }
 
@@ -562,22 +569,90 @@ func (s *Store) readDocument(data []byte) ([]Finding, error) {
 	if s.hooks.documentParse != nil {
 		s.hooks.documentParse()
 	}
-	findings, err := ParseFindings(data)
+	doc, err := ParseDocument(data)
 	if err != nil {
 		return nil, err
 	}
-	s.document = documentCache{sum: sum, findings: findings, held: true}
-	return cloneFindings(findings), nil
+	s.document = documentCache{sum: sum, findings: doc.Findings, bounds: doc.CoverageBounds, held: true}
+	return cloneFindings(doc.Findings), nil
+}
+
+// RecordCoverageBound records a whole-tree run's stated coverage bound
+// for the next document write: the bound rides the write that carries
+// the run's final merge, replacing the document's row for the same
+// selection — an EMPTY bound (the leg reached everything) deleting the
+// row, so a standing bound never outlives the run that refuted it
+// (REQ-result-unreached-bound). A scoped run never records: its
+// population is not the tree's. Not synchronized with a concurrent
+// Update: record before the write that should carry it.
+func (s *Store) RecordCoverageBound(bound CoverageBound) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingBounds == nil {
+		s.pendingBounds = map[string]CoverageBound{}
+	}
+	s.pendingBounds[bound.Selection] = bound
+}
+
+// RecordRunBound is the one seam a run's faces record through: a
+// whole-tree run's bound under its declared selection — empty included,
+// the record that clears a standing row — rides the write that follows;
+// a scoped run or an undeclared selection records nothing
+// (REQ-result-unreached-bound). Every face's final merge and every
+// zero-target whole-tree reconcile call it, so the rule has one home.
+func (s *Store) RecordRunBound(findings []Finding, sel Selection, runID string, wholeTree bool) {
+	if !wholeTree {
+		return
+	}
+	if bound := CoverageBoundOf(findings, sel, runID); bound != nil {
+		s.RecordCoverageBound(*bound)
+	}
+}
+
+// CoverageBounds reads the document's stated coverage bounds, one per
+// declared selection (REQ-result-unreached-bound); an absent document
+// has none.
+func (s *Store) CoverageBounds(ctx context.Context) ([]CoverageBound, error) {
+	if _, err := s.Load(ctx); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.document.bounds), nil
+}
+
+// mergedBounds is the document's standing bounds with the pending rows
+// laid over them by selection, sorted; read under the lock.
+func (s *Store) mergedBounds() []CoverageBound {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bySel := map[string]CoverageBound{}
+	for _, b := range s.document.bounds {
+		bySel[b.Selection] = b
+	}
+	for sel, b := range s.pendingBounds {
+		if len(b.Unreached) == 0 {
+			delete(bySel, sel)
+			continue
+		}
+		bySel[sel] = b
+	}
+	out := make([]CoverageBound, 0, len(bySel))
+	for _, b := range bySel {
+		out = append(out, b)
+	}
+	slices.SortFunc(out, func(a, b CoverageBound) int { return strings.Compare(a.Selection, b.Selection) })
+	return out
 }
 
 // cacheDocument records the rows a store write put in the document
 // under the hash of the bytes it wrote. Every row is the store's own
 // copy — a persisted-form clone of a served record or a fresh parse —
 // so no caller holds an alias into the cache.
-func (s *Store) cacheDocument(written []byte, rows []Finding) {
+func (s *Store) cacheDocument(written []byte, rows []Finding, bounds []CoverageBound) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.document = documentCache{sum: sha256.Sum256(written), findings: rows, held: true}
+	s.document = documentCache{sum: sha256.Sum256(written), findings: rows, bounds: bounds, held: true}
 }
 
 // cloneFindings clones every record of a slice.
@@ -756,6 +831,7 @@ func (s *Store) committable(f, form Finding) bool {
 // and errors.
 func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Finding, error)) error {
 	var next, rows []Finding
+	var bounds []CoverageBound
 	var pruned []string
 	committable := map[string]bool{}
 	held := map[string]Finding{}
@@ -852,11 +928,15 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
 		return out, nil
 	}, export: func(next []Finding) ([]byte, error) {
-		data, kept, err := exportDocument(next)
+		bounds = s.mergedBounds()
+		data, kept, err := exportDocumentWithBounds(next, bounds)
 		rows = kept
 		return data, err
 	}, after: func(written []byte) error {
-		s.cacheDocument(written, rows)
+		s.cacheDocument(written, rows, bounds)
+		s.mu.Lock()
+		s.pendingBounds = nil
+		s.mu.Unlock()
 		// The overlay follows the repo write, under the same lock: an
 		// entry is deleted when its record is committable and the
 		// overlay holds one, written when its record is not committable

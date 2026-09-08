@@ -42,7 +42,7 @@ func TestExportInternsDuplicatedEvidence(t *testing.T) {
 	if got := bytes.Count(data, []byte(manifest)); got != 1 {
 		t.Fatalf("shared manifest appears %d times in the document, want 1", got)
 	}
-	var doc documentV11
+	var doc internedDocument
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
@@ -92,27 +92,27 @@ func TestParseFindingsRefusesMalformedInternedDocuments(t *testing.T) {
 	}
 	cases := []struct {
 		name   string
-		mutate func(*documentV11)
+		mutate func(*internedDocument)
 		want   string
 	}{
-		{"dangling oracle-evidence index", func(d *documentV11) { d.Findings[0].OracleEvidence[0] = 99 }, "outside the table"},
-		{"dangling runtime-inputs index", func(d *documentV11) { d.Evidence[0].RuntimeInputs = 99 }, "outside the table"},
-		{"dangling ledger index", func(d *documentV11) { i := 42; d.Findings[0].CompartmentLedger = &i }, "outside the table"},
-		{"inline manifest beside its reference", func(d *documentV11) { d.Evidence[0].Evidence.RuntimeInputs = "sneak" }, "inline runtime-inputs manifest"},
-		{"inline oracle evidence on a record", func(d *documentV11) {
+		{"dangling oracle-evidence index", func(d *internedDocument) { d.Findings[0].OracleEvidence[0] = 99 }, "outside the table"},
+		{"dangling runtime-inputs index", func(d *internedDocument) { d.Evidence[0].RuntimeInputs = 99 }, "outside the table"},
+		{"dangling ledger index", func(d *internedDocument) { i := 42; d.Findings[0].CompartmentLedger = &i }, "outside the table"},
+		{"inline manifest beside its reference", func(d *internedDocument) { d.Evidence[0].Evidence.RuntimeInputs = "sneak" }, "inline runtime-inputs manifest"},
+		{"inline oracle evidence on a record", func(d *internedDocument) {
 			d.Findings[0].Finding.OracleEvidence = []SubjectEvidence{cleanEvidence("p.X")}
 		}, "inline heavy fields"},
-		{"inline target evidence on a record", func(d *documentV11) {
+		{"inline target evidence on a record", func(d *internedDocument) {
 			d.Findings[0].Finding.TargetEvidence = SubjectEvidence{Symbol: "p.X"}
 		}, "inline heavy fields"},
-		{"stray target-evidence index on a shaped record", func(d *documentV11) {
+		{"stray target-evidence index on a shaped record", func(d *internedDocument) {
 			i := 0
 			d.Findings[1].TargetEvidence = &i
 		}, "missing or has invalid required evidence"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var doc documentV11
+			var doc internedDocument
 			if err := json.Unmarshal(valid, &doc); err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +154,7 @@ func TestParseFindingsAcceptsDuplicateManifestEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc documentV11
+	var doc internedDocument
 	if err := json.Unmarshal(valid, &doc); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestParseFindingsRefusesMixedManifestsAcrossAFinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc documentV11
+	var doc internedDocument
 	if err := json.Unmarshal(valid, &doc); err != nil {
 		t.Fatal(err)
 	}

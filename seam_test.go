@@ -157,20 +157,26 @@ func TestRunPreparationMemoizesPackageAnalysis(t *testing.T) {
 		contexts:       map[string]packageContextResult{},
 	}
 
-	first, _, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.F"})
+	first, _, firstDerived, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.F"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	first[0] = "changed by caller"
-	second, _, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.G"})
+	second, _, secondDerived, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.G"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if testsCalls != 1 || !slices.Equal(second, []string{"example.com/p.TestP"}) {
 		t.Fatalf("derived oracle calls = %d, second = %v", testsCalls, second)
 	}
-	if explicit, _, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.H", Oracle: []string{"example.com/q.TestQ"}}); err != nil || !slices.Equal(explicit, []string{"example.com/q.TestQ"}) || testsCalls != 1 {
-		t.Fatalf("explicit oracle = %v, derived calls = %d", explicit, testsCalls)
+	// Both the first derivation and the memoized one report a
+	// derivation over a resolved package; an explicit statement never
+	// does (REQ-result-unreached-bound's class).
+	if !firstDerived || !secondDerived {
+		t.Fatalf("derived = %v, %v; want both derivations reported", firstDerived, secondDerived)
+	}
+	if explicit, _, explicitDerived, err := preparation.oracle(context.Background(), Target{Symbol: "example.com/p.H", Oracle: []string{"example.com/q.TestQ"}}); err != nil || !slices.Equal(explicit, []string{"example.com/q.TestQ"}) || testsCalls != 1 || explicitDerived {
+		t.Fatalf("explicit oracle = %v, derived calls = %d, derived %v", explicit, testsCalls, explicitDerived)
 	}
 
 	oracle := []string{"example.com/p.TestP", "example.com/q.TestQ"}

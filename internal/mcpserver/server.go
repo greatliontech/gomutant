@@ -563,6 +563,7 @@ type runOut struct {
 	DecisionsCount            int                         `json:"decisionsCount"`
 	Note                      string                      `json:"note,omitempty" jsonschema:"set when the run measured nothing (names the input that selected zero targets and the next step) or when a whole-tree reconcile dropped records whose targets left the code"`
 	LegacyOverlays            []gomutant.LegacyEntry      `json:"legacyOverlays,omitempty" jsonschema:"machine-local overlay entries preserved unread because their document version predates this binary's range: an older gomutant's records, attested dispositions included, never served and never deleted; capped, the overlay directory holds the full set"`
+	OmittedUnreached          int                         `json:"omittedUnreached,omitempty" jsonschema:"unreached symbols beyond the summary's row cap - counted, never silent; the findings document's coverage-bounds table holds the full roster"`
 	OmittedLegacyOverlays     int                         `json:"omittedLegacyOverlays,omitempty" jsonschema:"legacy overlay rows beyond the response cap - counted, never silent"`
 }
 
@@ -816,6 +817,10 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		out.Document = s.findingsPath(in.Findings)
 		out.Note = selectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed)
 		if wholeTree {
+			// The reconcile against zero targets is a whole-tree run's
+			// write: the selection's bound — empty — rides it and clears
+			// a standing row (REQ-result-unreached-bound).
+			prepared.Store.RecordRunBound(nil, tree.Selection(), runID, wholeTree)
 			dropped := 0
 			err := s.updateStore(ctx, prepared.Store, out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
@@ -975,6 +980,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// the run is in both or in neither (REQ-mcp-findings-doc).
 	var attestationSheds []gomutant.AttestationShed
 	reconcileDropped := 0
+	// The run's coverage bound rides the final merge through the one
+	// recording seam (REQ-result-unreached-bound).
+	prepared.Store.RecordRunBound(findings, tree.Selection(), runID, wholeTree)
 	err = s.updateStore(ctx, prepared.Store, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -1006,8 +1014,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return nil, out, withDrop(shedsRidingAbort(err, out.AttestationSheds))
 	}
 	rendered := gomutant.RenderedFindings(findings, postMerge)
-	out.Summary = gomutant.SummarizeRun(rendered)
+	out.Summary = gomutant.SummarizeRun(rendered, tree.Selection())
 	out.Summary.Run = runID
+	// The summary's unreached roster caps like every row list, the
+	// remainder counted (REQ-mcp-envelope).
+	out.Summary.Unreached, out.OmittedUnreached = capRows(out.Summary.Unreached)
 	runStore := prepared.Store
 	for _, f := range prior {
 		priorLayer[f.Symbol], _ = runStore.Layer(f)
@@ -1278,6 +1289,24 @@ type inspectedFinding struct {
 	Candidates     []gomutant.CandidateEvidence `json:"candidateEvidence,omitempty"`
 }
 
+// coverageBoundOut is one served coverage bound: the document's row
+// with its roster capped and the remainder counted (REQ-mcp-envelope).
+type coverageBoundOut struct {
+	Selection        string   `json:"selection"`
+	Run              string   `json:"run,omitempty"`
+	Unreached        []string `json:"unreached"`
+	OmittedUnreached int      `json:"omittedUnreached,omitempty"`
+}
+
+func coverageBoundRows(bounds []gomutant.CoverageBound) []coverageBoundOut {
+	rows := make([]coverageBoundOut, 0, len(bounds))
+	for _, b := range bounds {
+		shown, omitted := capRows(b.Unreached)
+		rows = append(rows, coverageBoundOut{Selection: b.Selection, Run: b.Run, Unreached: shown, OmittedUnreached: omitted})
+	}
+	return rows
+}
+
 type findingsOut struct {
 	Summary                      []findingSummary                `json:"summary,omitempty" jsonschema:"the bounded default: one row per record"`
 	Findings                     []inspectedFinding              `json:"findings,omitempty" jsonschema:"full rows, only under detail"`
@@ -1287,6 +1316,8 @@ type findingsOut struct {
 	Document                     string                          `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
 	Note                         string                          `json:"note,omitempty" jsonschema:"set when there are no rows: says whether the document is empty or the filters matched nothing, and the next step"`
 	EphemeralAttestations        []gomutant.EphemeralAttestation `json:"ephemeralAttestations,omitempty" jsonschema:"committed ephemeral-equivalence attestations beside the document - judged-equivalent manual probes with their edit digests and reasoning; capped, the record on disk carries the full set"`
+	CoverageBounds               []coverageBoundOut              `json:"coverageBounds,omitempty" jsonschema:"the document's stated coverage bounds, one per declared build selection: the targets that selection's leg discovered but no oracle reaches - the population the measurement did not cover, never a silent zero; rows and each row's roster capped, the remainders counted"`
+	OmittedCoverageBounds        int                             `json:"omittedCoverageBounds,omitempty" jsonschema:"coverage-bound rows beyond the response cap - counted, never silent; the document carries the full table"`
 	OmittedEphemeralAttestations int                             `json:"omittedEphemeralAttestations,omitempty" jsonschema:"attestation rows beyond the response cap - counted, never silent"`
 	LegacyOverlays               []gomutant.LegacyEntry          `json:"legacyOverlays,omitempty" jsonschema:"machine-local overlay entries preserved unread because their document version predates this binary's range: an older gomutant's records, attested dispositions included, never served and never deleted; capped, the overlay directory holds the full set"`
 	OmittedLegacyOverlays        int                             `json:"omittedLegacyOverlays,omitempty" jsonschema:"legacy overlay rows beyond the response cap - counted, never silent"`
@@ -1314,6 +1345,14 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
+	// The document's stated coverage bounds ride the inspection, rows
+	// and rosters capped like every list (REQ-result-unreached-bound,
+	// REQ-mcp-envelope).
+	bounds, err := store.CoverageBounds(ctx)
+	if err != nil {
+		return nil, out, err
+	}
+	out.CoverageBounds, out.OmittedCoverageBounds = capRows(coverageBoundRows(bounds))
 	out.LegacyOverlays, out.OmittedLegacyOverlays = capRows(store.LegacyEntries())
 	if err := ctx.Err(); err != nil {
 		return nil, out, err

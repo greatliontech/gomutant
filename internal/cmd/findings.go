@@ -122,11 +122,12 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 			return renderFindingsJSON(out, []findingView{})
 		}
 		fmt.Fprintln(out, "no findings")
-		// The attestation record can exist without findings — the
-		// primary loop shape persists no finding at all — so the
-		// empty-document face still surfaces it
-		// (REQ-result-ephemeral-attest).
-		return printEphemeralAttestationLine(out, o)
+		// The attestation record and the coverage bounds can exist
+		// without findings — the primary loop shape persists no finding
+		// at all, and a wholly unreached leg records a bound alone — so
+		// the empty-document face still surfaces them
+		// (REQ-result-ephemeral-attest, REQ-result-unreached-bound).
+		return printDocumentTail(ctx, out, store, o)
 	}
 	judge := o.judged()
 	var tree *gomutant.Tree
@@ -182,16 +183,35 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		return err
 	}
 	if o.json {
+		// The JSON face is the rows alone: the document on disk is the
+		// machine face for what rides beside them — the coverage-bounds
+		// table and the attestation record — exactly as the attestation
+		// precedent below reads it.
 		return renderFindingsJSON(out, views)
 	}
 	if len(views) == 0 {
 		fmt.Fprintln(out, "no findings")
-		return printEphemeralAttestationLine(out, o)
+		return printDocumentTail(ctx, out, store, o)
 	}
 	if !o.detail {
 		renderFindingSummaries(out, views, judge, cut != nil)
 	} else {
 		renderFindingViews(out, views)
+	}
+	return printDocumentTail(ctx, out, store, o)
+}
+
+// printDocumentTail prints what rides the inspection beside the rows:
+// the document's stated coverage bounds per declared selection
+// (REQ-result-unreached-bound), then the committed
+// ephemeral-equivalence record.
+func printDocumentTail(ctx context.Context, out io.Writer, store *gomutant.Store, o findingsOptions) error {
+	bounds, err := store.CoverageBounds(ctx)
+	if err != nil {
+		return err
+	}
+	for _, b := range bounds {
+		renderCoverageBound(out, b.Selection, b.Unreached)
 	}
 	return printEphemeralAttestationLine(out, o)
 }
@@ -212,11 +232,7 @@ func printEphemeralAttestationLine(out io.Writer, o findingsOptions) error {
 	if len(atts) == 0 {
 		return nil
 	}
-	plural := ""
-	if len(atts) != 1 {
-		plural = "s"
-	}
-	fmt.Fprintf(out, "%d ephemeral equivalence attestation%s on record — %s\n", len(atts), plural, attPath)
+	fmt.Fprintf(out, "%d ephemeral equivalence attestation%s on record — %s\n", len(atts), plural(len(atts)), attPath)
 	return nil
 }
 

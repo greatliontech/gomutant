@@ -460,6 +460,70 @@ type Finding struct {
 	// was measured ("no oracle", "not a function - ..." with the methodology hint).
 	Cached  bool   `json:"-"`
 	Skipped string `json:"-"`
+	// Unreached marks a "no oracle" skip that is the declared
+	// selection's coverage bound: the derivation found no test of the
+	// selection's build leg reaching the target and no package stood
+	// down — nothing to resolve, a leg no oracle covers
+	// (REQ-result-unreached-bound). The bound persists at the document
+	// level (CoverageBound), never as a record.
+	Unreached bool `json:"-"`
+}
+
+// CoverageBound is the document's stated coverage bound for one
+// declared build selection: the targets that selection's leg discovers
+// but no oracle reaches — recorded so a later reader sees the
+// population the measurement covered, never a silent zero
+// (REQ-result-unreached-bound). The latest WHOLE-TREE run of a
+// selection replaces its row, an empty bound clearing it; a scoped run
+// or an undeclared selection records none.
+type CoverageBound struct {
+	// Selection is the declared selection's key (SelectionKey):
+	// "tags:a,b", "toolchain:go1.28", or both joined by ";".
+	Selection string `json:"selection"`
+	// Run is the identity of the run that stated the bound.
+	Run string `json:"run,omitempty"`
+	// Unreached lists the unreached symbols, sorted.
+	Unreached []string `json:"unreached"`
+}
+
+// SelectionKey spells a declared selection as the coverage bound's
+// key — "tags:a,b", "toolchain:go1.28", or both joined by ";" — the
+// tags sorted and deduplicated; empty exactly when nothing is declared
+// (Selection.Declared), since an undeclared selection contributes no
+// part. A toolchain directive is a leg selector like a tag (a
+// release-gated file exists under one toolchain and not another), so
+// two toolchains under one tag set are two rows.
+func SelectionKey(sel Selection) string {
+	var parts []string
+	if len(sel.Tags) > 0 {
+		tags := slices.Clone(sel.Tags)
+		slices.Sort(tags)
+		parts = append(parts, "tags:"+strings.Join(slices.Compact(tags), ","))
+	}
+	if sel.Toolchain != "" {
+		parts = append(parts, "toolchain:"+sel.Toolchain)
+	}
+	return strings.Join(parts, ";")
+}
+
+// CoverageBoundOf derives a run's coverage bound from its findings:
+// nil under no declared selection; under one, the bound with its
+// unreached symbols sorted — EMPTY when the leg reached everything, so
+// a whole-tree run's record clears a standing row (the latest run of a
+// selection replaces its row, REQ-result-unreached-bound).
+func CoverageBoundOf(findings []Finding, sel Selection, runID string) *CoverageBound {
+	key := SelectionKey(sel)
+	if key == "" {
+		return nil
+	}
+	unreached := []string{}
+	for _, f := range findings {
+		if f.Unreached {
+			unreached = append(unreached, f.Symbol)
+		}
+	}
+	slices.Sort(unreached)
+	return &CoverageBound{Selection: key, Run: runID, Unreached: slices.Compact(unreached)}
 }
 
 // cloneFinding returns a Finding sharing no mutable state with f, so an
@@ -622,7 +686,7 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // evidence and a divergent second copy of one fact is
 // unrepresentable. An older reader cannot re-inline the tables, so
 // the shape rides the bump (the candidate-evidence precedent).
-const DocumentVersion = 11
+const DocumentVersion = 12
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale
@@ -681,7 +745,7 @@ func (e *DocumentVersionError) Unwrap() error { return e.Sentinel }
 const OldestReadableDocumentVersion = 4
 
 // document is the inline finding set shape of versions 4-10; version
-// 11 writes documentV11 and the parser expands it back through this
+// 11 writes internedDocument and the parser expands it back through this
 // path so every inline-era semantic check applies verbatim
 // (REQ-result-export).
 type document struct {
@@ -689,16 +753,23 @@ type document struct {
 	Findings []Finding `json:"findings"`
 }
 
-// documentV11 is the interned document (REQ-result-export, version
-// 11): subject evidence, runtime-inputs manifests, and compartment
-// ledgers live once each in document-level tables; records reference
-// them by index.
-type documentV11 struct {
+// internedDocument is the interned document (REQ-result-export,
+// versions 11 and 12): subject evidence, runtime-inputs manifests, and
+// compartment ledgers live once each in document-level tables; records
+// reference them by index; version 12 adds the coverage-bounds table.
+type internedDocument struct {
 	Version       int                 `json:"version"`
 	RuntimeInputs []string            `json:"runtimeInputsTable"`
 	Evidence      []evidenceEntryV11  `json:"evidenceTable"`
 	Ledgers       []CompartmentLedger `json:"ledgerTable"`
 	Findings      []findingV11        `json:"findings"`
+	// CoverageBounds is version 12's one addition: the stated coverage
+	// bound per declared selection (REQ-result-unreached-bound). A
+	// version-11 document carries none; a reader older than 12 refuses
+	// ahead rather than dropping the bound — a dropped bound reads as
+	// full coverage, the flattering direction REQ-result-tolerant's
+	// argument never admits.
+	CoverageBounds []CoverageBound `json:"coverageBounds"`
 }
 
 // evidenceEntryV11 carries one unique SubjectEvidence with its
@@ -725,8 +796,8 @@ type findingV11 struct {
 
 // internDocument builds the v11 interned form: identical evidence
 // rows, manifests, and ledgers collapse to one table entry each.
-func internDocument(kept []Finding) (documentV11, error) {
-	doc := documentV11{Version: DocumentVersion, RuntimeInputs: []string{}, Evidence: []evidenceEntryV11{}, Ledgers: []CompartmentLedger{}}
+func internDocument(kept []Finding) (internedDocument, error) {
+	doc := internedDocument{Version: DocumentVersion, RuntimeInputs: []string{}, Evidence: []evidenceEntryV11{}, Ledgers: []CompartmentLedger{}}
 	riIdx := map[string]int{}
 	evIdx := map[string]int{}
 	ldIdx := map[string]int{}
@@ -810,7 +881,7 @@ func internDocument(kept []Finding) (documentV11, error) {
 // inline manifest in a table entry, or inline heavy fields on a
 // record are malformed — the tables are the one home
 // (REQ-result-export).
-func expandV11(doc documentV11) ([]Finding, error) {
+func expandV11(doc internedDocument) ([]Finding, error) {
 	for i, e := range doc.Evidence {
 		if e.RuntimeInputs < 0 || e.RuntimeInputs >= len(doc.RuntimeInputs) {
 			return nil, fmt.Errorf("gomutant: evidence entry %d references runtime-inputs %d outside the table", i, e.RuntimeInputs)
@@ -912,6 +983,12 @@ func parsedForm(f Finding) (Finding, error) {
 // the check would only re-read what a parse produced (Store.Update
 // carries the argument); every other writer goes through Export.
 func exportDocument(findings []Finding) (data []byte, kept []Finding, err error) {
+	return exportDocumentWithBounds(findings, nil)
+}
+
+// exportDocumentWithBounds is exportDocument carrying the document's
+// coverage bounds, sorted by selection (REQ-result-unreached-bound).
+func exportDocumentWithBounds(findings []Finding, bounds []CoverageBound) (data []byte, kept []Finding, err error) {
 	kept = make([]Finding, 0, len(findings))
 	for _, f := range findings {
 		if f.Skipped != "" {
@@ -937,6 +1014,11 @@ func exportDocument(findings []Finding) (data []byte, kept []Finding, err error)
 	if err != nil {
 		return nil, nil, err
 	}
+	interned.CoverageBounds = slices.Clone(bounds)
+	if interned.CoverageBounds == nil {
+		interned.CoverageBounds = []CoverageBound{}
+	}
+	slices.SortFunc(interned.CoverageBounds, func(a, b CoverageBound) int { return strings.Compare(a.Selection, b.Selection) })
 	data, err = json.MarshalIndent(interned, "", "  ")
 	if err != nil {
 		return nil, nil, err
@@ -948,13 +1030,31 @@ func exportDocument(findings []Finding) (data []byte, kept []Finding, err error)
 // (REQ-result-export), an unknown field within a known version is discarded
 // (REQ-result-tolerant — encoding/json drops unknown fields).
 func ParseFindings(data []byte) ([]Finding, error) {
+	doc, err := ParseDocument(data)
+	if err != nil {
+		return nil, err
+	}
+	return doc.Findings, nil
+}
+
+// Document is a parsed findings document: its records and its stated
+// coverage bounds (REQ-result-unreached-bound).
+type Document struct {
+	Findings       []Finding
+	CoverageBounds []CoverageBound
+}
+
+// ParseDocument loads a finding document with its document-level
+// tables: an unknown version is refused (REQ-result-export), an unknown
+// field within a known version is discarded (REQ-result-tolerant).
+func ParseDocument(data []byte) (Document, error) {
 	top, err := decodeKnownObject(data, map[string]bool{"version": true, "findings": true})
 	if err != nil {
-		return nil, fmt.Errorf("gomutant: parse findings document: %w", err)
+		return Document{}, fmt.Errorf("gomutant: parse findings document: %w", err)
 	}
 	var version int
 	if err := json.Unmarshal(top["version"], &version); err != nil {
-		return nil, fmt.Errorf("gomutant: parse findings version: %w", err)
+		return Document{}, fmt.Errorf("gomutant: parse findings version: %w", err)
 	}
 	if version > DocumentVersion {
 		// A version AHEAD of this reader is nearly always "a newer
@@ -963,46 +1063,75 @@ func ParseFindings(data []byte) ([]Finding, error) {
 		// path, its surface dead until someone realizes the process
 		// itself is stale. Name the probable cause and the signal, so
 		// the reader is not sent hunting for document corruption.
-		return nil, &DocumentVersionError{Version: version, Sentinel: ErrVersionAhead}
+		return Document{}, &DocumentVersionError{Version: version, Sentinel: ErrVersionAhead}
 	}
 	if version < OldestReadableDocumentVersion {
-		return nil, &DocumentVersionError{Version: version, Sentinel: ErrVersionBehind}
+		return Document{}, &DocumentVersionError{Version: version, Sentinel: ErrVersionBehind}
 	}
 	if version >= 11 {
-		return parseInternedFindings(data)
+		return parseInternedDocument(data, version)
 	}
-	return parseInlineFindings(top)
+	findings, err := parseInlineFindings(top)
+	if err != nil {
+		return Document{}, err
+	}
+	return Document{Findings: findings}, nil
 }
 
-// parseInternedFindings reads a version-11 interned document, expands
-// its tables, and re-validates the expanded set through the inline
-// path — every inline-era semantic check applies verbatim, and the
-// interned shape adds its own structural checks in expandV11.
-func parseInternedFindings(data []byte) ([]Finding, error) {
+// parseInternedDocument reads an interned document (version 11 or 12),
+// expanding its tables and re-validating the expanded set through the
+// inline path — every inline-era semantic check applies verbatim, and
+// the interned shape adds its own structural checks in expandV11:
+// version 12 carries the coverage-bounds table and requires it present
+// — a document claiming 12 without the table is malformed, never read
+// as unbounded (REQ-result-unreached-bound); a version-11 document
+// carries none.
+func parseInternedDocument(data []byte, version int) (Document, error) {
+	findings, doc, err := parseInternedFindingsAndTables(data, version)
+	if err != nil {
+		return Document{}, err
+	}
+	bounds := slices.Clone(doc.CoverageBounds)
+	if bounds == nil {
+		bounds = []CoverageBound{}
+	}
+	return Document{Findings: findings, CoverageBounds: bounds}, nil
+}
+
+func parseInternedFindingsAndTables(data []byte, version int) ([]Finding, internedDocument, error) {
 	top, err := decodeKnownObject(data, map[string]bool{
-		"version": true, "runtimeInputsTable": true, "evidenceTable": true, "ledgerTable": true, "findings": true,
+		"version": true, "runtimeInputsTable": true, "evidenceTable": true, "ledgerTable": true, "findings": true, "coverageBounds": true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("gomutant: parse findings document: %w", err)
+		return nil, internedDocument{}, fmt.Errorf("gomutant: parse findings document: %w", err)
 	}
-	for _, name := range []string{"runtimeInputsTable", "evidenceTable", "ledgerTable", "findings"} {
+	required := []string{"runtimeInputsTable", "evidenceTable", "ledgerTable", "findings"}
+	if version >= 12 {
+		required = append(required, "coverageBounds")
+	}
+	for _, name := range required {
 		value, ok := top[name]
 		if !ok || isJSONNull(value) {
-			return nil, fmt.Errorf("gomutant: findings document field %s is missing or null", name)
+			return nil, internedDocument{}, fmt.Errorf("gomutant: findings document field %s is missing or null", name)
 		}
 	}
-	var doc documentV11
+	var doc internedDocument
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("gomutant: parse interned findings: %w", err)
+		return nil, internedDocument{}, fmt.Errorf("gomutant: parse interned findings: %w", err)
+	}
+	for _, b := range doc.CoverageBounds {
+		if b.Selection == "" || len(b.Unreached) == 0 {
+			return nil, internedDocument{}, fmt.Errorf("gomutant: findings document coverage bound needs a selection and its unreached symbols")
+		}
 	}
 	expanded, err := expandV11(doc)
 	if err != nil {
-		return nil, err
+		return nil, internedDocument{}, err
 	}
 	if err := validateInternedRecords(doc); err != nil {
-		return nil, err
+		return nil, internedDocument{}, err
 	}
-	return expanded, nil
+	return expanded, doc, nil
 }
 
 // validateInternedRecords re-runs every inline-era check over the
@@ -1020,7 +1149,7 @@ func parseInternedFindings(data []byte) ([]Finding, error) {
 // their manifests are equal (equal content collapses to one canonical
 // table index, so equality never depends on the index a row happens
 // to cite).
-func validateInternedRecords(doc documentV11) error {
+func validateInternedRecords(doc internedDocument) error {
 	canonical := map[string]int{}
 	placeholders := make([]string, len(doc.RuntimeInputs))
 	for i, manifest := range doc.RuntimeInputs {
@@ -1689,7 +1818,7 @@ func RenderedFindings(findings []Finding, postMerge map[string]Finding) []Findin
 	rendered := make([]Finding, len(findings))
 	for i, f := range findings {
 		if m, ok := postMerge[f.Symbol]; ok {
-			m.Cached, m.Skipped = f.Cached, f.Skipped
+			m.Cached, m.Skipped, m.Unreached = f.Cached, f.Skipped, f.Unreached
 			rendered[i] = m
 		} else {
 			rendered[i] = f
@@ -1919,7 +2048,9 @@ func UpdateDocumentContext(ctx context.Context, path string, update func(prior [
 
 // documentUpdate is one atomic replacement of a findings document with
 // the store's seams: parse reads the prior document's bytes (nil is
-// ParseFindings), export encodes the successor (nil is Export, with its
+// ParseFindings), export encodes the successor (nil is Export's writer
+// carrying the prior document's coverage bounds — read from the prior
+// bytes themselves, so any parse keeps the table — with the
 // whole-document self-check), and after runs with the bytes written
 // once the replacement is visible, still under the document lock — the
 // store's overlay writes follow the repo write there, so nothing
@@ -1937,8 +2068,31 @@ func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 	if parse == nil {
 		parse = ParseFindings
 	}
+	// The default writer carries the prior document's coverage bounds
+	// whole, read from the prior bytes themselves rather than inherited
+	// from whichever parse ran: a caller editing records through
+	// UpdateDocument never drops the table, the flattering direction
+	// (REQ-result-unreached-bound). An absent prior document has none.
+	var priorData []byte
 	if export == nil {
-		export = Export
+		export = func(findings []Finding) ([]byte, error) {
+			var bounds []CoverageBound
+			if priorData != nil {
+				doc, err := ParseDocument(priorData)
+				if err != nil {
+					return nil, err
+				}
+				bounds = doc.CoverageBounds
+			}
+			data, _, err := exportDocumentWithBounds(findings, bounds)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := ParseFindings(data); err != nil {
+				return nil, fmt.Errorf("gomutant: export produced an unreadable document: %w", err)
+			}
+			return data, nil
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -1962,6 +2116,7 @@ func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 		} else {
 			mode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
 		}
+		priorData = data
 		if prior, err = parse(data); err != nil {
 			return err
 		}

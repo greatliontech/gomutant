@@ -4,6 +4,7 @@
 
 ### run
 **does:** Measure mutants and update the findings document.
+**coverage bound:** under a declared build selection (`tags`, `toolchain`), the summary states the targets the selection's leg discovers but no oracle reaches — listed by symbol, capped with the remainder counted — and a whole-tree run records the bound in the findings document per selection (an empty bound clears the row; a scoped run records none); a stood-down derivation is a resolution failure, named per package, never this bound.
 **knobs:**
 - `targets_path` (mcp, cli as `targets`) — path to a targets document (gomutant's or a producer's export); overrides discovery.
 - `targets_json` (mcp) — an inline targets document, same formats as targets_path.
@@ -76,6 +77,7 @@ oracleSet integer referencing oracleSets[].id.
 
 ### findings
 **does:** Inspect the findings document: states, survivors, dispositions.
+**coverage bounds:** the document's stated bounds per declared selection ride every inspection after the rows (the human face's tail; `coverageBounds` on mcp, rows and rosters capped with the remainders counted; the JSON face carries rows alone — the document on disk is the machine face for the table) — the population a tagged measurement did not cover, never a silent zero.
 **knobs:**
 - `label` (mcp, cli) — show only findings carrying this label.
 - `state` (mcp, cli) — show only findings in this judged state: current, stale, unverifiable, or detached (implies judge).
