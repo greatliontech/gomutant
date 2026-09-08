@@ -49,7 +49,15 @@ A window's coverage-probe phase announces its cost's upper bound
 before its first batch and reports the batches paid after each, before
 the window's estimate; a
 target skipped on a failing oracle baseline carries the oracle's own
-output as an analysis line beside its decision.
+output as an analysis line beside its decision. Execution proceeds in
+windows that commit as they close: a window closes at a candidate
+ceiling (eight per worker, sixty-four at least) or, once it holds at
+least the candidate minimum (the worker count, eight at least), at a
+test-execution budget of five hundred and twelve — each target's
+candidates times its derived oracle's test count — so a suite-class
+oracle commits on a shorter horizon; the partition is a function of
+the tree, the target order, and the worker count, never a measured
+duration.
 **example:** run with changed=HEAD~1 at a chunk gate; run --plan
 first when the target decision set is in doubt.
 

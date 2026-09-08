@@ -322,15 +322,15 @@ func TestGatherWindowBlocksUntilBudgetOrEnd(t *testing.T) {
 		items <- work{candidates: make([]engine.Candidate, 9)}
 		close(items)
 	}()
-	window, ok := gatherWindow(items, 5)
+	window, ok := gatherWindow(items, 5, 5)
 	if !ok || len(window) != 2 || len(window[0].candidates) != 2 || len(window[1].candidates) != 3 {
 		t.Fatalf("first window = %d items, want the late-arriving item awaited into a two-item window", len(window))
 	}
-	window, ok = gatherWindow(items, 5)
+	window, ok = gatherWindow(items, 5, 5)
 	if !ok || len(window) != 1 || len(window[0].candidates) != 9 {
 		t.Fatalf("second window = %+v, want the single over-budget item alone", len(window))
 	}
-	if _, ok := gatherWindow(items, 5); ok {
+	if _, ok := gatherWindow(items, 5, 5); ok {
 		t.Fatal("drained channel still yielded a window")
 	}
 }

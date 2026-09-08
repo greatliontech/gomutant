@@ -3279,13 +3279,14 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 	// late abort cost the whole campaign's verdicts. Serial
 	// confirmation's isolation contract is "alone after the pool
 	// drains", which the per-window drain preserves.
-	windowBudget := jobs * 8
-	if windowBudget < 64 {
-		windowBudget = 64
-	}
-	if runWindowCandidates > 0 {
-		windowBudget = runWindowCandidates
-	}
+	// The window's bounds are content-stable — a function of the tree's
+	// candidate counts, the target order, the worker count, and the
+	// run's derived oracle lists (a stood-down derivation shortens them
+	// for that run alone), never of a measured duration — so the
+	// partition never moves between runs of an unchanged tree under the
+	// same workers and the same derivations, and audited sets nest
+	// (REQ-exec-oracle-run's window rule).
+	windowBudget, windowMinimum := windowBounds(jobs, runWindowCandidates)
 	var treeDrift error
 	// commitAndAttribute is the one epilogue every measured or spliced
 	// finding leaves aggregation through: install, persist, and — when
@@ -4218,7 +4219,7 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 	go func() {
 		defer close(windowCh)
 		for {
-			window, ok := gatherWindow(items, windowBudget)
+			window, ok := gatherWindow(items, windowBudget, windowMinimum)
 			if !ok {
 				return
 			}
@@ -4413,8 +4414,10 @@ func snapshotFindings(findings []Finding) []Finding {
 	return snapshot
 }
 
-// runWindowCandidates overrides the execution window candidate budget
-// when positive - a test seam; zero means the jobs-derived default.
+// runWindowCandidates fixes the execution window when positive — a
+// test seam taking BOTH bounds, the ceiling and the minimum, so the
+// execution budget never splits a fixed window; zero means the
+// jobs-derived rule (windowBounds).
 var runWindowCandidates int
 
 // groupBaselineProbe is the baseline probe seam — a var so the bank
@@ -4449,21 +4452,71 @@ var runTruncateErr error
 // execution timing, so the window-scoped confirmation flip signal covers
 // the same kills on every run (REQ-exec-attribution). ok is false when no
 // item remains.
-func gatherWindow(items <-chan work, budget int) ([]work, bool) {
+func gatherWindow(items <-chan work, ceiling, minimum int) ([]work, bool) {
 	first, ok := <-items
 	if !ok {
 		return nil, false
 	}
 	window := []work{first}
-	for total := len(first.candidates); total < budget; {
+	total, executions := len(first.candidates), windowExecutions(len(first.candidates), len(first.oracle))
+	for total < ceiling && !(executions >= windowExecutionBudget && total >= minimum) {
 		next, ok := <-items
 		if !ok {
 			break
 		}
 		window = append(window, next)
 		total += len(next.candidates)
+		executions += windowExecutions(len(next.candidates), len(next.oracle))
 	}
 	return window, true
+}
+
+// The window's bounds (REQ-exec-oracle-run's window rule): a window
+// closes when its candidate total reaches the ceiling — eight per
+// worker, sixty-four at least — or, once it holds at least the
+// candidate minimum, when its test-execution total reaches the budget,
+// whichever first; it always holds at least one target. The minimum —
+// the worker count, eight at least — is the audit's and the pool's
+// guard, in CANDIDATES: the narrowed-survivor audit floors one
+// full-oracle sample per window, so a window of fewer than eight
+// candidates would spend more than an eighth of itself on the sample
+// (auditShareDivisor), and a window narrower than the worker count
+// offers less than one candidate per worker. A serve-heavy window,
+// whose candidates mostly do not execute, relaxes both — the executing
+// set is the findings document's and must never key the partition
+// (windowExecutions). All four constants are contract: the partition
+// is observable across runs.
+const (
+	windowCandidatesPerWorker = 8
+	windowCandidatesFloor     = 64
+	windowCandidatesMin       = 8
+	windowExecutionBudget     = 512
+)
+
+// windowBounds derives the window's candidate ceiling and minimum from
+// the worker count: ceiling = max(jobs × 8, 64), minimum = max(jobs, 8).
+// A test's fixed window (override > 0) is the whole rule for that
+// test: the ceiling and the minimum both take it, so the execution
+// budget cannot close a fixed window early — the minimum IS the
+// ceiling.
+func windowBounds(jobs, override int) (ceiling, minimum int) {
+	if override > 0 {
+		return override, override
+	}
+	return max(jobs*windowCandidatesPerWorker, windowCandidatesFloor), max(jobs, windowCandidatesMin)
+}
+
+// windowExecutions is one target's test executions at one full oracle
+// run per mutant: candidates times the derived oracle's test count. It
+// is an UPPER BOUND, and deliberately so: a served target executes
+// nothing, a narrowed candidate runs a coverage subset of the oracle,
+// and only the bound is a tree property — the executing set
+// (executingIndexes) reads the findings document, which the run itself
+// rewrites, and keying the partition on it would move the windows
+// between two runs of an unchanged tree. The two counts are the
+// function's whole input: no duration can reach it.
+func windowExecutions(candidates, oracleTests int) int {
+	return candidates * oracleTests
 }
 
 // serveCheckRefusal renders a serve-time evidence-check failure as that

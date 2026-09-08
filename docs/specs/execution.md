@@ -63,14 +63,35 @@ NARROWING'S OWN MODELED SAVINGS: one sample is FLOORED whenever the
 window has a narrowed survivor — the disagreement rate is measured
 in every narrowing window on any oracle duration, never assumed, and
 the floor is a deliberate purchase of measurement that can exceed a
-low-savings window's own win — and BEYOND that floored first sample
+low-savings window's own win, bounded to an eighth of the window's
+candidates by the window's candidate minimum (a serve-heavy window,
+whose candidates mostly do not execute, relaxes that share) — and BEYOND that floored first sample
 the audit spends at most a fixed share of what the window's
 narrowing saved (each re-run priced at the costliest work's
 full-oracle baseline), with a fixed per-window sample ceiling
 binding above it; the derived bound varies only the DEPTH of the
 content-stable selection order, so audited sets across runs of an
 unchanged tree NEST — one is a prefix of the other — rather than
-repeating identically. A
+repeating identically — under one worker count: the execution window
+is a pure function of the tree, the target order, the worker count,
+and the run's derived oracle lists (a derivation that stood down for a
+run shortens that run's lists and so is a partition input for that run
+alone), so the nesting holds across runs of an unchanged tree run with
+the same workers and the same derivations. A window closes when its candidate total reaches a
+ceiling (eight candidates per worker, sixty-four at least) or, once it
+holds at least the candidate minimum (the worker count, eight at
+least), when its test-execution total — each target's candidates times
+its derived oracle's test count, an upper bound that is a tree property
+— reaches a budget of five hundred and twelve, whichever first, and
+always holds at least one target; a suite-class oracle thereby commits
+on a shorter horizon, no measured duration entering the rule. The
+minimum bounds CANDIDATES, not mutant runs: it keeps the audit's
+floored sample within an eighth of every window's candidates but the
+campaign's last, which closes on the drain, and offers the
+worker pool at least one candidate per worker; a serve-heavy window,
+whose candidates mostly do not execute, relaxes both — the share and
+the fill — since the executing set is the findings document's and must
+never key the partition. A
 disagreement is a false survivor, scored from the full run (the
 authority) and reported loudly, and the sample's measured
 disagreement rate rides the run summary — the narrowing's residual
@@ -953,8 +974,9 @@ preparation or aggregation boundary, cancel in-flight oracle processes, wait
 for their cleanup, return an operational cancellation error, and commit
 nothing further to the findings document. CLI and MCP runs commit each
 finished target's finding incrementally — a cached serve once its pins are
-proven to hold, a measured or spliced target after its post-execution source
-validation — under the same document lock the final merge takes, so an
+proven to hold, a measured or spliced target once its post-execution source
+validation passes and its execution window aggregates (the window is the
+measured target's commit horizon) — under the same document lock the final merge takes, so an
 interrupted run keeps every finding committed before cancellation became
 observable while an unfinished target's work is discarded whole. The final
 merge of the complete result remains the authority; re-merging a committed
