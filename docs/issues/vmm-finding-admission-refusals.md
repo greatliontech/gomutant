@@ -1,9 +1,19 @@
 # VMM measurements remain unverifiable after successful execution
 
-Lands: cross-tool train chunk 158 — gomutant's next gofresh bump (past
-v0.98.1, whose chunk 119 audited the nodwarf5 key the pinned v0.98.0
-refuses) re-verifies the report at 158's triage; closes if the
-refusals vanish under the audited key, re-slots at their root otherwise.
+Lands: user decision — the audit-key half closed at gomutant's gofresh
+bump to v0.99.0 (cross-tool train chunk 163, 2026-09-08: a gomutant built
+from the bumped tree under the stock go1.27.0 toolchain with
+GOEXPERIMENT=nodwarf5 loaded a fixture, ran its baseline, and measured a
+mutant with no toolchain-unaudited notice); the three residual refusal
+classes below are gofresh precision positions, each already owned there:
+`reaches os.ReadFile (file I/O)` is an intended external-effect refusal
+(a subject reading a file is observable by contract; a vouch cannot
+discharge an effect); `testing runtime value escapes analyzable
+receiver` is gofresh docs/issues/immutable-after-construction-objects.md
+(user decision); `subject accepts caller-supplied dynamic behavior` is
+gofresh docs/issues/invoke-targets-narrowed-by-operand.md (the chartered
+narrowing). This doc stands until those two decide, as the consumer-level
+record of which VMM targets each governs.
 
 ## Evidence
 

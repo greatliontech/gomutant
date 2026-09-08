@@ -22,7 +22,7 @@
 - `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters, for example **/*emitConditions*; alternatives.
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection (e.g. go1.26.5); rides the toolchain measurement pin, so a different selection re-measures rather than serving across.
-- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence. On mcp vouches are per-server (gomutant mcp --vouch), not per-call.
+- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence. The repository's reviewed standing set is the `vouches` file at the tree root (one IMPORT-PATH:VARIABLE per line, `#` comments; the engine reads it itself, a malformed line refusing the load); the flags extend that set for one invocation and never remove from it. On mcp vouches are per-server (gomutant mcp --vouch), not per-call.
 - `json` (cli) — structured output as JSON lines: every progress event, decision, result row, and summary as one JSON object per line — the CLI's machine-readable face; the human rendering is suppressed.
 - `progress-interval` (cli) — cadence of the cumulative progress line (targets committed, candidates, kills, elapsed); 0 disables.
 - `plan` (cli) — preflight only: run the full preparation sequence and print every target decision — cached, skipped with reason, or measure with candidate count — then stop before baseline probes and mutant execution, persisting nothing; precondition holes surface before any budget is spent.
@@ -87,7 +87,7 @@ oracleSet integer referencing oracleSets[].id.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection (implies judge).
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection (implies judge).
-- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); inspection judges under the same acceptances the run used (implies judge). On mcp vouches are per-server.
+- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), extending the tree root's `vouches` file; inspection judges under the same acceptances the run used (implies judge). On mcp vouches are per-server.
 - `json` (cli) — render deterministic machine-readable findings.
 - `dir` (cli) — tree root the default document anchors at.
 **when:** use findings to triage without running anything — recorded
@@ -249,7 +249,7 @@ run naming the test that must notice.
 **does:** Serve gomutant over MCP.
 **knobs:**
 - `dir` — tree root (module or workspace).
-- `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): every tool call's analysis judges under the server's set — a per-server input because the loaded tree is shared across calls.
+- `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): every tool call's analysis judges under the server's set — the tree root's `vouches` file extended by these — a per-server input because the loaded tree is shared across calls.
 **when:** use mcp as the server entry point for an MCP client;
 selection (tags, toolchain) is per-call on the served tools, while
 vouches bind at the server.
