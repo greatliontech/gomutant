@@ -18,6 +18,7 @@ import (
 
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/gitfixture"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -1660,5 +1661,132 @@ func TestToolAttestRefusesABlankReasonBeforeTheLock(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".gomutant")); !os.IsNotExist(err) {
 		t.Fatalf("a refused attest persisted the document's directory: %v", err)
+	}
+}
+
+// A cancellation after measurement began is the campaign's ordinary
+// end on this face: the result succeeds, exit names the cause, and the
+// summary's banked state claims exactly the commits that returned —
+// one here, cancelled right after it (REQ-exec-banked-summary).
+func TestToolRunCancelledAfterACommitReturnsTheBankedState(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over the fixture module")
+	}
+	s := serverAt(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	afterCommitForTest = func(gomutant.Finding) { cancel() }
+	t.Cleanup(func() { afterCommitForTest = nil })
+	_, out, err := s.toolRun(ctx, nil, runIn{
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
+		Jobs:        1,
+	})
+	if err != nil {
+		t.Fatalf("a cancellation after the first commit errored: %v", err)
+	}
+	if out.Exit == "" || out.Summary.Banked == nil || out.Summary.Banked.Committed != 1 || out.Summary.Banked.Selected != 2 || out.Summary.Banked.Cause != out.Exit {
+		t.Fatalf("banked result = exit %q, banked %+v; want one committed of two under the exit cause", out.Exit, out.Summary.Banked)
+	}
+	if len(out.Findings) != 0 || out.Document == "" {
+		t.Fatalf("banked result carried rows %d / document %q; want none and the document named", len(out.Findings), out.Document)
+	}
+	// Before any disposition, a cancellation is still the error it was.
+	done, cancelDone := context.WithCancel(context.Background())
+	cancelDone()
+	if _, _, err := s.toolRun(done, nil, runIn{TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"],"oracleExplicit":true}]}`}); err == nil {
+		t.Fatal("a cancellation before the load succeeded")
+	}
+}
+
+// The final replacement is the success boundary: a deadline expiring
+// after it never fails a committed run — the result succeeds with its
+// rows, and the document holds them (REQ-exec-cancellation).
+func TestToolRunDeadlineAfterTheFinalReplacementStillSucceeds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
+	// The changed-ref run: the survivor cut after the final replacement
+	// is the post-boundary work that reads the context.
+	s := New(gitfixture.Changed(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	afterFinalReplacementForTest = cancel
+	t.Cleanup(func() { afterFinalReplacementForTest = nil })
+	_, out, err := s.toolRun(ctx, nil, runIn{Changed: "HEAD"})
+	if err != nil {
+		t.Fatalf("a deadline after the final replacement failed the run: %v", err)
+	}
+	if out.Exit != "" || len(out.Findings) != 1 || len(out.Findings[0].DeltaOpen) == 0 || out.Summary.Delta == nil {
+		t.Fatalf("post-boundary result = exit %q, rows %+v, summary %+v; want the completed run with its cut", out.Exit, out.Findings, out.Summary)
+	}
+	store, err := gomutant.OpenStore(filepath.Join(s.dir, defaultFindings), s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range rows {
+		found = found || f.Symbol == "example.com/dl.Value"
+	}
+	if !found {
+		t.Fatalf("the committed row is not in the store: %d rows", len(rows))
+	}
+}
+
+// A shed the incremental commit recorded rides the banked result once
+// — never retold by the epilogue — and the banked result's lists are
+// capped like a completed run's (REQ-attest-survivor; REQ-mcp-envelope).
+func TestToolRunBankedResultListsEachShedOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
+	dir := gitfixture.Changed(t)
+	s := New(dir)
+	_, first, err := s.toolRun(context.Background(), nil, runIn{Changed: "HEAD"})
+	if err != nil || len(first.Findings) != 1 || len(first.Findings[0].Open) == 0 {
+		t.Fatalf("first run = %v, rows %+v; want one row with open survivors", err, first.Findings)
+	}
+	sv := first.Findings[0].Open[0]
+	if _, _, err := s.toolAttest(context.Background(), nil, attestIn{Symbol: "example.com/dl.Value", Position: sv.Position, Operator: sv.Operator, Reason: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	// The mutated body changes and every site moves: the target is
+	// measured again and the disposition sheds at its commit.
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("// moved\npackage dl\n\nfunc Value(x int) int {\n\tif x < -10 {\n\t\treturn 4\n\t}\n\tif x > 10 {\n\t\treturn 1\n\t}\n\treturn 2\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	afterCommitForTest = func(gomutant.Finding) { cancel() }
+	t.Cleanup(func() { afterCommitForTest = nil })
+	_, out, err := s.toolRun(ctx, nil, runIn{Changed: "HEAD"})
+	if err != nil || out.Exit == "" {
+		t.Fatalf("banked run = %v, exit %q; want the banked result", err, out.Exit)
+	}
+	if len(out.AttestationSheds) == 0 {
+		t.Fatal("the shed the commit recorded is missing from the banked result")
+	}
+	seen := map[string]bool{}
+	for _, line := range out.AttestationSheds {
+		if seen[line] {
+			t.Fatalf("shed listed twice on the banked result: %q", line)
+		}
+		seen[line] = true
+	}
+}
+
+// A cancelled run's summary carries the audit rate it measured before
+// the exit beside its banked state; a run that audited nothing carries
+// none (REQ-exec-oracle-run's narrowed-survivor clause).
+func TestBankedRunSummaryCarriesTheAuditRate(t *testing.T) {
+	audited := bankedRunSummary(gomutant.RunTallies{Committed: 2, Audit: gomutant.AuditSummary{Narrowed: 3, Disagreed: 1}}, "command timeout", 4*time.Second, gomutant.Selection{}, "r1")
+	if audited.Audit == nil || *audited.Audit != (gomutant.AuditSummary{Narrowed: 3, Disagreed: 1}) || audited.Banked == nil || audited.Banked.Committed != 2 || audited.Banked.Cause != "command timeout" || audited.Run != "r1" {
+		t.Fatalf("banked summary = %+v (audit %+v, banked %+v)", audited, audited.Audit, audited.Banked)
+	}
+	if silent := bankedRunSummary(gomutant.RunTallies{}, "interrupt/cancellation", time.Second, gomutant.Selection{}, "r2"); silent.Audit != nil {
+		t.Fatalf("a run that audited nothing carries an audit rate: %+v", silent.Audit)
 	}
 }

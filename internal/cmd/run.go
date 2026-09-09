@@ -308,6 +308,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		defer soft.disarm()
 	}
 	postures := map[string]gomutant.RecordPosture{}
+	var tallies *gomutant.RunTallies
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		RunID:    runID,
 		SoftStop: softStop,
@@ -415,6 +416,10 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// Each finished target commits under the same document lock the final
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
+		// The run's own tallies: the banked state a cancelled run
+		// reports and the audit rate the summary carries, one count for
+		// both faces (REQ-exec-banked-summary).
+		Tallies: func(r gomutant.RunTallies) { tallies = &r },
 		// Plan mode suppresses this at the library boundary — the run owns
 		// the plan clause's no-write guarantee.
 		Commit: func(finding gomutant.Finding) error {
@@ -459,12 +464,15 @@ func runCommand(ctx context.Context, o runOptions) error {
 	rep.stop()
 	var drift *gomutant.TreeDriftError
 	if err != nil && !errors.As(err, &drift) {
-		// The banked-state exit summary (REQ-exec-cancellation's
-		// rendering half): a budget, signal, or abort exit names what
-		// the findings document kept instead of ending on a bare
-		// context error. Only incrementally committed findings are
-		// claimed.
-		rep.bankedState(exitCause(err))
+		// The banked-state exit summary (REQ-exec-banked-summary): a
+		// budget, signal, or abort exit names what the findings
+		// document kept instead of ending on a bare context error —
+		// the run's own tallies, claiming only returned commits; a run
+		// cancelled before measurement began has no tallies and stays
+		// silent.
+		if tallies != nil {
+			rep.bankedState(tallies.Banked(gomutant.ExitCause(err), time.Since(rep.start)))
+		}
 		return err
 	}
 	// The final merge runs before anything renders: the output reads
@@ -495,6 +503,18 @@ func runCommand(ctx context.Context, o runOptions) error {
 		}); err != nil {
 			return err
 		}
+		if afterFinalReplacementForTest != nil {
+			afterFinalReplacementForTest()
+		}
+		// The final replacement is the success boundary
+		// (REQ-exec-cancellation): rendering after it runs detached
+		// from the command's deadline and interrupt under its own
+		// bound, so a deadline or interrupt after the commit never
+		// fails a committed run. A plan replaces nothing and renders
+		// under the command's own context.
+		var cancelRender context.CancelFunc
+		ctx, cancelRender = gomutant.PostCommitRenderContext(ctx)
+		defer cancelRender()
 	}
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	localOnly := 0
@@ -582,19 +602,18 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if cut != nil {
 			summary.Delta = &gomutant.DeltaSummary{Ref: cut.Ref, Open: deltaOpen}
 		}
+		// The narrowed-survivor audit's measured rate rides the run
+		// summary from the run's own tallies (REQ-exec-oracle-run's
+		// narrowed-survivor clause).
+		if tallies != nil && tallies.Audit.Narrowed > 0 {
+			audit := tallies.Audit
+			summary.Audit = &audit
+		}
 		if o.jsonl {
 			rep.emit("summary", summary)
 		} else {
 			renderRunSummary(&terminal, summary)
-		}
-		// The narrowed-survivor audit's measured rate rides the run
-		// summary (REQ-exec-oracle-run's narrowed-survivor clause).
-		if audited, disagreed := rep.auditTotals(); audited > 0 {
-			if o.jsonl {
-				rep.emit("audit", map[string]int{"auditedNarrowed": audited, "auditDisagreed": disagreed})
-			} else {
-				fmt.Fprintf(&terminal, "audit     %d narrowed survivor(s) re-scored under the full oracle this run, %d disagreed\n", audited, disagreed)
-			}
+			renderAudit(&terminal, summary)
 		}
 	}
 	// The class line earns its place only when it aggregates: a single
@@ -776,25 +795,6 @@ func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent, selectionN
 	fmt.Fprintln(w, line)
 }
 
-// exitCause names the exit path for the banked-state summary.
-func exitCause(err error) string {
-	switch {
-	case errors.Is(err, gomutant.ErrInterrupted):
-		// The graceful drain: measured prefixes are committed and
-		// re-running the same command extends them — the one exit that
-		// is neither a timeout, a hard cancel, nor an abort.
-		return "interrupted gracefully - measured prefixes committed; re-run to extend"
-	case errors.Is(err, context.DeadlineExceeded):
-		return "command timeout"
-	case errors.Is(err, context.Canceled):
-		// The CLI's err descends from the ctx it passed, so a
-		// Canceled error always accompanies a canceled ctx — one arm.
-		return "interrupt/cancellation"
-	default:
-		return fmt.Sprintf("aborted (%v)", err)
-	}
-}
-
 func renderRunDecision(w io.Writer, decision gomutant.RunDecision) {
 	switch {
 	case decision.Action == "measure":
@@ -828,6 +828,21 @@ func skipClasses(findings []gomutant.Finding) (string, int) {
 	}
 	return strings.Join(parts, "; "), total
 }
+
+// renderAudit renders the summary's narrowed-survivor audit rate, the
+// run's own count (REQ-exec-oracle-run's narrowed-survivor clause);
+// a run that audited nothing renders no line.
+func renderAudit(w io.Writer, summary gomutant.RunSummary) {
+	if summary.Audit == nil {
+		return
+	}
+	fmt.Fprintf(w, "audit     %d narrowed survivor(s) re-scored under the full oracle this run, %d disagreed\n", summary.Audit.Narrowed, summary.Audit.Disagreed)
+}
+
+// afterFinalReplacementForTest observes the final replacement's
+// return, so a test can end the command exactly at the success
+// boundary; nil outside tests, which never run in parallel.
+var afterFinalReplacementForTest func()
 
 func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
 	fmt.Fprintf(w, "summary   %d targets: %d measured, %d cached, %d skipped; %d generated, %d killed, %d survived, %d discarded; %d attested, %d open",

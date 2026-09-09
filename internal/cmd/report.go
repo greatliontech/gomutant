@@ -37,10 +37,6 @@ type runReporter struct {
 	bankedKilled int
 	bankedOpen   int
 	lastExec     gomutant.ExecutionEvent
-	// auditedNarrowed/auditDisagreed accumulate the narrowed-survivor
-	// audit's per-window events for the run-summary rate line.
-	auditedNarrowed int
-	auditDisagreed  int
 	// paceStart/paceBase/paceDone anchor the measured execution pace:
 	// first completion tick to latest, so the progress line's
 	// estimated-remaining reflects mutant execution alone —
@@ -216,20 +212,7 @@ func (r *runReporter) executing(e gomutant.ExecutionEvent) {
 		}
 		r.paceDone = e.CandidatesDone
 	}
-	if e.Phase == "audit" {
-		r.auditedNarrowed += e.AuditedNarrowed
-		r.auditDisagreed += e.AuditDisagreed
-	}
 	r.mu.Unlock()
-}
-
-// auditTotals reports the run's accumulated narrowed-survivor audit
-// counts for the summary line (REQ-exec-oracle-run's narrowed-survivor
-// clause: the measured disagreement rate rides the run summary).
-func (r *runReporter) auditTotals() (audited, disagreed int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.auditedNarrowed, r.auditDisagreed
 }
 
 // confirmationModeSuffix reports the suffix to append to a confirming
@@ -384,33 +367,12 @@ func (r *runReporter) stop() {
 	}
 }
 
-type bankedPayload struct {
-	Cause     string `json:"cause"`
-	Committed int    `json:"committed"`
-	Killed    int    `json:"killed"`
-	Open      int    `json:"open"`
-	Selected  int    `json:"selected"`
-	Served    int    `json:"served"`
-	Skipped   int    `json:"skipped"`
-	Elapsed   string `json:"elapsed"`
-}
-
-// bankedState renders the exit summary on a non-drift error path:
-// what the findings document holds (incrementally committed
-// findings), what the run had dispositioned, and the cause — a budget
-// or signal exit never ends on a bare context error again.
-func (r *runReporter) bankedState(cause string) {
-	r.mu.Lock()
-	p := bankedPayload{
-		Cause: cause, Committed: r.committed,
-		Killed: r.bankedKilled, Open: r.bankedOpen,
-		Selected: r.selected, Served: r.served, Skipped: r.skipped,
-		Elapsed: time.Since(r.start).Round(time.Second).String(),
-	}
-	r.mu.Unlock()
-	r.line("banked", p, func(w io.Writer) {
-		fmt.Fprintf(w, "banked    %s after %s: %d target(s) committed to the findings document this run (%d killed, %d open among them); selection was %d target(s) — %d served, %d skipped before exit; every committed target is kept (REQ-exec-cancellation), the rest re-measure — a gracefully drained prefix extends — on the next run\n",
-			p.Cause, p.Elapsed, p.Committed, p.Killed, p.Open, p.Selected, p.Served, p.Skipped)
+// bankedState renders the exit summary on a non-drift error path —
+// the run's own banked state, one text both faces show, under this
+// face's prefix (REQ-exec-banked-summary).
+func (r *runReporter) bankedState(state gomutant.BankedState) {
+	r.line("banked", state, func(w io.Writer) {
+		fmt.Fprintf(w, "banked    %s\n", state.Text())
 	})
 }
 

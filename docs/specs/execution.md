@@ -995,7 +995,10 @@ validation passes and its execution window aggregates (the window is the
 measured target's commit horizon) — under the same document lock the final merge takes, so an
 interrupted run keeps every finding committed before cancellation became
 observable while an unfinished target's work is discarded whole. The final
-merge of the complete result remains the authority; re-merging a committed
+merge of the complete result remains the authority — and its atomic
+replacement is the success boundary: rendering after it runs detached
+from the request's deadline under its own bound, so a deadline expiring
+after the commit never fails a committed run; re-merging a committed
 finding is idempotent. A finding's capture commit is read at stamp time, so
 an incremental or final commit records the repository state its evidence was
 validated against; repository ref motion never discards completed evidence,
@@ -1058,12 +1061,20 @@ committed findings — never in-flight work and never a finding whose commit
 failed — so what it reports is exactly what the findings document holds. A
 run cancelled before measurement began stays silent — there is no banked
 state to report — and the drift exit renders its full result rows and
-summary instead, which are its banked state.
+summary instead, which are its banked state. The run counts the banked
+state itself and both faces render its one text: the CLI as its banked
+line, the MCP result as the summary's banked state beside an exit
+naming the cause, the call succeeding — a cancellation after
+measurement began is an MCP campaign's ordinary end, never an error
+the transport discards the result with.
 
 **REQ-exec-completion** (behavior): A run that returns success MUST have
 dispositioned every announced target: measured and committed, served,
 skipped with a recorded reason, or named in a drift error. There is no
-fourth silent outcome.
+fourth silent outcome. The claim is the library return's and the
+completed campaign's; an MCP result carrying a banked exit claims no
+such completion — its banked state names what was and was not
+dispositioned.
 
 **REQ-exec-truncation** (behavior): A run whose pipeline ended early
 without an

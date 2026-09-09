@@ -23,12 +23,9 @@ import (
 func TestBankedStateNamesOnlyCommittedFindings(t *testing.T) {
 	var out bytes.Buffer
 	rep := newRunReporter(&out, false, 5)
-	rep.decision(gomutant.RunDecision{Action: "measure"})
-	rep.decision(gomutant.RunDecision{Action: "cached"})
-	rep.decision(gomutant.RunDecision{Action: "skipped"})
-	rep.bankedFinding(gomutant.Finding{Symbol: "a.F", Killed: 3})
-	rep.bankedFinding(gomutant.Finding{Symbol: "a.G", Killed: 1})
-	rep.bankedState("command timeout")
+	// The banked state is the run's own tally, rendered as its one text
+	// under this face's prefix.
+	rep.bankedState(gomutant.RunTallies{Committed: 2, Killed: 4, Selected: 5, Served: 1, Skipped: 1}.Banked("command timeout", 3*time.Second))
 	line := out.String()
 	for _, want := range []string{"banked", "command timeout", "2 target(s) committed", "4 killed", "5 target(s)", "1 served", "1 skipped"} {
 		if !strings.Contains(line, want) {
@@ -118,7 +115,7 @@ func TestJSONLEnvelopesParse(t *testing.T) {
 	rep.emit("decision", gomutant.RunDecision{Symbol: "a.F", Action: "measure", Candidates: 4})
 	rep.emit("execution", gomutant.ExecutionEvent{Phase: "confirming", Symbol: "a.F", ConfirmationMode: "stride-sampled"})
 	rep.bankedFinding(gomutant.Finding{Symbol: "a.F", Killed: 2})
-	rep.bankedState("interrupt/cancellation")
+	rep.bankedState(gomutant.RunTallies{Committed: 1, Killed: 2}.Banked("interrupt/cancellation", time.Second))
 	rep.progressLine()
 	kinds := map[string]bool{}
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
@@ -221,7 +218,10 @@ func TestRunCommandInterruptRendersBankedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	out := &triggerCancelWriter{cancel: cancel, trigger: []byte("measure")}
+	// The cancellation lands once measurement began — the first
+	// execution line, the window's dispatch — since a run cancelled
+	// before that has no banked state to report.
+	out := &triggerCancelWriter{cancel: cancel, trigger: []byte("target 1/1")}
 	err = runCommand(ctx, runOptions{
 		dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: docPath,
 		budget: 1, output: out,
@@ -548,5 +548,20 @@ func TestReporterLineClassesStayPureUnderJSONL(t *testing.T) {
 		if !kinds[c.kind] {
 			t.Fatalf("kinds %v missing %q", kinds, c.kind)
 		}
+	}
+}
+
+// The audit line reads the summary's own rate; a run that audited
+// nothing renders no line (REQ-exec-oracle-run's narrowed-survivor
+// clause).
+func TestRenderAuditReadsTheSummary(t *testing.T) {
+	var out bytes.Buffer
+	renderAudit(&out, gomutant.RunSummary{})
+	if out.Len() != 0 {
+		t.Fatalf("a run that audited nothing rendered %q", out.String())
+	}
+	renderAudit(&out, gomutant.RunSummary{Audit: &gomutant.AuditSummary{Narrowed: 4, Disagreed: 1}})
+	if !strings.Contains(out.String(), "4 narrowed survivor(s)") || !strings.Contains(out.String(), "1 disagreed") {
+		t.Fatalf("audit line = %q", out.String())
 	}
 }

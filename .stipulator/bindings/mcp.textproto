@@ -333,8 +333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "608a2fc24ad750b2efda297fea4de49909b0956c7df196f9d45750f982ae7360"
-  source_hash: "e07e2e72038fa2abb45c23427734ee61b083f87a526fc8c3f58ab56a94100a31"
+  content_hash: "9ffd04702b9bb698ea51a8aca3198d5de2ed53b9de5a0d0788973aeb9d03bb4a"
+  source_hash: "a7fc26ca3923bef2317efa38405222c490c4f16fefda34900ea4e80cb8a59571"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableTracksTheGuidanceVerbs"
   role: BINDING_ROLE_TESTS
@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "608a2fc24ad750b2efda297fea4de49909b0956c7df196f9d45750f982ae7360"
-  source_hash: "e07e2e72038fa2abb45c23427734ee61b083f87a526fc8c3f58ab56a94100a31"
+  content_hash: "9ffd04702b9bb698ea51a8aca3198d5de2ed53b9de5a0d0788973aeb9d03bb4a"
+  source_hash: "a7fc26ca3923bef2317efa38405222c490c4f16fefda34900ea4e80cb8a59571"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableStatesTheHeldBounds"
   role: BINDING_ROLE_TESTS
@@ -499,4 +499,14 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestCancelledServeKeepsTheWireErrorOnTheLine"
   role: BINDING_ROLE_TESTS
   shape_hash: "43eeff5643cfeccb50c18ad707709e0e2a2ead6ce961e671353d1fa997e75cc1"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "f5838a02cb5130cd550017eb704dbe591ad552739589b5cb36b4f128b3e8d7bd"
+  source_hash: "30ca10e747f2960a2a06ab521789d474156741f5925c282c6ca91f74cd885a4e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunBankedResultListsEachShedOnce"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3b43fa90f0571678960b3858e8cfb1a8671e75d8b75a3e882822a5ec4c01f77a"
 }

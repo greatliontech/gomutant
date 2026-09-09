@@ -276,6 +276,12 @@ type Options struct {
 	// and never needs a second operation to learn it is not
 	// (REQ-result-run-posture). Nil asks for no posture.
 	Posture func(RecordPosture)
+	// Tallies receives what the run counted about itself — the banked
+	// state and the audit rate — on every exit once measurement began
+	// (the first execution event, the first window's dispatch) and on
+	// every completed or drifted run; a run cancelled before that calls
+	// it never (REQ-exec-banked-summary).
+	Tallies func(RunTallies)
 	// PlanOnly stops the run after the deterministic preparation sequence
 	// and target decisions: mutants are enumerated and every decision is
 	// computed and delivered, but no baseline probes, no mutant executes,
@@ -737,6 +743,14 @@ type RunSummary struct {
 	Reusable           int             `json:"reusable"`
 	NotReusable        []RecordPosture `json:"notReusable,omitempty"`
 	OmittedNotReusable int             `json:"omittedNotReusable,omitempty"`
+	// Audit is the narrowed-survivor audit's measured rate for this
+	// run (REQ-exec-oracle-run's narrowed-survivor clause); absent
+	// when the run audited nothing.
+	Audit *AuditSummary `json:"audit,omitempty"`
+	// Banked is a cancelled run's banked state: what the document kept
+	// under the named exit cause (REQ-exec-banked-summary); absent on
+	// a completed run.
+	Banked *BankedState `json:"banked,omitempty"`
 }
 
 // PostureCap bounds the not-reusable roster a summary carries.
@@ -1880,6 +1894,22 @@ func preflightBracketPaths(ctx context.Context, treeDir string, paths []string) 
 }
 
 func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Finding, error) {
+	// The run counts itself: the tallies are installed on the caller's
+	// callbacks and delivered on every exit once measurement began, and
+	// on every completed or drifted run.
+	var tally RunTallies
+	tally.Selected = len(targets)
+	started := false
+	caller = tallyCallbacks(caller, &tally, &started)
+	findings, err := t.runCounted(ctx, targets, caller)
+	var drift *TreeDriftError
+	if caller.Tallies != nil && (started || err == nil || errors.As(err, &drift)) {
+		caller.Tallies(tally)
+	}
+	return findings, err
+}
+
+func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options) ([]Finding, error) {
 	// The run's view of its options: the caller's surface beside the
 	// services this function installs — the one constructor of
 	// runOptions.

@@ -238,7 +238,8 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	probingBeforeEstimate := true
 	var emu sync.Mutex
 	markerActive.Store(true)
-	scheduled, err := tr.Run(ctx, []Target{target}, Options{Executing: func(e ExecutionEvent) {
+	var tallies RunTallies
+	scheduled, err := tr.Run(ctx, []Target{target}, Options{Tallies: func(r RunTallies) { tallies = r }, Executing: func(e ExecutionEvent) {
 		emu.Lock()
 		defer emu.Unlock()
 		switch e.Phase {
@@ -267,6 +268,12 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The run's own tally of the audit matches what the events carried.
+	emu.Lock()
+	if tallies.Audit != (AuditSummary{Narrowed: audited, Disagreed: auditFlips}) {
+		t.Fatalf("tallied audit %+v, events carried %d narrowed, %d disagreed", tallies.Audit, audited, auditFlips)
+	}
+	emu.Unlock()
 	mu.Lock()
 	scheduledProbes := append([]string(nil), probed...)
 	mu.Unlock()

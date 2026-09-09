@@ -6172,3 +6172,96 @@ func TestShapedMutantRunsUnderDerivedBudget(t *testing.T) {
 		t.Fatalf("shaped timeout-kill record on a derived re-run = %+v, want a wholesale re-measure — no route re-vouches the bound claim", decisions)
 	}
 }
+
+// The run counts itself: the tallies delivered to Options.Tallies
+// claim exactly the commits that returned successfully — a run
+// cancelled inside its second target's commit banks one — a completed
+// run banks every target, and a run cancelled before measurement
+// began delivers nothing (REQ-exec-banked-summary).
+func TestRunTalliesBankOnlyReturnedCommits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test")
+	}
+	tr := fixtureTree(t)
+	add := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
+	weak := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var delivered []RunTallies
+	commits := 0
+	_, err := tr.Run(ctx, []Target{add, weak}, Options{Jobs: 1, Commit: func(f Finding) error {
+		commits++
+		if commits == 2 {
+			cancel()
+			return ctx.Err()
+		}
+		return nil
+	}, Tallies: func(r RunTallies) { delivered = append(delivered, r) }})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled run = %v, want the cancellation", err)
+	}
+	if len(delivered) != 1 || delivered[0].Committed != 1 || delivered[0].Selected != 2 {
+		t.Fatalf("tallies after a cancelled second commit = %+v, want one committed of two selected", delivered)
+	}
+	delivered = nil
+	findings, err := tr.Run(context.Background(), []Target{add, weak}, Options{Jobs: 1, Commit: func(Finding) error { return nil }, Tallies: func(r RunTallies) { delivered = append(delivered, r) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	killed := 0
+	for _, f := range findings {
+		killed += f.Killed
+	}
+	if len(delivered) != 1 || delivered[0].Committed != 2 || delivered[0].Killed != killed || delivered[0].Served != 0 {
+		t.Fatalf("tallies after a completed run = %+v, want both committed with %d killed", delivered, killed)
+	}
+	// A run over the prior findings serves both: served decisions are
+	// counted, and a serve commits too.
+	delivered = nil
+	if _, err := tr.Run(context.Background(), []Target{add, weak}, Options{Jobs: 1, Prior: findings, Commit: func(Finding) error { return nil }, Tallies: func(r RunTallies) { delivered = append(delivered, r) }}); err != nil {
+		t.Fatal(err)
+	}
+	if len(delivered) != 1 || delivered[0].Served != 2 || delivered[0].Committed != 2 {
+		t.Fatalf("tallies after a served run = %+v, want two served and committed", delivered)
+	}
+	delivered = nil
+	done, cancelDone := context.WithCancel(context.Background())
+	cancelDone()
+	if _, err := tr.Run(done, []Target{add}, Options{Tallies: func(r RunTallies) { delivered = append(delivered, r) }}); err == nil || len(delivered) != 0 {
+		t.Fatalf("a run cancelled before measurement began delivered %+v (err %v)", delivered, err)
+	}
+	// Measurement begins at the first window's dispatch: a run cancelled
+	// after serving from prior evidence but before any window delivers
+	// nothing — there is no banked state to report — while a caller
+	// supplying no commit banks nothing on a completed run.
+	delivered = nil
+	serving, cancelServing := context.WithCancel(context.Background())
+	defer cancelServing()
+	_, err = tr.Run(serving, []Target{add, weak}, Options{Jobs: 1, Prior: findings, Decision: func(RunDecision) { cancelServing() }, Tallies: func(r RunTallies) { delivered = append(delivered, r) }})
+	if err == nil || len(delivered) != 0 {
+		t.Fatalf("a run cancelled while serving, before measurement, delivered %+v (err %v)", delivered, err)
+	}
+	delivered = nil
+	if _, err := tr.Run(context.Background(), []Target{add}, Options{Tallies: func(r RunTallies) { delivered = append(delivered, r) }}); err != nil || len(delivered) != 1 || delivered[0].Committed != 0 {
+		t.Fatalf("a completed run with no commit callback banked %+v (err %v); want nothing committed", delivered, err)
+	}
+}
+
+// The audit summary event's counts accumulate on the tallies and mark
+// nothing else; a flip event carries no counts.
+func TestTallyCallbacksAccumulateTheAuditRate(t *testing.T) {
+	var tally RunTallies
+	started := false
+	opts := tallyCallbacks(Options{}, &tally, &started)
+	opts.Executing(ExecutionEvent{Phase: "audit", AuditedNarrowed: 3, AuditDisagreed: 1})
+	opts.Executing(ExecutionEvent{Phase: "audit-flip"})
+	opts.Executing(ExecutionEvent{Phase: "audit", AuditedNarrowed: 2})
+	if tally.Audit != (AuditSummary{Narrowed: 5, Disagreed: 1}) || !started {
+		t.Fatalf("audit tally = %+v (started %v), want 5 narrowed, 1 disagreed", tally.Audit, started)
+	}
+	opts.Decision(RunDecision{Action: "cached"})
+	opts.Decision(RunDecision{Action: "skipped"})
+	if tally.Served != 1 || tally.Skipped != 1 || tally.Committed != 0 || opts.Commit != nil {
+		t.Fatalf("decision tallies = %+v, commit %v; want one served, one skipped, no commit wrapper", tally, opts.Commit != nil)
+	}
+}

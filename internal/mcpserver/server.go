@@ -5,8 +5,6 @@
 package mcpserver
 
 import (
-	guidancepkg "github.com/greatliontech/gofresh/guidance"
-
 	"context"
 	"errors"
 	"fmt"
@@ -21,11 +19,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
+	guidancepkg "github.com/greatliontech/gofresh/guidance"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/gitref"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // clientKeepAliveInterval paces the server's keepalive pings - the
@@ -70,6 +68,32 @@ func WithDynamicStateVouches(identities ...string) Option {
 		s.vouches = append([]string(nil), identities...)
 	}
 }
+
+// bankedRunSummary is a cancelled run's summary: the banked state under
+// the exit cause, and the audit rate the run measured before the exit
+// (REQ-exec-banked-summary; REQ-exec-oracle-run's narrowed-survivor
+// clause).
+func bankedRunSummary(tallies gomutant.RunTallies, cause string, elapsed time.Duration, sel gomutant.Selection, runID string) gomutant.RunSummary {
+	summary := gomutant.SummarizeRun(nil, sel)
+	summary.Run = runID
+	banked := tallies.Banked(cause, elapsed)
+	summary.Banked = &banked
+	if tallies.Audit.Narrowed > 0 {
+		audit := tallies.Audit
+		summary.Audit = &audit
+	}
+	return summary
+}
+
+// afterCommitForTest and afterFinalReplacementForTest observe a run's
+// two commit boundaries — after an incremental commit returned, and
+// after the final replacement returned — so tests can end the request
+// exactly there and pin what each boundary claims (REQ-exec-banked-summary,
+// REQ-exec-cancellation); nil outside tests, which never run in parallel.
+var (
+	afterCommitForTest           func(gomutant.Finding)
+	afterFinalReplacementForTest func()
+)
 
 // updateStore commits through the one store a verb opened: a run's
 // per-target commits and its final merge share the store's caches and
@@ -788,6 +812,7 @@ type findingOut struct {
 
 type runOut struct {
 	Summary                   gomutant.RunSummary         `json:"summary"`
+	Exit                      string                      `json:"exit,omitempty" jsonschema:"set when the campaign ended on a cancellation after measurement began — the exit cause; summary.banked carries what the document kept, the findings list is empty, and the document holds every committed row"`
 	Document                  string                      `json:"document"`
 	Findings                  []findingOut                `json:"findings"`
 	OmittedFindings           int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
@@ -984,6 +1009,7 @@ func (out *runOut) capAdvisories() (fullSheds []string) {
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
+	callStart := time.Now()
 	// The run's identity is minted first: every record this run measures
 	// carries it, and the summary names it even when nothing was
 	// selected (REQ-exec-run-status).
@@ -1134,6 +1160,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	}
 	priorLayer := map[string]string{}
 	postures := map[string]gomutant.RecordPosture{}
+	var tallies *gomutant.RunTallies
 	options := gomutant.Options{
 		RunID:             runID,
 		Budget:            in.Budget,
@@ -1170,6 +1197,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		Prior:     prior,
 		Decision:  streams.decision,
 		Posture:   func(p gomutant.RecordPosture) { postures[p.Symbol] = p },
+		Tallies:   func(r gomutant.RunTallies) { tallies = &r },
 		Progress:  streams.progress,
 		Executing: streams.executing,
 		// Each finished target commits under the same document lock the final
@@ -1203,6 +1231,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 			for _, d := range dropped {
 				recordShed(d)
 			}
+			if afterCommitForTest != nil {
+				afterCommitForTest(finding)
+			}
 			return nil
 		},
 	}
@@ -1218,11 +1249,29 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return tree.Run(ctx, targets, options)
 	})
 	var drift *gomutant.TreeDriftError
-	if err != nil && !errors.As(err, &drift) {
-		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
+	if err == nil {
+		err = ctx.Err()
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, out, shedsRidingAbort(err, out.AttestationSheds)
+	if err != nil && !errors.As(err, &drift) {
+		// A cancellation after measurement began is the campaign's
+		// ordinary end on this face: the result carries the banked
+		// state — what the document kept, under the exit cause — and
+		// the sheds the incremental commits recorded, so nothing the
+		// SDK would discard with an error is lost
+		// (REQ-exec-banked-summary; REQ-mcp-envelope). A run cancelled
+		// before measurement began has nothing banked and errors.
+		if tallies == nil {
+			return nil, out, shedsRidingAbort(err, out.AttestationSheds)
+		}
+		out.Summary = bankedRunSummary(*tallies, gomutant.ExitCause(err), time.Since(callStart), tree.Selection(), runID)
+		out.Exit = out.Summary.Banked.Cause
+		// The sheds the incremental commits recorded are already on the
+		// result (recordShed); the same epilogue as a completed run caps
+		// every advisory list and the residue (REQ-mcp-envelope).
+		out.capAdvisories()
+		out.Residue, out.OmittedResidue = capRows(out.Residue)
+		out.Document = s.findingsPath(in.Findings)
+		return nil, out, nil
 	}
 	// The final merge runs before anything renders: the response reads
 	// the rows the document actually holds - a disposition recorded
@@ -1263,10 +1312,23 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	if err != nil {
 		return nil, out, withDrop(shedsRidingAbort(err, out.AttestationSheds))
 	}
+	if afterFinalReplacementForTest != nil {
+		afterFinalReplacementForTest()
+	}
+	// The final replacement is the success boundary
+	// (REQ-exec-cancellation): rendering after it runs under a context
+	// detached from the request's deadline and bounded by its own, so
+	// a deadline expiring after the commit never fails a committed run.
+	ctx, cancelRender := gomutant.PostCommitRenderContext(ctx)
+	defer cancelRender()
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	out.Summary = gomutant.SummarizeRun(rendered, tree.Selection())
 	out.Summary.Run = runID
 	out.Summary.AddPostures(postures)
+	if tallies != nil && tallies.Audit.Narrowed > 0 {
+		audit := tallies.Audit
+		out.Summary.Audit = &audit
+	}
 	// The summary's unreached roster caps like every row list, the
 	// remainder counted (REQ-mcp-envelope).
 	out.Summary.Unreached, out.OmittedUnreached = capRows(out.Summary.Unreached)
