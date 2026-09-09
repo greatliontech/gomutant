@@ -93,6 +93,19 @@ func CheckToolchainProvenance(ctx context.Context, dir string, sel Selection) er
 	return err
 }
 
+// CheckHarnessEnvironment is the ladder's environment arm alone,
+// decidable from the tree root and the selection with no process
+// spawned: every verb's preparation stage fires it before the lock
+// (REQ-exec-preparation), and the load's ladder fires it again by
+// construction.
+func CheckHarnessEnvironment(dir string, sel Selection) error {
+	env, err := sel.applyEnv(GoEnv(dir))
+	if err != nil {
+		return err
+	}
+	return harnessEventsSilenced(env)
+}
+
 // toolchainGuard is the load's one toolchain ladder, three arms in
 // order: the environment arm (a GODEBUG that silences the harness's
 // build-fail events — input-decidable, so first), the skew provenance

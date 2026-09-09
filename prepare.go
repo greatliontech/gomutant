@@ -14,6 +14,9 @@ import (
 // parse: the inputs every refusal below is decidable from, before the
 // tree loads.
 type CampaignInputs struct {
+	// Selection is the run's declared build selection: the harness
+	// environment it composes is judged here, before the lock.
+	Selection Selection
 	// FindingsPath is the findings document the campaign holds.
 	FindingsPath string
 	// ModuleDir is the tree root the store's layer judgment resolves
@@ -81,8 +84,10 @@ func ValidateTargetSources(given []string) error {
 // PrepareCampaign fires every refusal a findings-producing run can
 // decide from its inputs alone, in one place and before any tree load:
 // the bounds' signs, the target-source exclusivity, the scratch and
-// vouch declarations, the tree root's existence, the exemptions
-// document, the findings document (unreadable, or a version this
+// vouch declarations, the selection's shape, the tree root's
+// existence, the harness environment (the load ladder's
+// input-decidable arm), the bracket paths' shape and presence, the
+// exemptions document, the findings document (unreadable, or a version this
 // binary does not read), and last the campaign lock (fail-fast — a
 // second campaign against the same document refuses immediately,
 // naming the holder, per REQ-exec-exclusivity) — last, because the
@@ -105,6 +110,9 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 			return nil, err
 		}
 	}
+	if err := in.Selection.Validate(); err != nil {
+		return nil, err
+	}
 	// The tree root is an input too: a root that is not a directory
 	// refuses here, before the lock — whose directory creation would
 	// otherwise conjure an empty tree for the load to find.
@@ -114,6 +122,16 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("gomutant: tree root %s is not a directory", in.ModuleDir)
+	}
+	// The load ladder's environment arm is decidable from the root and
+	// the selection alone: a GODEBUG that silences the harness's
+	// build-fail events refuses here, before the lock, and again at the
+	// load's head by construction (REQ-exec-provenance). The arm reads
+	// the selection-applied environment the load reads — the term the
+	// spec names, not a live dependence: no selection sets GODEBUG; the
+	// selection's own shape refused above, with the declarations.
+	if err := CheckHarnessEnvironment(in.ModuleDir, in.Selection); err != nil {
+		return nil, err
 	}
 	// A bracket path's shape and presence are decidable from the tree
 	// root alone (REQ-exec-observation) — refused here, before the lock

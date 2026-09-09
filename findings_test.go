@@ -311,3 +311,27 @@ func TestSkippedPackageRadiusNamesDarkPackages(t *testing.T) {
 		t.Fatalf("summary dark packages = %+v, want exactly the dark one", summary.DarkPackages)
 	}
 }
+
+// AttestFinding is the one disposition both faces apply: the named
+// record carries the attestation, the rows come back whole, and a
+// symbol with no finding refuses.
+func TestAttestFindingDispositionsTheNamedRecord(t *testing.T) {
+	rows := []Finding{{Symbol: "a.B", Survivors: []Survivor{{Position: "p.go:1:1", Operator: "zero return"}}}, {Symbol: "a.C"}}
+	all, attested, err := AttestFinding(rows, "a.B", "p.go:1:1", "zero return", "r")
+	if err != nil || len(all) != 2 || attested.Symbol != "a.B" || len(attested.AttestedDispositions()) != 1 {
+		t.Fatalf("AttestFinding = %v, %+v, %v", len(all), attested, err)
+	}
+	if all[1].Symbol != "a.C" || len(all[1].AttestedDispositions()) != 0 {
+		t.Fatalf("the sibling row moved: %+v", all[1])
+	}
+	if _, _, err := AttestFinding(rows, "a.X", "p.go:1:1", "zero return", "r"); err == nil {
+		t.Fatal("a symbol with no finding was attested")
+	}
+	fresh := []Finding{{Symbol: "a.B", Survivors: []Survivor{{Position: "p.go:1:1", Operator: "zero return"}}}}
+	if _, _, err := AttestFinding(fresh, "a.B", "p.go:1:1", "zero return", "   "); err == nil || len(fresh[0].AttestedDispositions()) != 0 {
+		t.Fatalf("a whitespace-only reasoning was recorded: %v", err)
+	}
+	if _, _, err := AttestFinding(nil, "a.B", "p.go:1:1", "zero return", "r"); err == nil {
+		t.Fatal("empty rows attested a record")
+	}
+}

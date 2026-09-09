@@ -577,10 +577,11 @@ output text a test could forge — this requirement's canonical framing).
 A load whose selection-applied environment silences that event
 (GODEBUG's gotestjsonbuildtext=1 as the go command resolves it; a
 bisect-suffixed value is refused whether or not the bisect fires on a
-given stack — the refusal does not decide that) refuses at the head of
-the load's toolchain ladder, before anything loads, and at the
-pre-write check (REQ-exec-provenance), as a toolchain below go1.24
-does. Before the build, the imports a
+given stack — the refusal does not decide that) refuses in every campaign's
+preparation (REQ-exec-preparation), at the head of the load's
+toolchain ladder before anything loads, and at the pre-write check
+(REQ-exec-provenance); the floor, needing the sample, refuses at the
+load and the pre-write check alone. Before the build, the imports a
 replacement no longer references are pruned — an import whose bound name
 is known (an alias, or the declared name the loaded package imports it
 under) and that no selector in the mutant uses; blank and dot imports and
@@ -897,12 +898,15 @@ advisory and do not change successful exit semantics.
 
 **REQ-exec-preparation** (behavior): Every verb MUST fire each refusal
 its inputs alone decide — the bounds' signs, the run count, the target
-sources' exclusivity, a declaration's shape (scratch namespaces, vouches,
-a retarget pair, an attestation's reasoning), the tree root's existence,
+sources' exclusivity, a declaration's shape (scratch namespaces,
+vouches, a retarget pair, an attestation's reasoning, the build
+selection's tags and toolchain), the tree root's existence, the harness
+environment (the load ladder's input-decidable arm, a GODEBUG that
+silences the build-fail events), the bracket paths' shape and presence,
 the exemptions document, the findings document (unreadable, or a version
-this binary does not read), and last the campaign lock — before its first
-tree load, so a refused verb pays nothing it could have refused earlier.
-The lock comes last because its acquisition persists state (the
+this binary does not read), and last the campaign lock — before its
+first tree load, so a refused verb pays nothing it could have refused
+earlier. The lock comes last because its acquisition persists state (the
 document's directory, the lock file) that a refusal after it would
 strand. The loaded set decides a second stage, before the first oracle
 process: a bracket path absent or unhashable under a measured module, a
@@ -954,31 +958,30 @@ current groups, confirms kills serially within each candidate's own
 scope, and attributes kills against the full current oracle set (the run
 pattern already bounds execution to each scope's tests).
 
-**REQ-exec-provenance** (behavior): Every tree load MUST refuse
-outright — at the shared load path, so every entry on every face
-inherits the guard by construction rather than per-verb discipline —
-when the binary's compiled-in frontend cannot soundly judge the
-toolchain that serves the load: within a major, a frontend OLDER
-than the serving toolchain's language series refuses (it predates
-the sources; a newer frontend reads older language under the Go 1
-compatibility promise, which the declared-toolchain workflows
-depend on); across majors both directions refuse; an unidentifiable
-version on either side refuses — unidentifiable is not agreement.
-The serving toolchain is sampled in the TARGET directory under the
-SELECTION-APPLIED environment — the declared toolchain directive
-honored and stray workspace variables stripped — so the witnessed
-version is the one the run's loads and executions actually use,
-never the tool's own cwd default. A verb that mutates state before
-any load (attestation writes the findings document first) runs the
-same check before its write — the load's whole toolchain ladder, the
-skew refusal, the build-events floor below go1.24, and the refusal
-of an environment that silences those events (GODEBUG's
+**REQ-exec-provenance** (behavior): Every tree load MUST refuse outright
+— at the shared load path, so every entry on every face inherits the
+guard by construction rather than per-verb discipline — when the
+binary's compiled-in frontend cannot soundly judge the toolchain that
+serves the load: within a major, a frontend OLDER than the serving
+toolchain's language series refuses (it predates the sources; a newer
+frontend reads older language under the Go 1 compatibility promise,
+which the declared-toolchain workflows depend on); across majors both
+directions refuse; an unidentifiable version on either side refuses —
+unidentifiable is not agreement. The serving toolchain is sampled in the
+TARGET directory under the SELECTION-APPLIED environment — the declared
+toolchain directive honored and stray workspace variables stripped — so
+the witnessed version is the one the run's loads and executions actually
+use, never the tool's own cwd default. A verb that mutates state before
+any load (attestation writes the findings document first) runs the same
+check before its write on both faces — the load's whole toolchain
+ladder, the skew refusal, the build-events floor below go1.24, and the
+refusal of an environment that silences those events (GODEBUG's
 gotestjsonbuildtext=1 as the go command resolves it — its last entry,
 its last pair, a bisect suffix stripped — read from the OS environment
-alone) alike: a skewed, floor-refused, or silenced binary
-never writes, echoes success, and then fails. The refusal names both toolchains, and on an
-identified skew their language series and the rebuild direction; the
-unidentifiable refusal names the versions it could not identify.
+alone) alike: a skewed, floor-refused, or silenced binary never writes,
+echoes success, and then fails. The refusal names both toolchains, and
+on an identified skew their language series and the rebuild direction;
+the unidentifiable refusal names the versions it could not identify.
 
 **REQ-exec-cancellation** (behavior): An interrupt, termination signal, or
 caller-context cancellation, including expiry of an operator-supplied command

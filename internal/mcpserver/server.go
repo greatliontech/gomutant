@@ -1019,7 +1019,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// (REQ-exec-preparation); the target-source exclusivity counts the
 	// inline document as a targets source.
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
-		FindingsPath: s.findingsPath(in.Findings), ModuleDir: s.dir,
+		FindingsPath: s.findingsPath(in.Findings), ModuleDir: s.dir, Selection: in.selection(),
 		Budget: in.Budget, OracleTimeout: oracleTimeout,
 		ScratchNamespaces: in.ScratchNamespaces, BracketPaths: in.BracketPaths,
 		TargetSources: targetSourcesGiven(in.TargetsPath, in.TargetsJSON, in.Changed),
@@ -1948,23 +1948,32 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 			return nil, out, fmt.Errorf("attest_survivor needs symbol, position, operator, and reason")
 		}
 	}
+	// The reasoning's shape is a declaration's: refused before the
+	// document lock persists anything (REQ-exec-preparation).
+	if err := gomutant.ValidateAttestationReason(in.Reason); err != nil {
+		return nil, out, err
+	}
+	// The load ladder BEFORE the write, as the CLI runs it: attest
+	// mutates the findings document first, and a binary the ladder
+	// refuses — skewed, below the build-events floor, or under a
+	// silenced harness — must refuse outright rather than write, echo
+	// success, and then fail (REQ-exec-provenance, both faces).
+	if err := gomutant.CheckToolchainProvenance(ctx, s.dir, in.selection()); err != nil {
+		return nil, out, err
+	}
 	var attested gomutant.Finding
 	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
 	}
 	err = s.updateStore(ctx, store, s.findingsPath(in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
-		for i := range all {
-			if all[i].Symbol == in.Symbol {
-				if err := all[i].Attest(in.Position, in.Operator, in.Reason); err != nil {
-					return nil, err
-				}
-				out.Open = len(all[i].Open())
-				attested = all[i]
-				return all, nil
-			}
+		var err error
+		all, attested, err = gomutant.AttestFinding(all, in.Symbol, in.Position, in.Operator, in.Reason)
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("no finding for %s", in.Symbol)
+		out.Open = len(attested.Open())
+		return all, nil
 	})
 	if err != nil {
 		return nil, out, err

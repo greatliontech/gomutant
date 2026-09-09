@@ -390,6 +390,18 @@ func CheckToolchainProvenance(ctx context.Context, dir string, sel Selection) er
 	return engine.CheckToolchainProvenance(ctx, abs, sel)
 }
 
+// CheckHarnessEnvironment is the load ladder's input-decidable arm —
+// a GODEBUG that silences the harness's build-fail events refuses —
+// for a verb's preparation stage, before any state persists
+// (REQ-exec-preparation).
+func CheckHarnessEnvironment(dir string, sel Selection) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
+	}
+	return engine.CheckHarnessEnvironment(abs, sel)
+}
+
 // LoadContextSelection is LoadContext under a declared build selection:
 // the selection rewrites the tree's one frozen environment before
 // anything reads it, so package loading, target discovery, constraint

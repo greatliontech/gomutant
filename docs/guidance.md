@@ -135,6 +135,7 @@ document is unexpectedly empty.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
+- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); the posture is judged under these acceptances.
 - `dir` (cli) — tree root the default document anchors at.
 **when:** use attestation only after judging a survivor genuinely
 equivalent — refused unless the mutant is among the finding's

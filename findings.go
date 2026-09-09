@@ -2224,3 +2224,24 @@ func SkippedPackageRadius(findings []Finding) []PackageSkip {
 	sort.Slice(radius, func(i, j int) bool { return radius[i].Package < radius[j].Package })
 	return radius
 }
+
+// AttestFinding records one equivalence disposition on the named
+// symbol's finding in a document's rows — the one disposition both
+// faces' update callbacks apply, and the one home of the reasoning
+// rule (a blank reasoning refuses, whitespace included, as the
+// ephemeral attestation's does) — returning the rows and the record
+// as attested; a symbol with no finding refuses (REQ-attest-survivor).
+func AttestFinding(all []Finding, symbol, position, operator, reason string) ([]Finding, Finding, error) {
+	if err := ValidateAttestationReason(reason); err != nil {
+		return nil, Finding{}, err
+	}
+	for i := range all {
+		if all[i].Symbol == symbol {
+			if err := all[i].Attest(position, operator, reason); err != nil {
+				return nil, Finding{}, err
+			}
+			return all, all[i], nil
+		}
+	}
+	return nil, Finding{}, fmt.Errorf("no finding for %s", symbol)
+}

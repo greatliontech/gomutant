@@ -117,8 +117,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 	rep.phase("loading")
 	rep.startCadence(o.progressEvery)
 	// Every refusal the inputs decide fires here, before the load: the
-	// bounds, the declarations, the target sources, the campaign lock,
-	// the exemptions, the store (REQ-exec-preparation).
+	// bounds, the declarations, the target sources, the harness
+	// environment, the exemptions, the store, and last the campaign
+	// lock (REQ-exec-preparation).
 	docPath := findingsAt(o.dir, o.findingsFile)
 	if trimmed := strings.TrimSpace(o.targetsFile); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		return fmt.Errorf("--targets expects a file path; the value looks like an inline JSON document - write it to a file first")
@@ -131,7 +132,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		sources = append(sources, "--changed")
 	}
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
-		FindingsPath: docPath, ModuleDir: o.dir, Plan: o.plan,
+		FindingsPath: docPath, ModuleDir: o.dir, Plan: o.plan, Selection: selectionOf(o.tags, o.toolchain),
 		Budget: o.budget, OracleTimeout: o.oracleTimeout,
 		ScratchNamespaces: o.scratchNamespaces, Vouches: o.vouches, BracketPaths: o.bracketPaths,
 		TargetSources: sources,

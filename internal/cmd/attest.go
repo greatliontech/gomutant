@@ -14,6 +14,7 @@ type attestOptions struct {
 	dir, findingsFile, symbol, position, operator, reason string
 	tags                                                  []string
 	toolchain                                             string
+	vouches                                               []string
 }
 
 func newAttestCommand() *cobra.Command {
@@ -29,12 +30,25 @@ func newAttestCommand() *cobra.Command {
 	f.StringVar(&o.position, "position", "", "the survivor's position (file:line:col)")
 	f.StringVar(&o.operator, "operator", "", "the survivor's operator")
 	f.StringVar(&o.reason, "reason", "", "why the mutant is equivalent")
+	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); the posture is judged under the same acceptances the run used")
 	return cmd
 }
 
 func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	if o.symbol == "" || o.position == "" || o.operator == "" || o.reason == "" {
 		return fmt.Errorf("attest needs --symbol, --position, --operator, and --reason")
+	}
+	// The reasoning's shape is a declaration's: refused here, before
+	// the document lock persists anything (REQ-exec-preparation); the
+	// disposition seam keeps its own guard.
+	if err := gomutant.ValidateAttestationReason(o.reason); err != nil {
+		return err
+	}
+	// A vouch's shape is decidable from the flag alone: refused before
+	// the write, as every declaration's shape is (REQ-exec-preparation).
+	vouches, err := gomutant.ParseDynamicStateVouches(o.vouches)
+	if err != nil {
+		return err
 	}
 	// Provenance BEFORE the write: attest mutates the findings
 	// document first, and a skewed binary must refuse outright rather
@@ -48,16 +62,9 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	}
 	var attested gomutant.Finding
 	if err := store.Update(ctx, func(all []gomutant.Finding) ([]gomutant.Finding, error) {
-		for i := range all {
-			if all[i].Symbol == o.symbol {
-				if err := all[i].Attest(o.position, o.operator, o.reason); err != nil {
-					return nil, err
-				}
-				attested = all[i]
-				return all, nil
-			}
-		}
-		return nil, fmt.Errorf("no finding for %s", o.symbol)
+		var err error
+		all, attested, err = gomutant.AttestFinding(all, o.symbol, o.position, o.operator, o.reason)
+		return all, err
 	}); err != nil {
 		return err
 	}
@@ -71,7 +78,7 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// evidence by a reader who stopped at the echo
 	// (REQ-result-run-posture).
 	layer, layerReason := store.Layer(attested)
-	posture := attestedPosture(ctx, o.dir, selectionOf(o.tags, o.toolchain), attested)
+	posture := attestedPosture(ctx, o.dir, selectionOf(o.tags, o.toolchain), vouches, attested)
 	layerText := "repo"
 	if layer != "repo" {
 		layerText = "machine-local (" + layerReason + ")"
@@ -82,11 +89,19 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 
 // attestedPosture judges the attested record once under the call's
 // selection; a tree or judgment fault is the posture's own reason.
-func attestedPosture(ctx context.Context, dir string, sel gomutant.Selection, attested gomutant.Finding) gomutant.RecordPosture {
+func attestedPosture(ctx context.Context, dir string, sel gomutant.Selection, vouches []string, attested gomutant.Finding) gomutant.RecordPosture {
 	tree, err := gomutant.LoadContextSelection(ctx, dir, sel)
 	if err != nil {
 		return gomutant.RecordedPosture(attested, gomutant.FindingInspection{}, err)
 	}
+	return judgeAttestedPosture(ctx, tree, vouches, attested)
+}
+
+// judgeAttestedPosture judges the record on a loaded tree under the
+// same acceptances the run judged under — the MCP face's server-wide
+// vouches give it those; the posture must not differ by face.
+func judgeAttestedPosture(ctx context.Context, tree *gomutant.Tree, vouches []string, attested gomutant.Finding) gomutant.RecordPosture {
+	tree.SetDynamicStateVouches(vouches...)
 	inspection, err := tree.InspectFindingContext(ctx, attested)
 	return gomutant.RecordedPosture(attested, inspection, err)
 }

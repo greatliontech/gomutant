@@ -17,6 +17,7 @@ import (
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -1581,5 +1582,83 @@ func TestToolEphemeralCarriesTheAttestationAndReattestsByName(t *testing.T) {
 	again.Reattest = true
 	if _, out, err = s.toolEphemeral(ctx, nil, again); err != nil || out.AttestationRecorded == "" {
 		t.Fatalf("reattest = %+v, %v; want the row replaced", out, err)
+	}
+}
+
+// The load ladder runs before the write on the MCP face as on the
+// CLI: a silenced harness refuses the attestation with the document
+// untouched (REQ-exec-provenance).
+func TestToolAttestRefusesTheLoadLadderBeforeWriting(t *testing.T) {
+	s, path, before := seededSurvivorServer(t)
+	t.Setenv("GODEBUG", "gotestjsonbuildtext=1")
+	_, out, err := s.toolAttest(context.Background(), nil, attestIn{Symbol: "example.com/empty.Old", Position: "p.go:1:1", Operator: "zero return", Reason: "r"})
+	if err == nil || !strings.Contains(err.Error(), "gotestjsonbuildtext=1") {
+		t.Fatalf("attest under a silenced harness: %v, %+v; want the ladder's refusal", err, out)
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("a refused attest changed the document: %v", err)
+	}
+}
+
+// The pre-write ladder on the MCP face carries every arm, the sampled
+// ones included: a skewed ambient toolchain refuses the attestation
+// with the document untouched (REQ-exec-provenance).
+func TestToolAttestRefusesASkewedToolchainBeforeWriting(t *testing.T) {
+	s, path, before := seededSurvivorServer(t)
+	restore := engine.SwapGoVersionSamplerForTest(func(context.Context, string, []string) (string, error) { return "go99.1.0", nil })
+	defer restore()
+	_, out, err := s.toolAttest(context.Background(), nil, attestIn{Symbol: "example.com/empty.Old", Position: "p.go:1:1", Operator: "zero return", Reason: "r"})
+	if err == nil || !strings.Contains(err.Error(), "toolchain provenance") {
+		t.Fatalf("attest under a skewed toolchain: %v, %+v; want the skew refusal", err, out)
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("a refused attest changed the document: %v", err)
+	}
+}
+
+// seededSurvivorServer is an empty module holding one finding with one
+// open survivor, served by a fresh server; the document's bytes come
+// back so a refusal's no-write claim can be checked.
+func seededSurvivorServer(t *testing.T) (s *Server, path string, before []byte) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path = filepath.Join(dir, defaultFindings)
+	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		seeded := seededFinding("example.com/empty.Old")
+		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
+		seeded.CandidateCount, seeded.Generated, seeded.Mutants = 1, 1, 1
+		seeded.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}}
+		return []gomutant.Finding{seeded}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return New(dir), path, before
+}
+
+// A whitespace-only reasoning is a declaration's shape: refused before
+// the document lock, so a fresh tree gains no .gomutant directory
+// (REQ-exec-preparation).
+func TestToolAttestRefusesABlankReasonBeforeTheLock(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	_, _, err := s.toolAttest(context.Background(), nil, attestIn{Symbol: "example.com/empty.Old", Position: "p.go:1:1", Operator: "zero return", Reason: "   "})
+	if err == nil || !strings.Contains(err.Error(), "reasoning") {
+		t.Fatalf("attest with a blank reasoning = %v, want the reasoning refusal", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gomutant")); !os.IsNotExist(err) {
+		t.Fatalf("a refused attest persisted the document's directory: %v", err)
 	}
 }

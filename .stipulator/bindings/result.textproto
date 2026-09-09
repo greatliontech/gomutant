@@ -1550,3 +1550,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "38666e7604b77232fa8f10921de759cf96b615abebd2da8e83b109b795c16c48"
 }
+
+bindings {
+  requirement_id: "REQ-result-run-posture"
+  content_hash: "bafeb1eba97e14305c621f66b4740fecedacb73dff9734d7807351cb19fa62f0"
+  source_hash: "735ab5dd6b6fe5f8d99205049344af2d03825f1247eccdbf320a10d539a8720e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestAttestedPostureJudgesUnderTheVouches"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "aadf66f0334a0a12e637356fb33afae8f85c74534c2fe0cfc972a4fb569b43ea"
+}
