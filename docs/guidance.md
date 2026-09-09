@@ -57,7 +57,7 @@ test-execution budget of five hundred and twelve — each target's
 candidates times its derived oracle's test count — so a suite-class
 oracle commits on a shorter horizon; the partition is a function of
 the tree, the target order, and the worker count, never a measured
-duration. Every completed record's reuse posture rides the report — reusable as it stands or not, each refusing channel (freshness, candidate evidence, runtime inputs, stored observation) with its reason, and what lifts it — judged over the run's own views, so a committed record is never mistaken for reusable evidence and no second call is needed to learn it is not; the summary counts the reusable records and lists the rest, capped.
+duration. Every completed record's reuse posture rides the report — reusable as it stands or not, each refusing channel (freshness, candidate evidence, runtime inputs, stored observation) with its reason, and what lifts it — judged over the run's own views, so a committed record is never mistaken for reusable evidence and no second call is needed to learn it is not; the summary counts the reusable records and lists the rest, capped. The derived oracle is the runnable tests of every in-tree package whose test binary links the target's package — a CLI or app test that links it is a legitimate oracle, and the evidence its observation bracket captures over a real subprocess a legitimate record: its layer (repo or machine-local) is one fact and its reuse posture another, judged apart; an explicit targets inventory overrides the derivation whole, and integration oracles are never dropped to make a report read as more reusable.
 **example:** run with changed=HEAD~1 at a chunk gate; run --plan
 first when the target decision set is in doubt.
 

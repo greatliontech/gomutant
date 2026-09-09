@@ -101,9 +101,10 @@ missing identity, not general Go 1.27 support.
 
 Stash's mutation executions completed, but its persisted observation dispositions
 included unaudited-standard-operation refusals. This does not establish the
-cause of every later dynamic-state/callback refusal. The
-[measured/reuse diagnostics issue](measured-findings-reuse-diagnostics.md) owns
-the separate presentation wrinkle and documents those boundaries.
+cause of every later dynamic-state/callback refusal. The separate
+presentation wrinkle — a committed record read as reusable evidence — is
+closed by REQ-result-run-posture (docs/specs/results.md): the run
+states each record's reuse posture with its refusing channels named.
 
 The shared consumer-adoption acceptance also needs:
 

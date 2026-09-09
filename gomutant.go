@@ -417,9 +417,9 @@ func LoadContextSelection(ctx context.Context, dir string, sel Selection) (*Tree
 func (t *Tree) Selection() Selection { return t.selection }
 
 // DiscoverContext targets every top-level function and method declared in the
-// tree's non-test, non-generated source files — package initializers
-// excepted: the language keeps init unreferencable, so it can never be a
-// resolvable target — oracles left to the default
+// tree's non-test, non-generated source files, package initializers
+// included under their positional identity (`<pkg>.init#<file>#<ordinal>`,
+// the language keeping init unreferencable by name) — oracles left to the default
 // (REQ-target-producers): whole-package discovery is a usable run without a
 // caller enumerating anything.
 func (t *Tree) DiscoverContext(ctx context.Context) ([]Target, error) {
@@ -691,8 +691,13 @@ func rejectUnknownObjectFields(data []byte, known map[string]bool) error {
 }
 
 // resolveOracle returns a target's effective oracle: the explicit test
-// symbols when given, else the tests of the symbol's own package
-// (REQ-target-oracle, REQ-target-default). A target whose effective oracle
+// symbols when the target declares them — an explicit inventory, an
+// explicitly empty one included, overrides the derivation whole — else
+// the derived one: the runnable tests of every in-tree package whose
+// test binary links the symbol's package, the symbol's own included,
+// so a CLI or app test that links the package is a legitimate oracle
+// and the evidence its observation bracket captures is a legitimate
+// record (REQ-target-oracle, REQ-target-default). A target whose effective oracle
 // is empty has nothing that can kill — the caller sees it and decides.
 func (t *Tree) resolveOracle(tg Target) []string {
 	oracle, _ := t.resolveOracleContext(context.Background(), tg)

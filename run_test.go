@@ -5164,8 +5164,9 @@ func TestCandidateSpliceDirtyRecordPromotesOnCleanTree(t *testing.T) {
 
 // An init body measures end to end under its positional identity: the
 // classic silent-fault carrier (registry wiring) generates candidates,
-// runs against the package suite - the ground-truth oracle: every test
-// of the package executes every init - and records a finding with
+// runs against its derived oracle - the package's own suite among them,
+// the ground-truth oracle: every test of the package executes every
+// init - and records a finding with
 // freshness evidence keyed to the positional subject
 // (REQ-target-changed).
 func TestInitTargetMeasuresEndToEnd(t *testing.T) {

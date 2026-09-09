@@ -224,7 +224,7 @@ func (t *Tree) objectContext(ctx context.Context, symbol string) (types.Object, 
 	return nil, fmt.Errorf("symbol %s does not resolve", symbol)
 }
 
-// parseInitSymbol parses the positional init identity "init#<file>#<n>"
+// parseInitSymbol parses the positional init identity "init#<file>#<ordinal>"
 // from a symbol's package-local remainder. The ordinal is the suffix
 // after the LAST "#" - a file base name may itself contain "#" - and
 // must be canonical decimal (no sign, no leading zeros), so every

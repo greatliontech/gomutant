@@ -13,7 +13,7 @@ The contract lives in [docs/specs](docs/specs/overview.md).
 ## CLI
 
 ```
-# Measure every addressable function in the tree against its package's tests.
+# Measure every addressable function in the tree against the tests of every in-tree package whose test binary links its package.
 gomutant run
 
 # Bound command work through result commit separately from each oracle process.

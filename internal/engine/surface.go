@@ -216,7 +216,8 @@ func refDeclHashes(src []byte) map[string]string {
 
 // isInitDecl reports whether fd is a package initializer: the one
 // top-level function form whose identifier the language defines as
-// unreferencable, so it can never be a resolver symbol.
+// unreferencable, so its bare name is never a resolver symbol — it
+// resolves under the positional identity initSymbol builds.
 func isInitDecl(fd *ast.FuncDecl) bool {
 	return fd.Recv == nil && fd.Name.Name == "init"
 }

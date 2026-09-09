@@ -122,8 +122,10 @@ the package never shift it. The ordinal is the suffix after the LAST `#`
 (a file base name may itself contain `#`), spelled as canonical decimal.
 Discovery emits changed and whole-tree init bodies exactly like named
 symbols — a removed init is a deleted symbol — and the derived oracle is
-the package suite like any target's, which is also the ground truth of the
-oracle relationship: every test of the package executes every init. The
+REQ-target-default's, like any target's: the runnable tests of every
+in-tree package whose test binary links the init's package, the init's
+own package's suite among them and the ground truth of the oracle
+relation — every test of the package executes every init. The
 bare name `<pkg>.init` never resolves — the language keeps the identifier
 unreferencable — and its refusal points at the positional grammar; an
 out-of-range ordinal refuses naming the file's actual init count; a
