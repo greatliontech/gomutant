@@ -22,5 +22,5 @@ under the run's bounds (`TestConcurrentProbesSpawnUnderTheirOwnBounds`,
 `runMutantEvidence`, `coveredPositions`, `phaseBaselineProbe`,
 `campaignCoveredPositions`) keep observing each spawn's inputs.
 
-Lands: with the next change set touching the engine's spawn
+Lands: cross-tool train chunk 214
 signatures.

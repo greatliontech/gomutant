@@ -8,4 +8,4 @@ entry (the stat-keyed parse cache by entry file, the committability
 memo by symbol). The collapse: one entry-state record carrying stat
 identity, parse, and verdict, consulted by the report path too.
 
-Lands: the next change to the findings report path's classification.
+Lands: cross-tool train chunk 218
