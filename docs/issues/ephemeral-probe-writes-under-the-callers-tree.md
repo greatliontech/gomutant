@@ -1,6 +1,6 @@
 # An ephemeral probe's tests write under the caller's tree
 
-`Lands: user decision` — the isolation shape is a fork the spec's own
+Lands: cross-tool train chunk 187 — the isolation shape is a fork the spec's own
 cost accounting owns: routing every probe's oracle through the scratch
 channel REQ-mut-overlay already runs shaped candidates through (a
 disposable copy of the tree per probe, its cost stated per probe, the

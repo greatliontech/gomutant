@@ -1,6 +1,6 @@
 # VMM measurements remain unverifiable after successful execution
 
-Lands: user decision — the audit-key half closed at gomutant's gofresh
+Lands: cross-tool train chunk 193 (the immutable-after-construction proof; the dynamic-behavior class rides gofresh docs/issues/invoke-targets-narrowed-by-operand.md) — the audit-key half closed at gomutant's gofresh
 bump to v0.99.0 (cross-tool train chunk 163, 2026-09-08: a gomutant built
 from the bumped tree under the stock go1.27.0 toolchain with
 GOEXPERIMENT=nodwarf5 loaded a fixture, ran its baseline, and measured a

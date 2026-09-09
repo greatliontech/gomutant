@@ -1,6 +1,6 @@
 # Explicit fixture package selection cannot load a testdata package
 
-Lands: user decision
+Lands: cross-tool train chunk 188
 
 VMM keeps a guest-helper command and its host-side unit tests in
 `testdata/linux-init`, in the existing module rather than a nested module.

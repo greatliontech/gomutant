@@ -1,6 +1,6 @@
 # The execution window's cost models and constants have four homes
 
-`Lands: user decision` — a refactor across run.go, estimate.go, and
+Lands: cross-tool train chunk 186 — a refactor across run.go, estimate.go, and
 schedule.go with no demonstrated fault; surfaced at cross-tool train
 chunk 164's review.
 
