@@ -88,6 +88,7 @@ func TestSurfaceTableStatesTheHeldBounds(t *testing.T) {
 		{regexp.MustCompile(`symbols per group at (\d+)`), envelope.nested},
 		{regexp.MustCompile(`open survivors at (\d+)`), envelope.open},
 		{regexp.MustCompile(`open survivors and clauses at (\d+)`), envelope.reasons},
+		{regexp.MustCompile(`not-reusable roster at (\d+)`), gomutant.PostureCap},
 	}
 	seen := map[string]bool{}
 	for _, k := range keyed {

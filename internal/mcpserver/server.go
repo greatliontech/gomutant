@@ -764,23 +764,26 @@ type runIn struct {
 }
 
 type findingOut struct {
-	Symbol           string              `json:"symbol"`
-	Labels           []string            `json:"labels,omitempty"`
-	CandidateCount   int                 `json:"candidateCount"`
-	Generated        int                 `json:"generated"`
-	Mutants          int                 `json:"mutants"`
-	Killed           int                 `json:"killed"`
-	Discarded        int                 `json:"discarded"`
-	Attested         int                 `json:"attested,omitempty"`
-	Open             []gomutant.Survivor `json:"open,omitempty"`
-	OmittedOpen      int                 `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
-	Cached           bool                `json:"cached,omitempty"`
-	Skipped          string              `json:"skipped,omitempty"`
-	DeltaOpen        []gomutant.Survivor `json:"deltaOpen,omitempty" jsonschema:"on a changed-ref run, the open survivors on lines the working tree added since the ref - a subset of open, listed distinctly; capped like open"`
-	OmittedDeltaOpen int                 `json:"omittedDeltaOpen,omitempty" jsonschema:"on-delta survivors beyond the response cap"`
-	Run              string              `json:"run,omitempty" jsonschema:"identity of the run that last measured any candidate of the record: this run's (the summary's run) on a measured row and on a cached row whose flagged or drifted candidates this run re-executed, the measuring run's on a wholly served row; absent on records measured before runs carried one"`
-	Layer            string              `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
-	LayerReason      string              `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Symbol           string                   `json:"symbol"`
+	Labels           []string                 `json:"labels,omitempty"`
+	CandidateCount   int                      `json:"candidateCount"`
+	Generated        int                      `json:"generated"`
+	Mutants          int                      `json:"mutants"`
+	Killed           int                      `json:"killed"`
+	Discarded        int                      `json:"discarded"`
+	Attested         int                      `json:"attested,omitempty"`
+	Open             []gomutant.Survivor      `json:"open,omitempty"`
+	OmittedOpen      int                      `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
+	Cached           bool                     `json:"cached,omitempty"`
+	Skipped          string                   `json:"skipped,omitempty"`
+	DeltaOpen        []gomutant.Survivor      `json:"deltaOpen,omitempty" jsonschema:"on a changed-ref run, the open survivors on lines the working tree added since the ref - a subset of open, listed distinctly; capped like open"`
+	OmittedDeltaOpen int                      `json:"omittedDeltaOpen,omitempty" jsonschema:"on-delta survivors beyond the response cap"`
+	Run              string                   `json:"run,omitempty" jsonschema:"identity of the run that last measured any candidate of the record: this run's (the summary's run) on a measured row and on a cached row whose flagged or drifted candidates this run re-executed, the measuring run's on a wholly served row; absent on records measured before runs carried one"`
+	Reuse            string                   `json:"reuse,omitempty" jsonschema:"the record's reuse posture — current, stale, unverifiable, or detached — judged over the run's own views: a committed record is not thereby reusable evidence"`
+	Reasons          []gomutant.PostureReason `json:"reasons,omitempty" jsonschema:"each channel refusing reuse with its reason, composing: freshness (the judgment against the current tree), candidate evidence (stated beside a freshness refusal too), runtime inputs, and stored observation (the capture-time fact, stated beside the others when reuse is refused, it holds, and its text is not the judgment's own)"`
+	Analysis         string                   `json:"analysis,omitempty" jsonschema:"what a later judgment needs: a re-measure, a re-execution of the affected evidence, nothing a re-judgment can lift, or a re-judgment once a tree that failed to load does"`
+	Layer            string                   `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
+	LayerReason      string                   `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 }
 
 type runOut struct {
@@ -1130,6 +1133,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 	}
 	priorLayer := map[string]string{}
+	postures := map[string]gomutant.RecordPosture{}
 	options := gomutant.Options{
 		RunID:             runID,
 		Budget:            in.Budget,
@@ -1165,6 +1169,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		},
 		Prior:     prior,
 		Decision:  streams.decision,
+		Posture:   func(p gomutant.RecordPosture) { postures[p.Symbol] = p },
 		Progress:  streams.progress,
 		Executing: streams.executing,
 		// Each finished target commits under the same document lock the final
@@ -1261,6 +1266,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	out.Summary = gomutant.SummarizeRun(rendered, tree.Selection())
 	out.Summary.Run = runID
+	out.Summary.AddPostures(postures)
 	// The summary's unreached roster caps like every row list, the
 	// remainder counted (REQ-mcp-envelope).
 	out.Summary.Unreached, out.OmittedUnreached = capRows(out.Summary.Unreached)
@@ -1278,7 +1284,14 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 	}
 	var deltaOpen int
-	if out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(rendered, runStore.Layer, onDelta); err != nil {
+	if out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(rendered, runStore.Layer, onDelta); err == nil {
+		for i := range out.Findings {
+			if p, ok := postures[out.Findings[i].Symbol]; ok {
+				out.Findings[i].Reuse, out.Findings[i].Reasons, out.Findings[i].Analysis = string(p.Reuse), p.Reasons, p.Analysis
+			}
+		}
+	}
+	if err != nil {
 		return nil, out, err
 	}
 	if sel.cut != nil {
@@ -1921,11 +1934,11 @@ type attestedEcho struct {
 }
 
 type attestOut struct {
-	Recorded    *attestedEcho `json:"recorded,omitempty" jsonschema:"the disposition as recorded, echoed so the write is confirmed, not inferred"`
-	Open        int           `json:"open" jsonschema:"the symbol's open findings after the disposition"`
-	Layer       string        `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
-	LayerReason string        `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
-	Warning     string        `json:"warning,omitempty" jsonschema:"set when the record cannot serve as it stands - the next measure judges the equivalence afresh and sheds the disposition if its mutation domain moved"`
+	Recorded    *attestedEcho          `json:"recorded,omitempty" jsonschema:"the disposition as recorded, echoed so the write is confirmed, not inferred"`
+	Open        int                    `json:"open" jsonschema:"the symbol's open findings after the disposition"`
+	Layer       string                 `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
+	LayerReason string                 `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Posture     gomutant.RecordPosture `json:"posture" jsonschema:"the record's reuse posture judged once under this call's selection: reusable as it stands or not, each refusing channel named, and what a later judgment needs — a disposition is never reusable evidence by itself"`
 }
 
 func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in attestIn) (*mcp.CallToolResult, attestOut, error) {
@@ -1968,17 +1981,11 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	notify := progressNotifier(ctx, req)
 	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {
-		out.Warning = "record state unavailable: " + err.Error()
+		out.Posture = gomutant.RecordedPosture(attested, gomutant.FindingInspection{}, err)
 		return nil, out, nil
 	}
 	inspection, err := tree.InspectFindingContext(ctx, attested)
-	if err != nil {
-		out.Warning = "record state unavailable: " + err.Error()
-		return nil, out, nil
-	}
-	if inspection.State != gomutant.FindingCurrent {
-		out.Warning = fmt.Sprintf("the record is %s (%s) - the disposition is judged afresh when %s is re-measured", inspection.State, inspection.Reason, in.Symbol)
-	}
+	out.Posture = gomutant.RecordedPosture(attested, inspection, err)
 	return nil, out, nil
 }
 

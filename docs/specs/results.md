@@ -146,6 +146,26 @@ hole, not a tool hiccup, and a scattered per-reason count provably hid
 one: a field campaign read 567 scattered skips over 14 fully dark
 packages. Partially skipped packages stay in the per-reason class line.
 
+**REQ-result-run-posture** (behavior): A run's summary and every
+attestation verdict MUST state each completed record's posture beside
+its counts, on both faces: whether this run measured, served, or skipped
+it; whether it is reusable as it stands — its inspection state, judged
+over the views the run already built, never by a second operation — and,
+where it is not, every channel refusing reuse with its reason, the
+channel named: the freshness judgment against the current tree, the
+candidate evidence, the runtime inputs, and the stored observation the
+record carries, the last stated beside the others whenever reuse is
+refused, it holds, and its text is not the judgment's own (a reusable
+record carrying one is not refused by it); the channels compose —
+flagged candidates are stated beside a freshness refusal; and what a
+later judgment needs — a re-measure, a re-execution of the affected
+evidence, nothing a re-judgment can lift, or a re-judgment once a tree
+that failed to load does. Counts, committability, and layer never
+stand for reuse: a measured kill and an equivalence disposition are
+preserved as measured and never presented as reusable evidence. The
+summary's not-reusable roster caps with the remainder counted; the
+finding rows carry each record's own posture.
+
 **REQ-result-unreached-bound** (behavior): A run under a declared build
 selection (build tags, a toolchain directive, or both — each toolchain
 under a tag set its own leg, since a release-gated file exists under one

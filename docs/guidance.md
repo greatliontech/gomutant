@@ -57,7 +57,7 @@ test-execution budget of five hundred and twelve — each target's
 candidates times its derived oracle's test count — so a suite-class
 oracle commits on a shorter horizon; the partition is a function of
 the tree, the target order, and the worker count, never a measured
-duration.
+duration. Every completed record's reuse posture rides the report — reusable as it stands or not, each refusing channel (freshness, candidate evidence, runtime inputs, stored observation) with its reason, and what lifts it — judged over the run's own views, so a committed record is never mistaken for reusable evidence and no second call is needed to learn it is not; the summary counts the reusable records and lists the rest, capped.
 **example:** run with changed=HEAD~1 at a chunk gate; run --plan
 first when the target decision set is in doubt.
 
@@ -102,7 +102,7 @@ oracleSet integer referencing oracleSets[].id.
 facts by default, cheap at any document size; layer is repo
 (portable, committed) or local (machine-local overlay, with the
 reason it is not committable). Rows cap at 50 with the remainder
-counted; the document on disk always carries the full set.
+counted; the document on disk always carries the full set. A record's posture at the end of its run is already on the run's report; findings re-derives it against the current tree when the tree may have moved since.
 **example:** findings with state=unverifiable after a campaign to
 list what cannot serve.
 
@@ -143,7 +143,7 @@ selection); the disposition rides re-measures while the
 mutated source is unchanged and the mutant keeps surviving, and
 sheds when the mutation domain moves (the body or the operator set)
 or evidence contradicts it (a test kills the mutant), so every body
-version is re-judged.
+version is re-judged. The verdict line carries the record's layer and its reuse posture together, judged once before it is written: an attested survivor on a record that cannot serve as it stands says so on the same line, with the refusing channel named.
 **example:** attest a compiler-equivalent arithmetic rewrite with
 the equivalence argument as the reason.
 

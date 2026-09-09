@@ -150,7 +150,7 @@ func TestRunCarriesAcrossPinsAndShedsOnDomainMove(t *testing.T) {
 	}, &staleEcho); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(staleEcho.String(), "warning: the record is stale") {
+	if !strings.Contains(staleEcho.String(), "; reuse: stale; freshness: ") || !strings.Contains(staleEcho.String(), "; analysis: re-measure") {
 		t.Fatalf("birth-stale disposition did not warn: %q", staleEcho.String())
 	}
 }

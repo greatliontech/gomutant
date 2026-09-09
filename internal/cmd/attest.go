@@ -65,25 +65,28 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// lives; a record that cannot serve as it stands says so, because
 	// the next measure judges the equivalence afresh and sheds the
 	// disposition if its mutation domain moved (REQ-attest-survivor).
+	// The verdict line carries the record's posture whole — its layer
+	// and its reuse, every refusing channel named — judged once before
+	// the line is written, so a disposition is never read as reusable
+	// evidence by a reader who stopped at the echo
+	// (REQ-result-run-posture).
 	layer, layerReason := store.Layer(attested)
-	switch layer {
-	case "repo":
-		fmt.Fprintf(out, "attested %s %s; %d open; layer: repo\n", o.position, o.operator, len(attested.Open()))
-	default:
-		fmt.Fprintf(out, "attested %s %s; %d open; layer: machine-local (%s)\n", o.position, o.operator, len(attested.Open()), layerReason)
+	posture := attestedPosture(ctx, o.dir, selectionOf(o.tags, o.toolchain), attested)
+	layerText := "repo"
+	if layer != "repo" {
+		layerText = "machine-local (" + layerReason + ")"
 	}
-	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
+	fmt.Fprintf(out, "attested %s %s; %d open; layer: %s; reuse: %s\n", o.position, o.operator, len(attested.Open()), layerText, posture.Line())
+	return nil
+}
+
+// attestedPosture judges the attested record once under the call's
+// selection; a tree or judgment fault is the posture's own reason.
+func attestedPosture(ctx context.Context, dir string, sel gomutant.Selection, attested gomutant.Finding) gomutant.RecordPosture {
+	tree, err := gomutant.LoadContextSelection(ctx, dir, sel)
 	if err != nil {
-		fmt.Fprintf(out, "warning: record state unavailable: %s\n", err)
-		return nil
+		return gomutant.RecordedPosture(attested, gomutant.FindingInspection{}, err)
 	}
 	inspection, err := tree.InspectFindingContext(ctx, attested)
-	if err != nil {
-		fmt.Fprintf(out, "warning: record state unavailable: %s\n", err)
-		return nil
-	}
-	if inspection.State != gomutant.FindingCurrent {
-		fmt.Fprintf(out, "warning: the record is %s (%s) - the disposition is judged afresh when %s is re-measured\n", inspection.State, inspection.Reason, o.symbol)
-	}
-	return nil
+	return gomutant.RecordedPosture(attested, inspection, err)
 }

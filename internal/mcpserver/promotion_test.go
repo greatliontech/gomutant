@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gomutant"
 )
 
 // The run response counts records promoted from the machine-local
@@ -102,7 +104,7 @@ func TestToolRunReportsPromotedRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if echo.Layer == "" || !strings.Contains(echo.Warning, "stale") {
+	if echo.Layer == "" || echo.Posture.Reuse != gomutant.FindingStale || len(echo.Posture.Reasons) == 0 || echo.Posture.Reasons[0].Channel != gomutant.PostureFreshness || echo.Posture.Analysis != gomutant.AnalysisRemeasure {
 		t.Fatalf("birth-stale attest echo = %+v", echo)
 	}
 

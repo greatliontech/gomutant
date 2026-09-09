@@ -695,9 +695,10 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if aOut.Open != len(fOut.Findings[0].Open)-1 {
 		t.Fatalf("attest left %d open, want %d", aOut.Open, len(fOut.Findings[0].Open)-1)
 	}
-	// The disposition echo states the record's layer and stays silent on
-	// a record that can serve as it stands (REQ-attest-survivor).
-	if aOut.Layer != "local" || aOut.LayerReason == "" || aOut.Warning != "" {
+	// The disposition echo states the record's layer and its posture: a
+	// record that can serve as it stands is current with nothing
+	// refusing (REQ-attest-survivor, REQ-result-run-posture).
+	if aOut.Layer != "local" || aOut.LayerReason == "" || aOut.Posture.Reuse != gomutant.FindingCurrent || len(aOut.Posture.Reasons) != 0 || aOut.Posture.Measurement != "recorded" {
 		t.Fatalf("attest echo = %+v", aOut)
 	}
 	if _, _, err := s.toolAttest(ctx, nil, attestIn{Symbol: fOut.Findings[0].Symbol, Position: "nowhere:1:1", Operator: "x", Reason: "r"}); err == nil {

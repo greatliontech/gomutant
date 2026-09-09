@@ -306,6 +306,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// closing a channel nothing reads; the defer is the panic net.
 		defer soft.disarm()
 	}
+	postures := map[string]gomutant.RecordPosture{}
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		RunID:    runID,
 		SoftStop: softStop,
@@ -319,6 +320,12 @@ func runCommand(ctx context.Context, o runOptions) error {
 				return
 			}
 			renderExecutionEvent(out, event, rep.selectionNote(event.TargetCount), rep.confirmationModeSuffix(event))
+		},
+		Posture: func(p gomutant.RecordPosture) {
+			postures[p.Symbol] = p
+			if o.jsonl && !o.plan {
+				rep.emit("posture", p)
+			}
 		},
 		Decision: func(decision gomutant.RunDecision) {
 			rep.decision(decision)
@@ -544,6 +551,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if layer == "local" {
 			fmt.Fprintf(&terminal, "          machine-local: %s\n", layerReason)
 		}
+		if p, ok := postures[f.Symbol]; ok && f.Skipped == "" && p.Reuse != gomutant.FindingCurrent {
+			// Reuse is stated beside the counts: a committed record is
+			// not thereby reusable evidence (REQ-result-run-posture).
+			fmt.Fprintf(&terminal, "          reuse: %s\n", p.Line())
+		}
 		for i, s := range f.Open() {
 			mark := ""
 			if split.IsOnDelta(i) {
@@ -565,6 +577,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if !o.plan {
 		summary := gomutant.SummarizeRun(rendered, tree.Selection())
 		summary.Run = runID
+		summary.AddPostures(postures)
 		if cut != nil {
 			summary.Delta = &gomutant.DeltaSummary{Ref: cut.Ref, Open: deltaOpen}
 		}
@@ -823,6 +836,24 @@ func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
 	}
 	fmt.Fprintln(w)
 	renderCoverageBound(w, summary.Selection, summary.Unreached)
+	renderReusePosture(w, summary)
+}
+
+// renderReusePosture states the summary's reuse posture: how many
+// completed records are reusable as they stand and, capped, which are
+// not and why — counts never stand for reuse (REQ-result-run-posture).
+func renderReusePosture(w io.Writer, summary gomutant.RunSummary) {
+	if summary.Reusable == 0 && len(summary.NotReusable) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "reuse     %d reusable as they stand, %d not", summary.Reusable, len(summary.NotReusable)+summary.OmittedNotReusable)
+	if summary.OmittedNotReusable > 0 {
+		fmt.Fprintf(w, " (%d listed)", len(summary.NotReusable))
+	}
+	fmt.Fprintln(w)
+	for _, p := range summary.NotReusable {
+		fmt.Fprintf(w, "          %s  %s\n", p.Symbol, p.Line())
+	}
 }
 
 // plural is the count-aware noun suffix.

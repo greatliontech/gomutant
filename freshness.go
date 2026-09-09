@@ -36,8 +36,14 @@ const (
 // candidate reports its own incomplete-process reason
 // (REQ-result-inspection; candidate evidence, REQ-result-record).
 type FindingInspection struct {
-	State             FindingState        `json:"state"`
-	Reason            string              `json:"reason,omitempty"`
+	State  FindingState `json:"state"`
+	Reason string       `json:"reason,omitempty"`
+	// Channel names the check that decided a refusal — recorded by the
+	// one site that knows: the runtime-input arms and the candidate
+	// evidence rule name themselves, and an empty channel is the
+	// freshness judgment against the current tree. A posture concept:
+	// the served shape is RecordPosture, so it never rides the wire here.
+	Channel           string              `json:"-"`
 	CandidateEvidence []CandidateEvidence `json:"candidateEvidence,omitempty"`
 }
 
@@ -782,7 +788,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 		return FindingInspection{State: FindingStale, Reason: "subject identity changed"}, nil
 	}
 	if evidence.RuntimeUnverifiable {
-		return FindingInspection{State: FindingUnverifiable, Reason: evidence.RuntimeReason}, nil
+		return FindingInspection{State: FindingUnverifiable, Reason: evidence.RuntimeReason, Channel: PostureRuntimeInputs}, nil
 	}
 	state, err := runtimeinput.CurrentEnvContext(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
 	if err != nil || !state.OK {
@@ -790,12 +796,12 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 			return FindingInspection{}, ctx.Err()
 		}
 		if err != nil {
-			return FindingInspection{State: FindingUnverifiable, Reason: err.Error()}, nil
+			return FindingInspection{State: FindingUnverifiable, Reason: err.Error(), Channel: PostureRuntimeInputs}, nil
 		}
-		return FindingInspection{State: FindingUnverifiable, Reason: "runtime inputs cannot be evaluated"}, nil
+		return FindingInspection{State: FindingUnverifiable, Reason: "runtime inputs cannot be evaluated", Channel: PostureRuntimeInputs}, nil
 	}
 	if state.Unverifiable {
-		return FindingInspection{State: FindingUnverifiable, Reason: state.Reason}, nil
+		return FindingInspection{State: FindingUnverifiable, Reason: state.Reason, Channel: PostureRuntimeInputs}, nil
 	}
 	if state.Digest != evidence.RuntimeDigest {
 		return FindingInspection{State: FindingStale, Reason: "runtime inputs changed" + movedInputSuffix(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)}, nil
@@ -975,9 +981,19 @@ func withCandidateEvidence(inspection FindingInspection, f Finding) FindingInspe
 	inspection.CandidateEvidence = canonicalCandidateEvidence(f.CandidateEvidence)
 	if inspection.State == FindingCurrent && len(inspection.CandidateEvidence) != 0 {
 		inspection.State = FindingUnverifiable
-		inspection.Reason = fmt.Sprintf("%d candidate(s) carry unverifiable runtime evidence and re-execute before reuse", len(inspection.CandidateEvidence))
+		inspection.Reason = candidateEvidenceReason(inspection.CandidateEvidence)
+		inspection.Channel = PostureCandidateEvidence
 	}
 	return inspection
+}
+
+// targetReasonPrefix marks a reason the target's own subject decided;
+// the posture strips it to compare the stored observation's text.
+const targetReasonPrefix = "target: "
+
+// candidateEvidenceReason is the candidate-evidence refusal's text.
+func candidateEvidenceReason(evidence []CandidateEvidence) string {
+	return fmt.Sprintf("%d candidate(s) carry unverifiable runtime evidence and re-execute before reuse", len(evidence))
 }
 
 // admissionShared is what a pass's pre-checks share: the tree's
@@ -1130,7 +1146,7 @@ func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgment
 		inspection, err := viewFor[adm.target].inspectContext(ctx, f.TargetEvidence)
 		if err != nil || inspection.State != FindingCurrent {
 			if err == nil && inspection.Reason != "" {
-				inspection.Reason = "target: " + inspection.Reason
+				inspection.Reason = targetReasonPrefix + inspection.Reason
 			}
 			return inspection, err
 		}

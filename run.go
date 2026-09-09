@@ -268,6 +268,14 @@ type Options struct {
 	// target's own mutants execute, possibly after earlier targets began
 	// executing (REQ-exec-run-status).
 	Decision func(RunDecision)
+	// Posture receives, once the run's records are final, each record's
+	// reuse posture — measured, cached, or skipped; reusable as it
+	// stands or not, with every refusing channel named and what would
+	// lift it — judged over the views the run already built, so a
+	// consumer never mistakes a committed record for reusable evidence
+	// and never needs a second operation to learn it is not
+	// (REQ-result-run-posture). Nil asks for no posture.
+	Posture func(RecordPosture)
 	// PlanOnly stops the run after the deterministic preparation sequence
 	// and target decisions: mutants are enumerated and every decision is
 	// computed and delivered, but no baseline probes, no mutant executes,
@@ -531,6 +539,133 @@ type RunDecision struct {
 	Candidates int    `json:"candidates,omitempty"`
 }
 
+// RecordPosture is one record's standing at the end of a run: whether
+// this run measured it, served it, or skipped it; whether the record
+// is reusable as it stands (the inspection state); each channel that
+// refuses reuse with its reason; and what lifts the refusal. The faces
+// add the record's layer from their store (REQ-result-run-posture).
+type RecordPosture struct {
+	Symbol string `json:"symbol"`
+	// Measurement is "measured", "cached", or "skipped" for a run's
+	// record, "recorded" for an existing record a verdict inspects.
+	Measurement string `json:"measurement"`
+	// Reuse is the record's inspection state — current, stale,
+	// unverifiable, or detached; empty for a skipped record.
+	Reuse FindingState `json:"reuse,omitempty"`
+	// Reasons names each channel refusing reuse: "freshness" (the
+	// judge's verdict against the current tree), "candidate evidence"
+	// (flagged candidates), "runtime inputs" (an unverifiable input
+	// manifest), and "stored observation" (the capture-time
+	// observation the record carries) — the last stated beside the
+	// others whenever reuse is refused, it holds, and its text is not
+	// the judgment's; a current record carrying one is not refused by
+	// it. The channels compose: flagged candidates add theirs beside a
+	// freshness refusal.
+	Reasons []PostureReason `json:"reasons,omitempty"`
+	// Analysis says what a later judgment needs: nothing for a
+	// current record; a re-measure for a stale or detached one; a
+	// re-execution of the affected evidence for candidate evidence or
+	// runtime inputs; for a freshness refusal, that no re-judgment
+	// lifts it — a source change, a vouch, or a discharge does; and a
+	// re-judgment once the tree loads when the judgment itself failed.
+	Analysis string `json:"analysis,omitempty"`
+}
+
+// Line is the posture's one human line: the reuse state, each
+// refusing channel with its reason, and the analysis.
+func (p RecordPosture) Line() string {
+	if p.Measurement == "skipped" {
+		return "skipped"
+	}
+	parts := []string{string(p.Reuse)}
+	for _, r := range p.Reasons {
+		parts = append(parts, r.Channel+": "+r.Reason)
+	}
+	if p.Analysis != "" {
+		parts = append(parts, "analysis: "+p.Analysis)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// RecordedPosture is an existing record's posture outside a run — the
+// attestation verdict's — from the inspection the face made once, or
+// its failure.
+func RecordedPosture(f Finding, inspection FindingInspection, judgeErr error) RecordPosture {
+	p := posture(f, inspection, judgeErr)
+	p.Measurement = "recorded"
+	return p
+}
+
+// PostureReason is one refusing channel and its reason.
+type PostureReason struct {
+	Channel string `json:"channel"`
+	Reason  string `json:"reason"`
+}
+
+// Posture channel names.
+const (
+	PostureFreshness         = "freshness"
+	PostureCandidateEvidence = "candidate evidence"
+	PostureRuntimeInputs     = "runtime inputs"
+	PostureStoredObservation = "stored observation"
+)
+
+// Posture analyses.
+const (
+	AnalysisRemeasure = "re-measure"
+	AnalysisReexecute = "the next run re-executes the affected evidence"
+	AnalysisSource    = "no re-judgment lifts it — a source change, a vouch, or a discharge does"
+	AnalysisJudge     = "re-judge once the tree loads"
+)
+
+// posture derives one non-skipped record's posture from its inspection
+// and its own evidence. The refusing channels compose: the deciding
+// check's channel carries the inspection's reason; flagged candidates
+// add theirs whenever they were not the deciding check; the stored
+// observation adds its capture-time reason beside a refused reuse when
+// its text differs from the judgment's.
+func posture(f Finding, inspection FindingInspection, judgeErr error) RecordPosture {
+	p := RecordPosture{Symbol: f.Symbol, Measurement: "measured"}
+	if f.Cached {
+		p.Measurement = "cached"
+	}
+	switch {
+	case judgeErr != nil:
+		p.Reuse = FindingUnverifiable
+		p.Reasons = append(p.Reasons, PostureReason{Channel: PostureFreshness, Reason: "judgment unavailable: " + judgeErr.Error()})
+		p.Analysis = AnalysisJudge
+	case inspection.State == FindingCurrent:
+		p.Reuse = FindingCurrent
+	default:
+		p.Reuse = inspection.State
+		channel := inspection.Channel
+		if channel == "" {
+			channel = PostureFreshness
+		}
+		p.Reasons = append(p.Reasons, PostureReason{Channel: channel, Reason: inspection.Reason})
+		if channel != PostureCandidateEvidence && len(inspection.CandidateEvidence) != 0 {
+			p.Reasons = append(p.Reasons, PostureReason{Channel: PostureCandidateEvidence, Reason: candidateEvidenceReason(inspection.CandidateEvidence)})
+		}
+		switch {
+		case inspection.State == FindingStale || inspection.State == FindingDetached:
+			p.Analysis = AnalysisRemeasure
+		case channel == PostureCandidateEvidence || channel == PostureRuntimeInputs:
+			p.Analysis = AnalysisReexecute
+		default:
+			p.Analysis = AnalysisSource
+		}
+	}
+	// The capture-time observation is a refusing channel only beside a
+	// refused reuse — a current record may carry one its completed
+	// observation evidence served past — and only when its text is not
+	// the judgment's own.
+	if p.Reuse != FindingCurrent && !f.TargetEvidence.ObservationObservable && f.TargetEvidence.ObservationReason != "" &&
+		f.TargetEvidence.ObservationReason != strings.TrimPrefix(inspection.Reason, targetReasonPrefix) {
+		p.Reasons = append(p.Reasons, PostureReason{Channel: PostureStoredObservation, Reason: f.TargetEvidence.ObservationReason})
+	}
+	return p
+}
+
 // PropertyOracleNote states one oracle package's property-runtime
 // prerequisite (REQ-exec-property-oracles): a pinned runtime names what
 // the run pinned itself; an unpinnable one names what the caller must
@@ -595,6 +730,38 @@ type RunSummary struct {
 	// Delta is a changed-ref run's cut of the open survivors by the
 	// delta's added lines (DeltaSummary); absent on every other run.
 	Delta *DeltaSummary `json:"delta,omitempty"`
+	// Reusable counts the completed records reusable as they stand;
+	// NotReusable lists the others with their posture, capped at
+	// PostureCap with the remainder in OmittedNotReusable — the counts
+	// above never stand for reuse (REQ-result-run-posture).
+	Reusable           int             `json:"reusable"`
+	NotReusable        []RecordPosture `json:"notReusable,omitempty"`
+	OmittedNotReusable int             `json:"omittedNotReusable,omitempty"`
+}
+
+// PostureCap bounds the not-reusable roster a summary carries.
+const PostureCap = 20
+
+// AddPostures folds the run's record postures, keyed by symbol as the
+// faces collect them, into the summary: the reusable count and the
+// capped roster of the rest, in symbol order.
+func (s *RunSummary) AddPostures(postures map[string]RecordPosture) {
+	sorted := make([]RecordPosture, 0, len(postures))
+	for _, p := range postures {
+		sorted = append(sorted, p)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Symbol < sorted[j].Symbol })
+	for _, p := range sorted {
+		switch {
+		case p.Measurement == "skipped":
+		case p.Reuse == FindingCurrent:
+			s.Reusable++
+		case len(s.NotReusable) < PostureCap:
+			s.NotReusable = append(s.NotReusable, p)
+		default:
+			s.OmittedNotReusable++
+		}
+	}
 }
 
 // SummarizeRun derives deterministic aggregate totals from findings.
@@ -4371,6 +4538,50 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 	}
 	if len(unfinished) > 0 {
 		return nil, fmt.Errorf("gomutant: campaign truncated - %s ended without a result and without an error; the findings document keeps each unfinished target's prior record", cappedNameList(unfinished, "target"))
+	}
+	if opts.Posture != nil {
+		// Every completed record's reuse posture, judged over the views
+		// this run built (the inspection pass's chain without its view
+		// builds), keyed by the record's posture; a judgment fault
+		// is that record's posture, never the run's error, and a
+		// cancellation here stops the postures, never the finished run.
+		shared := t.newAdmissionShared()
+		for i := range findings {
+			if ctx.Err() != nil {
+				break
+			}
+			f := findings[i]
+			if driftedSymbols[targets[i].Symbol] {
+				continue
+			}
+			if f.Skipped != "" {
+				opts.Posture(RecordPosture{Symbol: f.Symbol, Measurement: "skipped"})
+				continue
+			}
+			// The record's own posture keys the set, exactly as the
+			// inspection pass keys its prebuilt views: the set's engine
+			// carries the package-process execution posture, which
+			// changes what the evidence check means, so a set built under
+			// the other posture is never read even when it holds the
+			// symbol; a posture the run built no set under is judged over
+			// a supplementary view, as the inspection pass would.
+			var prebuilt *subjectViewSet
+			if mv, ok := modes[findingPackageProcessAttestable(f)]; ok {
+				prebuilt = mv.views
+			}
+			var inspection FindingInspection
+			adm, err := t.admitFindingContext(ctx, f, shared)
+			if err == nil {
+				inspection, err = t.judgeAdmittedContext(ctx, f, adm, prebuilt)
+			}
+			if err == nil {
+				inspection = withCandidateEvidence(inspection, f)
+			}
+			if ctx.Err() != nil {
+				break
+			}
+			opts.Posture(posture(f, inspection, err))
+		}
 	}
 	if len(drifted) > 0 || treeDrift != nil {
 		completed := completedFindings(findings, drifted)
