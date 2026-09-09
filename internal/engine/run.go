@@ -560,11 +560,18 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		}
 		return MutantDiscarded, "", state, incomplete, "", fmt.Errorf("parse go test output: %w", parseErr)
 	}
+	// A rejected build never exits zero, so the survivor path pays no
+	// second walk of the event stream.
+	var buildDiagnostic string
+	var buildFailed bool
+	if runErr != nil {
+		buildDiagnostic, buildFailed = harnessBuildFailure(stdout.Bytes(), stderr.Bytes())
+	}
 	switch {
 	case runErr == nil:
 		state, incomplete, err := processObservationContext(ctx, testlog, dir, "", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		return MutantSurvived, "", state, incomplete, "", err
-	case buildRejected(stdout.Bytes()):
+	case buildFailed:
 		// The harness itself reported the failed build: no test process
 		// started, so there is no observation to finalize and no
 		// incomplete-process evidence to carry — the discard is a pure
@@ -572,7 +579,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		// build-configuration pins (REQ-result-stale). The diagnostic
 		// carries the compiler's text for interactive surfaces.
 		markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", compileDiagnostics(stdout.Bytes(), stderr.Bytes()), nil
+		return MutantDiscarded, "", runtimeinput.Observation{}, "", buildDiagnostic, nil
 	case killer != "":
 		reason := ""
 		if testProcessPanicked(stdout.Bytes()) || !testFailureCompleted(stdout.Bytes(), killer) {
@@ -1096,9 +1103,13 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	cmd := commandContext(ctx2, "go", args...)
 	cmd.Dir = dir
 	cmd.Env = oracleEnv(scratchEnv, bounds)
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	// The two streams stay apart, as the mutant path keeps them: the
+	// harness's events ride stdout and the go tool's own lines ride
+	// stderr, and a predicate over the event stream must never meet a
+	// stderr line ahead of the first event.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	runErr := runOracleProcess(cmd, bounds)
 	// Sweep before finalization - the record captures the swept truth
 	// (see the mutant site).
@@ -1117,10 +1128,13 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		}
 		return probeResult{state: state}, ctx2.Err()
 	}
-	if strings.Contains(buf.String(), "[build failed]") {
-		return probeResult{}, &BaselineBuildError{Diagnostic: compileDiagnostics(buf.Bytes(), nil)}
+	// As at the mutant site: a rejected build never exits zero.
+	if runErr != nil {
+		if diagnostic, rejected := harnessBuildFailure(stdout.Bytes(), stderr.Bytes()); rejected {
+			return probeResult{}, &BaselineBuildError{Diagnostic: diagnostic}
+		}
 	}
-	stream, err := parseTestStream(buf.Bytes())
+	stream, err := parseTestStream(stdout.Bytes())
 	if err != nil {
 		return probeResult{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
@@ -1241,6 +1255,20 @@ func firstFailingTest(stream []byte) (string, error) {
 			killer = e.Package + "." + name
 		}
 	}
+}
+
+// harnessBuildFailure classifies a run's build, baseline and mutant
+// alike: the harness's own build-failure event on the event stream
+// decides, never output text a test could print (a passing baseline
+// whose test echoes "[build failed]" is a passing baseline), over the
+// two streams kept apart; the diagnostic is the compiler's own from
+// both streams (REQ-exec-ephemeral, and the candidate-evidence term's
+// rule in results.md).
+func harnessBuildFailure(stdout, stderr []byte) (diagnostic string, rejected bool) {
+	if !buildRejected(stdout) {
+		return "", false
+	}
+	return compileDiagnostics(stdout, stderr), true
 }
 
 // buildRejected reports whether the test harness itself reported a failed

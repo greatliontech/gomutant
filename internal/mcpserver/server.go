@@ -2111,13 +2111,15 @@ type ephemeralOut struct {
 }
 
 func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in ephemeralIn) (*mcp.CallToolResult, *ephemeralOut, error) {
-	// The probe's bounds are its own value, derived per call and handed
-	// to every oracle spawn it makes — never process state a campaign or
-	// a sibling probe could move (REQ-exec-oracle-memory,
-	// REQ-exec-oracle-parallelism): the ceiling as requested (absent
-	// derives a lone tree's default), the width a lone tree's, the full
-	// host, exactly as a second gomutant process would budget itself.
-	bounds := gomutant.DeriveOracleBounds(mcpOracleMemoryBytes(in.OracleMemoryMiB), 1)
+	// The probe's bounds are its own value, derived once inside the
+	// request from the caller's memory CHOICE — absent for the derived
+	// default, a MiB count, -1 for unlimited — and handed to every
+	// oracle spawn it makes, never process state a campaign or a sibling
+	// probe could move (REQ-exec-oracle-memory; the width, a lone tree's,
+	// is derived in the request beside the ceiling,
+	// REQ-exec-oracle-parallelism). The choice crosses as the choice, as
+	// the CLI passes it: a value derived here and derived again there
+	// read -1 as the default ceiling.
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
 		return nil, nil, err
@@ -2184,7 +2186,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	// and name the heartbeat's stretch (REQ-exec-run-status).
 	var phase atomic.Value
 	phase.Store("ephemeral oracle")
-	probe := gomutant.EphemeralRequest{Findings: s.findingsPath(in.Findings), RefuseAttested: in.Attest != "" && !in.Reattest, File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: bounds.MemoryBytes, Progress: func(event gomutant.PreparationEvent) {
+	probe := gomutant.EphemeralRequest{Findings: s.findingsPath(in.Findings), RefuseAttested: in.Attest != "" && !in.Reattest, File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB), Progress: func(event gomutant.PreparationEvent) {
 		phase.Store(event.Text())
 		if notify != nil {
 			notify(preparationMessage(event))

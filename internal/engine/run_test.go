@@ -302,6 +302,12 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The oracle runs under a -coverpkg pattern nothing matches (set
+	// after the tree loaded), so the go tool prints a warning on stderr
+	// ahead of every event: the discard is classified by the event
+	// stream alone and its diagnostic carries the warning beside the
+	// compiler's text.
+	t.Setenv("GOFLAGS", "-coverpkg=example.com/nomatch/...")
 	for _, m := range ms {
 		out, killer, _, state, incomplete, diagnostic, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestAdd$", 60*time.Second, nil, moduleDir, packageDir, nil, nil, OracleBounds{})
@@ -310,6 +316,9 @@ func TestRunMutantBuildFailureIsDiscarded(t *testing.T) {
 		}
 		if out == MutantDiscarded && diagnostic != "" {
 			discarded++
+			if !strings.Contains(diagnostic, "warning: no packages being tested") {
+				t.Fatalf("discard diagnostic %q lacks the go tool's stderr line", diagnostic)
+			}
 			if killer != "" {
 				t.Fatalf("discarded mutant carries killer %q", killer)
 			}

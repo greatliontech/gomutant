@@ -112,14 +112,8 @@ func loadContextWith(ctx context.Context, dir string, sel Selection, executionSu
 	if err != nil {
 		return nil, err
 	}
-	// Provenance first: a skewed frontend must refuse before it
-	// parses anything. The one sample also serves the build-events
-	// floor.
-	sampledToolchain, err := toolchainProvenance(ctx, dir, env)
-	if err != nil {
-		return nil, err
-	}
-	if err := toolchainSupportsBuildEvents(sampledToolchain); err != nil {
+	// The toolchain ladder (toolchainGuard) before anything parses.
+	if _, err := toolchainGuard(ctx, dir, env); err != nil {
 		return nil, err
 	}
 	members, err := workspaceMembersContext(ctx, dir)

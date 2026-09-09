@@ -142,3 +142,80 @@ func TestGoVersionCmdWiresDirAndEnv(t *testing.T) {
 		t.Fatalf("cmd args = %q", got)
 	}
 }
+
+// The attestation path's provenance check carries the load's build-events
+// floor: a sampled toolchain below go1.24 refuses there as it refuses at
+// the load, so a verb that checks before its write admits nothing the
+// load would refuse (REQ-exec-provenance).
+func TestCheckToolchainProvenanceCarriesTheBuildEventsFloor(t *testing.T) {
+	restore := SwapGoVersionSamplerForTest(func(context.Context, string, []string) (string, error) {
+		return "go1.23.4", nil
+	})
+	defer restore()
+	err := CheckToolchainProvenance(context.Background(), "testdata/fixturemod", Selection{})
+	if err == nil || !strings.Contains(err.Error(), "below go1.24") {
+		t.Fatalf("below-floor sample through the provenance check = %v, want the build-events floor refusal", err)
+	}
+}
+
+// The environment arm of the load's ladder: GODEBUG's
+// gotestjsonbuildtext=1 silences the build-fail event the classifier
+// reads, so the load and the attestation path's standalone check
+// refuse it alike, judged as the go command judges its own setting —
+// the last GODEBUG entry's last pair.
+func TestLoadRefusesASilencedHarness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	// The arm's inputs alone decide it, so it refuses before the
+	// toolchain is sampled — on the load and on the standalone check.
+	sampled := false
+	restore := SwapGoVersionSamplerForTest(func(context.Context, string, []string) (string, error) {
+		sampled = true
+		return runtime.Version(), nil
+	})
+	defer restore()
+	t.Setenv("GODEBUG", "gotestjsonbuildtext=1")
+	_, err := loadContext(context.Background(), "testdata/fixturemod", Selection{}, true)
+	if err == nil || !strings.Contains(err.Error(), "gotestjsonbuildtext=1") {
+		t.Fatalf("load under a silenced harness = %v, want the refusal naming the setting", err)
+	}
+	if err := CheckToolchainProvenance(context.Background(), "testdata/fixturemod", Selection{}); err == nil || !strings.Contains(err.Error(), "gotestjsonbuildtext=1") {
+		t.Fatalf("standalone check under a silenced harness = %v, want the refusal naming the setting", err)
+	}
+	if sampled {
+		t.Fatal("the environment arm sampled the toolchain before refusing")
+	}
+	t.Setenv("GODEBUG", "gotestjsonbuildtext=1,gotestjsonbuildtext=0")
+	if err := CheckToolchainProvenance(context.Background(), "testdata/fixturemod", Selection{}); err != nil {
+		t.Fatalf("a later pair re-enabling the events refused: %v", err)
+	}
+}
+
+func TestHarnessEventsSilencedReadsTheEffectiveSetting(t *testing.T) {
+	for _, row := range []struct {
+		env      []string
+		silenced bool
+	}{
+		{nil, false},
+		{[]string{"GODEBUG=gotestjsonbuildtext=0"}, false},
+		{[]string{"GODEBUG=gotestjsonbuildtext=1"}, true},
+		{[]string{"GODEBUG=http2client=0,gotestjsonbuildtext=1"}, true},
+		{[]string{"GODEBUG=gotestjsonbuildtext=1,gotestjsonbuildtext=0"}, false},
+		{[]string{"GODEBUG=gotestjsonbuildtext=0,gotestjsonbuildtext=1"}, true},
+		{[]string{"GODEBUG=gotestjsonbuildtext=1", "GODEBUG=http2client=0"}, false},
+		{[]string{"GODEBUG=http2client=0", "GODEBUG=gotestjsonbuildtext=1"}, true},
+		{[]string{"GODEBUGX=gotestjsonbuildtext=1"}, false},
+		// A bisect suffix is stripped before the tool reads the value;
+		// the key is case-folded only where the spawn folds it.
+		{[]string{"GODEBUG=gotestjsonbuildtext=1#x"}, true},
+		{[]string{"GODEBUG=gotestjsonbuildtext=1#v1,http2client=0"}, true},
+		{[]string{"GODEBUG=gotestjsonbuildtext=01"}, false},
+		{[]string{"GODEBUG=gotestjsonbuildtext=1x"}, false},
+		{[]string{"godebug=gotestjsonbuildtext=1"}, runtime.GOOS == "windows"},
+	} {
+		if got := harnessEventsSilenced(row.env) != nil; got != row.silenced {
+			t.Fatalf("%q silenced = %v, want %v", row.env, got, row.silenced)
+		}
+	}
+}

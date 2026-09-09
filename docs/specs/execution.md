@@ -572,7 +572,15 @@ survivor, and an unparseable edit of such a file refuses on this ground
 first, before any build could diagnose it (a linked set the derivation
 cannot resolve leaves this gate standing down: a closure that does not
 build refuses at the baseline probe with the compiler's own diagnostic,
-this requirement's canonical framing). Before the build, the imports a
+as reported by the harness's own build-failure event, never inferred from
+output text a test could forge — this requirement's canonical framing).
+A load whose selection-applied environment silences that event
+(GODEBUG's gotestjsonbuildtext=1 as the go command resolves it; a
+bisect-suffixed value is refused whether or not the bisect fires on a
+given stack — the refusal does not decide that) refuses at the head of
+the load's toolchain ladder, before anything loads, and at the
+pre-write check (REQ-exec-provenance), as a toolchain below go1.24
+does. Before the build, the imports a
 replacement no longer references are pruned — an import whose bound name
 is known (an alias, or the declared name the loaded package imports it
 under) and that no selector in the mutant uses; blank and dot imports and
@@ -962,8 +970,13 @@ honored and stray workspace variables stripped — so the witnessed
 version is the one the run's loads and executions actually use,
 never the tool's own cwd default. A verb that mutates state before
 any load (attestation writes the findings document first) runs the
-same check before its write: a skewed binary never writes, echoes
-success, and then fails. The refusal names both toolchains, and on an
+same check before its write — the load's whole toolchain ladder, the
+skew refusal, the build-events floor below go1.24, and the refusal
+of an environment that silences those events (GODEBUG's
+gotestjsonbuildtext=1 as the go command resolves it — its last entry,
+its last pair, a bisect suffix stripped — read from the OS environment
+alone) alike: a skewed, floor-refused, or silenced binary
+never writes, echoes success, and then fails. The refusal names both toolchains, and on an
 identified skew their language series and the rebuild direction; the
 unidentifiable refusal names the versions it could not identify.
 
