@@ -13,6 +13,22 @@ context cancels within the ping interval (the lifecycle_test.go harness
 already builds in-process client/server pairs; a failing-writer
 transport wrapper is the missing piece).
 
+The same seam owes the exit line a fact the protocol layer discards: on
+a cancellation that wins the protocol layer's race against the
+session's end, the session's own error (a wire failure under a signal)
+is received into nothing inside the SDK, so the exit line carries only
+the context's cause — a connection wrapper remembering the last failed
+read or write (the shape the exit-log tests' torn connection already
+has) would carry it as `serve-error` on that outcome too.
+
+The same seam owes a second witness, the idle case: a long-lived
+session with minutes between calls — sixty-odd calls over one host
+session were served before the tools vanished between two turns, with
+no probe running — must stay served or fail with a stated reason (the
+exit log names every end's class and cause once the session reached
+the serve loop; the idle liveness itself is unwitnessed).
+
 Lands: when a transport-seam fault injection lands in the mcpserver
 test harness (the lifecycle_test in-process pair growing a
-failing-writer arm).
+failing-writer arm), the idle-session arm and the last-failure capture
+for the exit line beside it.

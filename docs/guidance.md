@@ -260,7 +260,15 @@ run naming the test that must notice.
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): every tool call's analysis judges under the server's set — the tree root's `vouches` file extended by these — a per-server input because the loaded tree is shared across calls.
 **when:** use mcp as the server entry point for an MCP client;
 selection (tags, toolchain) is per-call on the served tools, while
-vouches bind at the server.
+vouches bind at the server. Every session leaves `.gomutant/mcp.log`
+beside the findings document: the protocol layer's lines and a final
+`exit` line naming the class (host-closed, cancelled, transport,
+panic) with the cause, the calls answered, and the uptime — plus the
+serve's own error as `serve-error` where the class discarded it — and a
+`handler panic` line for a tool call that panicked (answered as an
+error, the session serving on) — read it when a host reports a
+disconnect without a cause; the host-initiated ends (host-closed,
+cancelled) exit 0, a transport end 2.
 **example:** mcp --vouch pgregory.net/rapid:anyRuneGen under an MCP
 client configuration.
 

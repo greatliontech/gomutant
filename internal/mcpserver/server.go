@@ -10,6 +10,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -80,12 +83,221 @@ func (s *Server) updateStore(ctx context.Context, store *gomutant.Store, path st
 	return store.Update(ctx, change)
 }
 
-// Run serves MCP over stdio until the context ends.
+// Run serves MCP over stdio until the session ends, and leaves one
+// diagnosable line behind whatever ended it (REQ-mcp-exit-log): the
+// exit log beside the findings document carries every server line the
+// protocol layer emits and a final `exit` line naming the class — the
+// host closed the transport, the context ended, the transport failed,
+// or the serve path itself panicked — so a disconnect the host reports
+// without a cause is attributable afterwards. The host-initiated ends —
+// its close, its signal — return nil; a transport end returns an
+// ExitError.
 func (s *Server) Run(ctx context.Context) error {
-	return s.MCP().Run(ctx, &mcp.StdioTransport{})
+	return s.runOn(ctx, &mcp.StdioTransport{})
 }
 
-// MCP builds the protocol server (REQ-mcp-tools).
+// ExitClass names why the server stopped serving (REQ-mcp-exit-log).
+type ExitClass string
+
+const (
+	// ExitHostClosed: the host closed the transport (stdin EOF) — the
+	// ordinary end of a session.
+	ExitHostClosed ExitClass = "host-closed"
+	// ExitCancelled: the serve context ended (a signal, a parent's
+	// cancellation).
+	ExitCancelled ExitClass = "cancelled"
+	// ExitTransport: the session ended on a transport or protocol error.
+	ExitTransport ExitClass = "transport"
+	// ExitPanic: the serve path itself panicked; the line is written and
+	// the panic re-raised. A tool handler's panic is not this class: it
+	// is recovered on the session's goroutine, logged, and answered as
+	// an error with the session serving on.
+	ExitPanic ExitClass = "panic"
+)
+
+// ExitError is Run's error for a session ended on its transport — the
+// one end that is a failure: it names the class and carries the cause,
+// and MCPExitCode is the status the command exits with
+// (REQ-mcp-exit-log).
+type ExitError struct {
+	Class ExitClass
+	Cause error
+}
+
+func (e *ExitError) Error() string {
+	return fmt.Sprintf("mcp exit %s: %v", e.Class, e.Cause)
+}
+
+func (e *ExitError) Unwrap() error { return e.Cause }
+
+// MCPExitCode is the command's exit status for a session that ended on
+// this error: 2, the transport class being the one that returns an
+// error at all — the host-initiated ends return none and exit 0, and a
+// serve-path panic ends the process on the runtime's own panic exit
+// (REQ-mcp-exit-log). Named for the tree so the command's discovery
+// never matches a subprocess's own status (os.ProcessState.ExitCode
+// rides every exec.ExitError the tree wraps).
+func (e *ExitError) MCPExitCode() int { return 2 }
+
+// ExitLogPath is the exit log's home: beside the findings document the
+// server serves, appended across sessions (REQ-mcp-exit-log).
+func (s *Server) ExitLogPath() string {
+	return filepath.Join(filepath.Dir(s.findingsPath("")), "mcp.log")
+}
+
+// runOn is Run over any transport — the in-memory one in tests — and
+// the one place the exit line is written. The served count lives here,
+// per session, so a Server run twice reports each session's own.
+func (s *Server) runOn(ctx context.Context, transport mcp.Transport) (err error) {
+	logger, closeLog := s.exitLogger()
+	defer closeLog()
+	start := time.Now()
+	var served atomic.Int64
+	exitLine := func(level slog.Level, class ExitClass, cause string, extra ...any) {
+		logger.Log(context.Background(), level, "exit", append([]any{"class", string(class), "cause", cause, "served", served.Load(), "uptime", time.Since(start).Round(time.Second).String()}, extra...)...)
+	}
+	logger.Info("serve start", "dir", s.dir)
+	defer func() {
+		if r := recover(); r != nil {
+			exitLine(slog.LevelError, ExitPanic, fmt.Sprint(r))
+			closeLog()
+			panic(r)
+		}
+	}()
+	err = s.mcpWith(logger, &served).Run(ctx, transport)
+	class, cause := exitClass(err, ctx.Err())
+	exitLine(slog.LevelInfo, class, cause, serveErrorField(cause, err)...)
+	// The host-initiated ends are never failures: no error, exit 0.
+	if class != ExitTransport {
+		return nil
+	}
+	return &ExitError{Class: ExitTransport, Cause: err}
+}
+
+// serveErrorField is the exit line's `serve-error` pair: the serve's
+// own error when the protocol layer surfaced one and the class
+// discarded it, and nothing when it would render as the cause already
+// (the transport arm; a cancelled serve answered with the context's
+// own error) or there was none. A session error the protocol layer
+// itself discards on cancellation never reaches here.
+func serveErrorField(cause string, err error) []any {
+	if err == nil || err.Error() == cause {
+		return nil
+	}
+	return []any{"serve-error", err.Error()}
+}
+
+// exitClass decides a session's end from two observed facts, in order:
+// a serve context that has ended is a cancelled serve whatever the
+// protocol layer returned first — a host that closes the transport and
+// signals together races the two inside the protocol layer, and the
+// fact recorded is the context's, not the race's; a clean return under
+// a live context is the host's close; anything else is the transport.
+func exitClass(err, ctxErr error) (ExitClass, string) {
+	switch {
+	case ctxErr != nil:
+		return ExitCancelled, ctxErr.Error()
+	case err == nil:
+		return ExitHostClosed, "the host closed the transport"
+	default:
+		return ExitTransport, err.Error()
+	}
+}
+
+// exitLogMaxBytes bounds the exit log at one megabyte: a write that
+// would carry it past the bound first moves the log to `<name>.1`, one
+// generation kept.
+const exitLogMaxBytes = 1 << 20
+
+// exitLogNotice receives the one line the server writes outside its
+// log — that the log is unwritable — so serving never fails on its own
+// diagnostics. A variable so a test can read it; production is stderr.
+var exitLogNotice io.Writer = os.Stderr
+
+// exitLogger opens the exit log for appending under its size bound and
+// returns the logger the protocol layer and the exit line share; an
+// unwritable log degrades to a discarding logger with the reason on
+// exitLogNotice.
+func (s *Server) exitLogger() (*slog.Logger, func()) {
+	path := s.ExitLogPath()
+	f, err := openRotatingFile(path, exitLogMaxBytes)
+	if err != nil {
+		fmt.Fprintf(exitLogNotice, "gomutant mcp: exit log %s unwritable (%v); serving without it\n", path, err)
+		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}
+	}
+	return slog.New(slog.NewTextHandler(f, nil)), func() { _ = f.Close() }
+}
+
+// rotatingFile is the exit log's writer: append-only, bounded at every
+// write — a write that would carry the file past the bound first moves
+// it to `<name>.1`, one generation kept — so one long session is
+// bounded exactly as many short ones are. A single write larger than
+// the bound lands whole in a fresh file. The size is this writer's
+// view: two servers appending to one document's log each count their
+// own bytes, so the file may pass the bound by the other's lines and
+// one may move the file the other is appending to — a misplaced line,
+// never a wrong class. A reopen that fails leaves the writer empty
+// until the next write reopens.
+type rotatingFile struct {
+	path string
+	max  int64
+	mu   sync.Mutex
+	f    *os.File
+	size int64
+}
+
+func openRotatingFile(path string, max int64) (*rotatingFile, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	r := &rotatingFile{path: path, max: max}
+	if err := r.open(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (r *rotatingFile) open() error {
+	f, err := os.OpenFile(r.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	r.f, r.size = f, info.Size()
+	return nil
+}
+
+func (r *rotatingFile) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.f != nil && r.size > 0 && r.size+int64(len(p)) > r.max {
+		_ = r.f.Close()
+		_ = os.Rename(r.path, r.path+".1")
+		r.f, r.size = nil, 0
+	}
+	if r.f == nil {
+		if err := r.open(); err != nil {
+			return 0, err
+		}
+	}
+	n, err := r.f.Write(p)
+	r.size += int64(n)
+	return n, err
+}
+
+func (r *rotatingFile) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.f == nil {
+		return nil
+	}
+	return r.f.Close()
+}
+
 // serverOptions builds the MCP server options - extracted so the
 // keepalive configuration is a testable fact.
 func serverOptions() *mcp.ServerOptions {
@@ -153,8 +365,41 @@ func withHeartbeatLabel[T any](ctx context.Context, notify func(string), label f
 	return fn(ctx)
 }
 
+// MCP builds the protocol server (REQ-mcp-tools) outside a session:
+// no exit log, the served count nobody reads — the shape the surface
+// pins inspect.
 func (s *Server) MCP() *mcp.Server {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, serverOptions())
+	return s.mcpWith(slog.New(slog.NewTextHandler(io.Discard, nil)), new(atomic.Int64))
+}
+
+// mcpWith is MCP with the session's logger — the protocol layer's own
+// lines go to it — and the session's served counter (REQ-mcp-exit-log).
+func (s *Server) mcpWith(logger *slog.Logger, served *atomic.Int64) *mcp.Server {
+	options := serverOptions()
+	options.Logger = logger
+	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, options)
+	srv.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
+			// A handler panic runs on the session's goroutine — past the
+			// protocol layer, which recovers nothing — so it is caught
+			// here: logged with its method and cause, answered as an
+			// error, the session continuing (REQ-mcp-exit-log). Only a
+			// panic on the serve path itself ends the session. Every
+			// tool call answered — the panicked one as an error — then
+			// counts once for the exit line: a receiving middleware, so
+			// no handler carries the duty.
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("handler panic", "method", method, "cause", fmt.Sprint(r))
+					result, err = nil, fmt.Errorf("gomutant: %s panicked: %v", method, r)
+				}
+				if method == "tools/call" {
+					served.Add(1)
+				}
+			}()
+			return next(ctx, method, req)
+		}
+	})
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "run",
 		Description: guidanceDescription("run"),

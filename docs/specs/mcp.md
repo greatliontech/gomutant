@@ -81,6 +81,39 @@ or execution stretch stays silent past a client's deadline. The server's
 instructions and each tool's description teach when to use what and what
 the caps mean.
 
+**REQ-mcp-exit-log** (behavior): The server MUST leave one diagnosable
+line behind whatever ends a session, so a disconnect the host reports
+without a cause is attributable afterwards: an exit log beside the
+default findings document it serves (`.gomutant/mcp.log` under the
+server's directory, whatever a call's own `findings` names; appended
+across sessions; moved to `mcp.log.1`, one generation kept, by any write
+that would carry it past one megabyte, within a session as between them)
+carries the protocol layer's own server lines and a final `exit` line
+naming the class — `cancelled` (the serve context had ended when the
+serve returned, whatever the protocol layer answered first: a host that
+closes the transport and signals together races the two, and the
+recorded fact is the context's), `host-closed` (a clean return under a
+live context — the host closed the transport, the ordinary end),
+`transport` (the session ended on a transport or protocol error), or
+`panic` (the serve path itself panicked; the line is written and the
+panic re-raised, the process ending on the runtime's own panic exit) —
+with the cause, the tool calls answered, the uptime, and — whatever the
+class — the serve's own error when the protocol layer surfaced one and
+the class discarded it (a cancelled serve the protocol layer answered
+with an error; on the transport arm the error is the cause already); a
+session error the protocol layer itself discards on cancellation — the
+context winning its race against the session's end — is not recoverable
+here. The host-initiated ends are never failures: `host-closed` and
+`cancelled` return no error and the command exits 0; `transport` returns
+an error carrying exit code 2. A tool handler's panic never ends the
+session: it runs past the protocol layer on the session's own goroutine,
+so the server recovers it there, logs a `handler panic` line with the
+call's method and cause, and answers the call with an error — counted as
+answered — serving on. An unwritable log never fails serving: the server
+says so on stderr and serves without it. A session that vanishes with no
+line and no such stderr notice is a session that never reached the serve
+loop — the host's own failure to spawn.
+
 **REQ-mcp-surfaces** (behavior): Each verb's default behaviour, output,
 and values MUST be the ones its surface's reader is served by — the MCP
 face an agent paying per token, the CLI face a person at a terminal — as
@@ -100,7 +133,7 @@ surface-table pin).
 | retarget | mcp, cli | the rewrites; `--check` previews | the rewrites capped at 50; `check` previews | `from` and `to` terminated alike |
 | ephemeral | mcp, cli | `--file` with a `--replacement` path, or `--batch` a JSON file `{"edits":[{"file","old_string","new_string"},…]}`; a progress line on the shared cadence; the command timeout unlimited | inline `replacement`, `edits`, or `batch_edits`; notifications and a heartbeat under a token; the command timeout 300 seconds | exactly one mutation form; runs 1–10; oracle timeout 0 derives the budget; `attest` records a judged equivalence |
 | guidance | mcp, cli | a verb's section, or the orientation | the same | — |
-| mcp | cli | serves the tools over stdio | — | per-server vouches |
+| mcp | cli | serves the tools over stdio; the exit log `.gomutant/mcp.log` beside the findings document | — | per-server vouches; the exit classes |
 | version | cli | the binary and document versions | — | — |
 
 **REQ-mcp-guidance** (behavior): Tool-level served prose MUST be the
