@@ -120,7 +120,8 @@ func TestCampaignObservesEachModuleGroupOnceForBothRoles(t *testing.T) {
 	var observes atomic.Int64
 	var mu sync.Mutex
 	var phases []string
-	_, err := tr.Run(context.Background(), []Target{target}, Options{AnalysisEvent: func(phase, pkg, detail string) {
+	_, err := tr.Run(context.Background(), []Target{target}, Options{AnalysisEvent: func(event AnalysisEvent) {
+		phase := event.Phase
 		if phase == "observe" {
 			observes.Add(1)
 		}

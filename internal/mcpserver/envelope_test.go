@@ -28,7 +28,8 @@ func TestRunStreamsLeaveThePayloadWhenStreamed(t *testing.T) {
 	if out.PreparationCount != 3 || out.DecisionsCount != 3 || len(notes) != 6 {
 		t.Fatalf("streamed totals = %d/%d, notes %d", out.PreparationCount, out.DecisionsCount, len(notes))
 	}
-	if phase, _ := streamed.lastPhase.Load().(string); phase != "executing mutants" {
+	// A decision opens no stretch: the label stays the preparation's.
+	if phase, _ := streamed.lastPhase.Load().(string); phase != "prepare mutants" {
 		t.Fatalf("heartbeat phase = %q", phase)
 	}
 

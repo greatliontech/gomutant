@@ -396,26 +396,6 @@ func (r *runReporter) flushProse(text string) error {
 	return r.firstWriteError()
 }
 
-// analysisVocabulary maps gofresh's internal phase names to the
-// operator vocabulary — an unexplained "analysis observe" was the
-// field report's exact complaint. Unknown phases pass through raw so
-// new engine vocabulary stays visible rather than silently renamed.
-var analysisVocabulary = map[string]string{
-	"analysis-unavailable": "attributed reachability unavailable for",
-	"load":                 "loading package graphs (gofresh analysis)",
-	"observe":              "observing oracle runtime inputs (freshness evidence)",
-	"runtime":              "validating runtime-input evidence (oracle freshness)",
-	"prove":                "proving oracle closure freshness (gofresh hash proof)",
-	"baseline-output":      "oracle baseline output for",
-}
-
-func analysisPhrase(phase string) string {
-	if v, ok := analysisVocabulary[phase]; ok {
-		return v
-	}
-	return phase
-}
-
 // resultRowPayload is the structured face's per-target result row —
 // the same facts as the human measured/cached row plus its survivors
 // and operator tallies inline, and the persistence layer when the

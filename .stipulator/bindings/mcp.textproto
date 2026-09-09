@@ -333,8 +333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "9ffd04702b9bb698ea51a8aca3198d5de2ed53b9de5a0d0788973aeb9d03bb4a"
-  source_hash: "a7fc26ca3923bef2317efa38405222c490c4f16fefda34900ea4e80cb8a59571"
+  content_hash: "147315da70583a4166802fa90d75be75e5fc4bd4af7f5abe4cdf5bc66af17f7c"
+  source_hash: "58e5cd81634ecf265da1778b7500f3239eed89734ddb767d797e79b1fc7bd678"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableTracksTheGuidanceVerbs"
   role: BINDING_ROLE_TESTS
@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "9ffd04702b9bb698ea51a8aca3198d5de2ed53b9de5a0d0788973aeb9d03bb4a"
-  source_hash: "a7fc26ca3923bef2317efa38405222c490c4f16fefda34900ea4e80cb8a59571"
+  content_hash: "147315da70583a4166802fa90d75be75e5fc4bd4af7f5abe4cdf5bc66af17f7c"
+  source_hash: "58e5cd81634ecf265da1778b7500f3239eed89734ddb767d797e79b1fc7bd678"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableStatesTheHeldBounds"
   role: BINDING_ROLE_TESTS
@@ -509,4 +509,34 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunBankedResultListsEachShedOnce"
   role: BINDING_ROLE_TESTS
   shape_hash: "3b43fa90f0571678960b3858e8cfb1a8671e75d8b75a3e882822a5ec4c01f77a"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "f5838a02cb5130cd550017eb704dbe591ad552739589b5cb36b4f128b3e8d7bd"
+  source_hash: "30ca10e747f2960a2a06ab521789d474156741f5925c282c6ca91f74cd885a4e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestRunStreamsNameTheStretchFromTheEvent"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "753c7b12a88d16b62899643350e246124e971f3041bc9417b00fa5304fa6be65"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "f5838a02cb5130cd550017eb704dbe591ad552739589b5cb36b4f128b3e8d7bd"
+  source_hash: "30ca10e747f2960a2a06ab521789d474156741f5925c282c6ca91f74cd885a4e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunHeartbeatSpansEveryStretch"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c4b4f26053b85a17b5d7fef6f6dde0ae37ecb9ffa2c5cd2db316c6216c7a8d9f"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "f5838a02cb5130cd550017eb704dbe591ad552739589b5cb36b4f128b3e8d7bd"
+  source_hash: "30ca10e747f2960a2a06ab521789d474156741f5925c282c6ca91f74cd885a4e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunHeartbeatFiresUnderAToken"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "563d83800af168babcae122ee558cc056f5002ce736cc0e8c7cbbdde98ca3e34"
 }

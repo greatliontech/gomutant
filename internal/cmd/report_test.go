@@ -183,10 +183,10 @@ func TestConfirmationModeSuffixRendersOnChangeOnly(t *testing.T) {
 // gofresh's internal phase names render as operator vocabulary;
 // unknown phases pass through raw rather than silently renaming.
 func TestAnalysisPhraseVocabulary(t *testing.T) {
-	if got := analysisPhrase("observe"); !strings.Contains(got, "freshness evidence") {
+	if got := (gomutant.AnalysisEvent{Phase: "observe"}).Head(); !strings.Contains(got, "freshness evidence") {
 		t.Fatalf("observe phrase = %q", got)
 	}
-	if got := analysisPhrase("novel-phase"); got != "novel-phase" {
+	if got := (gomutant.AnalysisEvent{Phase: "novel-phase"}).Head(); got != "novel-phase" {
 		t.Fatalf("unknown phase = %q, want passthrough", got)
 	}
 }

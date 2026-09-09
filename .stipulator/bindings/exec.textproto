@@ -2380,3 +2380,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "98d35002f6e391fdfaec8c65e9ad7c8136bcd9e5b00d25fe817a06f0c24b57c0"
 }
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "9fd6aca4f6e328bee925f463e6a926af7ff5e351f67c400744e5650a83dcf81e"
+  source_hash: "7a0eba52e09c58b5573c2dcb638d7523dca51db34715d6d5ea8fd39bf3895bf3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestGrammarsRenderOnceForEveryClass"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b1aa60e8855cac18384842e603bb9f453fae2f0bd44736c33249a55e5d97fe99"
+}
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "9fd6aca4f6e328bee925f463e6a926af7ff5e351f67c400744e5650a83dcf81e"
+  source_hash: "7a0eba52e09c58b5573c2dcb638d7523dca51db34715d6d5ea8fd39bf3895bf3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestRunStreamsNameTheStretchFromTheEvent"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "753c7b12a88d16b62899643350e246124e971f3041bc9417b00fa5304fa6be65"
+}

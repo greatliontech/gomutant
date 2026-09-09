@@ -1356,11 +1356,11 @@ func TestToolRunForwardsProgressNotifications(t *testing.T) {
 // share one channel and one line shape, the payload after an em dash
 // matching the CLI face.
 func TestAnalysisEventMessages(t *testing.T) {
-	if got, want := analysisEventMessage("loading", "example.com/pkg", ""), "analysis loading example.com/pkg"; got != want {
+	if got, want := analysisEventMessage(gomutant.AnalysisEvent{Phase: "loading", Package: "example.com/pkg", Detail: ""}), "analysis loading example.com/pkg"; got != want {
 		t.Errorf("keep-alive message = %q, want %q", got, want)
 	}
-	if got, want := analysisEventMessage("analysis-unavailable", "example.com/pkg", "unsupported analysis shape: chan T"),
-		"analysis analysis-unavailable example.com/pkg — unsupported analysis shape: chan T"; got != want {
+	if got, want := analysisEventMessage(gomutant.AnalysisEvent{Phase: "analysis-unavailable", Package: "example.com/pkg", Detail: "unsupported analysis shape: chan T"}),
+		"analysis attributed reachability unavailable for example.com/pkg — unsupported analysis shape: chan T"; got != want {
 		t.Errorf("diagnostic message = %q, want %q", got, want)
 	}
 }
@@ -1788,5 +1788,128 @@ func TestBankedRunSummaryCarriesTheAuditRate(t *testing.T) {
 	}
 	if silent := bankedRunSummary(gomutant.RunTallies{}, "interrupt/cancellation", time.Second, gomutant.Selection{}, "r2"); silent.Audit != nil {
 		t.Fatalf("a run that audited nothing carries an audit rate: %+v", silent.Audit)
+	}
+}
+
+// The heartbeat's stretch follows the execution event's phase — the
+// serial confirmation included — and a decision moves it not at all;
+// the audit's flip reaches this face with its payload
+// (REQ-mcp-envelope; REQ-exec-run-status).
+func TestRunStreamsNameTheStretchFromTheEvent(t *testing.T) {
+	var out runOut
+	var notes []string
+	streams := newRunStreams(&out, func(m string) { notes = append(notes, m) })
+	streams.executing(gomutant.ExecutionEvent{Phase: "executing", Symbol: "a.F", TargetIndex: 1, TargetCount: 1})
+	streams.decision(gomutant.RunDecision{Action: "cached", Symbol: "a.G"})
+	if got := streams.lastPhase.Load().(string); got != "executing mutants a.F" {
+		t.Fatalf("a decision moved the stretch to %q", got)
+	}
+	streams.executing(gomutant.ExecutionEvent{Phase: "confirming", Symbol: "a.F", ConfirmationsTotal: 3})
+	if got := streams.lastPhase.Load().(string); got != "confirming a.F" {
+		t.Fatalf("the confirming stretch = %q", got)
+	}
+	streams.executing(gomutant.ExecutionEvent{Phase: "audit-flip", Symbol: "a.F", FlipPosition: "f.go:1:1", FlipKiller: "a.TestF"})
+	if got := streams.lastPhase.Load().(string); got != "confirming a.F" {
+		t.Fatalf("an audit flip moved the stretch to %q", got)
+	}
+	joined := strings.Join(notes, "\n")
+	for _, want := range []string{"executing target 1/1 a.F", "decision cached a.G", "confirming target", "audit FLIP: a.F f.go:1:1 - narrowed survivor killed by a.TestF"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("notifications lack %q:\n%s", want, joined)
+		}
+	}
+}
+
+// One heartbeat spans the whole call and names each stretch: a
+// changed-ref run records the load, the selection, the execution
+// phases, the merge, and the rendering as its stretches, in that order
+// (REQ-mcp-envelope).
+func TestToolRunHeartbeatSpansEveryStretch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
+	var mu sync.Mutex
+	var labels []string
+	stretchObserverForTest = func(label string) {
+		mu.Lock()
+		defer mu.Unlock()
+		labels = append(labels, label)
+	}
+	// The selection's own start is a marker in the same sequence: the
+	// label must be stored before the work it names begins.
+	selectionObserverForTest = func() {
+		mu.Lock()
+		defer mu.Unlock()
+		labels = append(labels, "<selection begins>")
+	}
+	t.Cleanup(func() { stretchObserverForTest, selectionObserverForTest = nil, nil })
+	s := New(gitfixture.Changed(t))
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{Changed: "HEAD"}); err != nil {
+		t.Fatal(err)
+	}
+	wants := []string{"loading tree", "selecting targets", "<selection begins>", "executing mutants example.com/dl.Value", "estimating example.com/dl.Value", "merging findings", "rendering the response"}
+	at := 0
+	for _, label := range labels {
+		if at < len(wants) && strings.HasPrefix(label, wants[at]) {
+			at++
+		}
+	}
+	if at != len(wants) {
+		t.Fatalf("the stretches never named %q in order; recorded %q", wants[at], labels)
+	}
+}
+
+// The heartbeat itself spans the run call: under a millisecond cadence
+// and a listening token, a still-working message names the load — the
+// stretch every run pays — so the wrapper is witnessed, not only the
+// labels (REQ-mcp-envelope).
+func TestToolRunHeartbeatFiresUnderAToken(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
+	prior := heartbeatInterval
+	heartbeatInterval = 5 * time.Millisecond
+	t.Cleanup(func() { heartbeatInterval = prior })
+	s := serverAt(t)
+	ctx := context.Background()
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	serverSession, err := s.MCP().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	var mu sync.Mutex
+	var notes []string
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, &mcp.ClientOptions{
+		ProgressNotificationHandler: func(_ context.Context, req *mcp.ProgressNotificationClientRequest) {
+			mu.Lock()
+			defer mu.Unlock()
+			if req.Params.ProgressToken == "tok" {
+				notes = append(notes, req.Params.Message)
+			}
+		},
+	})
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	params := &mcp.CallToolParams{Name: "run", Arguments: map[string]any{"targets_json": `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"oracleExplicit":true}]}`}}
+	params.SetProgressToken("tok")
+	if _, err := clientSession.CallTool(ctx, params); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		joined := strings.Join(notes, "\n")
+		mu.Unlock()
+		if strings.Contains(joined, "still working: loading tree") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no heartbeat named the run's load:\n%s", joined)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

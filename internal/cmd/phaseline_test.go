@@ -76,12 +76,12 @@ func TestPhasePrimedBeforeTheCadenceNeverPrintsTallies(t *testing.T) {
 // many lines and stays readable under its heading.
 func TestRenderAnalysisIndentsMultiLineDetail(t *testing.T) {
 	var out bytes.Buffer
-	renderAnalysis(&out, "analysis-unavailable", "example.com/p", "no analyzer")
+	renderAnalysis(&out, gomutant.AnalysisEvent{Phase: "analysis-unavailable", Package: "example.com/p", Detail: "no analyzer"})
 	if out.String() != "analysis  attributed reachability unavailable for example.com/p — no analyzer\n" {
 		t.Fatalf("one-line detail = %q", out.String())
 	}
 	out.Reset()
-	renderAnalysis(&out, "baseline-output", "example.com/p", "TestX:\n--- FAIL: TestX\n    x_test.go:9: broke\n")
+	renderAnalysis(&out, gomutant.AnalysisEvent{Phase: "baseline-output", Package: "example.com/p", Detail: "TestX:\n--- FAIL: TestX\n    x_test.go:9: broke\n"})
 	want := "analysis  oracle baseline output for example.com/p:\n          TestX:\n          --- FAIL: TestX\n              x_test.go:9: broke\n"
 	if out.String() != want {
 		t.Fatalf("multi-line detail = %q, want %q", out.String(), want)

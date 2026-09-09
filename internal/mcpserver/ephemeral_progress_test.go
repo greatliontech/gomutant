@@ -157,7 +157,7 @@ func TestRunStreamsNameTheProbePhase(t *testing.T) {
 	streams := newRunStreams(&runOut{}, func(m string) { notified = append(notified, m) })
 	streams.executing(gomutant.ExecutionEvent{Phase: "probing", Symbol: "p.F", ProbesTotal: 3, EstimateProjected: "2m0s", ProbesUnpriced: 1})
 	streams.executing(gomutant.ExecutionEvent{Phase: "probing", Symbol: "p.F", ProbesDone: 1, ProbesTotal: 3})
-	if len(notified) != 1 || notified[0] != "probing p.F: 3 coverage probe(s) up to ~2m0s, 1 unpriced" {
+	if len(notified) != 1 || notified[0] != "probing target 0/0 p.F  probes 0/3  (up to ~2m0s, 1 unpriced)" {
 		t.Fatalf("notifications after the announcement and a tick = %q; want the priced announcement alone", notified)
 	}
 	if got := streams.lastPhase.Load().(string); got != "probing 1/3 p.F" {
@@ -167,7 +167,7 @@ func TestRunStreamsNameTheProbePhase(t *testing.T) {
 	if len(notified) != 2 || !strings.HasPrefix(notified[1], "estimate target 1/1 p.F") {
 		t.Fatalf("notifications after the estimate = %q", notified)
 	}
-	if got := streams.lastPhase.Load().(string); got != "executing mutants p.F" {
+	if got := streams.lastPhase.Load().(string); got != "estimating p.F" {
 		t.Fatalf("heartbeat label after the estimate = %q", got)
 	}
 }

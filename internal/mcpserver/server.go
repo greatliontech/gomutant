@@ -595,16 +595,28 @@ type runStreams struct {
 // analysis-unavailable provenance, the unlisted-toolchain notice)
 // rides the same line after an em dash, matching the CLI face's
 // rendering.
-func analysisEventMessage(phase, pkg, detail string) string {
-	message := "analysis " + phase
-	if pkg != "" {
-		message += " " + pkg
-	}
-	if detail != "" {
-		message += " — " + detail
-	}
-	return message
+func analysisEventMessage(event gomutant.AnalysisEvent) string {
+	return "analysis " + event.Text()
 }
+
+// stretch names the stretch the heartbeat reports as still working —
+// the one label setter every phase of the call goes through, so a
+// test can pin the sequence without racing the cadence.
+func (r runStreams) stretch(label string) {
+	r.lastPhase.Store(label)
+	if stretchObserverForTest != nil {
+		stretchObserverForTest(label)
+	}
+}
+
+// stretchObserverForTest sees every stretch label a run records and
+// selectionObserverForTest the selection's start, so a test can pin
+// the labels' order against the work; nil outside tests, which never
+// run in parallel.
+var (
+	stretchObserverForTest   func(string)
+	selectionObserverForTest func()
+)
 
 func newRunStreams(out *runOut, notify func(string)) runStreams {
 	var phase atomic.Value
@@ -614,7 +626,8 @@ func newRunStreams(out *runOut, notify func(string)) runStreams {
 
 func (r runStreams) decision(decision gomutant.RunDecision) {
 	r.out.DecisionsCount++
-	r.lastPhase.Store("executing mutants")
+	// A decision opens no stretch: a served or skipped target is not
+	// an executing one; the heartbeat keeps the last stretch named.
 	if r.notify != nil {
 		r.notify(decisionMessage(decision))
 		return
@@ -625,56 +638,34 @@ func (r runStreams) decision(decision gomutant.RunDecision) {
 }
 
 // executing is the run tool's one execution-event hook: it names the
-// heartbeat's stretch, and while a token listens it forwards the
-// advisory execution-phase events (REQ-exec-run-status's advisory
-// classes) — the probe phase's priced announcement once, the per-batch
-// probe ticks naming the stretch only, a confirmation flip with its
-// payload, every other phase with its window position and tallies.
+// heartbeat's stretch from the event's own Stretch, and while a token
+// listens it forwards the advisory execution-phase events in the one
+// grammar (REQ-exec-run-status's advisory classes) — the probe phase's
+// priced announcement once (the per-batch probe ticks name the stretch
+// only), every other class as its text, the confirmation mode on the
+// line whenever the event carries one.
 func (r runStreams) executing(e gomutant.ExecutionEvent) {
-	switch e.Phase {
-	case "probing":
-		r.lastPhase.Store(fmt.Sprintf("probing %d/%d %s", e.ProbesDone, e.ProbesTotal, e.Symbol))
-		if e.ProbesDone != 0 || r.notify == nil {
-			return
-		}
-		message := fmt.Sprintf("probing %s: %d coverage probe(s)", e.Symbol, e.ProbesTotal)
-		if e.EstimateProjected != "" {
-			message += " up to ~" + e.EstimateProjected
-		}
-		if e.ProbesUnpriced > 0 {
-			message += fmt.Sprintf(", %d unpriced", e.ProbesUnpriced)
-		}
-		r.notify(message)
-		return
-	case "executing", "estimate":
-		r.lastPhase.Store("executing mutants " + e.Symbol)
+	if stretch := e.Stretch(); stretch != "" {
+		r.stretch(stretch)
 	}
-	if r.notify == nil {
+	if r.notify == nil || (e.Phase == "probing" && e.ProbesDone != 0) {
 		return
 	}
-	if e.Phase == "confirmation-flip" {
-		// The demotion carries its payload on every face: a
-		// provisional kill re-scored survivor names its mutant
-		// and withdrawn killer (REQ-exec-run-status).
-		r.notify(fmt.Sprintf("confirmation FLIP: %s %s - provisional kill by %s re-scored survivor on serial re-run", e.Symbol, e.FlipPosition, e.FlipKiller))
-		return
-	}
-	message := fmt.Sprintf("%s target %d/%d %s candidates %d/%d", e.Phase, e.TargetIndex, e.TargetCount, e.Symbol, e.CandidatesDone, e.CandidatesTotal)
-	if e.ConfirmationsTotal > 0 {
-		message += fmt.Sprintf(" confirmations %d/%d", e.ConfirmationsDone, e.ConfirmationsTotal)
-	}
+	suffix := ""
 	if e.ConfirmationMode != "" {
 		// The gate state rides every face: the disarmed stride
 		// must be distinguishable from the armed one for MCP
 		// operators too (REQ-exec-run-status).
-		message += " mode=" + e.ConfirmationMode
+		suffix = " mode=" + e.ConfirmationMode
 	}
-	r.notify(message)
+	if label, rest, ok := e.Text("", suffix); ok {
+		r.notify(label + " " + rest)
+	}
 }
 
 func (r runStreams) progress(event gomutant.PreparationEvent) {
 	r.out.PreparationCount++
-	r.lastPhase.Store("prepare " + string(event.Stage))
+	r.stretch("prepare " + string(event.Stage))
 	if r.notify != nil {
 		r.notify(preparationMessage(event))
 		return
@@ -710,14 +701,8 @@ func preparationMessage(event gomutant.PreparationEvent) string {
 }
 
 func decisionMessage(decision gomutant.RunDecision) string {
-	message := "decision " + decision.Action + " " + decision.Symbol
-	if decision.Reason != "" {
-		message += " (" + decision.Reason + ")"
-	}
-	if decision.Action == "measure" || decision.Candidates != 0 {
-		message += fmt.Sprintf(", %d candidates", decision.Candidates)
-	}
-	return message
+	label, rest := decision.Text()
+	return "decision " + label + " " + rest
 }
 
 func (s *Server) findingsPath(override string) string {
@@ -934,6 +919,9 @@ type targetSelection struct {
 // lives in the library, so the callers' zero-target notes name the
 // true emptier (REQ-target-filtering, REQ-mcp-envelope).
 func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, targetsPath, targetsJSON, changed string, packages, symbols []string) (targetSelection, error) {
+	if selectionObserverForTest != nil {
+		selectionObserverForTest()
+	}
 	var sel targetSelection
 	var err error
 	switch {
@@ -1009,6 +997,22 @@ func (out *runOut) capAdvisories() (fullSheds []string) {
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
+	// One heartbeat spans the whole call — the load, the selection and
+	// its signposts, the run, the merge, the rendering — naming the
+	// stretch the streams last recorded, so no phase goes silent longer
+	// than the cadence while a token listens (REQ-mcp-envelope).
+	notify := progressNotifier(ctx, req)
+	streams := newRunStreams(&out, notify)
+	_, err = withHeartbeatLabel(ctx, notify, func() string { return streams.lastPhase.Load().(string) }, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, s.runTool(ctx, in, streams)
+	})
+	return nil, out, err
+}
+
+// runTool is the run call's body: the streams carry the notifier and
+// the response it writes into — one response, whichever path fills it.
+func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err error) {
+	notify, out := streams.notify, streams.out
 	callStart := time.Now()
 	// The run's identity is minted first: every record this run measures
 	// carries it, and the summary names it even when nothing was
@@ -1017,11 +1021,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	out.Summary.Run = runID
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
 	if err != nil {
-		return nil, out, err
+		return err
 	}
 	oracleTimeout, err := secondsDuration("oracle_timeout_sec", in.OracleTimeoutSec)
 	if err != nil {
-		return nil, out, err
+		return err
 	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
@@ -1039,7 +1043,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 	}()
 	if err := ctx.Err(); err != nil {
-		return nil, out, err
+		return err
 	}
 	// Every refusal the inputs decide fires here, before the load
 	// (REQ-exec-preparation); the target-source exclusivity counts the
@@ -1051,41 +1055,46 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		TargetSources: targetSourcesGiven(in.TargetsPath, in.TargetsJSON, in.Changed),
 	})
 	if err != nil {
-		return nil, out, err
+		return err
 	}
 	defer prepared.ReleaseCampaign()
 	scratchNamespaces, exemptions := prepared.ScratchNamespaces, prepared.Exemptions
-	notify := progressNotifier(ctx, req)
 	// The loading event rides the inline face when no token listens;
 	// with one, the load itself announces it (loadTreeReporting).
 	out.PreparationCount++
 	if notify == nil {
 		out.Preparation = append(out.Preparation, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	}
-	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
+	streams.stretch("loading tree")
+	if notify != nil {
+		notify("prepare loading")
+	}
+	tree, err := s.loadTreeContext(ctx, in.selection())
 	if err != nil {
-		return nil, out, err
+		return err
 	}
 	var targets []gomutant.Target
 	wholeTree := false
+	streams.stretch("selecting targets")
 	sel, err := s.selectTargets(ctx, tree, in.TargetsPath, in.TargetsJSON, in.Changed, in.Packages, in.Symbols)
 	if err != nil {
-		return nil, out, err
+		return err
 	}
 	targets, wholeTree = sel.targets, sel.wholeTree
 	out.Residue = sel.residue
 	prior := prepared.Prior
 	out.LegacyOverlays, out.OmittedLegacyOverlays = capRows(prepared.Store.LegacyEntries())
 	if out.Residue, err = tree.OracleClosureSignpostContext(ctx, out.Residue, prior, targets, func(stage string) {
+		streams.stretch("inspecting prior findings: " + stage)
 		if notify != nil {
 			notify(stage)
 		}
 	}); err != nil {
-		return nil, out, err
+		return err
 	}
 	if len(targets) == 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, out, err
+			return err
 		}
 		out.Residue, out.OmittedResidue = capRows(out.Residue)
 		out.Document = s.findingsPath(in.Findings)
@@ -1095,6 +1104,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 			// write: the selection's bound — empty — rides it and clears
 			// a standing row (REQ-result-unreached-bound).
 			prepared.Store.RecordRunBound(nil, tree.Selection(), runID, wholeTree)
+			streams.stretch("reconciling the document")
 			dropped := 0
 			err := s.updateStore(ctx, prepared.Store, out.Document, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
@@ -1105,7 +1115,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 				return merged, nil
 			})
 			if err != nil {
-				return nil, out, err
+				return err
 			}
 			// A whole-tree reconcile against zero targets drops every
 			// record whose target left the code - a document write the
@@ -1114,12 +1124,11 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 				out.Note += fmt.Sprintf("; the whole-tree reconcile dropped %d record(s) whose targets left the code", dropped)
 			}
 		}
-		return nil, out, nil
+		return nil
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, out, err
+		return err
 	}
-	streams := newRunStreams(&out, notify)
 	var commitSheds []gomutant.AttestationShed
 	// The run-start snapshot of dispositions per symbol makes the merge
 	// graft pin-correct, and the post-merge rows are the response truth:
@@ -1238,16 +1247,14 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		},
 	}
 	if notify != nil {
-		options.AnalysisEvent = func(phase, pkg, detail string) {
-			notify(analysisEventMessage(phase, pkg, detail))
+		options.AnalysisEvent = func(event gomutant.AnalysisEvent) {
+			notify(analysisEventMessage(event))
 		}
 	}
 	// The heartbeat keeps long compile and execution stretches audible
 	// under the client's deadline: no phase goes silent longer than the
 	// cadence while a token listens (REQ-mcp-envelope).
-	findings, err := withHeartbeatLabel(ctx, notify, func() string { return streams.lastPhase.Load().(string) }, func(ctx context.Context) ([]gomutant.Finding, error) {
-		return tree.Run(ctx, targets, options)
-	})
+	findings, err := tree.Run(ctx, targets, options)
 	var drift *gomutant.TreeDriftError
 	if err == nil {
 		err = ctx.Err()
@@ -1261,7 +1268,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		// (REQ-exec-banked-summary; REQ-mcp-envelope). A run cancelled
 		// before measurement began has nothing banked and errors.
 		if tallies == nil {
-			return nil, out, shedsRidingAbort(err, out.AttestationSheds)
+			return shedsRidingAbort(err, out.AttestationSheds)
 		}
 		out.Summary = bankedRunSummary(*tallies, gomutant.ExitCause(err), time.Since(callStart), tree.Selection(), runID)
 		out.Exit = out.Summary.Banked.Cause
@@ -1271,12 +1278,13 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		out.capAdvisories()
 		out.Residue, out.OmittedResidue = capRows(out.Residue)
 		out.Document = s.findingsPath(in.Findings)
-		return nil, out, nil
+		return nil
 	}
 	// The final merge runs before anything renders: the response reads
 	// the rows the document actually holds - a disposition recorded
 	// concurrently between a symbol's incremental commit and the end of
 	// the run is in both or in neither (REQ-mcp-findings-doc).
+	streams.stretch("merging findings")
 	var attestationSheds []gomutant.AttestationShed
 	reconcileDropped := 0
 	// The run's coverage bound rides the final merge through the one
@@ -1310,7 +1318,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		return fmt.Errorf("%w — additionally, the whole-tree reconcile had already dropped %d record(s) whose targets left the code (persisted)", err, reconcileDropped)
 	}
 	if err != nil {
-		return nil, out, withDrop(shedsRidingAbort(err, out.AttestationSheds))
+		return withDrop(shedsRidingAbort(err, out.AttestationSheds))
 	}
 	if afterFinalReplacementForTest != nil {
 		afterFinalReplacementForTest()
@@ -1321,6 +1329,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// a deadline expiring after the commit never fails a committed run.
 	ctx, cancelRender := gomutant.PostCommitRenderContext(ctx)
 	defer cancelRender()
+	streams.stretch("rendering the response")
 	rendered := gomutant.RenderedFindings(findings, postMerge)
 	out.Summary = gomutant.SummarizeRun(rendered, tree.Selection())
 	out.Summary.Run = runID
@@ -1354,7 +1363,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 		}
 	}
 	if err != nil {
-		return nil, out, err
+		return err
 	}
 	if sel.cut != nil {
 		out.Summary.Delta = &gomutant.DeltaSummary{Ref: sel.cut.Ref, Open: deltaOpen}
@@ -1411,9 +1420,9 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// attestation sheds - fold into it via driftError: surfaced once,
 	// never silently dropped (REQ-attest-survivor).
 	if drift != nil {
-		return nil, out, withDrop(driftError(drift, fullSheds))
+		return withDrop(driftError(drift, fullSheds))
 	}
-	return nil, out, nil
+	return nil
 }
 
 // cappedSheds bounds an error-riding shed list with the remainder

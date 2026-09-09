@@ -2340,7 +2340,8 @@ func TestServeMatchingBatchesEvidenceChecksPerView(t *testing.T) {
 	served, err := warm.Run(context.Background(), targets, Options{
 		Budget: 1, Prior: prior,
 		Decision: func(d RunDecision) { decisions = append(decisions, d) },
-		AnalysisEvent: func(phase, _, _ string) {
+		AnalysisEvent: func(event AnalysisEvent) {
+			phase := event.Phase
 			if phase == "runtime" {
 				runtimePasses.Add(1)
 			}
@@ -3121,7 +3122,8 @@ func TestRunReportsAnalysisEvents(t *testing.T) {
 	var mu sync.Mutex
 	phases := map[string]int{}
 	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
-	if _, err := tr.Run(context.Background(), []Target{target}, Options{AnalysisEvent: func(phase, pkg, detail string) {
+	if _, err := tr.Run(context.Background(), []Target{target}, Options{AnalysisEvent: func(event AnalysisEvent) {
+		phase := event.Phase
 		mu.Lock()
 		phases[phase]++
 		mu.Unlock()

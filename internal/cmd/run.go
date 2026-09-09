@@ -366,7 +366,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// analysis-unavailable provenance the field diagnoses from),
 		// and the structured face keeps the package a package with
 		// the payload under its own key.
-		AnalysisEvent: func(phase, pkg, detail string) {
+		AnalysisEvent: func(event gomutant.AnalysisEvent) {
+			phase, pkg, detail := event.Phase, event.Package, event.Detail
 			analysisMu.Lock()
 			defer analysisMu.Unlock()
 			if detail == "" {
@@ -379,14 +380,14 @@ func runCommand(ctx context.Context, o runOptions) error {
 					rep.emit("analysis", map[string]string{"phase": phase, "package": pkg})
 					return
 				}
-				fmt.Fprintf(out, "analysis  %s\n", strings.TrimSpace(analysisPhrase(phase)+" "+pkg))
+				fmt.Fprintf(out, "analysis  %s\n", event.Head())
 				return
 			}
 			if o.jsonl {
 				rep.emit("analysis", map[string]string{"phase": phase, "package": pkg, "detail": detail})
 				return
 			}
-			renderAnalysis(out, phase, pkg, detail)
+			renderAnalysis(out, event)
 		},
 		Guidance: func(g gomutant.OracleGuidance) {
 			rep.line("guidance", g, func(w io.Writer) {
@@ -711,99 +712,18 @@ func renderPreparation(w io.Writer, event gomutant.PreparationEvent) {
 }
 
 func renderExecutionEvent(w io.Writer, event gomutant.ExecutionEvent, selectionNote, modeSuffix string) {
-	switch event.Phase {
-	case "tick":
-		// Per-candidate completion ticks feed the reporter's pace and
-		// the JSONL face; a human line per candidate would be noise —
-		// the cadence progress line carries the pace instead.
-		return
-	case "probing":
-		// The probe phase, priced before its first batch — the announcement
-		// carries the projection, each later event a batch paid — so the
-		// window's coverage probes read as work with a horizon, never a
-		// frozen done-count (REQ-exec-run-status).
-		line := fmt.Sprintf("probing   target %d/%d %s%s  probes %d/%d", event.TargetIndex, event.TargetCount, event.Symbol, selectionNote, event.ProbesDone, event.ProbesTotal)
-		if event.ProbesDone == 0 {
-			// The projection is an upper bound (each batch at its group's
-			// whole baseline); nothing priced renders no figure.
-			if event.EstimateProjected != "" {
-				line += fmt.Sprintf("  (up to ~%s", event.EstimateProjected)
-				if event.ProbesUnpriced > 0 {
-					line += fmt.Sprintf(", %d unpriced", event.ProbesUnpriced)
-				}
-				line += ")"
-			} else if event.ProbesUnpriced > 0 {
-				line += fmt.Sprintf("  (%d unpriced)", event.ProbesUnpriced)
-			}
-		}
-		fmt.Fprintln(w, line)
-		return
-	case "estimate":
-		// The window cost model, before any budget is spent: the
-		// priced projection at measured-baseline pace, the candidate
-		// classes, and the audit's worst case — unpriced candidates
-		// are counted, never folded into the projection.
-		line := fmt.Sprintf("estimate  target %d/%d %s%s", event.TargetIndex, event.TargetCount, event.Symbol, selectionNote)
-		if event.EstimateProjected != "" {
-			line += fmt.Sprintf("  window ~%s", event.EstimateProjected)
-		}
-		line += fmt.Sprintf("  (%d narrowed, %d full", event.EstimateNarrowed, event.EstimateFull)
-		if event.EstimateUnknown > 0 {
-			line += fmt.Sprintf(", %d unpriced", event.EstimateUnknown)
-		}
-		line += ")"
-		if event.EstimateAudit != "" {
-			line += fmt.Sprintf("  audit ~%s", event.EstimateAudit)
-		}
-		fmt.Fprintln(w, line)
-		return
-	case "audit-flip":
-		// A false survivor is never silent: the audit's full-oracle
-		// re-run killed a narrowed survivor.
-		fmt.Fprintf(w, "audit FLIP: %s %s - narrowed survivor killed by %s under the full oracle; verdict re-scored\n",
-			event.Symbol, event.FlipPosition, event.FlipKiller)
-		return
-	case "audit":
-		fmt.Fprintf(w, "audit     %d narrowed survivor(s) re-scored under the full oracle, %d disagreed\n",
-			event.AuditedNarrowed, event.AuditDisagreed)
-		return
-	case "confirmation-flip":
-		// A demoted kill is never silent: the serial re-run re-scored
-		// this mutant a survivor and withdrew its provisional killer.
-		fmt.Fprintf(w, "confirmation FLIP: %s %s - provisional kill by %s re-scored survivor on serial re-run\n",
-			event.Symbol, event.FlipPosition, event.FlipKiller)
+	// The one grammar, under this face's column: the label padded to
+	// the prefix width (REQ-exec-run-status).
+	label, rest, ok := event.Text(selectionNote, modeSuffix)
+	if !ok {
 		return
 	}
-	line := fmt.Sprintf("%-9s target %d/%d %s", event.Phase, event.TargetIndex, event.TargetCount, event.Symbol)
-	// The event's TargetCount is measure targets prepared so far, not
-	// the request: the reporter's selection note beside it keeps a
-	// resumed run's shrunken denominator honest ("7/71" reads as
-	// remaining work of the same 85-target request, not a different
-	// campaign).
-	line += selectionNote
-	// A confirming window's candidate tally is saturated by
-	// construction - the confirmations counter is the signal - so the
-	// line drops the dead segment (display only; the event carries the
-	// tallies unchanged).
-	if event.Phase != "confirming" {
-		line += fmt.Sprintf("  candidates %d/%d", event.CandidatesDone, event.CandidatesTotal)
-	}
-	if event.ConfirmationsTotal > 0 {
-		line += fmt.Sprintf("  confirmations %d/%d", event.ConfirmationsDone, event.ConfirmationsTotal)
-	}
-	line += modeSuffix
-	fmt.Fprintln(w, line)
+	fmt.Fprintf(w, "%-9s %s\n", label, rest)
 }
 
 func renderRunDecision(w io.Writer, decision gomutant.RunDecision) {
-	switch {
-	case decision.Action == "measure":
-		fmt.Fprintf(w, "measure   %s  %d candidates (%s)\n", decision.Symbol, decision.Candidates, decision.Reason)
-	case decision.Reason != "":
-		fmt.Fprintf(w, "%-9s %s  (%s)\n", decision.Action, decision.Symbol, decision.Reason)
-	default:
-		fmt.Fprintf(w, "%-9s %s\n", decision.Action, decision.Symbol)
-	}
+	label, rest := decision.Text()
+	fmt.Fprintf(w, "%-9s %s\n", label, rest)
 }
 
 // skipClasses aggregates skip reasons so a targets-fed run reports
@@ -932,14 +852,13 @@ func runSuffix(run string) string {
 // renderAnalysis prints a payload-bearing analysis event: one line with
 // the detail when it fits one, else the line then the detail's lines
 // indented under it (a baseline's output is many).
-func renderAnalysis(w io.Writer, phase, pkg, detail string) {
-	head := strings.TrimSpace(analysisPhrase(phase) + " " + pkg)
-	if !strings.Contains(strings.TrimRight(detail, "\n"), "\n") {
-		fmt.Fprintf(w, "analysis  %s — %s\n", head, strings.TrimSpace(detail))
+func renderAnalysis(w io.Writer, event gomutant.AnalysisEvent) {
+	if !strings.Contains(strings.TrimRight(event.Detail, "\n"), "\n") {
+		fmt.Fprintf(w, "analysis  %s\n", event.Text())
 		return
 	}
-	fmt.Fprintf(w, "analysis  %s:\n", head)
-	for _, line := range strings.Split(strings.TrimRight(detail, "\n"), "\n") {
+	fmt.Fprintf(w, "analysis  %s:\n", event.Head())
+	for _, line := range strings.Split(strings.TrimRight(event.Detail, "\n"), "\n") {
 		fmt.Fprintf(w, "          %s\n", line)
 	}
 }

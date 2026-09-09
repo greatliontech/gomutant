@@ -326,7 +326,7 @@ type Options struct {
 	// or finding, and their sequence is not part of the deterministic
 	// run-status contract (REQ-exec-run-status). The callback must
 	// return normally.
-	AnalysisEvent func(phase, pkg, detail string)
+	AnalysisEvent func(AnalysisEvent)
 	// Commit synchronously receives each finished target's final finding —
 	// a cached serve as soon as its pins are proven to hold, a measured or
 	// spliced target after its post-execution producer validation — so the
@@ -2289,7 +2289,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		mv, ok := modes[attested]
 		if !ok {
 			mv = &modeViews{
-				engines:        t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds.Width),
+				engines:        t.newSubjectEngines(analysisEventSink(opts.AnalysisEvent), attested, opts.bounds.Width),
 				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width},
 				viewFaults:     map[string]error{},
 				producerUnion:  &observedViewSet{&subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width}},
@@ -2625,7 +2625,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// the caller's plain go test is diagnosable from the run
 				// (REQ-exec-run-status).
 				if reason != "" && diagnostic != "" && opts.AnalysisEvent != nil {
-					opts.AnalysisEvent("baseline-output", group.pkgs[0], diagnostic)
+					opts.AnalysisEvent(AnalysisEvent{Phase: "baseline-output", Package: group.pkgs[0], Detail: diagnostic})
 				}
 				// A refusing CONSUMER package of a derived oracle names
 				// the escape: the oracle-of-record is a derivation-time

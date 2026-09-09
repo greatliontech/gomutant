@@ -20,8 +20,10 @@ func TestCampaignBaselineFailureCarriesTheOracleOutput(t *testing.T) {
 	var analyses []string
 	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/failing.TestAlwaysFails"}, OracleExplicit: true}
 	if _, err := tr.Run(context.Background(), []Target{target}, Options{Budget: 1, OracleTimeout: time.Minute,
-		Decision:      func(d RunDecision) { decisions = append(decisions, d) },
-		AnalysisEvent: func(phase, pkg, detail string) { analyses = append(analyses, phase+" "+pkg+" "+detail) },
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+		AnalysisEvent: func(event AnalysisEvent) {
+			analyses = append(analyses, event.Phase+" "+event.Package+" "+event.Detail)
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -48,8 +50,10 @@ func TestCampaignBaselineDriftCarriesTheOracleOutput(t *testing.T) {
 	var analyses []string
 	target := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestUnstableBaselineResult"}, OracleExplicit: true}
 	if _, err := tr.Run(context.Background(), []Target{target}, Options{Budget: 1, OracleTimeout: time.Minute,
-		Decision:      func(d RunDecision) { decisions = append(decisions, d) },
-		AnalysisEvent: func(phase, pkg, detail string) { analyses = append(analyses, phase+" "+pkg+" "+detail) },
+		Decision: func(d RunDecision) { decisions = append(decisions, d) },
+		AnalysisEvent: func(event AnalysisEvent) {
+			analyses = append(analyses, event.Phase+" "+event.Package+" "+event.Detail)
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
