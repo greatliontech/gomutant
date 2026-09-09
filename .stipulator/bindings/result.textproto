@@ -1490,3 +1490,63 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "23606dff8fb64d44e925e1846c33f5234a73ea0b290267ff21da0b39b4873c31"
 }
+
+bindings {
+  requirement_id: "REQ-result-run-posture"
+  content_hash: "bafeb1eba97e14305c621f66b4740fecedacb73dff9734d7807351cb19fa62f0"
+  source_hash: "735ab5dd6b6fe5f8d99205049344af2d03825f1247eccdbf320a10d539a8720e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunStatesEachRecordsReusePosture"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8ece03a2528c126a991a51f0f7a888d416033a8f2f853446b0536047ed8910b3"
+}
+
+bindings {
+  requirement_id: "REQ-result-run-posture"
+  content_hash: "bafeb1eba97e14305c621f66b4740fecedacb73dff9734d7807351cb19fa62f0"
+  source_hash: "735ab5dd6b6fe5f8d99205049344af2d03825f1247eccdbf320a10d539a8720e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSummaryPostureRosterIsCappedAndOrdered"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "688283b867462d3bc90b607e33c0b5e007b39a5e0b5c20deac899f5f5eb70e41"
+}
+
+bindings {
+  requirement_id: "REQ-result-run-posture"
+  content_hash: "bafeb1eba97e14305c621f66b4740fecedacb73dff9734d7807351cb19fa62f0"
+  source_hash: "735ab5dd6b6fe5f8d99205049344af2d03825f1247eccdbf320a10d539a8720e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestPostureComposesEveryChannel"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f2121f610613e8286f0dbedba17db2753fd071a84920b19aba4fc0ccd25992c9"
+}
+
+bindings {
+  requirement_id: "REQ-result-run-posture"
+  content_hash: "bafeb1eba97e14305c621f66b4740fecedacb73dff9734d7807351cb19fa62f0"
+  source_hash: "735ab5dd6b6fe5f8d99205049344af2d03825f1247eccdbf320a10d539a8720e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunReportStatesEachRecordsReusePosture"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "09715be328bc99d97fc5ef174c6dade23dc855d36cfc924407ff2784b4d850ef"
+}
+
+bindings {
+  requirement_id: "REQ-result-run-posture"
+  content_hash: "bafeb1eba97e14305c621f66b4740fecedacb73dff9734d7807351cb19fa62f0"
+  source_hash: "735ab5dd6b6fe5f8d99205049344af2d03825f1247eccdbf320a10d539a8720e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestReuseLineNamesTheOmittedRemainder"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b1807aa01d287f213f18add03e1cc7b810c6d81b94536c69e59ad49e82f88acf"
+}
+
+bindings {
+  requirement_id: "REQ-result-run-posture"
+  content_hash: "bafeb1eba97e14305c621f66b4740fecedacb73dff9734d7807351cb19fa62f0"
+  source_hash: "735ab5dd6b6fe5f8d99205049344af2d03825f1247eccdbf320a10d539a8720e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestRunToolStatesEachRecordsReusePosture"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "38666e7604b77232fa8f10921de759cf96b615abebd2da8e83b109b795c16c48"
+}

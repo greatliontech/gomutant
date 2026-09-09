@@ -333,8 +333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "09d867089cc4a7a72023d27d3a73f8cc0e2aa700e70f3b99a3604276a56162e2"
-  source_hash: "9f4f5275e064f062be10e043e9a71911c9520a43c3bfed6e0097ef945347e3b1"
+  content_hash: "608a2fc24ad750b2efda297fea4de49909b0956c7df196f9d45750f982ae7360"
+  source_hash: "e07e2e72038fa2abb45c23427734ee61b083f87a526fc8c3f58ab56a94100a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableTracksTheGuidanceVerbs"
   role: BINDING_ROLE_TESTS
@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "09d867089cc4a7a72023d27d3a73f8cc0e2aa700e70f3b99a3604276a56162e2"
-  source_hash: "9f4f5275e064f062be10e043e9a71911c9520a43c3bfed6e0097ef945347e3b1"
+  content_hash: "608a2fc24ad750b2efda297fea4de49909b0956c7df196f9d45750f982ae7360"
+  source_hash: "e07e2e72038fa2abb45c23427734ee61b083f87a526fc8c3f58ab56a94100a31"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableStatesTheHeldBounds"
   role: BINDING_ROLE_TESTS
