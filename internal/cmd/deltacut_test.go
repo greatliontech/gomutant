@@ -152,6 +152,28 @@ func TestRunAndFindingsCutSurvivorsByTheDelta(t *testing.T) {
 	if strings.Contains(plain.String(), "on the delta") {
 		t.Fatalf("a findings inspection without a ref rendered a delta count: %q", plain.String())
 	}
+	// A reflow that leaves every body canonically unchanged targets
+	// nothing on this face too: the ref's content must actually be
+	// read for the comparison (REQ-target-changed).
+	commit := exec.Command("git", "commit", "-q", "-am", "edited")
+	commit.Dir = dir
+	if out, err := commit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	src, err := os.ReadFile(filepath.Join(dir, "p.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte(strings.Replace(string(src), "package dl\n", "package dl\n\n// reflowed\n\n", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var reflowed bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{dir: dir, changed: "HEAD", findingsFile: "findings.json", output: &reflowed}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(reflowed.String(), "measure ") || strings.Contains(reflowed.String(), "candidates") {
+		t.Fatalf("a reflow-only change measured a symbol on the CLI:\n%s", reflowed.String())
+	}
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

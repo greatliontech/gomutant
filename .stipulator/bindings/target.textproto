@@ -480,3 +480,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "e6a1c7b271e2fca5c63581b94c82ff25f5853fe3382e135c08e155f473242dc9"
 }
+
+bindings {
+  requirement_id: "REQ-target-changed"
+  content_hash: "9d68b3302833cb211c1db76b7f7c0801b825f9b0a9cb1db2736500ae0ba01ba8"
+  source_hash: "525cc4ee05a577280d9fba0eb3bf4383689d3add6abd5049e64d36d4ef3b6dbc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolsCutSurvivorsByTheDelta"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1784e31c91632399835cff259320c17cc81bc891526f25ce8c61025519d02eed"
+}

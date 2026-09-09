@@ -56,7 +56,7 @@ func TestFindingsDefaultNeedsNoTree(t *testing.T) {
 			RuntimeInputs: "manifest", RuntimeDigest: "digest"}},
 		Operators: []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors: []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}}}
-	if err := gomutant.UpdateDocument(findingsAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(gomutant.FindingsPathAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{seed}, nil
 	}); err != nil {
 		t.Fatal(err)

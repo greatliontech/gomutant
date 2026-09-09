@@ -120,17 +120,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// bounds, the declarations, the target sources, the harness
 	// environment, the exemptions, the store, and last the campaign
 	// lock (REQ-exec-preparation).
-	docPath := findingsAt(o.dir, o.findingsFile)
+	docPath := gomutant.FindingsPathAt(o.dir, o.findingsFile)
 	if trimmed := strings.TrimSpace(o.targetsFile); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		return fmt.Errorf("--targets expects a file path; the value looks like an inline JSON document - write it to a file first")
 	}
-	var sources []string
-	if o.targetsFile != "" {
-		sources = append(sources, "--targets")
-	}
-	if o.changed != "" {
-		sources = append(sources, "--changed")
-	}
+	sources := gomutant.TargetSourcesGiven(gomutant.TargetSource{Name: "--targets", Given: o.targetsFile != ""}, gomutant.TargetSource{Name: "--changed", Given: o.changed != ""})
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: docPath, ModuleDir: o.dir, Plan: o.plan, Selection: selectionOf(o.tags, o.toolchain),
 		Budget: o.budget, OracleTimeout: o.oracleTimeout,
@@ -178,9 +172,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// The delta cut and the target set come from the one surface
 		// (REQ-exec-run-status); a plan measures nothing and cuts nothing.
 		var delta gomutant.DeltaCut
-		targets, residue, delta, err = tree.DiscoverChangedSurfaceContext(ctx, surface, func(p string) ([]byte, bool) {
-			return gitref.ShowContext(ctx, o.dir, o.changed, p)
-		})
+		targets, residue, delta, err = tree.DiscoverChangedSurfaceContext(ctx, surface, gitref.ContentAt(ctx, o.dir, o.changed))
 		if err != nil {
 			return err
 		}

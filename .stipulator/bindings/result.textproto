@@ -1560,3 +1560,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "aadf66f0334a0a12e637356fb33afae8f85c74534c2fe0cfc972a4fb569b43ea"
 }
+
+bindings {
+  requirement_id: "REQ-result-ephemeral-attest"
+  content_hash: "ed7ed1d283ef35dd8ed74a30292766c549e034f8bbf94e5797cb9bef693e7c03"
+  source_hash: "495d86f777fb11704a6d9db7306b7521b6ca21276f32a1b90c5a693d00d009d3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEphemeralAttestationRecordFollowsTheTreeRelativeDocument"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6220f73136955b1d0ac2af8592cc2c7d14848537a87b36c8918c1501b0cb9045"
+}

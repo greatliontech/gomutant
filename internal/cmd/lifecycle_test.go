@@ -46,7 +46,7 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 			Survivors: []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}},
 			Attested:  []gomutant.Attestation{{Position: "p.go:1:1", Operator: "zero return", Reason: "equivalent by inspection"}}}
 	}
-	if err := gomutant.UpdateDocument(findingsAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(gomutant.FindingsPathAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{record("example.com/life.Gone"), record("example.com/old.F")}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 		!strings.Contains(pruned.String(), "attested p.go:1:1 zero return  (equivalent by inspection)") {
 		t.Fatalf("prune output lost the disposition echo: %q", pruned.String())
 	}
-	after, err := loadFindings(dir, findingsAt(dir, defaultFindings))
+	after, err := loadFindings(dir, gomutant.FindingsPathAt(dir, defaultFindings))
 	if err != nil || len(after) != 1 || after[0].Symbol != "example.com/life.F" {
 		t.Fatalf("document after lifecycle commands = %+v, %v", after, err)
 	}
@@ -100,7 +100,7 @@ func TestRunRefusesWhileCampaignLockHeld(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	release, err := gomutant.AcquireCampaignLock(findingsAt(dir, defaultFindings))
+	release, err := gomutant.AcquireCampaignLock(gomutant.FindingsPathAt(dir, defaultFindings))
 	if err != nil {
 		t.Fatal(err)
 	}

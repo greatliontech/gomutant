@@ -56,7 +56,7 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	if err := gomutant.CheckToolchainProvenance(ctx, o.dir, selectionOf(o.tags, o.toolchain)); err != nil {
 		return err
 	}
-	store, err := gomutant.OpenStore(findingsAt(o.dir, o.findingsFile), o.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err
 	}

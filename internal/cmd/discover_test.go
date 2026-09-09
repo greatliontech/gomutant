@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"github.com/greatliontech/gomutant/internal/gitfixture"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -81,5 +83,25 @@ func TestDiscoverTargetsFiltersEveryProducer(t *testing.T) {
 	}
 	if _, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, symbols: []string{"example.com/fixture/lib.Absent"}}); err == nil {
 		t.Fatal("empty filtered discovery succeeded")
+	}
+}
+
+// The discover verb's target-source preamble names only what the call
+// gave: --changed alone is one source and passes the exclusivity
+// check (REQ-exec-preparation).
+func TestDiscoverTargetsChangedAloneIsOneSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git binary not available")
+	}
+	dir := gitfixture.Changed(t)
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: dir, changed: "HEAD"})
+	if err != nil {
+		t.Fatalf("discover --changed alone refused: %v", err)
+	}
+	if len(view.Targets) != 1 || view.Targets[0].Symbol != "example.com/dl.Value" {
+		t.Fatalf("changed discovery = %+v, want the edited symbol", view.Targets)
 	}
 }

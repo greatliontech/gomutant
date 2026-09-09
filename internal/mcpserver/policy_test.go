@@ -40,7 +40,7 @@ func TestHeartbeatAndEnvelopeAreOnePolicyEach(t *testing.T) {
 // (REQ-mcp-envelope).
 func TestFindingsEphemeralAttestationsCapAtTheRowBound(t *testing.T) {
 	s := serverAt(t)
-	path := gomutant.EphemeralAttestationsPathFor(s.findingsPath(""))
+	path := gomutant.EphemeralAttestationsPathFor(gomutant.FindingsPathAt(s.dir, ""))
 	for i := 0; i < envelope.rows+3; i++ {
 		att := gomutant.EphemeralAttestation{EditDigest: fmt.Sprintf("d%d", i), RawEditDigest: fmt.Sprintf("r%d", i), Files: []string{"lib/lib.go"}, TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", Reason: "equivalent", Dirty: true}
 		if err := gomutant.RecordEphemeralAttestation(context.Background(), path, att, false); err != nil {
@@ -60,7 +60,7 @@ func TestFindingsEphemeralAttestationsCapAtTheRowBound(t *testing.T) {
 // rows (REQ-result-unreached-bound).
 func TestFindingsServesTheDocumentCoverageBounds(t *testing.T) {
 	s := serverAt(t)
-	store, err := gomutant.OpenStore(s.findingsPath(""), s.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, ""), s.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestRunSummaryCapsTheUnreachedRoster(t *testing.T) {
 	if len(inspected.CoverageBounds) != 1 || inspected.CoverageBounds[0].OmittedUnreached != 3 || len(inspected.CoverageBounds[0].Unreached) != envelope.rows {
 		t.Fatalf("served bounds = %+v", inspected.CoverageBounds)
 	}
-	store, err := gomutant.OpenStore(s.findingsPath(""), dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, ""), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestZeroTargetWholeTreeRunClearsTheServedBound(t *testing.T) {
 		}
 	}
 	s := New(dir)
-	store, err := gomutant.OpenStore(s.findingsPath(""), dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, ""), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestZeroTargetWholeTreeRunClearsTheServedBound(t *testing.T) {
 	if _, _, err := s.toolRun(context.Background(), nil, runIn{selectionIn: selectionIn{Tags: []string{"seltag"}}}); err != nil {
 		t.Fatal(err)
 	}
-	after, err := gomutant.OpenStore(s.findingsPath(""), dir)
+	after, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, ""), dir)
 	if err != nil {
 		t.Fatal(err)
 	}

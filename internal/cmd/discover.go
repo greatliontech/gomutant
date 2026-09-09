@@ -75,13 +75,7 @@ func discoverCommand(ctx context.Context, o discoverOptions) error {
 
 func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, error) {
 	view := discoveryView{Targets: []gomutant.TargetDescription{}, Residue: []gomutant.Residue{}}
-	var sources []string
-	if o.targetsFile != "" {
-		sources = append(sources, "--targets")
-	}
-	if o.changed != "" {
-		sources = append(sources, "--changed")
-	}
+	sources := gomutant.TargetSourcesGiven(gomutant.TargetSource{Name: "--targets", Given: o.targetsFile != ""}, gomutant.TargetSource{Name: "--changed", Given: o.changed != ""})
 	if err := gomutant.ValidateTargetSources(sources); err != nil {
 		return view, err
 	}
@@ -113,9 +107,7 @@ func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, err
 		if err != nil {
 			return view, err
 		}
-		targets, view.Residue, err = tree.DiscoverChangedContext(ctx, paths, func(p string) ([]byte, bool) {
-			return gitref.ShowContext(ctx, o.dir, o.changed, p)
-		})
+		targets, view.Residue, err = tree.DiscoverChangedContext(ctx, paths, gitref.ContentAt(ctx, o.dir, o.changed))
 		if err != nil {
 			return view, err
 		}

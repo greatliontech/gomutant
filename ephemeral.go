@@ -207,10 +207,7 @@ type ephemeralPrep struct {
 // a standing row refuses when the caller means to attest without
 // asking for the replacement (REQ-result-ephemeral-attest).
 func (t *Tree) prepareAttestation(prep ephemeralPrep, canonical, raw string) (*EphemeralAttestation, error) {
-	findings := prep.findings
-	if findings == "" {
-		findings = filepath.Join(t.dir, DefaultFindingsPath)
-	}
+	findings := FindingsPathAt(t.dir, prep.findings)
 	atts, err := LoadEphemeralAttestations(EphemeralAttestationsPathFor(findings))
 	if err != nil {
 		return nil, err

@@ -21,7 +21,7 @@ func TestToolRunCommitsThroughThePreparedStore(t *testing.T) {
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	s := serverAt(t)
-	doc := s.findingsPath("")
+	doc := gomutant.FindingsPathAt(s.dir, "")
 	torn := make(chan error, 1)
 	go func() {
 		deadline := time.Now().Add(2 * time.Minute)

@@ -95,7 +95,7 @@ func TestFindingsCommandFiltersByRun(t *testing.T) {
 	two := seededLocalFinding("example.com/empty.Two")
 	two.Run = "run-two"
 	old := seededLocalFinding("example.com/empty.Old")
-	if err := gomutant.UpdateDocument(findingsAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(gomutant.FindingsPathAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{one, two, old}, nil
 	}); err != nil {
 		t.Fatal(err)

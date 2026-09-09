@@ -153,16 +153,9 @@ func (w cancellingWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func TestFindingsAtAndUpdate(t *testing.T) {
+func TestUpdateDocumentMergesAndAnchors(t *testing.T) {
 	dir := t.TempDir()
-	path := findingsAt(dir, defaultFindings)
-	if filepath.Dir(filepath.Dir(path)) != dir {
-		t.Fatalf("default document not anchored at the tree: %s", path)
-	}
-	abs := filepath.Join(t.TempDir(), "f.json")
-	if findingsAt(dir, abs) != abs {
-		t.Fatal("absolute findings path rewritten")
-	}
+	path := gomutant.FindingsPathAt(dir, defaultFindings)
 	evidence := func(symbol string) gomutant.SubjectEvidence {
 		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
 			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
@@ -200,7 +193,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	}
 	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
-	path := findingsAt(dir, defaultFindings)
+	path := gomutant.FindingsPathAt(dir, defaultFindings)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +353,7 @@ func TestRunCommandPlanRendersDecisionsWithoutSummary(t *testing.T) {
 	if strings.Contains(output.String(), "summary   ") {
 		t.Fatalf("plan output carries a run summary: %q", output.String())
 	}
-	if _, err := os.Stat(findingsAt(fixture, defaultFindings)); !os.IsNotExist(err) {
+	if _, err := os.Stat(gomutant.FindingsPathAt(fixture, defaultFindings)); !os.IsNotExist(err) {
 		t.Fatalf("plan persisted a findings document: %v", err)
 	}
 }
@@ -722,7 +715,7 @@ func TestRunCommandPlanNeverPrunesEmptyWholeTree(t *testing.T) {
 	}
 	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
-	path := findingsAt(dir, defaultFindings)
+	path := gomutant.FindingsPathAt(dir, defaultFindings)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -788,7 +781,7 @@ func TestRunCommandSurfacesCommitPhaseAttestationSheds(t *testing.T) {
 	if err := rec.Attest(attested.Position, attested.Operator, "boundary equivalent at the first site"); err != nil {
 		t.Fatal(err)
 	}
-	path := findingsAt(dir, defaultFindings)
+	path := gomutant.FindingsPathAt(dir, defaultFindings)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{rec}, nil
 	}); err != nil {

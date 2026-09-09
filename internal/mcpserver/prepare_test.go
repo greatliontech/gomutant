@@ -22,7 +22,7 @@ func TestRunToolRefusesItsInputsBeforeAnyLoad(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(nowhere, ".gomutant"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	doc := filepath.Join(nowhere, defaultFindings)
+	doc := filepath.Join(nowhere, gomutant.DefaultFindingsPath)
 	document, err := gomutant.Export(nil)
 	if err != nil {
 		t.Fatal(err)

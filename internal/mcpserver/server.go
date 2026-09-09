@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	guidancepkg "github.com/greatliontech/gofresh/guidance"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/gitref"
@@ -166,7 +165,7 @@ func (e *ExitError) MCPExitCode() int { return 2 }
 // ExitLogPath is the exit log's home: beside the findings document the
 // server serves, appended across sessions (REQ-mcp-exit-log).
 func (s *Server) ExitLogPath() string {
-	return filepath.Join(filepath.Dir(s.findingsPath("")), "mcp.log")
+	return filepath.Join(filepath.Dir(gomutant.FindingsPathAt(s.dir, "")), "mcp.log")
 }
 
 // runOn is Run over any transport — the in-memory one in tests — and
@@ -464,8 +463,6 @@ func (s *Server) mcpWith(logger *slog.Logger, served *atomic.Int64) *mcp.Server 
 	return srv
 }
 
-const defaultFindings = gomutant.DefaultFindingsPath
-
 // defaultCommandTimeoutSec bounds MCP tool work when the caller omits
 // timeout_sec: typical MCP clients abandon a request within a few minutes,
 // and a server that keeps working past its client's private deadline commits
@@ -705,17 +702,6 @@ func decisionMessage(decision gomutant.RunDecision) string {
 	return "decision " + label + " " + rest
 }
 
-func (s *Server) findingsPath(override string) string {
-	p := override
-	if p == "" {
-		p = defaultFindings
-	}
-	if filepath.IsAbs(p) {
-		return p
-	}
-	return filepath.Join(s.dir, filepath.FromSlash(p))
-}
-
 // localPath refuses a tree-relative input that escapes the server's dir —
 // the surface is dir-bound, and an escaping ephemeral file would no-op in
 // the overlay and read as a survivor.
@@ -949,9 +935,7 @@ func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, targets
 			return sel, err
 		}
 		var delta gomutant.DeltaCut
-		sel.targets, sel.residue, delta, err = tree.DiscoverChangedSurfaceContext(ctx, surface, func(p string) ([]byte, bool) {
-			return gitref.ShowContext(ctx, s.dir, changed, p)
-		})
+		sel.targets, sel.residue, delta, err = tree.DiscoverChangedSurfaceContext(ctx, surface, gitref.ContentAt(ctx, s.dir, changed))
 		if err != nil {
 			return sel, err
 		}
@@ -1049,10 +1033,10 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// (REQ-exec-preparation); the target-source exclusivity counts the
 	// inline document as a targets source.
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
-		FindingsPath: s.findingsPath(in.Findings), ModuleDir: s.dir, Selection: in.selection(),
+		FindingsPath: gomutant.FindingsPathAt(s.dir, in.Findings), ModuleDir: s.dir, Selection: in.selection(),
 		Budget: in.Budget, OracleTimeout: oracleTimeout,
 		ScratchNamespaces: in.ScratchNamespaces, BracketPaths: in.BracketPaths,
-		TargetSources: targetSourcesGiven(in.TargetsPath, in.TargetsJSON, in.Changed),
+		TargetSources: wireTargetSources(in.TargetsPath, in.TargetsJSON, in.Changed),
 	})
 	if err != nil {
 		return err
@@ -1097,7 +1081,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 			return err
 		}
 		out.Residue, out.OmittedResidue = capRows(out.Residue)
-		out.Document = s.findingsPath(in.Findings)
+		out.Document = gomutant.FindingsPathAt(s.dir, in.Findings)
 		out.Note = selectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed)
 		if wholeTree {
 			// The reconcile against zero targets is a whole-tree run's
@@ -1180,7 +1164,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		ScratchNamespaces: scratchNamespaces,
 		Exemptions:        exemptions,
 		Staged:            in.Staged,
-		OwnWrites:         gomutant.RunOwnWrites(s.findingsPath(in.Findings)),
+		OwnWrites:         gomutant.RunOwnWrites(gomutant.FindingsPathAt(s.dir, in.Findings)),
 		OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB),
 		Guidance:          func(g gomutant.OracleGuidance) { appendGuidance(&out.Guidance, g) },
 		Contradiction: func(c gomutant.AttestationContradiction) {
@@ -1214,7 +1198,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		// final merge below remains the authority (REQ-exec-cancellation).
 		Commit: func(finding gomutant.Finding) error {
 			var dropped []gomutant.AttestationShed
-			err := s.updateStore(ctx, prepared.Store, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+			err := s.updateStore(ctx, prepared.Store, gomutant.FindingsPathAt(s.dir, in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -1277,7 +1261,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		// every advisory list and the residue (REQ-mcp-envelope).
 		out.capAdvisories()
 		out.Residue, out.OmittedResidue = capRows(out.Residue)
-		out.Document = s.findingsPath(in.Findings)
+		out.Document = gomutant.FindingsPathAt(s.dir, in.Findings)
 		return nil
 	}
 	// The final merge runs before anything renders: the response reads
@@ -1290,7 +1274,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// The run's coverage bound rides the final merge through the one
 	// recording seam (REQ-result-unreached-bound).
 	prepared.Store.RecordRunBound(findings, tree.Selection(), runID, wholeTree)
-	err = s.updateStore(ctx, prepared.Store, s.findingsPath(in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+	err = s.updateStore(ctx, prepared.Store, gomutant.FindingsPathAt(s.dir, in.Findings), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -1401,7 +1385,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 			out.MachineLocalOnly++
 		}
 	}
-	out.Document = s.findingsPath(in.Findings)
+	out.Document = gomutant.FindingsPathAt(s.dir, in.Findings)
 	// The advisory lists cap like every row surface; the drift error
 	// still folds over the FULL shed list, capped by its own exemplar
 	// bound - a capped response list must not shrink what the error
@@ -1498,7 +1482,7 @@ type discoverOut struct {
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
 	var out discoverOut
-	if err := gomutant.ValidateTargetSources(targetSourcesGiven(in.TargetsPath, in.TargetsJSON, in.Changed)); err != nil {
+	if err := gomutant.ValidateTargetSources(wireTargetSources(in.TargetsPath, in.TargetsJSON, in.Changed)); err != nil {
 		return nil, out, err
 	}
 	notify := progressNotifier(ctx, req)
@@ -1653,7 +1637,7 @@ type findingsOut struct {
 }
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
-	out := findingsOut{Document: s.findingsPath(in.Findings)}
+	out := findingsOut{Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
 	// The committed ephemeral-equivalence record rides the inspection,
 	// independent of the finding rows (REQ-result-ephemeral-attest).
 	atts, err := gomutant.LoadEphemeralAttestations(gomutant.EphemeralAttestationsPathFor(out.Document))
@@ -1666,7 +1650,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	default:
 		return nil, out, fmt.Errorf("unknown state %q (current, stale, unverifiable, detached)", in.State)
 	}
-	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
 	}
@@ -1722,9 +1706,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		if err != nil {
 			return nil, out, err
 		}
-		_, _, delta, err := tree.DiscoverChangedSurfaceContext(ctx, surface, func(p string) ([]byte, bool) {
-			return gitref.ShowContext(ctx, s.dir, in.Changed, p)
-		})
+		_, _, delta, err := tree.DiscoverChangedSurfaceContext(ctx, surface, gitref.ContentAt(ctx, s.dir, in.Changed))
 		if err != nil {
 			return nil, out, err
 		}
@@ -1870,7 +1852,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 	if in.Symbol != "" && in.Label != "" {
 		return nil, explainOut{}, fmt.Errorf("explain: the label filter restricts the triage arm; pass symbol or label, not both")
 	}
-	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, in.Findings), s.dir)
 	if err != nil {
 		return nil, explainOut{}, err
 	}
@@ -1908,7 +1890,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 				Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
 				Layer: layer, LayerReasons: gomutant.RollUpMachineLocalInputs(layerReasons),
 				Attested: len(finding.AttestedDispositions()),
-				Document: s.findingsPath(in.Findings),
+				Document: gomutant.FindingsPathAt(s.dir, in.Findings),
 			}
 			if len(out.LayerReasons) > envelope.reasons {
 				out.OmittedLayerReasons = len(out.LayerReasons) - envelope.reasons
@@ -1948,7 +1930,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			groups[reason] = append(groups[reason], finding.Symbol)
 		}
 	}
-	out := explainOut{RepoCommittable: &repo, LocalOnly: &local, Document: s.findingsPath(in.Findings)}
+	out := explainOut{RepoCommittable: &repo, LocalOnly: &local, Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
 	// An empty triage is an answer with two different next steps -
 	// measure first, or widen the label - so the response says which
 	// (REQ-mcp-explain, REQ-mcp-envelope).
@@ -2033,11 +2015,11 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 		return nil, out, err
 	}
 	var attested gomutant.Finding
-	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
 	}
-	err = s.updateStore(ctx, store, s.findingsPath(in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+	err = s.updateStore(ctx, store, gomutant.FindingsPathAt(s.dir, in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		var err error
 		all, attested, err = gomutant.AttestFinding(all, in.Symbol, in.Position, in.Operator, in.Reason)
 		if err != nil {
@@ -2088,8 +2070,8 @@ type pruneOut struct {
 }
 
 func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pruneIn) (*mcp.CallToolResult, pruneOut, error) {
-	out := pruneOut{Removed: []prunedOut{}, Document: s.findingsPath(in.Findings)}
-	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	out := pruneOut{Removed: []prunedOut{}, Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
 	}
@@ -2133,11 +2115,11 @@ type retargetOut struct {
 }
 
 func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
-	out := retargetOut{Rewritten: []gomutant.RetargetedRecord{}, Document: s.findingsPath(in.Findings)}
+	out := retargetOut{Rewritten: []gomutant.RetargetedRecord{}, Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
 	if err := gomutant.ValidateRetargetPair(in.From, in.To); err != nil {
 		return nil, out, err
 	}
-	store, err := gomutant.OpenStore(s.findingsPath(in.Findings), s.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
 	}
@@ -2266,7 +2248,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	// and name the heartbeat's stretch (REQ-exec-run-status).
 	var phase atomic.Value
 	phase.Store("ephemeral oracle")
-	probe := gomutant.EphemeralRequest{Findings: s.findingsPath(in.Findings), RefuseAttested: in.Attest != "" && !in.Reattest, File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB), Progress: func(event gomutant.PreparationEvent) {
+	probe := gomutant.EphemeralRequest{Findings: gomutant.FindingsPathAt(s.dir, in.Findings), RefuseAttested: in.Attest != "" && !in.Reattest, File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB), Progress: func(event gomutant.PreparationEvent) {
 		phase.Store(event.Text())
 		if notify != nil {
 			notify(preparationMessage(event))
@@ -2292,7 +2274,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 		if err != nil {
 			return nil, nil, err
 		}
-		path := gomutant.EphemeralAttestationsPathFor(s.findingsPath(in.Findings))
+		path := gomutant.EphemeralAttestationsPathFor(gomutant.FindingsPathAt(s.dir, in.Findings))
 		if err := gomutant.RecordEphemeralAttestation(ctx, path, att, in.Reattest); err != nil {
 			return nil, nil, err
 		}
@@ -2311,24 +2293,15 @@ func mcpOracleMemoryBytes(mib *int64) int64 {
 	return gomutant.OracleMemoryBytesFromMiB(*mib)
 }
 
-// guidanceDoc is the embedded guidance document; a malformed document
-// is a build defect the parse-pinning test surfaces, so consumers
-// fail loudly rather than serving nothing.
-func guidanceDoc() *guidancepkg.Document {
-	doc, err := gomutant.GuidanceDocument()
-	if err != nil {
-		panic("mcpserver: embedded guidance document malformed: " + err.Error())
-	}
-	return doc
-}
-
-func guidanceOrientation() string { return guidanceDoc().Orientation() }
+// guidanceOrientation is the decision map the served instructions and
+// the bare guidance call open with.
+func guidanceOrientation() string { return gomutant.Guidance().Orientation() }
 
 // guidanceDescription is a tool's one-line purpose, served from the
 // guidance document under the tool's mcp spelling
 // (REQ-mcp-guidance).
 func guidanceDescription(verb string) string {
-	d, err := guidanceDoc().Description("mcp", verb)
+	d, err := gomutant.Guidance().Description("mcp", verb)
 	if err != nil {
 		panic("mcpserver: " + err.Error())
 	}
@@ -2345,27 +2318,20 @@ type guidanceIn struct {
 // or the decision map for orientation. It touches no tree state.
 func (s *Server) toolGuidance(ctx context.Context, req *mcp.CallToolRequest, in guidanceIn) (*mcp.CallToolResult, any, error) {
 	if in.Verb == "" {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: guidanceDoc().Orientation()}}}, nil, nil
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: gomutant.Guidance().Orientation()}}}, nil, nil
 	}
-	long, err := guidanceDoc().Long("mcp", in.Verb)
+	long, err := gomutant.Guidance().Long("mcp", in.Verb)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w; empty verb serves the decision map, which names every verb", err)
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: long}}}, nil, nil
 }
 
-// targetSourcesGiven names the run's supplied target sources in the
-// wire's spelling.
-func targetSourcesGiven(targetsPath, targetsJSON, changed string) []string {
-	var given []string
-	if targetsPath != "" {
-		given = append(given, "targets_path")
-	}
-	if targetsJSON != "" {
-		given = append(given, "targets_json")
-	}
-	if changed != "" {
-		given = append(given, "changed")
-	}
-	return given
+// wireTargetSources names a call's given target sources in the wire's
+// spelling — the spellings' one home on this face.
+func wireTargetSources(targetsPath, targetsJSON, changed string) []string {
+	return gomutant.TargetSourcesGiven(
+		gomutant.TargetSource{Name: "targets_path", Given: targetsPath != ""},
+		gomutant.TargetSource{Name: "targets_json", Given: targetsJSON != ""},
+		gomutant.TargetSource{Name: "changed", Given: changed != ""})
 }

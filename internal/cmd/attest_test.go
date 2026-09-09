@@ -20,7 +20,7 @@ func TestAttestRefusesAMalformedVouchBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedFinding(t, dir, "example.com/empty.Old", "example.com/empty.TestOld", "example.com/empty")
-	path := findingsAt(dir, defaultFindings)
+	path := gomutant.FindingsPathAt(dir, defaultFindings)
 	before, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

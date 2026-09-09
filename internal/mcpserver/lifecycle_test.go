@@ -42,7 +42,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	// The stored subject package must agree with the symbol - the
 	// retarget's package-boundary gate audits the stored fact.
 	renamed.TargetEvidence.ObservationSubjectPackage = "example.com/old"
-	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{dead, renamed}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestToolLifecycleEchoBounds(t *testing.T) {
 		f.TargetEvidence.ObservationSubjectPackage = "example.com/old"
 		seed = append(seed, f)
 	}
-	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return seed, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -179,7 +179,7 @@ func TestToolExplainRollsUpSameRootInputs(t *testing.T) {
 	f.Commit = "abc"
 	f.TargetEvidence.RuntimeInputs = manifest
 	f.OracleEvidence[0].RuntimeInputs = manifest
-	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{f}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	s := New(dir)
 	ctx := context.Background()
-	release, err := gomutant.AcquireCampaignLock(s.findingsPath(""))
+	release, err := gomutant.AcquireCampaignLock(gomutant.FindingsPathAt(s.dir, ""))
 	if err != nil {
 		t.Fatal(err)
 	}

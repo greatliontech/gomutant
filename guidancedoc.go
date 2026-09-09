@@ -23,6 +23,18 @@ var (
 	guidanceErr  error
 )
 
+// Guidance is the embedded guidance document every face reads: a
+// malformed document is a build defect the parse-pinning test
+// surfaces, so a face's construction fails loudly rather than serving
+// nothing (REQ-mcp-guidance).
+func Guidance() *guidance.Document {
+	doc, err := GuidanceDocument()
+	if err != nil {
+		panic("gomutant: embedded guidance document malformed: " + err.Error())
+	}
+	return doc
+}
+
 // GuidanceDocument is the parsed embedded guidance source, parsed
 // once; a malformed document is a build-time defect every consumer
 // surfaces loudly.

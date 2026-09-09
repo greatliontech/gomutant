@@ -72,6 +72,25 @@ func validateRunBounds(budget int, oracleTimeout time.Duration) error {
 	return nil
 }
 
+// TargetSource is one of a face's target-source knobs in the face's
+// own spelling, and whether the call gave it.
+type TargetSource struct {
+	Name  string
+	Given bool
+}
+
+// TargetSourcesGiven names the sources a call gave, in the face's
+// order — the one preamble both faces hand ValidateTargetSources.
+func TargetSourcesGiven(sources ...TargetSource) []string {
+	var given []string
+	for _, s := range sources {
+		if s.Given {
+			given = append(given, s.Name)
+		}
+	}
+	return given
+}
+
 // ValidateTargetSources refuses more than one supplied target source,
 // naming the ones given in the caller's own spelling.
 func ValidateTargetSources(given []string) error {

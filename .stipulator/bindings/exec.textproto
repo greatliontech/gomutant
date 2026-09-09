@@ -2400,3 +2400,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "753c7b12a88d16b62899643350e246124e971f3041bc9417b00fa5304fa6be65"
 }
+
+bindings {
+  requirement_id: "REQ-exec-preparation"
+  content_hash: "8e4e1461f0d7dc8756324f0f118ff1ae468f722093d22a70c63272a34694b421"
+  source_hash: "5d694cc36eb3d950cdd81820e768a0238182a745614b5a47db1fa0e45fa06615"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestOneSourceHelpersForBothFaces"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bfa54b1eb0c877bab51db401ac9998db7d0fb7e76eda758d59b7e79ad60cc1dc"
+}
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "9fd6aca4f6e328bee925f463e6a926af7ff5e351f67c400744e5650a83dcf81e"
+  source_hash: "7a0eba52e09c58b5573c2dcb638d7523dca51db34715d6d5ea8fd39bf3895bf3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/gitref.TestContentAtReadsTheRef"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "46b5a4f81650ab8d8f0f8cad6b3f851870be0047222b9f3c4c1aaadf574e38dc"
+}
+
+bindings {
+  requirement_id: "REQ-exec-preparation"
+  content_hash: "8e4e1461f0d7dc8756324f0f118ff1ae468f722093d22a70c63272a34694b421"
+  source_hash: "5d694cc36eb3d950cdd81820e768a0238182a745614b5a47db1fa0e45fa06615"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestDiscoverTargetsChangedAloneIsOneSource"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "90d9aeb745c9ddec6dd21cdd488447c6eb2ffc6c073fcb2b24010b1cf76d78cc"
+}

@@ -45,7 +45,7 @@ func TestToolRunChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) {
 	stale := gomutant.Finding{Symbol: "example.com/fixture/lib.Weak", BodyHash: "body", OperatorSet: engine.OperatorSet, OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/fixture/lib.Weak"),
 		OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/fixture/lib.TestGone")}}
-	if err := gomutant.UpdateDocument(filepath.Join(s.dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(filepath.Join(s.dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{stale}, nil
 	}); err != nil {
 		t.Fatal(err)

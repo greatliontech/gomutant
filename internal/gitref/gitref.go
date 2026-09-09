@@ -65,3 +65,10 @@ func outputContext(ctx context.Context, dir string, args ...string) ([]byte, err
 	}
 	return stdout.Bytes(), nil
 }
+
+// ContentAt is the ref's content as the changed-surface discovery
+// reads it — the one closure every face's changed-ref path hands
+// Tree.DiscoverChangedSurfaceContext, written once.
+func ContentAt(ctx context.Context, dir, ref string) func(path string) ([]byte, bool) {
+	return func(path string) ([]byte, bool) { return ShowContext(ctx, dir, ref, path) }
+}

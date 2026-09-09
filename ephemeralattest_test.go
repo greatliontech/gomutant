@@ -578,3 +578,26 @@ func TestEphemeralSurvivorCarriesItsAttestation(t *testing.T) {
 		t.Fatalf("probe over an unloadable record = %v, want the record's refusal", err)
 	}
 }
+
+// The attestation record's home follows the findings document under
+// the one path rule: a relative document name is tree-relative, so
+// the record beside it is too (REQ-result-ephemeral-attest).
+func TestEphemeralAttestationRecordFollowsTheTreeRelativeDocument(t *testing.T) {
+	dir := t.TempDir()
+	tr := &Tree{dir: dir}
+	rel := filepath.Join("out", "findings.json")
+	if err := os.MkdirAll(filepath.Join(dir, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := EphemeralAttestationsPathFor(filepath.Join(dir, rel))
+	if err := os.WriteFile(record, []byte(`{"version":2,"attestations":[{"editDigest":"c","rawEditDigest":"r","files":["p.go"],"testPkg":"example.com/p","run":"^TestP$","reason":"equivalent"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	row, err := tr.prepareAttestation(ephemeralPrep{findings: rel}, "c", "r")
+	if err != nil {
+		t.Fatalf("a tree-relative findings name did not find its record: %v", err)
+	}
+	if row == nil || row.Reason != "equivalent" {
+		t.Fatalf("the standing row beside the tree-relative document was not read: %+v", row)
+	}
+}

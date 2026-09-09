@@ -140,7 +140,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	if err != nil {
 		return interrupted(err)
 	}
-	req := gomutant.EphemeralRequest{Findings: findingsAt(o.dir, o.findingsFile), RefuseAttested: o.attest != "" && !o.reattest, TestPkg: o.testPkg, Run: o.runPat, OracleTimeout: o.oracleTimeout, Runs: o.runs, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Progress: rep.preparation}
+	req := gomutant.EphemeralRequest{Findings: gomutant.FindingsPathAt(o.dir, o.findingsFile), RefuseAttested: o.attest != "" && !o.reattest, TestPkg: o.testPkg, Run: o.runPat, OracleTimeout: o.oracleTimeout, Runs: o.runs, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Progress: rep.preparation}
 	if o.batch != "" {
 		req.BatchEdits = batchEdits
 	} else {
@@ -166,7 +166,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 		if err != nil {
 			return err
 		}
-		path := gomutant.EphemeralAttestationsPathFor(findingsAt(o.dir, o.findingsFile))
+		path := gomutant.EphemeralAttestationsPathFor(gomutant.FindingsPathAt(o.dir, o.findingsFile))
 		if err := gomutant.RecordEphemeralAttestation(ctx, path, att, o.reattest); err != nil {
 			return err
 		}

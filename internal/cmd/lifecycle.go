@@ -31,7 +31,7 @@ func newPruneCommand() *cobra.Command {
 }
 
 func pruneCommand(ctx context.Context, o pruneOptions, out io.Writer) error {
-	store, err := gomutant.OpenStore(findingsAt(o.dir, o.findingsFile), o.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func retargetCommand(ctx context.Context, o retargetOptions, out io.Writer) erro
 	if err := gomutant.ValidateRetargetPair(o.from, o.to); err != nil {
 		return err
 	}
-	store, err := gomutant.OpenStore(findingsAt(o.dir, o.findingsFile), o.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err
 	}

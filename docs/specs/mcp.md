@@ -157,13 +157,15 @@ is wrong.
 findings document the CLI maintains — a measuring tool merges fresh findings
 over the prior document by symbol and an attesting tool rewrites it — so an
 agent session and an operator session compose through one record, and
-neither invalidates the other's dispositions. What a run surface reports is
-the post-merge record: survivor rows, disposition rows, and summary counts
-describe the document the run left behind, on both faces, so the response
-and the document never disagree about a disposition's fate. A run that
-carries any record from the machine-local overlay into the committed
-document says so — the promoted count is a document change git only sees
-when committed.
+neither invalidates the other's dispositions. Both faces name that document
+by one rule: an empty name is the default document under the tree root, a
+relative name is tree-relative, an absolute name stands. What a run surface
+reports is the post-merge record: survivor rows, disposition rows, and
+summary counts describe the document the run left behind, on both faces, so
+the response and the document never disagree about a disposition's fate. A
+run that carries any record from the machine-local overlay into the
+committed document says so — the promoted count is a document change git
+only sees when committed.
 
 **REQ-mcp-lifecycle** (behavior): The server MUST expose the prune and
 retarget verbs of REQ-result-lifecycle in [results.md](results.md) as

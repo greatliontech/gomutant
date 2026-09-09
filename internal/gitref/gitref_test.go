@@ -1,10 +1,13 @@
 package gitref
 
 import (
+	"context"
+	"github.com/greatliontech/gomutant/internal/gitfixture"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -69,5 +72,20 @@ func TestChangedPaths(t *testing.T) {
 	}
 	if _, ok := Show(sub, "HEAD", "untracked.go"); ok {
 		t.Fatal("a new file read as present at the ref")
+	}
+}
+
+// ContentAt is the show closure every changed-ref path hands the
+// discovery: it reads the ref's content, and reports absence for a
+// path the ref lacks.
+func TestContentAtReadsTheRef(t *testing.T) {
+	dir := gitfixture.Changed(t)
+	at := ContentAt(context.Background(), dir, "HEAD")
+	data, ok := at("p.go")
+	if !ok || !strings.Contains(string(data), "func Value(x int) int") || strings.Contains(string(data), "x < -10") {
+		t.Fatalf("content at HEAD = %q, %v; want the committed body", data, ok)
+	}
+	if _, ok := at("missing.go"); ok {
+		t.Fatal("a path the ref lacks read as present")
 	}
 }

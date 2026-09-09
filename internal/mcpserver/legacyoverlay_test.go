@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gomutant/internal/legacytest"
+
+	gomutant "github.com/greatliontech/gomutant"
 )
 
 // The run and findings tools carry preserved legacy overlay entries as
@@ -27,7 +29,7 @@ func TestToolsCarryPreservedLegacyOverlays(t *testing.T) {
 	for i := range versions {
 		versions[i] = 2
 	}
-	entries := legacytest.Plant(t, dir, filepath.Join(dir, defaultFindings), versions...)
+	entries := legacytest.Plant(t, dir, filepath.Join(dir, gomutant.DefaultFindingsPath), versions...)
 	planted := map[string]bool{}
 	for _, e := range entries {
 		planted[e] = true

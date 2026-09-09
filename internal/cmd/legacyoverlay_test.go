@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gomutant/internal/legacytest"
+
+	gomutant "github.com/greatliontech/gomutant"
 )
 
 // A findings document beside preserved legacy overlay entries names
@@ -25,7 +27,7 @@ func TestFindingsCommandNamesPreservedLegacyOverlays(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	entry := legacytest.Plant(t, dir, findingsAt(dir, defaultFindings), 2)[0]
+	entry := legacytest.Plant(t, dir, gomutant.FindingsPathAt(dir, defaultFindings), 2)[0]
 	ctx := context.Background()
 	var human bytes.Buffer
 	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings}, &human); err != nil {

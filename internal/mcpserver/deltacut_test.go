@@ -3,6 +3,9 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,6 +70,27 @@ func TestToolsCutSurvivorsByTheDelta(t *testing.T) {
 	}
 	if whole.Summary.Delta != nil || len(whole.Findings[0].DeltaOpen) != 0 {
 		t.Fatalf("a whole-tree run carried a delta cut: %+v", whole.Summary.Delta)
+	}
+	// A reflow that leaves every body canonically unchanged targets
+	// nothing and cuts nothing: the ref's content must actually be read
+	// for the comparison (REQ-target-changed; REQ-exec-run-status).
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package dl\n\n// reflowed\n\nfunc Value(x int) int {\n\tif x < -10 {\n\t\treturn 3\n\t}\n\tif x > 10 {\n\t\treturn 1\n\t}\n\treturn 2\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCommit := exec.Command("git", "commit", "-q", "-am", "edited")
+	gitCommit.Dir = dir
+	if out, err := gitCommit.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package dl\n\n\n// reflowed twice\n\nfunc Value(x int) int {\n\n\tif x < -10 {\n\t\treturn 3\n\t}\n\tif x > 10 {\n\t\treturn 1\n\t}\n\treturn 2\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, reflowed, err := s.toolRun(context.Background(), nil, runIn{Changed: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reflowed.Summary.Targets != 0 || reflowed.Note == "" {
+		t.Fatalf("a reflow-only change targeted %d symbols (note %q); want none", reflowed.Summary.Targets, reflowed.Note)
 	}
 }
 

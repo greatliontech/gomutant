@@ -94,7 +94,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	default:
 		return fmt.Errorf("unknown state %q (current, stale, unverifiable, detached)", o.state)
 	}
-	store, err := gomutant.OpenStore(findingsAt(o.dir, o.findingsFile), o.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err
 	}
@@ -167,9 +167,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		if err != nil {
 			return err
 		}
-		_, _, delta, err := tree.DiscoverChangedSurfaceContext(ctx, surface, func(p string) ([]byte, bool) {
-			return gitref.ShowContext(ctx, o.dir, o.changed, p)
-		})
+		_, _, delta, err := tree.DiscoverChangedSurfaceContext(ctx, surface, gitref.ContentAt(ctx, o.dir, o.changed))
 		if err != nil {
 			return err
 		}
@@ -224,7 +222,7 @@ func printDocumentTail(ctx context.Context, out io.Writer, store *gomutant.Store
 // findings tool's and the record file's own
 // (REQ-result-ephemeral-attest).
 func printEphemeralAttestationLine(out io.Writer, o findingsOptions) error {
-	attPath := gomutant.EphemeralAttestationsPathFor(findingsAt(o.dir, o.findingsFile))
+	attPath := gomutant.EphemeralAttestationsPathFor(gomutant.FindingsPathAt(o.dir, o.findingsFile))
 	atts, err := gomutant.LoadEphemeralAttestations(attPath)
 	if err != nil {
 		return err

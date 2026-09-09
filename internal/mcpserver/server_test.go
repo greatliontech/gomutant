@@ -25,7 +25,7 @@ import (
 // loadFindings reads the merged findings view through one store, for
 // assertions on what a call persisted.
 func (s *Server) loadFindings(override string) ([]gomutant.Finding, error) {
-	store, err := gomutant.OpenStore(s.findingsPath(override), s.dir)
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, override), s.dir)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func TestToolExplainAnswersSymbolAndTriage(t *testing.T) {
 	// machine-local overlay and the repo document stays empty: the
 	// explain surface must read the merged two-layer view, not the
 	// repo document alone (REQ-result-layers).
-	path := filepath.Join(dir, defaultFindings)
+	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
 	st, err := gomutant.OpenStore(path, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestToolExplainCapsEveryRowSet(t *testing.T) {
 		f.OracleEvidence[0].RuntimeInputs = f.TargetEvidence.RuntimeInputs
 		seeds = append(seeds, f)
 	}
-	st, err := gomutant.OpenStore(filepath.Join(dir, defaultFindings), dir)
+	st, err := gomutant.OpenStore(filepath.Join(dir, gomutant.DefaultFindingsPath), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +322,7 @@ func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, defaultFindings)
+	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, defaultFindings)
+	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		// The shaped record survives a whole-tree reconcile, so the
 		// reported drop count (1 of these 2) discriminates a real
@@ -473,7 +473,7 @@ func TestResponsesNameEmptyAnswers(t *testing.T) {
 		t.Fatalf("empty-document explain note = %q", out.Note)
 	}
 
-	path := filepath.Join(dir, defaultFindings)
+	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		seeded := seededFinding("example.com/empty.Old")
 		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
@@ -542,7 +542,7 @@ func TestToolRunWholeTreePrunesAlongsideCurrentMeasurement(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(dir)
-	path := filepath.Join(dir, defaultFindings)
+	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{seededFinding("example.com/current.Deleted")}, nil
 	}); err != nil {
@@ -612,7 +612,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	if got, want := strings.Join(stages, ","), "loading,resolving,freshness,mutants,baseline"; got != want {
 		t.Fatalf("run preparation = %s, want %s: %+v", got, want, out.Preparation)
 	}
-	if _, err := os.Stat(filepath.Join(s.dir, defaultFindings)); err != nil {
+	if _, err := os.Stat(filepath.Join(s.dir, gomutant.DefaultFindingsPath)); err != nil {
 		t.Fatalf("findings document not written: %v", err)
 	}
 	persisted, err := s.loadFindings("")
@@ -780,7 +780,7 @@ func TestToolFindingsCapsSummaryRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(dir)
-	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		var all []gomutant.Finding
 		for i := 0; i < envelope.rows+3; i++ {
 			all = append(all, seededFinding(fmt.Sprintf("example.com/empty.Gone%02d", i)))
@@ -812,7 +812,7 @@ func TestToolFindingsAnnouncesInspection(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(dir)
-	if err := gomutant.UpdateDocument(filepath.Join(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{seededFinding("example.com/empty.Gone")}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -1513,7 +1513,7 @@ func TestToolAttestRefusesAMalformedExemptionsRecordBeforeWriting(t *testing.T) 
 		t.Fatal(err)
 	}
 	s := New(dir)
-	path := filepath.Join(dir, defaultFindings)
+	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		seeded := seededFinding("example.com/empty.Old")
 		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
@@ -1629,7 +1629,7 @@ func seededSurvivorServer(t *testing.T) (s *Server, path string, before []byte) 
 	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	path = filepath.Join(dir, defaultFindings)
+	path = filepath.Join(dir, gomutant.DefaultFindingsPath)
 	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		seeded := seededFinding("example.com/empty.Old")
 		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
@@ -1719,7 +1719,7 @@ func TestToolRunDeadlineAfterTheFinalReplacementStillSucceeds(t *testing.T) {
 	if out.Exit != "" || len(out.Findings) != 1 || len(out.Findings[0].DeltaOpen) == 0 || out.Summary.Delta == nil {
 		t.Fatalf("post-boundary result = exit %q, rows %+v, summary %+v; want the completed run with its cut", out.Exit, out.Findings, out.Summary)
 	}
-	store, err := gomutant.OpenStore(filepath.Join(s.dir, defaultFindings), s.dir)
+	store, err := gomutant.OpenStore(filepath.Join(s.dir, gomutant.DefaultFindingsPath), s.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
