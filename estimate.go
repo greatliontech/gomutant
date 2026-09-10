@@ -1,6 +1,10 @@
 package gomutant
 
-import "time"
+import (
+	"time"
+
+	"github.com/greatliontech/gomutant/internal/windowcost"
+)
 
 // The window cost model (REQ-exec-run-status's estimate class): an
 // advisory PROJECTION of a window's scheduled oracle time at
@@ -70,7 +74,7 @@ func estimateWindow(window []work, store *scheduleStore, baselineDur func(group)
 	}
 	audits := 0
 	if est.narrowed > 0 {
-		audits = min(min(est.narrowed, auditCeiling), derivedAuditCap(modelSavings, maxFull))
+		audits = min(min(est.narrowed, auditCeiling), windowcost.DerivedAuditCap(modelSavings, maxFull))
 	}
 	est.auditProjected = time.Duration(audits) * maxFull
 	return est
@@ -176,18 +180,9 @@ func roundedDuration(d time.Duration) string {
 // off the measured baselines — the driver's ordering price, refined
 // by the post-probe estimate event once the window's probes run.
 func windowPrice(window []work, baselineDur func(group) (time.Duration, bool)) (cost time.Duration, priced bool) {
-	est := estimateWindow(window, nil, baselineDur, auditNarrowedCap)
+	est := estimateWindow(window, nil, baselineDur, windowcost.AuditNarrowedCap)
 	return est.projected, est.unknown == 0
 }
-
-// auditShareDivisor sets the audit's share of the narrowing's modeled
-// savings: the audit may spend at most 1/8 of what the narrowing
-// saved this window, so the narrowing keeps at least 7/8 of its win
-// on ANY oracle duration — the fixed count it replaces priced four
-// full 21-minute oracles onto a window whose narrowing saved less
-// than one. The measured campaign share lands with the chunk's gate
-// re-run.
-const auditShareDivisor = 8
 
 // candidateNarrowingSavings models what narrowing saved on ONE
 // candidate: its work's full-oracle price minus its scheduled price
@@ -204,19 +199,4 @@ func candidateNarrowingSavings(w work, mi int, store *scheduleStore, baselineDur
 		return 0
 	}
 	return full - cost
-}
-
-// derivedAuditCap bounds a window's narrowed-survivor audit by the
-// narrowing's own modeled savings: at most savings/auditShareDivisor
-// worth of full-oracle re-runs (each priced at unit, the costliest
-// work's full oracle), floored at ONE sample — the residual risk is a
-// measured quantity in every window that narrowed, never an
-// assumption — and ceilinged at the fixed per-window cap. A zero or
-// unpriced unit derives the floor.
-func derivedAuditCap(savings, unit time.Duration) int {
-	if unit <= 0 {
-		return 1
-	}
-	share := int(savings / (auditShareDivisor * unit))
-	return max(1, min(share, auditNarrowedCap))
 }

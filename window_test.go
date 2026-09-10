@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 // gatherAll partitions a work list exactly as the driver does: one
@@ -28,31 +29,9 @@ func gatherAll(items []work, ceiling, minimum int) [][]work {
 func windowTotals(window []work) (candidates, executions int) {
 	for _, w := range window {
 		candidates += len(w.candidates)
-		executions += windowExecutions(len(w.candidates), len(w.oracle))
+		executions += windowcost.Executions(len(w.candidates), len(w.oracle))
 	}
 	return
-}
-
-// The bounds derive from the worker count alone: the ceiling eight per
-// worker and sixty-four at least, the minimum the worker count and
-// eight at least (REQ-exec-oracle-run's window rule).
-func TestWindowBoundsDeriveFromTheWorkerCount(t *testing.T) {
-	for _, tc := range []struct{ jobs, ceiling, minimum int }{{1, 64, 8}, {4, 64, 8}, {8, 64, 8}, {9, 72, 9}, {16, 128, 16}} {
-		if c, m := windowBounds(tc.jobs, 0); c != tc.ceiling || m != tc.minimum {
-			t.Fatalf("windowBounds(%d) = %d, %d; want %d, %d", tc.jobs, c, m, tc.ceiling, tc.minimum)
-		}
-	}
-	// A test's fixed window takes both bounds, so the execution budget
-	// can never split it.
-	if c, m := windowBounds(16, 5); c != 5 || m != 5 {
-		t.Fatalf("windowBounds(16, 5) = %d, %d; want 5, 5", c, m)
-	}
-	if windowCandidatesPerWorker != 8 || windowCandidatesFloor != 64 || windowCandidatesMin != 8 || windowExecutionBudget != 512 {
-		t.Fatalf("the window's constants moved: %d %d %d %d", windowCandidatesPerWorker, windowCandidatesFloor, windowCandidatesMin, windowExecutionBudget)
-	}
-	if windowCandidatesMin != auditShareDivisor {
-		t.Fatalf("the candidate minimum %d is not the audit share divisor %d it exists to honour", windowCandidatesMin, auditShareDivisor)
-	}
 }
 
 // Over generated work lists the partition meets its bounds and keeps
@@ -64,7 +43,7 @@ func TestWindowBoundsDeriveFromTheWorkerCount(t *testing.T) {
 // (REQ-exec-oracle-run's window rule).
 func TestWindowPartitionMeetsItsBoundsAndKeepsOrder(t *testing.T) {
 	rng := rand.New(rand.NewSource(164))
-	budget, minimum := windowBounds(8, 0)
+	budget, minimum := windowcost.Bounds(8, 0)
 	for round := 0; round < 3000; round++ {
 		n := rng.Intn(40)
 		items := make([]work, n)
@@ -97,13 +76,13 @@ func TestWindowPartitionMeetsItsBoundsAndKeepsOrder(t *testing.T) {
 				next++
 			}
 			candidates, executions := windowTotals(window)
-			closed := candidates >= budget || (executions >= windowExecutionBudget && candidates >= minimum)
+			closed := candidates >= budget || (executions >= windowcost.ExecutionBudget && candidates >= minimum)
 			if wi < len(once)-1 && !closed {
 				t.Fatalf("round %d: window %d closed early at %d candidates, %d executions", round, wi, candidates, executions)
 			}
 			if len(window) > 1 {
 				pc, pe := windowTotals(window[:len(window)-1])
-				if pc >= budget || (pe >= windowExecutionBudget && pc >= minimum) {
+				if pc >= budget || (pe >= windowcost.ExecutionBudget && pc >= minimum) {
 					t.Fatalf("round %d: window %d's prefix already met a bound (%d candidates, %d executions) yet the window grew", round, wi, pc, pe)
 				}
 			}
@@ -122,7 +101,7 @@ func TestWindowPartitionMeetsItsBoundsAndKeepsOrder(t *testing.T) {
 // the candidate minimum, so the audit's floored sample never exceeds an
 // eighth of the window (REQ-exec-oracle-run).
 func TestSuiteClassOracleClosesItsWindowOnTheExecutionBudget(t *testing.T) {
-	ceiling, minimum := windowBounds(8, 0)
+	ceiling, minimum := windowcost.Bounds(8, 0)
 	probe := make([]work, 100)
 	for i := range probe {
 		probe[i] = work{target: i, candidates: make([]engine.Candidate, 1), oracle: make([]string, 1)}
@@ -134,12 +113,12 @@ func TestSuiteClassOracleClosesItsWindowOnTheExecutionBudget(t *testing.T) {
 	for i := range suite {
 		suite[i] = work{target: i, candidates: make([]engine.Candidate, 1), oracle: make([]string, 64)}
 	}
-	perWindow := windowExecutionBudget / 64
+	perWindow := windowcost.ExecutionBudget / 64
 	windows := gatherAll(suite, ceiling, minimum)
 	if len(windows) != (100+perWindow-1)/perWindow || len(windows[0]) != perWindow {
 		t.Fatalf("suite-class partition = %d windows, first %d targets; want windows of %d", len(windows), len(windows[0]), perWindow)
 	}
-	if c, e := windowTotals(windows[0]); c != perWindow || e != windowExecutionBudget {
+	if c, e := windowTotals(windows[0]); c != perWindow || e != windowcost.ExecutionBudget {
 		t.Fatalf("first suite window = %d candidates, %d executions; want %d at the budget", c, e, perWindow)
 	}
 	heavy := make([]work, 20)

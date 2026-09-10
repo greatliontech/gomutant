@@ -24,6 +24,7 @@ import (
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 var findingObservationSequence atomic.Uint64
@@ -3486,7 +3487,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// partition never moves between runs of an unchanged tree under the
 	// same workers and the same derivations, and audited sets nest
 	// (REQ-exec-oracle-run's window rule).
-	windowBudget, windowMinimum := windowBounds(jobs, runWindowCandidates)
+	windowBudget, windowMinimum := windowcost.Bounds(jobs, runWindowCandidates)
 	var treeDrift error
 	// commitAndAttribute is the one epilogue every measured or spliced
 	// finding leaves aggregation through: install, persist, and — when
@@ -3650,7 +3651,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// The window's cost model, priced AFTER the probes so the
 		// narrowing decision is the schedule's own — advisory, before
 		// any budget is spent (REQ-exec-run-status's estimate class).
-		est := estimateWindow(window, opts.scheduleStore, opts.baselineDur, auditNarrowedCap)
+		est := estimateWindow(window, opts.scheduleStore, opts.baselineDur, windowcost.AuditNarrowedCap)
 		reportExecuting(opts.Executing, ExecutionEvent{
 			Phase:       "estimate",
 			TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
@@ -4626,12 +4627,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	return findings, nil
 }
 
-// auditNarrowedCap is the CEILING of the savings-derived audit cap
-// (derivedAuditCap): however much a window's narrowing saved, at most
-// this many full-oracle re-runs audit it — the scale argument for the
-// derived cap itself lives with auditShareDivisor.
-const auditNarrowedCap = 4
-
 // ErrInterrupted is the graceful-interrupt run result: an operational
 // cancellation — the campaign did not finish — whose drained prefixes
 // are already committed as candidate-capped records; re-running the
@@ -4661,7 +4656,7 @@ func snapshotFindings(findings []Finding) []Finding {
 // runWindowCandidates fixes the execution window when positive — a
 // test seam taking BOTH bounds, the ceiling and the minimum, so the
 // execution budget never splits a fixed window; zero means the
-// jobs-derived rule (windowBounds).
+// jobs-derived rule (windowcost.Bounds).
 var runWindowCandidates int
 
 // groupBaselineProbe is the baseline probe seam — a var so the bank
@@ -4702,65 +4697,17 @@ func gatherWindow(items <-chan work, ceiling, minimum int) ([]work, bool) {
 		return nil, false
 	}
 	window := []work{first}
-	total, executions := len(first.candidates), windowExecutions(len(first.candidates), len(first.oracle))
-	for total < ceiling && !(executions >= windowExecutionBudget && total >= minimum) {
+	total, executions := len(first.candidates), windowcost.Executions(len(first.candidates), len(first.oracle))
+	for total < ceiling && !(executions >= windowcost.ExecutionBudget && total >= minimum) {
 		next, ok := <-items
 		if !ok {
 			break
 		}
 		window = append(window, next)
 		total += len(next.candidates)
-		executions += windowExecutions(len(next.candidates), len(next.oracle))
+		executions += windowcost.Executions(len(next.candidates), len(next.oracle))
 	}
 	return window, true
-}
-
-// The window's bounds (REQ-exec-oracle-run's window rule): a window
-// closes when its candidate total reaches the ceiling — eight per
-// worker, sixty-four at least — or, once it holds at least the
-// candidate minimum, when its test-execution total reaches the budget,
-// whichever first; it always holds at least one target. The minimum —
-// the worker count, eight at least — is the audit's and the pool's
-// guard, in CANDIDATES: the narrowed-survivor audit floors one
-// full-oracle sample per window, so a window of fewer than eight
-// candidates would spend more than an eighth of itself on the sample
-// (auditShareDivisor), and a window narrower than the worker count
-// offers less than one candidate per worker. A serve-heavy window,
-// whose candidates mostly do not execute, relaxes both — the executing
-// set is the findings document's and must never key the partition
-// (windowExecutions). All four constants are contract: the partition
-// is observable across runs.
-const (
-	windowCandidatesPerWorker = 8
-	windowCandidatesFloor     = 64
-	windowCandidatesMin       = 8
-	windowExecutionBudget     = 512
-)
-
-// windowBounds derives the window's candidate ceiling and minimum from
-// the worker count: ceiling = max(jobs × 8, 64), minimum = max(jobs, 8).
-// A test's fixed window (override > 0) is the whole rule for that
-// test: the ceiling and the minimum both take it, so the execution
-// budget cannot close a fixed window early — the minimum IS the
-// ceiling.
-func windowBounds(jobs, override int) (ceiling, minimum int) {
-	if override > 0 {
-		return override, override
-	}
-	return max(jobs*windowCandidatesPerWorker, windowCandidatesFloor), max(jobs, windowCandidatesMin)
-}
-
-// windowExecutions is one target's test executions at one full oracle
-// run per mutant: candidates times the derived oracle's test count. It
-// is an UPPER BOUND, and deliberately so: a served target executes
-// nothing, a narrowed candidate runs a coverage subset of the oracle,
-// and only the bound is a tree property — the executing set
-// (executingIndexes) reads the findings document, which the run itself
-// rewrites, and keying the partition on it would move the windows
-// between two runs of an unchanged tree. The two counts are the
-// function's whole input: no duration can reach it.
-func windowExecutions(candidates, oracleTests int) int {
-	return candidates * oracleTests
 }
 
 // serveCheckRefusal renders a serve-time evidence-check failure as that
@@ -4809,18 +4756,6 @@ func reportPreparation(callback func(PreparationEvent), event PreparationEvent) 
 	}
 }
 
-// Confirmation stride gating (REQ-exec-attribution): after
-// confirmStreak consecutive reproductions within one target's window,
-// further kills confirm at every confirmStrideth candidate; any flip
-// restores full confirmation retroactively. The constants realize the
-// contract's "run of consecutive reproductions" and "fixed
-// deterministic stride" — the spec deliberately leaves the numbers
-// code-side (nothing persisted or wire-visible depends on them).
-const (
-	confirmStreak = 3
-	confirmStride = 4
-)
-
 // confirmationGate is the per-target, per-window stride gate over
 // serial kill confirmation. Deterministic by construction: its inputs
 // are the candidate-ordered reproduction results, never worker timing.
@@ -4837,18 +4772,18 @@ type confirmationGate struct {
 // the confirmation decision and the advisory mode label — two copies
 // would let the label lie about the gate.
 func (g *confirmationGate) armed() bool {
-	return g.volatile || g.flipped || g.streak < confirmStreak
+	return g.volatile || g.flipped || g.streak < windowcost.ConfirmStreak
 }
 
 // confirmNow reports whether the next kill confirms serially. An
-// armed gate always confirms; otherwise every confirmStrideth kill
+// armed gate always confirms; otherwise every ConfirmStride-th kill
 // confirms and the rest stride-skip.
 func (g *confirmationGate) confirmNow() bool {
 	if g.armed() {
 		return true
 	}
 	g.sinceSample++
-	if g.sinceSample >= confirmStride {
+	if g.sinceSample >= windowcost.ConfirmStride {
 		g.sinceSample = 0
 		return true
 	}
@@ -4948,7 +4883,7 @@ type auditPick struct {
 // auditSample assembles the window's narrowed-survivor audit: every
 // narrowed survivor enters the pool with its content hash; the pool
 // sorts by hash (ties by position for determinism), and truncates at
-// the savings-derived cap (derivedAuditCap) — the audit spends a
+// the savings-derived cap (windowcost.DerivedAuditCap) — the audit spends a
 // bounded share of what THIS window's narrowing modelled as saved,
 // each re-run priced at the costliest work's full-oracle baseline.
 // The selection ORDER is content-stable; the depth follows this
@@ -4981,7 +4916,7 @@ func auditSample(window []work, symbol func(wi int) string, isNarrowedSurvivor f
 		}
 		return pool[i].wi < pool[j].wi || (pool[i].wi == pool[j].wi && pool[i].mi < pool[j].mi)
 	})
-	if auditCap := derivedAuditCap(savings, unit); len(pool) > auditCap {
+	if auditCap := windowcost.DerivedAuditCap(savings, unit); len(pool) > auditCap {
 		pool = pool[:auditCap]
 	}
 	return pool

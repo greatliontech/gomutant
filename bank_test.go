@@ -12,6 +12,7 @@ import (
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 // The bank is pure cache with a hard honesty rule: an absent,
@@ -148,15 +149,15 @@ func TestRunServesBankedBaselinesAcrossRuns(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	restoreProbe := groupBaselineProbe
 	restoreCov := campaignCoveredPositions
-	restoreMinT := scheduleMinTests
-	restoreMinC := scheduleMinCandidates
-	scheduleMinTests = 2
-	scheduleMinCandidates = 1
+	restoreMinT := windowcost.ScheduleMinTests
+	restoreMinC := windowcost.ScheduleMinCandidates
+	windowcost.ScheduleMinTests = 2
+	windowcost.ScheduleMinCandidates = 1
 	t.Cleanup(func() {
 		groupBaselineProbe = restoreProbe
 		campaignCoveredPositions = restoreCov
-		scheduleMinTests = restoreMinT
-		scheduleMinCandidates = restoreMinC
+		windowcost.ScheduleMinTests = restoreMinT
+		windowcost.ScheduleMinCandidates = restoreMinC
 	})
 	var baselineProbes, coverageProbes atomic.Int64
 	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {

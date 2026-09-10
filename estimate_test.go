@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 // The window cost model prices only what the run measured: a narrowed
@@ -80,7 +81,7 @@ func TestEstimateWindowPricesOnlyMeasuredDurations(t *testing.T) {
 
 	// The audit projection derives the SAME savings-based cap the
 	// executed audit uses: six narrowed candidates model ~6x57s of
-	// savings against a 60s unit — below auditShareDivisor x 2 — so
+	// savings against a 60s unit — below the audit share divisor x 2 — so
 	// the projection floors at ONE re-run, not the ceiling.
 	store.byKey[coverageKey(w.groups[0], coverPkg)].batches[0].dur = 3 * time.Second
 	many := w
@@ -231,22 +232,22 @@ func TestNextReadyWindowOrdersByCost(t *testing.T) {
 
 // The audit cap derives from the narrowing's own modeled savings
 // (REQ-exec-oracle-run's narrowed-survivor clause): at most
-// savings/auditShareDivisor full-oracle re-runs, floored at one
+// savings/(the audit share divisor) full-oracle re-runs, floored at one
 // sample so the disagreement rate is measured in every narrowing
 // window, ceilinged at the fixed per-window cap; an unpriced unit
 // derives the floor, never a fabricated share.
 func TestDerivedAuditCapSharesSavings(t *testing.T) {
 	unit := 21 * time.Minute
-	if got := derivedAuditCap(0, unit); got != 1 {
+	if got := windowcost.DerivedAuditCap(0, unit); got != 1 {
 		t.Fatalf("zero savings cap = %d, want the floor 1 — the rate stays measured", got)
 	}
-	if got := derivedAuditCap(auditShareDivisor*2*unit, unit); got != 2 {
-		t.Fatalf("cap = %d, want savings/(%d×unit) = 2", got, auditShareDivisor)
+	if got := windowcost.DerivedAuditCap(windowcost.AuditShareDivisor*2*unit, unit); got != 2 {
+		t.Fatalf("cap = %d, want savings/(%d×unit) = 2", got, windowcost.AuditShareDivisor)
 	}
-	if got := derivedAuditCap(1000*unit, unit); got != auditNarrowedCap {
-		t.Fatalf("cap = %d, want the ceiling %d", got, auditNarrowedCap)
+	if got := windowcost.DerivedAuditCap(1000*unit, unit); got != windowcost.AuditNarrowedCap {
+		t.Fatalf("cap = %d, want the ceiling %d", got, windowcost.AuditNarrowedCap)
 	}
-	if got := derivedAuditCap(time.Hour, 0); got != 1 {
+	if got := windowcost.DerivedAuditCap(time.Hour, 0); got != 1 {
 		t.Fatalf("unpriced unit cap = %d, want the floor — no fabricated share", got)
 	}
 }

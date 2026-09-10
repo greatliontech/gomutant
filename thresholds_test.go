@@ -12,6 +12,7 @@ import (
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 // The measurement leash is lifted by a banked duration to the budget
@@ -135,18 +136,18 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	restoreProbe := groupBaselineProbe
 	restoreCov := campaignCoveredPositions
-	restoreMinT := scheduleMinTests
-	restoreMinC := scheduleMinCandidates
+	restoreMinT := windowcost.ScheduleMinTests
+	restoreMinC := windowcost.ScheduleMinCandidates
 	// Lowered so the schedule's coverage probe fires over this two-test
 	// fixture (its production minimums gate it out of a probe this
 	// small); the survivor-bucket probe fires on Sub's surviving mutants.
-	scheduleMinTests = 2
-	scheduleMinCandidates = 1
+	windowcost.ScheduleMinTests = 2
+	windowcost.ScheduleMinCandidates = 1
 	t.Cleanup(func() {
 		groupBaselineProbe = restoreProbe
 		campaignCoveredPositions = restoreCov
-		scheduleMinTests = restoreMinT
-		scheduleMinCandidates = restoreMinC
+		windowcost.ScheduleMinTests = restoreMinT
+		windowcost.ScheduleMinCandidates = restoreMinC
 	})
 	var bounds, probeBounds []time.Duration
 	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {

@@ -21,6 +21,7 @@ import (
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 // TestRunEndToEnd pins the orchestration against the fixture tree: a
@@ -4578,8 +4579,8 @@ func TestRunExecutingEventsAdvisory(t *testing.T) {
 		}
 	}
 	wantConfirms := total
-	if total > confirmStreak {
-		wantConfirms = confirmStreak + (total-confirmStreak)/confirmStride
+	if total > windowcost.ConfirmStreak {
+		wantConfirms = windowcost.ConfirmStreak + (total-windowcost.ConfirmStreak)/windowcost.ConfirmStride
 	}
 	if confirming != wantConfirms {
 		t.Fatalf("confirming events = %d with total %d, want %d (stride gate engaged)", confirming, total, wantConfirms)
@@ -4672,7 +4673,7 @@ func TestConfirmationGateStrides(t *testing.T) {
 		flip.observe(confirmReproduced)
 	}
 	sampledOnce := false
-	for i := 0; i < confirmStride; i++ {
+	for i := 0; i < windowcost.ConfirmStride; i++ {
 		if flip.confirmNow() {
 			sampledOnce = true
 			break

@@ -14,6 +14,7 @@ import (
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 // The schedule's phases must partition the oracle group exactly —
@@ -141,12 +142,12 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
-	restoreMin := scheduleMinTests
-	scheduleMinTests = 2
+	restoreMin := windowcost.ScheduleMinTests
+	windowcost.ScheduleMinTests = 2
 	restoreProbe := campaignCoveredPositions
 	restoreRun := runMutantObservedEnv
 	defer func() {
-		scheduleMinTests = restoreMin
+		windowcost.ScheduleMinTests = restoreMin
 		campaignCoveredPositions = restoreProbe
 		runMutantObservedEnv = restoreRun
 	}()
@@ -335,7 +336,7 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 
 	// Control: same target, same oracle, scheduling gated off.
 	markerActive.Store(false)
-	scheduleMinTests = 1 << 30
+	windowcost.ScheduleMinTests = 1 << 30
 	oracleRuns.Store(0)
 	control, err := tr.Run(ctx, []Target{target}, Options{})
 	if err != nil {
@@ -351,7 +352,7 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 		t.Fatal("control found no kills — the lying-coverage pin is vacuous")
 	}
 	// The lie hides the killer's verdicts; the audit's deterministic
-	// sample recovers up to auditNarrowedCap of them from the full
+	// sample recovers up to windowcost.AuditNarrowedCap of them from the full
 	// oracle (each recovery is an audit-flip attributed to the real
 	// killer). The assertions hold under any hash luck.
 	narrowedRows := 0
@@ -371,14 +372,14 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	}
 	// The DERIVED cap: this fixture's modeled savings are about
 	// N_narrowed x the full-oracle price (the crafted covering batches
-	// cost microseconds), so the share is N/auditShareDivisor and the
+	// cost microseconds), so the share is N/windowcost.AuditShareDivisor and the
 	// cap floors at exactly ONE audited sample while N stays below
-	// 2 x auditShareDivisor — a fixed count-per-window cap would audit
+	// 2 x windowcost.AuditShareDivisor — a fixed count-per-window cap would audit
 	// up to its ceiling here (REQ-exec-oracle-run's savings-derived
 	// audit bound). The premise asserts separately so operator-set
 	// growth is self-diagnosing, not a mystery flake.
-	if narrowedRows+audited >= 2*auditShareDivisor {
-		t.Fatalf("fixture drift: %d narrowed survivors reaches 2 x auditShareDivisor = %d — the derived cap leaves the floor and the exact assertion below needs re-derivation", narrowedRows+audited, 2*auditShareDivisor)
+	if narrowedRows+audited >= 2*windowcost.AuditShareDivisor {
+		t.Fatalf("fixture drift: %d narrowed survivors reaches 2 x the audit share divisor = %d — the derived cap leaves the floor and the exact assertion below needs re-derivation", narrowedRows+audited, 2*windowcost.AuditShareDivisor)
 	}
 	if audited != 1 {
 		t.Fatalf("audit sampled %d narrowed survivors, want exactly the derived floor of 1", audited)
@@ -680,11 +681,11 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 	}
 	tr := fixtureTree(t)
 	restoreProbe := campaignCoveredPositions
-	restoreMin := scheduleMinTests
-	scheduleMinTests = 2
+	restoreMin := windowcost.ScheduleMinTests
+	windowcost.ScheduleMinTests = 2
 	defer func() {
 		campaignCoveredPositions = restoreProbe
-		scheduleMinTests = restoreMin
+		windowcost.ScheduleMinTests = restoreMin
 	}()
 	var calls atomic.Int64
 	campaignCoveredPositions = func(_ context.Context, _, _, _, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {

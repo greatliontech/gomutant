@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 // The execution schedule (REQ-exec-oracle-run's narrowed-survivor
@@ -47,17 +48,6 @@ import (
 // probe: a union of subset runs is not the same
 // measurement (inter-test state moves branches both ways), and the
 // spec pins "measured once per oracle group".
-
-// scheduleMinCandidates and scheduleMinTests gate the probe: below
-// two EXECUTING candidates the probe cannot amortize, and below eight
-// tests the split saves less than the extra process it adds.
-// Derivation constants like the budget multiple — incidental, not
-// contract. Vars for test reach only (the runWindowCandidates
-// precedent); no production code writes them.
-var (
-	scheduleMinCandidates = 2
-	scheduleMinTests      = 8
-)
 
 // The seams below are package-level variables a test swaps for the
 // duration of one Run: they are read unsynchronized from the run's
@@ -280,7 +270,7 @@ type probeUnit struct {
 // total is exactly the batches the loop runs.
 func (t *Tree) scheduleProbePlan(ctx context.Context, w work, opts runOptions) ([]probeUnit, error) {
 	store := opts.scheduleStore
-	if store == nil || w.shaped || w.targetView == nil || executingCandidates(w) < scheduleMinCandidates {
+	if store == nil || w.shaped || w.targetView == nil || executingCandidates(w) < windowcost.ScheduleMinCandidates {
 		return nil, nil
 	}
 	coverPkg := w.targetView.subject.Package
@@ -302,7 +292,7 @@ func (t *Tree) scheduleProbePlan(ctx context.Context, w work, opts runOptions) (
 		store.mu.Unlock()
 
 		fns := groupTestFns(w.oracle, g.pkgs[0])
-		if len(fns) < scheduleMinTests {
+		if len(fns) < windowcost.ScheduleMinTests {
 			continue
 		}
 		// The bank consult (REQ-result-baseline-bank): a banked probe
