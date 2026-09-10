@@ -18,4 +18,4 @@ composition, with the intended value). `GoEnv`'s every-platform fold is
 the one semantic to settle — it predates the Windows-only rule and may
 be deliberate for `GOWORK`.
 
-Lands: the next change to an oracle or process env composer (GoEnv, oracleCPUEnv, oracleMemoryEnv).
+Lands: cross-tool train chunk 246 (the gofresh bump: one env-composition rule for the six composers, 235 C8).
