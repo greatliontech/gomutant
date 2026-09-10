@@ -100,7 +100,7 @@ func TestRunDriftRefusesSplicedServeTargetLocally(t *testing.T) {
 	if len(first) != 1 || len(first[0].CandidateEvidence) == 0 {
 		t.Fatalf("warming run = %+v, want candidate-local evidence", first)
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestRunServeRefusesContentMovePastViewCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := Export(warmed)
+	doc, err := Export(warmed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

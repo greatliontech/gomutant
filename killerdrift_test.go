@@ -470,7 +470,7 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 	if auxKills == 0 || smallKills == 0 {
 		t.Fatalf("fixture kills = %+v, want both oracles attributed so the drift split has teeth", f.Kills)
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +576,7 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 	}
 
 	// The drifted record is current on its tree: a follow-up serves cached.
-	driftedDoc, err := Export(driftedFindings)
+	driftedDoc, err := Export(driftedFindings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(strings.Replace(testSource, "return v\n", "w := v\n\treturn w\n", 1)+"\nfunc lonely() {}\n\nvar seed = 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	lonelyDoc, err := Export(lonelyFindings)
+	lonelyDoc, err := Export(lonelyFindings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -795,7 +795,7 @@ func TestRunServesGrownAndDriftedComposition(t *testing.T) {
 	if auxKills == 0 || smallKills == 0 {
 		t.Fatalf("fixture kills = %+v, want both oracles attributed so the split has teeth", f.Kills)
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -994,7 +994,7 @@ func TestRunDriftAddedOnlyServesKillsAndBucketsSurvivors(t *testing.T) {
 	if f.Killed == 0 || len(f.Kills) != f.Killed || len(f.Survivors) == 0 {
 		t.Fatalf("baseline fixture = %+v, want attributed kills and survivors", f)
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1082,7 +1082,7 @@ func TestRunDriftGrownFullyKilledRecordSaysSetGrew(t *testing.T) {
 	if len(first[0].Survivors) != 0 || first[0].Killed == 0 {
 		t.Fatalf("fixture = %+v, want a fully-killed record so the re-measure set is empty", first[0])
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1237,7 +1237,7 @@ func TestFlakyGate(t *testing.T) {
 	if smallKills == 0 {
 		t.Fatalf("baseline kills = %+v, want TestSmall attributions to drift", first[0].Kills)
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1354,7 +1354,7 @@ func TestRunDriftNarrowBaselineRefusesAddedTestFailingAlone(t *testing.T) {
 	if len(first[0].Survivors) == 0 {
 		t.Fatalf("baseline fixture = %+v, want survivors so the narrowing arms", first[0])
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

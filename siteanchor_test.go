@@ -61,7 +61,7 @@ func TestAttestStampsSiteAndMergeReportsSheds(t *testing.T) {
 
 	prior := []Finding{{Symbol: "pkg.F", Survivors: f.Survivors, Attested: f.Attested}}
 	fresh := []Finding{{Symbol: "pkg.F", Survivors: []Survivor{{Position: "f.go:3:2", Operator: "op", Site: "d00d4567d00d4567"}}}}
-	merged, shed := MergeFindingsShed(prior, fresh)
+	merged, shed := MergeFindings(prior, fresh, nil)
 	if len(merged) != 1 || len(merged[0].Attested) != 0 {
 		t.Fatalf("cross-site disposition survived the merge: %+v", merged)
 	}
@@ -74,11 +74,11 @@ func TestAttestStampsSiteAndMergeReportsSheds(t *testing.T) {
 	// merge sees an already-stripped document and reports nothing - so
 	// run surfaces must collect sheds from the commit phase or they are
 	// silent (REQ-attest-survivor).
-	committed, commitShed := MergeFindingsShed(prior, fresh)
+	committed, commitShed := MergeFindings(prior, fresh, nil)
 	if len(commitShed) != 1 {
 		t.Fatalf("commit-phase merge did not shed: %+v", commitShed)
 	}
-	if _, finalShed := MergeFindingsShed(committed, fresh); len(finalShed) != 0 {
+	if _, finalShed := MergeFindings(committed, fresh, nil); len(finalShed) != 0 {
 		t.Fatalf("final merge over the stripped document re-shed: %+v", finalShed)
 	}
 }
@@ -165,7 +165,7 @@ func TestAttestationNeverInheritsAcrossShiftedSameShapedSites(t *testing.T) {
 	if err := rec.Attest(s0.Position, s0.Operator, "boundary equivalent at the first site"); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := Export([]Finding{rec})
+	doc, err := Export([]Finding{rec}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestAttestationNeverInheritsAcrossShiftedSameShapedSites(t *testing.T) {
 	if !collided {
 		t.Fatalf("no survivor collided at %s %s; positions: %+v", s0.Position, s0.Operator, fresh[0].Survivors)
 	}
-	merged, shed := MergeFindingsShed(prior, fresh)
+	merged, shed := MergeFindings(prior, fresh, nil)
 	for _, f := range merged {
 		for _, a := range f.Attested {
 			if a.Position == s0.Position && a.Operator == s0.Operator {

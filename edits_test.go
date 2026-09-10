@@ -40,25 +40,25 @@ func (c cancelWhenTempWrittenContext) Err() error {
 // ambiguity, and empty matches are refused rather than guessed.
 func TestApplyEdits(t *testing.T) {
 	src := []byte("a + b\nreturn a + c\n")
-	out, err := ApplyEdits(src, []Edit{{Old: "a + b", New: "a - b"}, {Old: "a + c", New: "0"}})
+	out, err := ApplyEdits(context.Background(), src, []Edit{{Old: "a + b", New: "a - b"}, {Old: "a + c", New: "0"}})
 	if err != nil || string(out) != "a - b\nreturn 0\n" {
 		t.Fatalf("ApplyEdits = %q, %v", out, err)
 	}
-	if _, err := ApplyEdits(src, []Edit{{Old: "nowhere", New: "x"}}); err == nil || !strings.Contains(err.Error(), "matches nothing") {
+	if _, err := ApplyEdits(context.Background(), src, []Edit{{Old: "nowhere", New: "x"}}); err == nil || !strings.Contains(err.Error(), "matches nothing") {
 		t.Fatalf("zero-match accepted: %v", err)
 	}
-	if _, err := ApplyEdits([]byte("x x"), []Edit{{Old: "x", New: "y"}}); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+	if _, err := ApplyEdits(context.Background(), []byte("x x"), []Edit{{Old: "x", New: "y"}}); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("ambiguous match accepted: %v", err)
 	}
-	if _, err := ApplyEdits(src, []Edit{{Old: "", New: "y"}}); err == nil {
+	if _, err := ApplyEdits(context.Background(), src, []Edit{{Old: "", New: "y"}}); err == nil {
 		t.Fatal("empty match accepted")
 	}
-	if _, err := ApplyEdits(src, nil); err == nil {
+	if _, err := ApplyEdits(context.Background(), src, nil); err == nil {
 		t.Fatal("empty edit list accepted")
 	}
 	// A later edit may match text an earlier edit produced: sequential order
 	// is the contract.
-	out, err = ApplyEdits([]byte("one"), []Edit{{Old: "one", New: "two"}, {Old: "two", New: "three"}})
+	out, err = ApplyEdits(context.Background(), []byte("one"), []Edit{{Old: "one", New: "two"}, {Old: "two", New: "three"}})
 	if err != nil || string(out) != "three" {
 		t.Fatalf("sequential application = %q, %v", out, err)
 	}
@@ -69,7 +69,7 @@ func TestApplyEdits(t *testing.T) {
 func TestMergeFindings(t *testing.T) {
 	prior := []Finding{{Symbol: "p.A", BodyHash: "1"}, {Symbol: "p.B", BodyHash: "2"}}
 	fresh := []Finding{{Symbol: "p.A", BodyHash: "1b"}}
-	got := MergeFindings(prior, fresh)
+	got := mergeOnly(MergeFindings(prior, fresh, nil))
 	bySym := map[string]string{}
 	for _, f := range got {
 		bySym[f.Symbol] = f.BodyHash
@@ -87,7 +87,7 @@ func TestMergeFindingsSkipNeverShadows(t *testing.T) {
 	prior := []Finding{{Symbol: "p.A", BodyHash: "h",
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "zero return"}},
 		Attested:  []Attestation{{Position: "f.go:1:1", Operator: "zero return", Reason: "equivalent"}}}}
-	got := MergeFindings(prior, []Finding{{Symbol: "p.A", Skipped: "no oracle"}})
+	got := mergeOnly(MergeFindings(prior, []Finding{{Symbol: "p.A", Skipped: "no oracle"}}, nil))
 	if len(got) != 1 || got[0].BodyHash != "h" || len(got[0].Attested) != 1 {
 		t.Fatalf("a skipped result shadowed the real record: %+v", got)
 	}
@@ -96,14 +96,14 @@ func TestMergeFindingsSkipNeverShadows(t *testing.T) {
 func TestMergeWholeFindingsPrunesAbsentSymbols(t *testing.T) {
 	prior := []Finding{{Symbol: "p.Present", BodyHash: "old"}, {Symbol: "p.Deleted", BodyHash: "gone"}}
 	fresh := []Finding{{Symbol: "p.Present", BodyHash: "new"}}
-	got := MergeWholeFindings(prior, fresh, []Target{{Symbol: "p.Present"}, {Symbol: "p.Skipped"}})
+	got := mergeOnly(MergeWholeFindings(prior, fresh, []Target{{Symbol: "p.Present"}, {Symbol: "p.Skipped"}}, nil))
 	if len(got) != 1 || got[0].Symbol != "p.Present" || got[0].BodyHash != "new" {
 		t.Fatalf("whole-tree merge = %+v", got)
 	}
-	if got := MergeWholeFindings(prior, nil, nil); len(got) != 0 {
+	if got := mergeOnly(MergeWholeFindings(prior, nil, nil, nil)); len(got) != 0 {
 		t.Fatalf("empty whole-tree discovery retained findings: %+v", got)
 	}
-	if got := MergeFindings(prior, fresh); len(got) != 2 {
+	if got := mergeOnly(MergeFindings(prior, fresh, nil)); len(got) != 2 {
 		t.Fatalf("scoped merge pruned an unmeasured finding: %+v", got)
 	}
 }
@@ -127,15 +127,15 @@ func TestUpdateDocument(t *testing.T) {
 		TargetEvidence: evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1,
 		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "zero return"}}}}
-	if err := UpdateDocument(path, func(prior []Finding) ([]Finding, error) {
-		return MergeFindings(prior, seed), nil
+	if err := UpdateDocument(context.Background(), path, func(prior []Finding) ([]Finding, error) {
+		return mergeOnly(MergeFindings(prior, seed, nil)), nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// A long-running session took its snapshot here; meanwhile a disposition
 	// lands through its own locked update.
-	if err := UpdateDocument(path, func(all []Finding) ([]Finding, error) {
+	if err := UpdateDocument(context.Background(), path, func(all []Finding) ([]Finding, error) {
 		return all, all[0].Attest("f.go:1:1", "zero return", "equivalent")
 	}); err != nil {
 		t.Fatal(err)
@@ -146,13 +146,13 @@ func TestUpdateDocument(t *testing.T) {
 	fresh := []Finding{{Symbol: "p.B", BodyHash: "h2", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.B"), OracleEvidence: []SubjectEvidence{evidence("p.TestB")}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}}
-	if err := UpdateDocument(path, func(current []Finding) ([]Finding, error) {
+	if err := UpdateDocument(context.Background(), path, func(current []Finding) ([]Finding, error) {
 		for _, f := range current {
 			if f.Symbol == "p.A" && len(f.Attested) != 1 {
 				t.Fatal("the update saw a stale snapshot")
 			}
 		}
-		return MergeFindings(current, fresh), nil
+		return mergeOnly(MergeFindings(current, fresh, nil)), nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestUpdateDocument(t *testing.T) {
 	}
 	before := string(data)
 	ctx, cancel := context.WithCancel(context.Background())
-	err = UpdateDocumentContext(ctx, path, func(current []Finding) ([]Finding, error) {
+	err = UpdateDocument(ctx, path, func(current []Finding) ([]Finding, error) {
 		cancel()
 		return current[:1], nil
 	})
@@ -198,7 +198,7 @@ func TestUpdateDocument(t *testing.T) {
 	}
 	base, cancelBeforeCommit := context.WithCancel(context.Background())
 	ctx = cancelWhenTempWrittenContext{Context: base, dir: filepath.Dir(path), cancel: cancelBeforeCommit}
-	err = UpdateDocumentContext(ctx, path, func(current []Finding) ([]Finding, error) {
+	err = UpdateDocument(ctx, path, func(current []Finding) ([]Finding, error) {
 		return current[:1], nil
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -225,7 +225,7 @@ func TestUpdateDocument(t *testing.T) {
 	shortCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	err = UpdateDocumentContext(shortCtx, path, func(p []Finding) ([]Finding, error) { return p, nil })
+	err = UpdateDocument(shortCtx, path, func(p []Finding) ([]Finding, error) { return p, nil })
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("held-lock wait under an expired ctx = %v, want DeadlineExceeded", err)
 	}

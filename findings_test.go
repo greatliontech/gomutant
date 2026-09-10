@@ -335,3 +335,26 @@ func TestAttestFindingDispositionsTheNamedRecord(t *testing.T) {
 		t.Fatal("empty rows attested a record")
 	}
 }
+
+// Export writes the bounds table it is given, whole, and reads it back
+// as written (REQ-result-export, REQ-result-unreached-bound's table).
+func TestExportCarriesTheCoverageBounds(t *testing.T) {
+	findings := []Finding{storeFinding("p.A", nil)}
+	bounds := []CoverageBound{{Selection: "tags:wasm;toolchain:", Unreached: []string{"p.B"}}}
+	data, err := Export(findings, bounds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := ParseDocument(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.CoverageBounds) != 1 || doc.CoverageBounds[0].Selection != bounds[0].Selection || len(doc.CoverageBounds[0].Unreached) != 1 {
+		t.Fatalf("bounds = %+v; want the one written", doc.CoverageBounds)
+	}
+	if again, err := Export(findings, nil); err != nil {
+		t.Fatal(err)
+	} else if doc, err := ParseDocument(again); err != nil || len(doc.CoverageBounds) != 0 {
+		t.Fatalf("no bounds written, %d read (%v)", len(doc.CoverageBounds), err)
+	}
+}

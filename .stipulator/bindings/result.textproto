@@ -1570,3 +1570,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "6220f73136955b1d0ac2af8592cc2c7d14848537a87b36c8918c1501b0cb9045"
 }
+
+bindings {
+  requirement_id: "REQ-result-export"
+  content_hash: "76e11c208c06236b061381aa2377539a05b336cd3012ecef203e1f0d20190fee"
+  source_hash: "982357d5a66c070349690178152a53ce16e5b490b6cf11e0a111fd8814c91ad3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestExportCarriesTheCoverageBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a6f9c1dbda0a31e8b74b059c00bbe774775276375d3c9cc91b00fdd24243fecc"
+}
+
+bindings {
+  requirement_id: "REQ-result-unreached-bound"
+  content_hash: "973dab070f75cdf108a15b63e598ed76531f027419a35d5f2ac5109693b80955"
+  source_hash: "9d41a8bbc45545446fadea7e8d982b171e6ba8227773f5874e3f85b7217e5048"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestExportCarriesTheCoverageBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a6f9c1dbda0a31e8b74b059c00bbe774775276375d3c9cc91b00fdd24243fecc"
+}

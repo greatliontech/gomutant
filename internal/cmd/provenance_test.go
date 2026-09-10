@@ -21,7 +21,7 @@ func TestAttestRefusesToolchainSkewBeforeWriting(t *testing.T) {
 	})
 	t.Cleanup(restore)
 	dir := t.TempDir()
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

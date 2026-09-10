@@ -173,7 +173,7 @@ func TestModuleBaseIsNotAnAttestationPin(t *testing.T) {
 func TestParseRefusesEscapingModuleBase(t *testing.T) {
 	for _, base := range []string{"..", "../x", "a/../b", "/abs", "a//b", "."} {
 		f := storeFinding("p.A", func(f *Finding) { f.TargetEvidence.ModuleBase = base })
-		data, err := Export([]Finding{f})
+		data, err := Export([]Finding{f}, nil)
 		if err == nil {
 			_, err = ParseFindings(data)
 		}
@@ -182,7 +182,7 @@ func TestParseRefusesEscapingModuleBase(t *testing.T) {
 		}
 	}
 	clean := storeFinding("p.A", func(f *Finding) { f.TargetEvidence.ModuleBase = "m/n" })
-	data, err := Export([]Finding{clean})
+	data, err := Export([]Finding{clean}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

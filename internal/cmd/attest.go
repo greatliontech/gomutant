@@ -102,6 +102,6 @@ func attestedPosture(ctx context.Context, dir string, sel gomutant.Selection, vo
 // vouches give it those; the posture must not differ by face.
 func judgeAttestedPosture(ctx context.Context, tree *gomutant.Tree, vouches []string, attested gomutant.Finding) gomutant.RecordPosture {
 	tree.SetDynamicStateVouches(vouches...)
-	inspection, err := tree.InspectFindingContext(ctx, attested)
+	inspection, err := tree.InspectFinding(ctx, attested)
 	return gomutant.RecordedPosture(attested, inspection, err)
 }

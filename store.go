@@ -929,7 +929,11 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		return out, nil
 	}, export: func(next []Finding) ([]byte, error) {
 		bounds = s.mergedBounds()
-		data, kept, err := exportDocumentWithBounds(next, bounds)
+		// Render alone: every changed row is a parsed form already and
+		// every unchanged row the prior document's persisted form, so the
+		// checked writer's re-parse would re-read what a parse produced,
+		// over the whole document, under the lock, per window.
+		data, kept, err := renderDocument(next, bounds)
 		rows = kept
 		return data, err
 	}, after: func(written []byte) error {
@@ -1007,24 +1011,6 @@ func (s *Store) LayerReasons(f Finding) (layer string, reasons []string) {
 		return "local", rs
 	}
 	return "repo", nil
-}
-
-// Committability counts the merged view's records per layer for the
-// findings surfaces: the repo document is committable by construction,
-// and the local-only count says what a reviewer would not inherit.
-func (s *Store) Committability(ctx context.Context) (repo, localOnly int, err error) {
-	prior, err := s.Load(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
-	for _, f := range prior {
-		if ok, _ := Committable(f, s.moduleDir, s.exemptions); ok {
-			repo++
-		} else {
-			localOnly++
-		}
-	}
-	return repo, localOnly, nil
 }
 
 // RollUpMachineLocalInputs collapses machine-local runtime-input

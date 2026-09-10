@@ -24,7 +24,7 @@ func TestDocumentLockAbsorbsCrashedHolderResidue(t *testing.T) {
 		t.Fatal(err)
 	}
 	ran := false
-	if err := UpdateDocument(path, func(p []Finding) ([]Finding, error) { ran = true; return p, nil }); err != nil {
+	if err := UpdateDocument(context.Background(), path, func(p []Finding) ([]Finding, error) { ran = true; return p, nil }); err != nil {
 		t.Fatalf("update blocked by crashed-holder residue: %v", err)
 	}
 	if !ran {

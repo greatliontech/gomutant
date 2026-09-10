@@ -52,11 +52,6 @@ type repositoryState struct {
 	stagedTree string
 }
 
-func captureRepositoryState(dir string) repositoryState {
-	state, _ := captureRepositoryStateContext(context.Background(), dir, false)
-	return state
-}
-
 func captureRepositoryStateContext(ctx context.Context, dir string, staged bool) (repositoryState, error) {
 	root, err := gitOutputContext(ctx, dir, "rev-parse", "--show-toplevel")
 	if ctx.Err() != nil {
@@ -325,11 +320,6 @@ func (s repositoryState) snapshotMovedContext(ctx context.Context) (bool, error)
 	return err != nil || strings.TrimSpace(string(tree)) != s.stagedTree, nil
 }
 
-func (s repositoryState) historicalPackageFiles(sourceFiles []string) []string {
-	paths, _ := s.historicalPackageFilesContext(context.Background(), sourceFiles)
-	return paths
-}
-
 func (s repositoryState) historicalPackageFilesContext(ctx context.Context, sourceFiles []string) ([]string, error) {
 	if !s.available {
 		return nil, nil
@@ -396,10 +386,6 @@ func (s repositoryState) currentCommitContext(ctx context.Context) (string, erro
 		return "", fmt.Errorf("gomutant: commit provenance unavailable at stamp time: %v", err)
 	}
 	return strings.TrimSpace(string(head)), nil
-}
-
-func gitOutput(dir string, args ...string) ([]byte, error) {
-	return gitOutputContext(context.Background(), dir, args...)
 }
 
 func gitOutputContext(ctx context.Context, dir string, args ...string) ([]byte, error) {

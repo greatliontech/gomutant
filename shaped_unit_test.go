@@ -283,7 +283,7 @@ func TestWholeTreeShedKeepsShapedFindings(t *testing.T) {
 	shaped.Shape = &TargetShape{Manual: &ManualSpec{File: "f.go", Edits: []ManualEdit{{Find: "a", Replace: "b"}}}}
 	shaped.TargetEvidence = SubjectEvidence{}
 	departed := lifecycleFinding("example.com/life.Gone")
-	merged, _ := MergeWholeFindingsShed([]Finding{shaped, departed}, nil, []Target{{Symbol: "example.com/life.F"}})
+	merged, _ := MergeWholeFindings([]Finding{shaped, departed}, nil, []Target{{Symbol: "example.com/life.F"}}, nil)
 	if len(merged) != 1 || merged[0].Symbol != "structural:kept" {
 		t.Fatalf("whole-tree shed destroyed the shaped finding: %+v", merged)
 	}

@@ -15,8 +15,8 @@ import (
 
 // workspaceFixture builds a committed go.work workspace: a root module
 // holding a fixture the nested member's test reads through a relative
-// spelling ("../shared/fixture.txt"), the field shape behind chunk 138's
-// reports. It returns the tree root, the member directory, and a
+// spelling ("../shared/fixture.txt"), the field shape the consumers'
+// workspace reports named. It returns the tree root, the member directory, and a
 // function committing the tree's current state.
 func workspaceFixture(t *testing.T) (string, string, func()) {
 	t.Helper()
@@ -111,7 +111,7 @@ func TestWorkspaceMemberBracketPathResolvesAgainstTheTreeRoot(t *testing.T) {
 	// union at the base the record is anchored at: the extended record
 	// keeps verifiable evidence — a base mismatch would false-diverge it
 	// into a non-reusable stamp (REQ-result-stale).
-	doc, err := Export(findings)
+	doc, err := Export(findings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -126,7 +126,7 @@ func TestMergePreservesWidthReadingEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged, err := mergeProcessObservations(root, env, true, bounds, obs)
+	merged, err := mergeProcessObservationsContext(context.Background(), root, env, true, bounds, obs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,7 +29,7 @@ func promoteThroughServe(t *testing.T, target Target, setup func(t *testing.T) (
 	ctx := context.Background()
 	commit := func(finding Finding) error {
 		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
-			return MergeFindings(current, []Finding{finding}), nil
+			return mergeOnly(MergeFindings(current, []Finding{finding}, nil)), nil
 		})
 	}
 

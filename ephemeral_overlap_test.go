@@ -1,6 +1,7 @@
 package gomutant
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func TestEditUniquenessCountsOverlappingStarts(t *testing.T) {
 	}
 
 	// The sequential edit path refuses the overlap.
-	if _, err := ApplyEdits([]byte("aaa"), []Edit{{Old: "aa", New: "zz"}}); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+	if _, err := ApplyEdits(context.Background(), []byte("aaa"), []Edit{{Old: "aa", New: "zz"}}); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("overlapping sequential edit = %v, want an ambiguity refusal", err)
 	}
 

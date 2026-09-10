@@ -115,7 +115,7 @@ func TestExecuteContextCancellationStopsBeforeLoading(t *testing.T) {
 
 func TestRunCommandTimeoutCancelsBeforeCommit(t *testing.T) {
 	docPath := filepath.Join(t.TempDir(), "findings.json")
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,8 +165,9 @@ func TestUpdateDocumentMergesAndAnchors(t *testing.T) {
 	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}}
-	err := gomutant.UpdateDocument(path, func(prior []gomutant.Finding) ([]gomutant.Finding, error) {
-		return gomutant.MergeFindings(prior, fresh), nil
+	err := gomutant.UpdateDocument(context.Background(), path, func(prior []gomutant.Finding) ([]gomutant.Finding, error) {
+		merged, _ := gomutant.MergeFindings(prior, fresh, nil)
+		return merged, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +195,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
 	path := gomutant.FindingsPathAt(dir, defaultFindings)
-	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	targetsPath := filepath.Join(dir, "targets.json")
@@ -513,7 +514,7 @@ func TestRunCommandCancellationLinearizesAtFindingsCommit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +594,7 @@ func TestRunCommandAbortAfterCommitReportsSheds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +639,7 @@ func TestRunCommandAbortAfterCommitReportsSheds(t *testing.T) {
 	if err := findings[0].Attest(survivor.Position, survivor.Operator, "regression-harness equivalence"); err != nil {
 		t.Fatal(err)
 	}
-	attested, err := gomutant.Export(findings)
+	attested, err := gomutant.Export(findings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,7 +717,7 @@ func TestRunCommandPlanNeverPrunesEmptyWholeTree(t *testing.T) {
 	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
 	path := gomutant.FindingsPathAt(dir, defaultFindings)
-	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
@@ -782,7 +783,7 @@ func TestRunCommandSurfacesCommitPhaseAttestationSheds(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := gomutant.FindingsPathAt(dir, defaultFindings)
-	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{rec}, nil
 	}); err != nil {
 		t.Fatal(err)

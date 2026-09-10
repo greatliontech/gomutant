@@ -931,25 +931,23 @@ func expandV11(doc internedDocument) ([]Finding, error) {
 	return findings, nil
 }
 
-// Export serializes findings to the versioned document gomutant owns
-// (REQ-result-export), skipped results excluded (nothing was measured),
-// deterministically ordered by symbol, and re-parses what it wrote as
-// the self-check that the document is readable.
-func Export(findings []Finding) ([]byte, error) {
-	data, _, err := exportDocument(findings)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := ParseFindings(data); err != nil {
-		return nil, fmt.Errorf("gomutant: export invalid findings: %w", err)
-	}
-	return data, nil
+// Export serializes findings and a coverage-bounds table to the
+// versioned document gomutant owns (REQ-result-export), skipped results
+// excluded (nothing was measured), deterministically ordered by symbol,
+// and re-parses what it wrote as the self-check that the document is
+// readable. The table is written whole as given; the per-selection
+// replacement of bounds is the store's merge (REQ-result-unreached-bound),
+// so a caller writing one selection's row through Export writes the
+// document's whole table.
+func Export(findings []Finding, bounds []CoverageBound) ([]byte, error) {
+	data, _, _, err := writeDocument(findings, bounds)
+	return data, err
 }
 
 // persistRecord is one record's persisted bytes — a one-record
 // document — beside the record exactly as a parse of those bytes yields
-// it: validated and canonicalized (absent lists made empty, the
-// never-persisted run metadata dropped) in one record-sized step. The
+// it: validated and canonicalized (absent lists made empty) in one
+// record-sized step. The
 // overlay installs entries through it and caches the parsed row; the
 // store's document write canonicalizes each row it changed through it,
 // so the document cache holds what a reader of the file sees. A record
@@ -960,13 +958,9 @@ func persistRecord(f Finding) ([]byte, Finding, error) {
 	if f.Skipped != "" {
 		return nil, Finding{}, fmt.Errorf("gomutant: skipped record %s has no persisted form (nothing was measured)", f.Symbol)
 	}
-	data, _, err := exportDocument([]Finding{f})
+	data, _, parsed, err := writeDocument([]Finding{f}, nil)
 	if err != nil {
 		return nil, Finding{}, err
-	}
-	parsed, err := ParseFindings(data)
-	if err != nil {
-		return nil, Finding{}, fmt.Errorf("gomutant: export invalid findings: %w", err)
 	}
 	return data, parsed[0], nil
 }
@@ -977,18 +971,34 @@ func parsedForm(f Finding) (Finding, error) {
 	return row, err
 }
 
-// exportDocument is Export without the self-check, returning the rows
-// it wrote in document order beside the bytes. The store's document
-// write uses it over rows that are each a parsed form already, where
-// the check would only re-read what a parse produced (Store.Update
-// carries the argument); every other writer goes through Export.
-func exportDocument(findings []Finding) (data []byte, kept []Finding, err error) {
-	return exportDocumentWithBounds(findings, nil)
+// writeDocument is the checked document writer: renderDocument's
+// document, re-parsed as the self-check that what was written is
+// readable (REQ-result-export), the parse returned so a caller that
+// needs the persisted form reads it once. Export, the default document
+// update, and the record-sized persist are this call; the store's
+// per-commit install is renderDocument alone — its changed rows are
+// each a parsed form already and its unchanged rows are the prior
+// document's persisted forms, so the check would only re-read what a
+// parse produced, over a whole document, under the document lock, per
+// window — the per-commit cost the store's incremental write does not
+// pay.
+func writeDocument(findings []Finding, bounds []CoverageBound) (data []byte, kept, parsed []Finding, err error) {
+	data, kept, err = renderDocument(findings, bounds)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	parsed, err = ParseFindings(data)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("gomutant: export invalid findings: %w", err)
+	}
+	return data, kept, parsed, nil
 }
 
-// exportDocumentWithBounds is exportDocument carrying the document's
-// coverage bounds, sorted by selection (REQ-result-unreached-bound).
-func exportDocumentWithBounds(findings []Finding, bounds []CoverageBound) (data []byte, kept []Finding, err error) {
+// renderDocument marshals findings and the coverage-bounds table —
+// sorted by selection (REQ-result-unreached-bound) — as the interned
+// document, skipped results excluded (nothing was measured), records
+// ordered by symbol; kept is the records the document holds.
+func renderDocument(findings []Finding, bounds []CoverageBound) (data []byte, kept []Finding, err error) {
 	kept = make([]Finding, 0, len(findings))
 	for _, f := range findings {
 		if f.Skipped != "" {
@@ -1694,29 +1704,20 @@ func budgetCovers(f Finding, req int) bool {
 
 // Fresh reports whether a prior finding still covers the target at the
 // requested budget — the REQ-result-stale pin check as a query, computed
-// against the current tree without running anything. A caller reminding
-// about unhardened or stale-measured symbols asks this instead of
-// re-deriving pin arithmetic.
-func (t *Tree) Fresh(f Finding, tg Target, budget int) (bool, error) {
-	return t.FreshContext(context.Background(), f, tg, budget)
-}
-
-// FreshContext is Fresh with caller-owned cancellation. It mirrors a
+// against the current tree without running anything, under caller-owned
+// cancellation. A caller reminding about unhardened or stale-measured
+// symbols asks this instead of re-deriving pin arithmetic. It mirrors a
 // default run's serve posture: derived oracle budgets, so a derived
 // record with no timeout kills reads fresh (completed verdicts are
-// budget-independent) while an explicit record reads stale exactly as
-// a derive-mode Run would re-measure it.
-func (t *Tree) FreshContext(ctx context.Context, f Finding, tg Target, budget int) (bool, error) {
+// budget-independent) while an explicit record reads stale exactly as a
+// derive-mode Run would re-measure it; FreshFor is the same query under
+// an explicit effective oracle timeout.
+func (t *Tree) Fresh(ctx context.Context, f Finding, tg Target, budget int) (bool, error) {
 	return t.freshForContext(ctx, f, tg, budget, campaignBaselineLeash, true)
 }
 
 // FreshFor is Fresh under an explicit effective oracle timeout.
-func (t *Tree) FreshFor(f Finding, tg Target, budget int, timeout time.Duration) (bool, error) {
-	return t.FreshForContext(context.Background(), f, tg, budget, timeout)
-}
-
-// FreshForContext is FreshFor with caller-owned cancellation.
-func (t *Tree) FreshForContext(ctx context.Context, f Finding, tg Target, budget int, timeout time.Duration) (bool, error) {
+func (t *Tree) FreshFor(ctx context.Context, f Finding, tg Target, budget int, timeout time.Duration) (bool, error) {
 	return t.freshForContext(ctx, f, tg, budget, timeout, false)
 }
 
@@ -1793,23 +1794,6 @@ func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget
 	return len(f.CandidateEvidence) == 0, nil
 }
 
-// MergeFindings merges a run's findings over a prior document by symbol — a
-// measured or cached finding replaces its symbol's record, untouched symbols
-// persist, so a scoped run never drops the rest of the document
-// (REQ-result-export; skipped results are excluded by Export, the single
-// owner of that rule).
-func MergeFindings(prior, fresh []Finding) []Finding {
-	merged, _ := MergeFindingsShed(prior, fresh)
-	return merged
-}
-
-// MergeFindingsShed is MergeFindings additionally reporting the
-// dispositions that failed to carry only because the site content under
-// their position changed (REQ-attest-survivor).
-func MergeFindingsShed(prior, fresh []Finding) ([]Finding, []AttestationShed) {
-	return MergeFindingsShedAgainst(prior, fresh, nil)
-}
-
 // RenderedFindings substitutes each run finding with its post-merge
 // document row where one landed, preserving the run-only Cached and
 // Skipped markers: what a run surface renders is what the document
@@ -1845,17 +1829,20 @@ func DedupeAttestationSheds(sheds []AttestationShed) []AttestationShed {
 	return out
 }
 
-// MergeFindingsShedAgainst is MergeFindingsShed with the caller's
-// run-start snapshot of attested dispositions per symbol. With the
-// snapshot in hand the graft is pin-correct (REQ-attest-survivor):
-// a disposition the fresh record already carries rode the domain-hold
-// re-measure carry and stays; a disposition present in the live
-// document but absent from the snapshot is a concurrent attestation
-// and grafts onto a still-reported survivor; every other prior
-// disposition was judged afresh and rejected - its mutation domain
-// moved - and sheds loudly. Without a snapshot the graft anchors on survivor
-// identity and site alone, the pre-snapshot behavior.
-func MergeFindingsShedAgainst(prior, fresh []Finding, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
+// MergeFindings merges a run's fresh findings into the prior document's
+// records — a fresh record replaces the prior for its symbol, a prior
+// record with no fresh counterpart stands — grafting attested
+// dispositions against snapshot, the caller's run-start snapshot of
+// attested dispositions per symbol, and reporting the ones it shed.
+// With the snapshot in hand the graft is pin-correct
+// (REQ-attest-survivor): a disposition the fresh record already carries
+// rode the domain-hold re-measure carry and stays; a disposition
+// present in the live document but absent from the snapshot is a
+// concurrent attestation and grafts onto a still-reported survivor;
+// every other prior disposition was judged afresh and rejected — its
+// mutation domain moved — and sheds loudly. Without a snapshot the
+// graft anchors on survivor identity and site alone.
+func MergeFindings(prior, fresh []Finding, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
 	var shed []AttestationShed
 	bySym := map[string]Finding{}
 	for _, f := range prior {
@@ -1990,28 +1977,17 @@ func graftAttestationsAgainst(prior, fresh []Attestation, survivors []Survivor, 
 	return out, shed
 }
 
-// MergeWholeFindings merges a whole-tree run and removes records whose
-// symbols are absent from the complete discovery snapshot
-// (REQ-result-hygiene). Scoped callers use MergeFindings instead.
-func MergeWholeFindings(prior, fresh []Finding, discovered []Target) []Finding {
-	merged, _ := MergeWholeFindingsShed(prior, fresh, discovered)
-	return merged
-}
-
-// MergeWholeFindingsShed is MergeWholeFindings additionally reporting
-// site-anchored attestation sheds (REQ-attest-survivor).
-func MergeWholeFindingsShed(prior, fresh []Finding, discovered []Target) ([]Finding, []AttestationShed) {
-	return MergeWholeFindingsShedAgainst(prior, fresh, discovered, nil)
-}
-
-// MergeWholeFindingsShedAgainst is MergeWholeFindingsShed under the
-// caller's run-start snapshot (REQ-attest-survivor).
-func MergeWholeFindingsShedAgainst(prior, fresh []Finding, discovered []Target, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
+// MergeWholeFindings is MergeFindings for a whole-tree run: a prior
+// record whose symbol the run did not discover is dropped — the symbol
+// is gone from the tree (REQ-result-hygiene) — while a discovered or
+// shaped symbol's record stands, re-measured or not; the shed reports
+// against snapshot exactly as MergeFindings does.
+func MergeWholeFindings(prior, fresh []Finding, discovered []Target, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
 	current := make(map[string]bool, len(discovered))
 	for _, target := range discovered {
 		current[target.Symbol] = true
 	}
-	merged, shed := MergeFindingsShedAgainst(prior, fresh, snapshot)
+	merged, shed := MergeFindings(prior, fresh, snapshot)
 	kept := merged[:0]
 	for _, finding := range merged {
 		// A shaped finding's identity is never discovered: absence from
@@ -2034,15 +2010,8 @@ func MergeWholeFindingsShedAgainst(prior, fresh []Finding, discovered []Target, 
 // document reads as empty; a lock held elsewhere is waited on briefly and
 // then refused with the holder named (REQ-exec-exclusivity's liveness
 // discipline: a crashed holder never leaves a stale block on the supported
-// platform).
-func UpdateDocument(path string, update func(prior []Finding) ([]Finding, error)) error {
-	return UpdateDocumentContext(context.Background(), path, update)
-}
-
-// UpdateDocumentContext is UpdateDocument with cancellation serialized against
-// the atomic replacement: cancellation that wins before commit leaves the
-// prior document byte-for-byte unchanged.
-func UpdateDocumentContext(ctx context.Context, path string, update func(prior []Finding) ([]Finding, error)) error {
+// platform). The context bounds the wait and the update.
+func UpdateDocument(ctx context.Context, path string, update func(prior []Finding) ([]Finding, error)) error {
 	return updateDocument(ctx, path, documentUpdate{update: update})
 }
 
@@ -2062,7 +2031,7 @@ type documentUpdate struct {
 	after  func(written []byte) error
 }
 
-// updateDocument is UpdateDocumentContext over a documentUpdate.
+// updateDocument is UpdateDocument over a documentUpdate.
 func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 	parse, export := u.parse, u.export
 	if parse == nil {
@@ -2084,7 +2053,7 @@ func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 				}
 				bounds = doc.CoverageBounds
 			}
-			data, _, err := exportDocumentWithBounds(findings, bounds)
+			data, _, _, err := writeDocument(findings, bounds)
 			if err != nil {
 				return nil, err
 			}

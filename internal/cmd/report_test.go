@@ -209,7 +209,7 @@ func TestRunCommandInterruptRendersBankedState(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestRunCommandJSONLEmitsOnlyJSON(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestBankedStateExcludesFailedCommits(t *testing.T) {
 	if err := os.Mkdir(fdir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +397,7 @@ func TestRunCommandJSONLPlanAndNoTargetsStayPure(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +453,7 @@ func TestProgressCadenceEmitsAndJoins(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

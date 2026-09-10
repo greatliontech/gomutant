@@ -259,10 +259,6 @@ func renderEphemeralVerdict(w io.Writer, res *gomutant.EphemeralResult) {
 	}
 }
 
-func readInput(path string) ([]byte, error) {
-	return readInputContext(context.Background(), path)
-}
-
 func readInputContext(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

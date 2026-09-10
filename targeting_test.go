@@ -83,15 +83,15 @@ func TestTargetPreparationContextCancellation(t *testing.T) {
 	if targets, err := tree.DiscoverContext(cancelled); !errors.Is(err, context.Canceled) || targets != nil {
 		t.Fatalf("cancelled discovery = targets %v, error %v", targets, err)
 	}
-	if selected, err := tree.FilterTargetsContext(cancelled, []Target{{Symbol: "missing"}}, nil, nil); !errors.Is(err, context.Canceled) || selected != nil {
+	if selected, err := tree.FilterTargets(cancelled, []Target{{Symbol: "missing"}}, nil, nil); !errors.Is(err, context.Canceled) || selected != nil {
 		t.Fatalf("cancelled filtering = targets %v, error %v", selected, err)
 	}
 	filterCtx := &cancelAfterChecks{Context: context.Background(), remaining: 2}
-	if selected, err := tree.FilterTargetsContext(filterCtx, []Target{{Symbol: "example.com/fixture/lib.Add"}}, []string{"example.com/*"}, nil); !errors.Is(err, context.Canceled) || selected != nil {
+	if selected, err := tree.FilterTargets(filterCtx, []Target{{Symbol: "example.com/fixture/lib.Add"}}, []string{"example.com/*"}, nil); !errors.Is(err, context.Canceled) || selected != nil {
 		t.Fatalf("mid-filter cancellation = targets %v, error %v", selected, err)
 	}
 	compileCtx := &cancelAfterChecks{Context: context.Background(), remaining: 2}
-	if _, err := tree.FilterTargetsContext(compileCtx, nil, []string{"example.com/*", "["}, nil); !errors.Is(err, context.Canceled) {
+	if _, err := tree.FilterTargets(compileCtx, nil, []string{"example.com/*", "["}, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("filter compilation cancellation lost precedence: %v", err)
 	}
 	if pkg, err := tree.eng.PackagePathContext(cancelled, "missing"); !errors.Is(err, context.Canceled) || pkg != "" {
@@ -102,7 +102,7 @@ func TestTargetPreparationContextCancellation(t *testing.T) {
 		t.Fatalf("post-resolution package cancellation = %q, %v", pkg, err)
 	}
 	describeCtx := cancelInFunctionContext{Context: context.Background(), function: "BodyHashContext"}
-	if descriptions, err := tree.DescribeTargetsContext(describeCtx, []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}); !errors.Is(err, context.Canceled) || descriptions != nil {
+	if descriptions, err := tree.DescribeTargets(describeCtx, []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}); !errors.Is(err, context.Canceled) || descriptions != nil {
 		t.Fatalf("body-hash cancellation = descriptions %+v, error %v", descriptions, err)
 	}
 }
@@ -154,7 +154,7 @@ func TestFilterTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected, err := tr.FilterTargets(targets,
+	selected, err := tr.FilterTargets(context.Background(), targets,
 		[]string{"example.com/fixture/{lib,dot.x}"},
 		[]string{"{example.com/fixture/lib.Add,example.com/fixture/dot.x.F}"},
 	)
@@ -169,25 +169,25 @@ func TestFilterTargets(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("filtered targets = %v, want %v", got, want)
 	}
-	if _, err := tr.FilterTargets(targets, []string{"["}, nil); err == nil || !strings.Contains(err.Error(), "invalid package filter") {
+	if _, err := tr.FilterTargets(context.Background(), targets, []string{"["}, nil); err == nil || !strings.Contains(err.Error(), "invalid package filter") {
 		t.Fatalf("invalid filter = %v", err)
 	}
 	// Filters over an emptied selection are vacuous, never refused —
 	// but their patterns still validate (REQ-target-filtering).
-	if vacuous, err := tr.FilterTargets(nil, []string{"example.com/**"}, nil); err != nil || len(vacuous) != 0 {
+	if vacuous, err := tr.FilterTargets(context.Background(), nil, []string{"example.com/**"}, nil); err != nil || len(vacuous) != 0 {
 		t.Fatalf("filters over an empty selection = %v, %v; want a vacuous empty pass", vacuous, err)
 	}
-	if _, err := tr.FilterTargets(nil, []string{"["}, nil); err == nil || !strings.Contains(err.Error(), "invalid package filter") {
+	if _, err := tr.FilterTargets(context.Background(), nil, []string{"["}, nil); err == nil || !strings.Contains(err.Error(), "invalid package filter") {
 		t.Fatalf("invalid filter over an empty selection = %v, want the compile refusal", err)
 	}
-	if _, err := tr.FilterTargets(targets, nil, []string{"["}); err == nil || !strings.Contains(err.Error(), "invalid symbol filter") {
+	if _, err := tr.FilterTargets(context.Background(), targets, nil, []string{"["}); err == nil || !strings.Contains(err.Error(), "invalid symbol filter") {
 		t.Fatalf("invalid symbol filter = %v", err)
 	}
-	symbolOnly, err := tr.FilterTargets(targets, nil, []string{"example.com/fixture/lib.Add"})
+	symbolOnly, err := tr.FilterTargets(context.Background(), targets, nil, []string{"example.com/fixture/lib.Add"})
 	if err != nil || len(symbolOnly) != 1 || symbolOnly[0].Symbol != "example.com/fixture/lib.Add" {
 		t.Fatalf("symbol-only selection = %+v, %v", symbolOnly, err)
 	}
-	packageOnly, err := tr.FilterTargets([]Target{
+	packageOnly, err := tr.FilterTargets(context.Background(), []Target{
 		{Symbol: "example.com/fixture/lib.Add"},
 		{Symbol: "example.com/fixture/methods.Counter.Inc"},
 		{Symbol: "example.com/fixture/lib.Weak"},
@@ -196,17 +196,17 @@ func TestFilterTargets(t *testing.T) {
 		t.Fatalf("package-only selection = %+v, %v", packageOnly, err)
 	}
 	invalid := []Target{{Symbol: "not/a/loaded.Symbol"}, {Symbol: "example.com/fixture/lib.Add"}}
-	selected, err = tr.FilterTargets(invalid, nil, []string{"example.com/fixture/lib.Add"})
+	selected, err = tr.FilterTargets(context.Background(), invalid, nil, []string{"example.com/fixture/lib.Add"})
 	if err != nil || len(selected) != 1 || selected[0].Symbol != "example.com/fixture/lib.Add" {
 		t.Fatalf("excluded invalid target = %+v, %v", selected, err)
 	}
-	if _, err := tr.FilterTargets(invalid[:1], []string{"**"}, nil); err == nil || !strings.Contains(err.Error(), "no loaded package") {
+	if _, err := tr.FilterTargets(context.Background(), invalid[:1], []string{"**"}, nil); err == nil || !strings.Contains(err.Error(), "no loaded package") {
 		t.Fatalf("selected invalid target = %v", err)
 	}
-	if _, err := tr.FilterTargets(targets, nil, []string{"example.com/fixture/lib.Absent"}); err == nil || !strings.Contains(err.Error(), "matched no targets") {
+	if _, err := tr.FilterTargets(context.Background(), targets, nil, []string{"example.com/fixture/lib.Absent"}); err == nil || !strings.Contains(err.Error(), "matched no targets") {
 		t.Fatalf("empty selection = %v", err)
 	}
-	copy, err := tr.FilterTargets(targets, nil, nil)
+	copy, err := tr.FilterTargets(context.Background(), targets, nil, nil)
 	if err != nil || !reflect.DeepEqual(copy, targets) {
 		t.Fatalf("unfiltered copy = %v, %v", copy, err)
 	}
@@ -232,7 +232,7 @@ func TestSelfHostTargetsResolve(t *testing.T) {
 		t.Fatalf("self-host target count = %d, want 6", len(targets))
 	}
 	want := map[string][]string{
-		"github.com/greatliontech/gomutant.Tree.FilterTargetsContext": {
+		"github.com/greatliontech/gomutant.Tree.FilterTargets": {
 			"github.com/greatliontech/gomutant.TestFilterTargets",
 			"github.com/greatliontech/gomutant.TestTargetPreparationContextCancellation",
 		},
@@ -259,7 +259,7 @@ func TestSelfHostTargetsResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptions, err := tree.DescribeTargets(targets)
+	descriptions, err := tree.DescribeTargets(context.Background(), targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func TestDescribeTargetsResolvesEffectiveOracles(t *testing.T) {
 		t.Skip("measured heavy under the fast tier (in-process)")
 	}
 	tr := fixtureTree(t)
-	descriptions, err := tr.DescribeTargets([]Target{
+	descriptions, err := tr.DescribeTargets(context.Background(), []Target{
 		{Symbol: "example.com/fixture/lib.Weak", Labels: []string{"z", "a"}},
 		{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestWeak", "example.com/fixture/lib.TestAdd"}},
 		{Symbol: "example.com/fixture/lib.Guarded", OracleExplicit: true},
@@ -457,17 +457,17 @@ func TestDescribeTargetsResolvesEffectiveOracles(t *testing.T) {
 	if weak.OracleExplicit || len(weak.Oracle) == 0 || len(weak.Labels) != 2 || weak.Labels[0] != "a" {
 		t.Fatalf("derived description = %+v", weak)
 	}
-	if _, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.Add"}, {Symbol: "example.com/fixture/lib.Add"}}); err == nil {
+	if _, err := tr.DescribeTargets(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add"}, {Symbol: "example.com/fixture/lib.Add"}}); err == nil {
 		t.Fatal("duplicate target accepted")
 	}
-	if _, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestDeleted"}}}); err == nil {
+	if _, err := tr.DescribeTargets(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestDeleted"}}}); err == nil {
 		t.Fatal("missing oracle accepted")
 	}
-	nonFunction, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.I", Oracle: []string{"example.com/fixture/lib.TestAdd"}}})
+	nonFunction, err := tr.DescribeTargets(context.Background(), []Target{{Symbol: "example.com/fixture/lib.I", Oracle: []string{"example.com/fixture/lib.TestAdd"}}})
 	if err != nil || len(nonFunction) != 1 || !strings.HasPrefix(nonFunction[0].Skipped, "not a function - ") {
 		t.Fatalf("non-function description = %+v, %v", nonFunction, err)
 	}
-	if _, err := tr.DescribeTargets([]Target{{Symbol: "example.com/fixture/lib.Deleted", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}); err == nil {
+	if _, err := tr.DescribeTargets(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Deleted", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}); err == nil {
 		t.Fatal("missing target accepted")
 	}
 }
@@ -577,7 +577,7 @@ func TestInitFunctionsTargetPositionally(t *testing.T) {
 	if discovered["example.com/fixture/lib.init#genwired.go#0"] {
 		t.Fatal("whole-tree discovery emitted a generated file's init")
 	}
-	if _, err := tr.DescribeTargetsContext(context.Background(), targets); err != nil {
+	if _, err := tr.DescribeTargets(context.Background(), targets); err != nil {
 		t.Fatalf("describing whole-tree targets aborted: %v", err)
 	}
 
@@ -662,14 +662,14 @@ func TestInitFunctionsTargetPositionally(t *testing.T) {
 
 	// The bare unreferencable name refuses pointing at the positional
 	// grammar.
-	_, err = tr.DescribeTargetsContext(context.Background(), []Target{{Symbol: "example.com/fixture/lib.init"}})
+	_, err = tr.DescribeTargets(context.Background(), []Target{{Symbol: "example.com/fixture/lib.init"}})
 	if err == nil || !strings.Contains(err.Error(), "init#<file>#<ordinal>") {
 		t.Fatalf("bare init target error = %v, want the positional-grammar pointer", err)
 	}
 
 	// A method named init is addressable; its resolution failure is
 	// ordinary, never the func-init class claim.
-	_, err = tr.DescribeTargetsContext(context.Background(), []Target{{Symbol: "example.com/fixture/lib.NoSuchType.init"}})
+	_, err = tr.DescribeTargets(context.Background(), []Target{{Symbol: "example.com/fixture/lib.NoSuchType.init"}})
 	if err == nil || strings.Contains(err.Error(), "not an addressable mutation subject") {
 		t.Fatalf("method-form init miss got the func-init class claim: %v", err)
 	}

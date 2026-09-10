@@ -365,7 +365,7 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 	}
 	if filters.judge && len(selected) > 0 {
 		phase(fmt.Sprintf("judging %d record(s)", len(selected)))
-		judged, err := tree.InspectFindingsContext(ctx, selected, phase)
+		judged, err := tree.InspectFindings(ctx, selected, phase)
 		if err != nil {
 			return nil, err
 		}

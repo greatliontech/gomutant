@@ -23,7 +23,7 @@ func TestRunToolRefusesItsInputsBeforeAnyLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := filepath.Join(nowhere, gomutant.DefaultFindingsPath)
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

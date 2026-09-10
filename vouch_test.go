@@ -150,7 +150,7 @@ func TestCount(t *testing.T) {
 		if len(vouches) > 0 {
 			tree.SetDynamicStateVouches(vouches...)
 		}
-		inspection, err := tree.InspectFindingContext(ctx, finding)
+		inspection, err := tree.InspectFinding(ctx, finding)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -587,14 +587,14 @@ func TestRunRecordsPackageProcessDischarges(t *testing.T) {
 	// record unverifiable naming the armer's culprit — so a gofresh
 	// change that kept emitting the discharge string while dropping the
 	// lift would fail here, not silently pass.
-	attestedInspection, err := crossTree.InspectFindingContext(ctx, attested[0])
+	attestedInspection, err := crossTree.InspectFinding(ctx, attested[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	if attestedInspection.State != FindingCurrent {
 		t.Fatalf("attested record inspects %v (%s), want current under the recorded discharge", attestedInspection.State, attestedInspection.Reason)
 	}
-	crossInspection, err := crossTree.InspectFindingContext(ctx, cross[0])
+	crossInspection, err := crossTree.InspectFinding(ctx, cross[0])
 	if err != nil {
 		t.Fatal(err)
 	}

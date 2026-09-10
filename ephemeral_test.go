@@ -30,7 +30,7 @@ func TestEphemeralPreparationCancellation(t *testing.T) {
 	if result, err := tree.RunEphemeral(ctx, EphemeralRequest{File: "missing.go", Edits: []Edit{{Old: "x", New: "y"}}, TestPkg: "p", Run: "T", OracleTimeout: time.Minute, Runs: 1}); !errors.Is(err, context.Canceled) || result != nil {
 		t.Fatalf("cancelled edits = %+v, %v", result, err)
 	}
-	if result, err := ApplyEditsContext(ctx, []byte("x"), []Edit{{Old: "x", New: "y"}}); !errors.Is(err, context.Canceled) || result != nil {
+	if result, err := ApplyEdits(ctx, []byte("x"), []Edit{{Old: "x", New: "y"}}); !errors.Is(err, context.Canceled) || result != nil {
 		t.Fatalf("cancelled apply = %q, %v", result, err)
 	}
 }

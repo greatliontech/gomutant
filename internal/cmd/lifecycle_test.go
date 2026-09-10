@@ -46,7 +46,7 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 			Survivors: []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}},
 			Attested:  []gomutant.Attestation{{Position: "p.go:1:1", Operator: "zero return", Reason: "equivalent by inspection"}}}
 	}
-	if err := gomutant.UpdateDocument(gomutant.FindingsPathAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), gomutant.FindingsPathAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{record("example.com/life.Gone"), record("example.com/old.F")}, nil
 	}); err != nil {
 		t.Fatal(err)

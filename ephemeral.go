@@ -893,13 +893,8 @@ type Edit struct {
 
 // ApplyEdits applies exact-match edits to src in order and returns the
 // mutated content — the edits form of an ephemeral mutant's replacement
-// source (REQ-exec-ephemeral).
-func ApplyEdits(src []byte, edits []Edit) ([]byte, error) {
-	return ApplyEditsContext(context.Background(), src, edits)
-}
-
-// ApplyEditsContext is ApplyEdits with cooperative cancellation.
-func ApplyEditsContext(ctx context.Context, src []byte, edits []Edit) ([]byte, error) {
+// source (REQ-exec-ephemeral) — under caller-owned cancellation.
+func ApplyEdits(ctx context.Context, src []byte, edits []Edit) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -964,7 +959,7 @@ func (t *Tree) ephemeralEdits(ctx context.Context, file string, edits []Edit, te
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	mutant, err := ApplyEditsContext(ctx, orig, edits)
+	mutant, err := ApplyEdits(ctx, orig, edits)
 	if err != nil {
 		return nil, err
 	}

@@ -295,7 +295,7 @@ func TestUpdateEvictsRevokedRepoRow(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	repo, _, err := store.Committability(context.Background())
+	repo, _, err := committability(context.Background(), store)
 	if err != nil || repo != 1 {
 		t.Fatalf("exempted row not committed: repo=%d err=%v", repo, err)
 	}

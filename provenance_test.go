@@ -93,7 +93,7 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	runGit("add", "go.mod", "source.go", "extra.go")
 	runGit("commit", "-q", "-m", "fixture")
 
-	repository := captureRepositoryState(root)
+	repository := mustRepositoryState(t, root)
 	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
 	}
@@ -109,7 +109,7 @@ func TestRepositoryStateTracksOnlySelectedInputs(t *testing.T) {
 	if repository.pathsDirty([]string{goMod, source}) {
 		t.Fatal("unrelated untracked file dirtied selected inputs")
 	}
-	selected := append([]string{goMod, source}, repository.historicalPackageFiles([]string{source})...)
+	selected := append([]string{goMod, source}, historicalFiles(t, repository, []string{source})...)
 	if err := os.Remove(extraSource); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	runGit("init", "-q")
 	runGit("add", "-A")
 	runGit("commit", "-q", "-m", "fixture")
-	repository := captureRepositoryState(root)
+	repository := mustRepositoryState(t, root)
 	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
 	}
@@ -312,7 +312,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	runGit("init", "-q")
 	runGit("add", "-A")
 	runGit("commit", "-q", "-m", "fixture")
-	repository := captureRepositoryState(root)
+	repository := mustRepositoryState(t, root)
 	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
 	}
@@ -353,7 +353,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	}
 	runGit("add", "-A")
 	runGit("commit", "-q", "-m", "tracked link")
-	repository = captureRepositoryState(root)
+	repository = mustRepositoryState(t, root)
 	aliasLinkInput := filepath.Join(alias, "m", "link", "input.txt")
 	linkObserved, err := runtimeinput.FromTestLog([]byte("open "+aliasLinkInput+"\n"), root, moduleDir, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, root)))
 	if err != nil {
@@ -467,7 +467,7 @@ func TestMeasurementResidueNamesFreshUntrackedFiles(t *testing.T) {
 	if err := os.Chtimes(stale, old, old); err != nil {
 		t.Fatal(err)
 	}
-	repository := captureRepositoryState(root)
+	repository := mustRepositoryState(t, root)
 	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
 	}
@@ -605,7 +605,7 @@ func TestStampAsksGitAboutTheLinkAnOutsideIdentityTraverses(t *testing.T) {
 	runGit("init", "-q")
 	runGit("add", "-A")
 	runGit("commit", "-q", "-m", "fixture")
-	repository := captureRepositoryState(root)
+	repository := mustRepositoryState(t, root)
 	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
 	}

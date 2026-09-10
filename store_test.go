@@ -48,7 +48,7 @@ func storeFinding(symbol string, mutate func(*Finding)) Finding {
 	return f
 }
 
-// Committability draws the portable line: clean commit-pinned evidence
+// Committable draws the portable line: clean commit-pinned evidence
 // is repo material; dirty provenance, missing commits,
 // runtime-unverifiable evidence, and machine-local input identities
 // stay local (REQ-result-layers).
@@ -257,7 +257,7 @@ func TestStoreSplitsUpdatesAcrossLayers(t *testing.T) {
 		t.Fatal("pruned symbol's overlay entry survived")
 	}
 
-	repoCount, localOnly, err := store.Committability(ctx)
+	repoCount, localOnly, err := committability(ctx, store)
 	if err != nil || repoCount != 1 || localOnly != 0 {
 		t.Fatalf("committability = %d/%d, %v", repoCount, localOnly, err)
 	}
@@ -281,7 +281,7 @@ func survivorFinding(symbol string) Finding {
 // size bytes.
 func paddedEntryDoc(t *testing.T, symbol string, size int) []byte {
 	t.Helper()
-	doc, err := Export([]Finding{survivorFinding(symbol)})
+	doc, err := Export([]Finding{survivorFinding(symbol)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestOverlayReloadTracksRewrittenAndDeletedEntries(t *testing.T) {
 
 	rewritten := survivorFinding("p.A")
 	rewritten.BodyHash = "h2"
-	doc, err := Export([]Finding{rewritten})
+	doc, err := Export([]Finding{rewritten}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1088,11 +1088,18 @@ func TestStoreUpdateRewritesOnlyChangedEntries(t *testing.T) {
 	store.hooks.walk = func(symbol string) { walked = append(walked, symbol) }
 	changedB := local("p.B")
 	changedB.BodyHash = "h2"
+	// A re-submitted identical record — built afresh, not the loaded
+	// row — rewrites no entry: the changed/unchanged decision compares
+	// persisted forms on both sides.
+	sameA := local("p.A")
 	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 		next := append([]Finding(nil), current...)
 		for i := range next {
-			if next[i].Symbol == "p.B" {
+			switch next[i].Symbol {
+			case "p.B":
 				next[i] = changedB
+			case "p.A":
+				next[i] = sameA
 			}
 		}
 		return next, nil

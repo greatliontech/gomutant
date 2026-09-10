@@ -68,7 +68,7 @@ func TestSummaryStatesTheUnreachedBoundUnderTheSelection(t *testing.T) {
 func TestDocumentCarriesCoverageBoundsUnderVersion12(t *testing.T) {
 	findings := []Finding{survivorFinding("example.com/mod/host.D")}
 	bounds := []CoverageBound{{Selection: "wasm", Run: "r1", Unreached: []string{"example.com/mod/wasm.A"}}, {Selection: "js", Run: "r1", Unreached: []string{"example.com/mod/js.B"}}}
-	data, _, err := exportDocumentWithBounds(findings, bounds)
+	data, _, err := renderDocument(findings, bounds)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestDocumentCarriesCoverageBoundsUnderVersion12(t *testing.T) {
 		t.Fatalf("findings = %d", len(doc.Findings))
 	}
 	// An empty table is written present, never null.
-	empty, _, err := exportDocumentWithBounds(findings, nil)
+	empty, _, err := renderDocument(findings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestUpdateDocumentKeepsTheCoverageBounds(t *testing.T) {
 	if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) { return []Finding{survivorFinding("example.com/mod/host.D")}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpdateDocument(path, func(prior []Finding) ([]Finding, error) { return prior, nil }); err != nil {
+	if err := UpdateDocument(context.Background(), path, func(prior []Finding) ([]Finding, error) { return prior, nil }); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)

@@ -318,7 +318,7 @@ func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestToolRunWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
-	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		// The shaped record survives a whole-tree reconcile, so the
 		// reported drop count (1 of these 2) discriminates a real
 		// symbol-set difference from a bare len(current).
@@ -474,7 +474,7 @@ func TestResponsesNameEmptyAnswers(t *testing.T) {
 	}
 
 	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
-	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		seeded := seededFinding("example.com/empty.Old")
 		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
 		seeded.CandidateCount, seeded.Generated, seeded.Mutants = 1, 1, 1
@@ -543,7 +543,7 @@ func TestToolRunWholeTreePrunesAlongsideCurrentMeasurement(t *testing.T) {
 	}
 	s := New(dir)
 	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
-	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{seededFinding("example.com/current.Deleted")}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -780,7 +780,7 @@ func TestToolFindingsCapsSummaryRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(dir)
-	if err := gomutant.UpdateDocument(filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		var all []gomutant.Finding
 		for i := 0; i < envelope.rows+3; i++ {
 			all = append(all, seededFinding(fmt.Sprintf("example.com/empty.Gone%02d", i)))
@@ -812,7 +812,7 @@ func TestToolFindingsAnnouncesInspection(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New(dir)
-	if err := gomutant.UpdateDocument(filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{seededFinding("example.com/empty.Gone")}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -1514,7 +1514,7 @@ func TestToolAttestRefusesAMalformedExemptionsRecordBeforeWriting(t *testing.T) 
 	}
 	s := New(dir)
 	path := filepath.Join(dir, gomutant.DefaultFindingsPath)
-	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		seeded := seededFinding("example.com/empty.Old")
 		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
 		seeded.CandidateCount, seeded.Generated, seeded.Mutants = 1, 1, 1
@@ -1630,7 +1630,7 @@ func seededSurvivorServer(t *testing.T) (s *Server, path string, before []byte) 
 		t.Fatal(err)
 	}
 	path = filepath.Join(dir, gomutant.DefaultFindingsPath)
-	if err := gomutant.UpdateDocument(path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		seeded := seededFinding("example.com/empty.Old")
 		seeded.Survivors = []gomutant.Survivor{{Position: "p.go:1:1", Operator: "zero return"}}
 		seeded.CandidateCount, seeded.Generated, seeded.Mutants = 1, 1, 1

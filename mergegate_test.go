@@ -21,7 +21,7 @@ func TestMergeGraftGatesDispositionCarryOnTheRunStartSnapshot(t *testing.T) {
 	// equivalence was judged afresh. The domain-blind graft re-attached
 	// here; the gated merge sheds loudly.
 	fresh := []Finding{{Symbol: "pkg.F", Survivors: []Survivor{survivor}}}
-	merged, shed := MergeFindingsShedAgainst(prior, fresh, snapshot)
+	merged, shed := MergeFindings(prior, fresh, snapshot)
 	if len(merged) != 1 || len(merged[0].Attested) != 0 {
 		t.Fatalf("rejected disposition re-attached across a pin move: %+v", merged)
 	}
@@ -32,7 +32,7 @@ func TestMergeGraftGatesDispositionCarryOnTheRunStartSnapshot(t *testing.T) {
 	// A disposition recorded concurrently during the run - in the live
 	// document but absent from the run-start snapshot - grafts onto the
 	// still-reported survivor.
-	merged, shed = MergeFindingsShedAgainst(prior, fresh, map[string][]Attestation{})
+	merged, shed = MergeFindings(prior, fresh, map[string][]Attestation{})
 	if len(merged) != 1 || len(merged[0].Attested) != 1 || len(shed) != 0 {
 		t.Fatalf("concurrent attestation did not graft: %+v shed %+v", merged, shed)
 	}
@@ -40,7 +40,7 @@ func TestMergeGraftGatesDispositionCarryOnTheRunStartSnapshot(t *testing.T) {
 	// A snapshotted disposition whose survivor's site also moved sheds
 	// with the site reason: the specific cause outranks the general one.
 	movedSite := Survivor{Position: attestation.Position, Operator: attestation.Operator, Site: "bbbb2222bbbb2222"}
-	merged, shed = MergeFindingsShedAgainst(prior, []Finding{{Symbol: "pkg.F", Survivors: []Survivor{movedSite}}}, snapshot)
+	merged, shed = MergeFindings(prior, []Finding{{Symbol: "pkg.F", Survivors: []Survivor{movedSite}}}, snapshot)
 	if len(merged) != 1 || len(merged[0].Attested) != 0 || len(shed) != 1 || !strings.Contains(shed[0].Reason, "site content changed") {
 		t.Fatalf("moved-site snapshotted disposition = %+v shed %+v, want the site reason", merged, shed)
 	}
@@ -51,7 +51,7 @@ func TestMergeGraftGatesDispositionCarryOnTheRunStartSnapshot(t *testing.T) {
 	// and grafts instead of being mistaken for the rejected original.
 	reattested := attestation
 	reattested.Reason = "re-judged equivalent against the re-measured record"
-	merged, shed = MergeFindingsShedAgainst([]Finding{{Symbol: "pkg.F", Survivors: []Survivor{survivor}, Attested: []Attestation{reattested}}}, fresh, snapshot)
+	merged, shed = MergeFindings([]Finding{{Symbol: "pkg.F", Survivors: []Survivor{survivor}, Attested: []Attestation{reattested}}}, fresh, snapshot)
 	if len(merged) != 1 || len(merged[0].Attested) != 1 || merged[0].Attested[0].Reason != reattested.Reason || len(shed) != 0 {
 		t.Fatalf("concurrent re-attestation mistaken for the rejected original: %+v shed %+v", merged, shed)
 	}
@@ -59,7 +59,7 @@ func TestMergeGraftGatesDispositionCarryOnTheRunStartSnapshot(t *testing.T) {
 	// A disposition the fresh record already carries rode the in-run
 	// domain-hold carry: it stays and nothing sheds.
 	carried := []Finding{{Symbol: "pkg.F", Survivors: []Survivor{survivor}, Attested: []Attestation{attestation}}}
-	merged, shed = MergeFindingsShedAgainst(prior, carried, snapshot)
+	merged, shed = MergeFindings(prior, carried, snapshot)
 	if len(merged) != 1 || len(merged[0].Attested) != 1 || len(shed) != 0 {
 		t.Fatalf("carried disposition disturbed: %+v shed %+v", merged, shed)
 	}
@@ -77,7 +77,7 @@ func TestMergeShedsDispositionsOfVanishedSurvivorsLoudly(t *testing.T) {
 		"without snapshot": nil,
 		"with snapshot":    {"pkg.F": {attestation}},
 	} {
-		merged, shed := MergeFindingsShedAgainst(prior, fresh, snapshot)
+		merged, shed := MergeFindings(prior, fresh, snapshot)
 		if len(merged) != 1 || len(merged[0].Attested) != 0 {
 			t.Fatalf("%s: vanished survivor's disposition survived: %+v", name, merged)
 		}

@@ -101,7 +101,7 @@ func TestAttestationPinsIgnoreTheRunIdentity(t *testing.T) {
 // through the document (REQ-result-export).
 func TestRunIdentityRoundTripsThroughTheDocument(t *testing.T) {
 	f := storeFinding("p.S", func(f *Finding) { f.Run = "run-one" })
-	doc, err := Export([]Finding{f})
+	doc, err := Export([]Finding{f}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

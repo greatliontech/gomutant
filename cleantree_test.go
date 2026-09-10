@@ -70,7 +70,7 @@ func TestCleanTreeWithTempDirOracleStampsClean(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
-		merged, _ := MergeFindingsShedAgainst(prior, findings, nil)
+		merged, _ := MergeFindings(prior, findings, nil)
 		return merged, nil
 	}); err != nil {
 		t.Fatal(err)

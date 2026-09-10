@@ -32,7 +32,7 @@ func unloadable(t *testing.T) string {
 func TestRunRefusesItsInputsBeforeAnyLoad(t *testing.T) {
 	nowhere := unloadable(t)
 	doc := filepath.Join(t.TempDir(), "findings.json")
-	document, err := gomutant.Export(nil)
+	document, err := gomutant.Export(nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

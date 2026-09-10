@@ -856,7 +856,7 @@ func capRows[T any](rows []T) ([]T, int) {
 // one wording. Filters never appear here — filtering an already-empty
 // selection is skipped (nothing exists for filters to drop, so blaming
 // them would teach the wrong next step), and filters that empty a
-// non-empty selection refuse inside FilterTargetsContext with their
+// non-empty selection refuse inside FilterTargets with their
 // own teaching error.
 func selectionEmptiedNote(targetsDoc bool, changed string) string {
 	switch {
@@ -946,7 +946,7 @@ func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, targets
 		}
 		sel.wholeTree = true
 	}
-	if sel.targets, err = tree.FilterTargetsContext(ctx, sel.targets, packages, symbols); err != nil {
+	if sel.targets, err = tree.FilterTargets(ctx, sel.targets, packages, symbols); err != nil {
 		return sel, err
 	}
 	if len(packages) != 0 || len(symbols) != 0 {
@@ -1094,7 +1094,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				merged := gomutant.MergeWholeFindings(current, nil, nil)
+				merged, _ := gomutant.MergeWholeFindings(current, nil, nil, nil)
 				dropped = droppedSymbols(current, merged)
 				return merged, nil
 			})
@@ -1206,7 +1206,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 				// actually happens against the prior document - the final
 				// merge sees an already-stripped record, so the shed must
 				// be collected here or it is silent (REQ-attest-survivor).
-				merged, shed := gomutant.MergeFindingsShedAgainst(current, []gomutant.Finding{finding}, attestSnapshot)
+				merged, shed := gomutant.MergeFindings(current, []gomutant.Finding{finding}, attestSnapshot)
 				dropped = shed
 				for _, m := range merged {
 					if m.Symbol == finding.Symbol {
@@ -1280,10 +1280,10 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		}
 		var merged []gomutant.Finding
 		if wholeTree {
-			merged, attestationSheds = gomutant.MergeWholeFindingsShedAgainst(current, findings, targets, attestSnapshot)
+			merged, attestationSheds = gomutant.MergeWholeFindings(current, findings, targets, attestSnapshot)
 			reconcileDropped = droppedSymbols(current, merged)
 		} else {
-			merged, attestationSheds = gomutant.MergeFindingsShedAgainst(current, findings, attestSnapshot)
+			merged, attestationSheds = gomutant.MergeFindings(current, findings, attestSnapshot)
 		}
 		for _, m := range merged {
 			if _, ran := postMerge[m.Symbol]; ran {
@@ -1496,7 +1496,7 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 	}
 	targets := sel.targets
 	out.Residue = sel.residue
-	descriptions, err := tree.DescribeTargetsContext(ctx, targets)
+	descriptions, err := tree.DescribeTargets(ctx, targets)
 	if err != nil {
 		return nil, out, err
 	}
@@ -1734,7 +1734,7 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 			inspections[i] = gomutant.RecordedInspection(finding)
 		}
 		if judge && len(matched) > 0 {
-			judged, err := tree.InspectFindingsContext(ctx, matched, nil)
+			judged, err := tree.InspectFindings(ctx, matched, nil)
 			if err != nil {
 				return res, err
 			}
@@ -1880,7 +1880,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 				notify("inspecting " + finding.Symbol)
 			}
 			inspection, err := withHeartbeat(ctx, notify, "inspecting "+finding.Symbol, func(ctx context.Context) (gomutant.FindingInspection, error) {
-				return tree.InspectFindingContext(ctx, finding)
+				return tree.InspectFinding(ctx, finding)
 			})
 			if err != nil {
 				return nil, explainOut{}, err
@@ -2046,7 +2046,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 		out.Posture = gomutant.RecordedPosture(attested, gomutant.FindingInspection{}, err)
 		return nil, out, nil
 	}
-	inspection, err := tree.InspectFindingContext(ctx, attested)
+	inspection, err := tree.InspectFinding(ctx, attested)
 	out.Posture = gomutant.RecordedPosture(attested, inspection, err)
 	return nil, out, nil
 }

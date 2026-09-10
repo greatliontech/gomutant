@@ -1,7 +1,7 @@
 {
   "targets": [
     {
-      "symbol": "github.com/greatliontech/gomutant.Tree.FilterTargetsContext",
+      "symbol": "github.com/greatliontech/gomutant.Tree.FilterTargets",
       "oracle": [
         "github.com/greatliontech/gomutant.TestFilterTargets",
         "github.com/greatliontech/gomutant.TestTargetPreparationContextCancellation"

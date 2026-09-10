@@ -35,7 +35,7 @@ func TestExportInternsDuplicatedEvidence(t *testing.T) {
 		f.TargetEvidence = SubjectEvidence{}
 		f.OracleEvidence = []SubjectEvidence{shared}
 	})
-	data, err := Export([]Finding{a, b, c})
+	data, err := Export([]Finding{a, b, c}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestParseFindingsRefusesMalformedInternedDocuments(t *testing.T) {
 		f.Shape = &TargetShape{Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}}
 		f.TargetEvidence = SubjectEvidence{}
 	})
-	valid, err := Export([]Finding{survivorFinding("p.A"), shaped})
+	valid, err := Export([]Finding{survivorFinding("p.A"), shaped}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestParseFindingsRefusesMalformedInternedDocuments(t *testing.T) {
 // inline form they stand for would - cross-row manifest equality is
 // content equality, never table-index equality (REQ-result-export).
 func TestParseFindingsAcceptsDuplicateManifestEntries(t *testing.T) {
-	valid, err := Export([]Finding{survivorFinding("p.A")})
+	valid, err := Export([]Finding{survivorFinding("p.A")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestParseFindingsAcceptsDuplicateManifestEntries(t *testing.T) {
 // content, not merely accept equal content
 // (REQ-result-export, REQ-result-record).
 func TestParseFindingsRefusesMixedManifestsAcrossAFinding(t *testing.T) {
-	valid, err := Export([]Finding{survivorFinding("p.A")})
+	valid, err := Export([]Finding{survivorFinding("p.A")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestExportRefusesShapedFindingWithTargetEvidence(t *testing.T) {
 	shaped := storeFinding("structural:pin", func(f *Finding) {
 		f.Shape = &TargetShape{Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}}
 	})
-	if _, err := Export([]Finding{shaped}); err == nil || !strings.Contains(err.Error(), "shaped but carries target evidence") {
+	if _, err := Export([]Finding{shaped}, nil); err == nil || !strings.Contains(err.Error(), "shaped but carries target evidence") {
 		t.Fatalf("stray target evidence accepted: %v", err)
 	}
 }

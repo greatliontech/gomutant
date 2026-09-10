@@ -328,7 +328,7 @@ func TestShapedDispositionShedsOnMovedPins(t *testing.T) {
 	if err := findings[0].Attest(survivor.Position, survivor.Operator, "vacuous oracle accepted for the harness"); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := Export(findings)
+	doc, err := Export(findings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

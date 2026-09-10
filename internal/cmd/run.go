@@ -185,7 +185,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			return err
 		}
 	}
-	targets, err = tree.FilterTargetsContext(ctx, targets, o.packages, o.symbols)
+	targets, err = tree.FilterTargets(ctx, targets, o.packages, o.symbols)
 	if err != nil {
 		return err
 	}
@@ -235,7 +235,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
-				return gomutant.MergeWholeFindings(current, nil, nil), nil
+				merged, _ := gomutant.MergeWholeFindings(current, nil, nil, nil)
+				return merged, nil
 			}); err != nil {
 				return err
 			}
@@ -425,7 +426,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 				// actually happens against the prior document - the final
 				// merge sees an already-stripped record, so the shed must
 				// be collected here or it is silent (REQ-attest-survivor).
-				merged, shed := gomutant.MergeFindingsShedAgainst(current, []gomutant.Finding{finding}, attestSnapshot)
+				merged, shed := gomutant.MergeFindings(current, []gomutant.Finding{finding}, attestSnapshot)
 				dropped = shed
 				for _, m := range merged {
 					if m.Symbol == finding.Symbol {
@@ -483,9 +484,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 			}
 			var merged []gomutant.Finding
 			if wholeTree {
-				merged, finalSheds = gomutant.MergeWholeFindingsShedAgainst(current, findings, targets, attestSnapshot)
+				merged, finalSheds = gomutant.MergeWholeFindings(current, findings, targets, attestSnapshot)
 			} else {
-				merged, finalSheds = gomutant.MergeFindingsShedAgainst(current, findings, attestSnapshot)
+				merged, finalSheds = gomutant.MergeFindings(current, findings, attestSnapshot)
 			}
 			for _, m := range merged {
 				if _, ran := postMerge[m.Symbol]; ran {

@@ -4997,10 +4997,6 @@ func advanceDone(base, total, cur int64) int64 {
 	return cur
 }
 
-func mergeFindingObservations(root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
-	return mergeFindingObservationsContext(context.Background(), root, env, states...)
-}
-
 func mergeFindingObservationsContext(ctx context.Context, root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.Observation{}, err

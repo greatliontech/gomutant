@@ -25,7 +25,7 @@ func TestToolsCarryTheRunIdentity(t *testing.T) {
 	one.Run = "run-one"
 	two := seededFinding("example.com/empty.Two")
 	two.Run = "run-two"
-	if err := gomutant.UpdateDocument(filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if err := gomutant.UpdateDocument(context.Background(), filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{one, two, seededFinding("example.com/empty.Old")}, nil
 	}); err != nil {
 		t.Fatal(err)

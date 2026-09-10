@@ -1,7 +1,7 @@
-// Package gitref is the git seam both gomutant faces share: the changed
-// surface vs a ref, and reference content, via the git binary — the library
-// itself stays git-free (it defines the surface's types and never execs
-// git); only the shells reach here.
+// Package gitref is the changed-surface and ref-content seam both
+// gomutant faces share, via the git binary; the root package's
+// provenance keeps its own git reads (the repository state a record
+// pins), and every other package stays git-free.
 package gitref
 
 import (
@@ -46,10 +46,6 @@ func ShowContext(ctx context.Context, dir, ref, path string) ([]byte, bool) {
 		return nil, false
 	}
 	return out, true
-}
-
-func output(dir string, args ...string) ([]byte, error) {
-	return outputContext(context.Background(), dir, args...)
 }
 
 func outputContext(ctx context.Context, dir string, args ...string) ([]byte, error) {

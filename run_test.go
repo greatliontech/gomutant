@@ -86,7 +86,7 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 
 	// The export/parse round trip omits skipped targets.
-	doc, err := Export([]Finding{add, iface})
+	doc, err := Export([]Finding{add, iface}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestRunEndToEnd(t *testing.T) {
 	if len(cacheable[0].Open()) != len(cacheable[0].Survivors)-1 {
 		t.Fatal("attestation did not close the finding")
 	}
-	cacheDoc, err := Export(cacheable)
+	cacheDoc, err := Export(cacheable, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestRunEndToEnd(t *testing.T) {
 	if capped[0].Cached || capped[0].Budget != 1 || capped[0].Mutants+capped[0].Discarded != 1 {
 		t.Fatalf("budget-1 run = %+v", capped[0])
 	}
-	cappedDoc, err := Export(capped)
+	cappedDoc, err := Export(capped, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestRunAccountsForComparisonFamilies(t *testing.T) {
 	}
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/5"
-	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
 		t.Fatalf("go/5 finding under current basis = fresh %v, err %v", fresh, err)
 	}
 }
@@ -392,7 +392,7 @@ func TestRunAccountsForControlFamilies(t *testing.T) {
 	}
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/6"
-	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
 		t.Fatalf("go/6 finding under go/7 = fresh %v, err %v", fresh, err)
 	}
 }
@@ -452,7 +452,7 @@ func TestRunAccountsForArithmeticFamilies(t *testing.T) {
 	}
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/6"
-	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
 		t.Fatalf("go/6 finding under go/7 = fresh %v, err %v", fresh, err)
 	}
 }
@@ -511,7 +511,7 @@ func TestRunAccountsForBitwiseFamilies(t *testing.T) {
 	}
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/7"
-	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
 		t.Fatalf("go/7 finding under go/8 = fresh %v, err %v", fresh, err)
 	}
 }
@@ -580,7 +580,7 @@ func TestRunAccountsForUnaryAssignmentFamilies(t *testing.T) {
 	}
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/8"
-	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
 		t.Fatalf("go/8 finding under go/9 = fresh %v, err %v", fresh, err)
 	}
 }
@@ -640,7 +640,7 @@ func TestRunAccountsForScalarLiteralFamilies(t *testing.T) {
 	}
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/9"
-	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
 		t.Fatalf("go/9 finding under go/10 = fresh %v, err %v", fresh, err)
 	}
 }
@@ -695,7 +695,7 @@ func TestRunAccountsForReturnSubstitutions(t *testing.T) {
 	}
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/10"
-	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
 		t.Fatalf("go/10 finding under go/11 = fresh %v, err %v", fresh, err)
 	}
 }
@@ -745,7 +745,7 @@ func TestRunAccountsForStatementFamilies(t *testing.T) {
 	}
 	oldBasis := findings[0]
 	oldBasis.OperatorSet = "go/11"
-	if fresh, err := tr.Fresh(oldBasis, targets[0], 0); err != nil || fresh {
+	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
 		t.Fatalf("go/11 finding under go/12 = fresh %v, err %v", fresh, err)
 	}
 }
@@ -1175,7 +1175,7 @@ func TestRunRapidClassificationIncludesLaterTargets(t *testing.T) {
 		!strings.Contains(findings[1].TargetEvidence.ObservationReason, "observation analysis unavailable") {
 		t.Fatalf("external-test-only observation proof = %+v", findings[1].TargetEvidence)
 	}
-	if _, err := Export(findings); err != nil {
+	if _, err := Export(findings, nil); err != nil {
 		t.Fatalf("exporting unavailable observation proof: %v", err)
 	}
 }
@@ -1204,7 +1204,7 @@ func TestRunRemeasuresGeneratedFixtureEvidence(t *testing.T) {
 	if len(first[0].CandidateEvidence) != 0 {
 		t.Fatalf("generated-fixture candidate evidence = %+v, want none: the processes proved their logs complete", first[0].CandidateEvidence)
 	}
-	data, err := Export(first)
+	data, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1254,7 +1254,7 @@ func TestMergeFindingObservationsMakesMovementNonReusable(t *testing.T) {
 	if err := os.WriteFile(moving, []byte("after"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	merged, err := mergeFindingObservations(root, env, stableState, movingState)
+	merged, err := mergeFindingObservationsContext(context.Background(), root, env, stableState, movingState)
 	if err != nil || !merged.OK || !merged.Unverifiable || !strings.Contains(merged.Reason, "could not be merged for reuse") {
 		t.Fatalf("moved observation = %+v, %v", merged, err)
 	}
@@ -1330,7 +1330,7 @@ func TestRunCompileDiscardCarriesNoCandidateEvidence(t *testing.T) {
 	}
 	// The record is coverable as it stands - no splice, no probe, no
 	// doomed re-compile per serve.
-	if ok, err := tr.Fresh(findings[0], target, 0); err != nil || !ok {
+	if ok, err := tr.Fresh(context.Background(), findings[0], target, 0); err != nil || !ok {
 		t.Fatalf("compile-discard finding coverable without execution = %v, %v; want covered", ok, err)
 	}
 	var decisions []RunDecision
@@ -1349,7 +1349,7 @@ func TestRunCompileDiscardCarriesNoCandidateEvidence(t *testing.T) {
 			t.Fatalf("serve still splices a deterministic compile rejection: %+v", decision)
 		}
 	}
-	if _, err := Export(findings); err != nil {
+	if _, err := Export(findings, nil); err != nil {
 		t.Fatalf("exporting compile-discard finding: %v", err)
 	}
 }
@@ -1535,7 +1535,7 @@ func TestAttestationShedsAcrossSourceDrift(t *testing.T) {
 	if err := weak.Attest(s0.Position, s0.Operator, "equivalent"); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := Export([]Finding{weak})
+	doc, err := Export([]Finding{weak}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1705,7 +1705,7 @@ func TestWidthReadingOracleEvidenceServes(t *testing.T) {
 	if first[0].Cached {
 		t.Fatal("first run served with no prior")
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1944,7 +1944,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	}
 	expectInvalidExport := func(name string, finding Finding) {
 		t.Helper()
-		if _, err := Export([]Finding{finding}); err == nil {
+		if _, err := Export([]Finding{finding}, nil); err == nil {
 			t.Fatalf("%s operator summaries accepted", name)
 		}
 	}
@@ -1970,7 +1970,7 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 	expectInvalidExport("negative", base)
 	invalidExport := nonGitFindings[0]
 	invalidExport.Dirty = false
-	if _, err := Export([]Finding{invalidExport}); err == nil {
+	if _, err := Export([]Finding{invalidExport}, nil); err == nil {
 		t.Fatal("export emitted commitless clean provenance")
 	}
 	digestAt := strings.LastIndex(nonGit, `"runtimeDigest":"d"`)
@@ -2069,7 +2069,7 @@ func TestRunPanickedMutantIsCandidateLocalAndServes(t *testing.T) {
 	if f.Generated != f.Mutants+f.Discarded || f.Mutants != f.Killed+len(f.Survivors) || f.Generated != f.CandidateCount {
 		t.Fatalf("first-run counts do not reconcile: %+v", f)
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2081,7 +2081,7 @@ func TestRunPanickedMutantIsCandidateLocalAndServes(t *testing.T) {
 	// Every pin matches, yet the record covers the target only through the
 	// flagged re-execution, so it is not fresh without measurement
 	// (REQ-result-stale).
-	if ok, err := tr.Fresh(prior[0], target, 0); err != nil || ok {
+	if ok, err := tr.Fresh(context.Background(), prior[0], target, 0); err != nil || ok {
 		t.Fatalf("candidate-local record coverable without execution = %v, %v", ok, err)
 	}
 
@@ -2130,7 +2130,7 @@ func TestRunPanickedMutantIsCandidateLocalAndServes(t *testing.T) {
 	if len(s.CandidateEvidence) != len(f.CandidateEvidence) {
 		t.Fatalf("re-executed candidate evidence = %+v, want the deterministic incompleteness re-flagged", s.CandidateEvidence)
 	}
-	if _, err := Export(second); err != nil {
+	if _, err := Export(second, nil); err != nil {
 		t.Fatalf("exporting spliced finding: %v", err)
 	}
 }
@@ -2487,7 +2487,7 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if err := first[0].Attest(keeper.Position, keeper.Operator, "still equivalent"); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2601,7 +2601,7 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 
 	// The grown record is current on the grown tree: a follow-up run serves
 	// it without measurement.
-	grownDoc, err := Export(grownFindings)
+	grownDoc, err := Export(grownFindings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2697,11 +2697,11 @@ func TestRunExtensionDivergenceStampsAndAttributes(t *testing.T) {
 			t.Fatalf("capped oracle evidence unverifiable at capture: %+v", oracle)
 		}
 	}
-	inspection, ierr := tr.InspectFinding(capped[0])
+	inspection, ierr := tr.InspectFinding(context.Background(), capped[0])
 	if ierr != nil || inspection.State != FindingCurrent {
 		t.Fatalf("capped inspection = %+v, %v\noracle evidence: %+v", inspection, ierr, capped[0].OracleEvidence)
 	}
-	doc, err := Export(capped)
+	doc, err := Export(capped, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2950,7 +2950,7 @@ func TestRunCancellationKeepsCommittedFindings(t *testing.T) {
 		committed[0].Mutants != first[0].Mutants || committed[0].Killed != first[0].Killed {
 		t.Fatalf("measured-target commits = %+v, want the finished finding once", committed)
 	}
-	doc, err := Export(first)
+	doc, err := Export(first, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2971,8 +2971,8 @@ func TestRunCancellationKeepsCommittedFindings(t *testing.T) {
 		Decision: func(RunDecision) { cancel() },
 		Commit: func(f Finding) error {
 			committed = append(committed, f)
-			return UpdateDocumentContext(ctx, docPath, func(current []Finding) ([]Finding, error) {
-				return MergeFindings(current, []Finding{f}), nil
+			return UpdateDocument(ctx, docPath, func(current []Finding) ([]Finding, error) {
+				return mergeOnly(MergeFindings(current, []Finding{f}, nil)), nil
 			})
 		},
 	})
@@ -3093,19 +3093,19 @@ func TestMergeFindingsGraftsConcurrentAttestation(t *testing.T) {
 		Attested:  []Attestation{{Position: "f.go:1:1", Operator: "op", Reason: "equivalent"}}}
 	fresh := Finding{Symbol: "p.F",
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op"}, {Position: "f.go:2:2", Operator: "op"}}}
-	merged := MergeFindings([]Finding{prior}, []Finding{fresh})
+	merged := mergeOnly(MergeFindings([]Finding{prior}, []Finding{fresh}, nil))
 	if len(merged) != 1 || len(merged[0].Attested) != 1 || merged[0].Attested[0].Reason != "equivalent" {
 		t.Fatalf("concurrent attestation clobbered: %+v", merged[0].Attested)
 	}
 	shed := Finding{Symbol: "p.F", Survivors: []Survivor{{Position: "f.go:2:2", Operator: "op"}}}
-	merged = MergeFindings([]Finding{prior}, []Finding{shed})
+	merged = mergeOnly(MergeFindings([]Finding{prior}, []Finding{shed}, nil))
 	if len(merged[0].Attested) != 0 {
 		t.Fatalf("dead survivor's attestation retained: %+v", merged[0].Attested)
 	}
 	kept := Finding{Symbol: "p.F",
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "op"}},
 		Attested:  []Attestation{{Position: "f.go:1:1", Operator: "op", Reason: "fresher"}}}
-	merged = MergeFindings([]Finding{prior}, []Finding{kept})
+	merged = mergeOnly(MergeFindings([]Finding{prior}, []Finding{kept}, nil))
 	if len(merged[0].Attested) != 1 || merged[0].Attested[0].Reason != "fresher" {
 		t.Fatalf("fresh attestation not preferred: %+v", merged[0].Attested)
 	}
@@ -3694,11 +3694,11 @@ func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *tes
 		t.Fatalf("interning altered the distinct state: %+v vs %+v", internedThird.State, incomplete.State)
 	}
 	// The interned observations still merge exactly as the originals do.
-	fromInterned, err := mergeFindingObservations(root, env, internedFirst, internedSecond)
+	fromInterned, err := mergeFindingObservationsContext(context.Background(), root, env, internedFirst, internedSecond)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromOriginals, err := mergeFindingObservations(root, env, first, second)
+	fromOriginals, err := mergeFindingObservationsContext(context.Background(), root, env, first, second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3748,7 +3748,7 @@ func TestRunExtendsCappedFindingMeasuringOnlyTheSuffix(t *testing.T) {
 	if err := capped[0].Attest(prefixSurvivor.Position, prefixSurvivor.Operator, "equivalent by inspection"); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := Export(capped)
+	doc, err := Export(capped, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3828,7 +3828,7 @@ func TestRunExtendsCappedFindingMeasuringOnlyTheSuffix(t *testing.T) {
 	}
 
 	// The merged record round-trips the versioned document unchanged.
-	extendedDoc, err := Export(extendedFindings)
+	extendedDoc, err := Export(extendedFindings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3880,7 +3880,7 @@ func TestRunExtendsCappedFindingMeasuringOnlyTheSuffix(t *testing.T) {
 			t.Fatalf("exhaustive extension left a survivor unbucketed: %+v", full.Survivors)
 		}
 	}
-	if _, err := Export(exhaustive); err != nil {
+	if _, err := Export(exhaustive, nil); err != nil {
 		t.Fatalf("exporting exhaustively extended finding: %v", err)
 	}
 
@@ -4868,7 +4868,7 @@ func TestServedDirtyRecordPromotesToRepoDocumentOnCleanTree(t *testing.T) {
 	ctx := context.Background()
 	commit := func(finding Finding) error {
 		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
-			return MergeFindings(current, []Finding{finding}), nil
+			return mergeOnly(MergeFindings(current, []Finding{finding}, nil)), nil
 		})
 	}
 	target := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
@@ -5032,7 +5032,7 @@ func TestExtendedDirtyRecordPromotesOnCleanTree(t *testing.T) {
 	ctx := context.Background()
 	commit := func(finding Finding) error {
 		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
-			return MergeFindings(current, []Finding{finding}), nil
+			return mergeOnly(MergeFindings(current, []Finding{finding}, nil)), nil
 		})
 	}
 	target := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
@@ -5109,7 +5109,7 @@ func TestCandidateSpliceDirtyRecordPromotesOnCleanTree(t *testing.T) {
 	ctx := context.Background()
 	commit := func(finding Finding) error {
 		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
-			return MergeFindings(current, []Finding{finding}), nil
+			return mergeOnly(MergeFindings(current, []Finding{finding}, nil)), nil
 		})
 	}
 	target := Target{Symbol: "example.com/fixture/candlocal.Value", Oracle: []string{"example.com/fixture/candlocal.TestValue"}}
@@ -5925,7 +5925,7 @@ func TestRunGracefulInterruptCommitsCappedPrefix(t *testing.T) {
 	if len(committed) != 1 {
 		t.Fatalf("interrupted run committed %d records, want the one drained prefix", len(committed))
 	}
-	doc, err := Export(committed)
+	doc, err := Export(committed, nil)
 	if err != nil {
 		t.Fatalf("capped prefix refused export: %v", err)
 	}

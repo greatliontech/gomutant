@@ -642,7 +642,7 @@ func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 	if err := os.WriteFile(moving, []byte("after"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	merged, err := mergeRuntimeEvidence(root, env, stableState, movingState)
+	merged, err := mergeRuntimeEvidenceContext(context.Background(), root, env, stableState, movingState)
 	if err != nil || !merged.OK || !merged.Unverifiable || !strings.Contains(merged.Reason, "could not be merged for reuse") {
 		t.Fatalf("moved observation = %+v, %v", merged, err)
 	}
@@ -669,7 +669,7 @@ func TestAbsoluteRuntimeEvidenceDropsMovedUnsealedInputs(t *testing.T) {
 	if err := os.WriteFile(path, []byte("after"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	absolute, err := absoluteRuntimeEvidence(state, root, env)
+	absolute, err := absoluteRuntimeEvidenceContext(context.Background(), state, root, env)
 	if err != nil || !absolute.OK || !absolute.Unverifiable || !strings.Contains(absolute.Reason, "could not be finalized for reuse") {
 		t.Fatalf("moved absolute observation = %+v, %v", absolute, err)
 	}
@@ -685,7 +685,7 @@ func TestAbsoluteRuntimeEvidenceDropsMovedUnsealedInputs(t *testing.T) {
 		"malformed": {State: runtimeinput.State{OK: true, Manifest: "malformed", Digest: "digest"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if state, err := absoluteRuntimeEvidence(malformed, root, env); err == nil || state.OK {
+			if state, err := absoluteRuntimeEvidenceContext(context.Background(), malformed, root, env); err == nil || state.OK {
 				t.Fatalf("malformed absolute observation = %+v, %v", state, err)
 			}
 		})

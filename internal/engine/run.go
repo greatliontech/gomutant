@@ -863,10 +863,6 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	return observation, reason, err
 }
 
-func absoluteRuntimeEvidence(observation runtimeinput.Observation, moduleDir string, env []string) (runtimeinput.Observation, error) {
-	return absoluteRuntimeEvidenceContext(context.Background(), observation, moduleDir, env)
-}
-
 func absoluteRuntimeEvidenceContext(ctx context.Context, observation runtimeinput.Observation, moduleDir string, env []string) (runtimeinput.Observation, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.Observation{}, err
@@ -913,10 +909,6 @@ func absoluteNonReusableRuntimeEvidence(ctx context.Context, incomplete runtimei
 	return absolute, err
 }
 
-func mergeProcessObservations(root string, env []string, capture bool, bounds OracleBounds, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
-	return mergeProcessObservationsContext(context.Background(), root, env, capture, bounds, states...)
-}
-
 func mergeProcessObservationsContext(ctx context.Context, root string, env []string, capture bool, bounds OracleBounds, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
 	if !capture {
 		return runtimeinput.Observation{}, nil
@@ -928,10 +920,6 @@ func mergeProcessObservationsContext(ctx context.Context, root string, env []str
 	// the union to incomplete - silent evidence loss on exactly the
 	// differential-attribution path (REQ-exec-oracle-parallelism).
 	return mergeRuntimeEvidenceContext(ctx, root, OracleEvidenceEnv(env, bounds.Width), states...)
-}
-
-func mergeRuntimeEvidence(root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
-	return mergeRuntimeEvidenceContext(context.Background(), root, env, states...)
 }
 
 func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
@@ -965,10 +953,6 @@ func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string,
 		}
 	}
 	return result, nil
-}
-
-func addRuntimeEvidenceReason(root string, env []string, state runtimeinput.Observation, reason string) (runtimeinput.Observation, error) {
-	return addRuntimeEvidenceReasonContext(context.Background(), root, env, state, reason)
 }
 
 func addRuntimeEvidenceReasonContext(ctx context.Context, root string, env []string, state runtimeinput.Observation, reason string) (runtimeinput.Observation, error) {

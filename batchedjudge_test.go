@@ -58,7 +58,7 @@ func TestInspectFindingsJudgesInOnePass(t *testing.T) {
 	subjectViewBuildHook = func(symbols []string) { builds++; built = append(built, symbols) }
 	defer func() { inspectionSupplementaryViewHook, subjectViewBuildHook = prior, priorBuild }()
 	var progressed []string
-	batched, err := tr.InspectFindingsContext(ctx, records, func(stage string) { progressed = append(progressed, stage) })
+	batched, err := tr.InspectFindings(ctx, records, func(stage string) { progressed = append(progressed, stage) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestInspectFindingsJudgesInOnePass(t *testing.T) {
 	// Records the pre-checks decide without a view build none: a pass of
 	// early-decided records builds no view set.
 	builds = 0
-	if _, err := tr.InspectFindingsContext(ctx, []Finding{records[2], {Symbol: "example.com/fixture/lib.Add", OperatorSet: "old/1", OracleTimeout: "1m0s", BodyHash: "x"}}, nil); err != nil {
+	if _, err := tr.InspectFindings(ctx, []Finding{records[2], {Symbol: "example.com/fixture/lib.Add", OperatorSet: "old/1", OracleTimeout: "1m0s", BodyHash: "x"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if builds != 0 {
@@ -93,12 +93,12 @@ func TestInspectFindingsJudgesInOnePass(t *testing.T) {
 	// record's admission (the pass's own ending check).
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := tr.InspectFindingsContext(cancelled, []Finding{records[2]}, nil); err == nil {
+	if _, err := tr.InspectFindings(cancelled, []Finding{records[2]}, nil); err == nil {
 		t.Fatal("a view-free pass completed under a cancelled context")
 	}
 	late, cancelLate := context.WithCancel(ctx)
 	defer cancelLate()
-	if _, err := tr.InspectFindingsContext(late, []Finding{records[2]}, func(stage string) {
+	if _, err := tr.InspectFindings(late, []Finding{records[2]}, func(stage string) {
 		if strings.HasPrefix(stage, "judging ") {
 			cancelLate()
 		}

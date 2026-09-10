@@ -120,13 +120,9 @@ func compileTargetFilters(ctx context.Context, packagePatterns, symbolPatterns [
 // FilterTargets selects targets by package import path and fully qualified
 // symbol using complete-input glob patterns (REQ-target-filtering). Patterns
 // within one kind are alternatives; package and symbol filters both constrain
-// the result when supplied.
-func (t *Tree) FilterTargets(targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
-	return t.FilterTargetsContext(context.Background(), targets, packagePatterns, symbolPatterns)
-}
-
-// FilterTargetsContext is FilterTargets with cooperative cancellation.
-func (t *Tree) FilterTargetsContext(ctx context.Context, targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
+// the result when supplied. The context bounds the preparation the
+// selection loads.
+func (t *Tree) FilterTargets(ctx context.Context, targets []Target, packagePatterns, symbolPatterns []string) ([]Target, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -202,13 +198,9 @@ type TargetDescription struct {
 }
 
 // DescribeTargets resolves and validates the effective oracle of every target
-// without running mutants (REQ-target-inspection).
-func (t *Tree) DescribeTargets(targets []Target) ([]TargetDescription, error) {
-	return t.DescribeTargetsContext(context.Background(), targets)
-}
-
-// DescribeTargetsContext is DescribeTargets with cooperative cancellation.
-func (t *Tree) DescribeTargetsContext(ctx context.Context, targets []Target) ([]TargetDescription, error) {
+// without running mutants (REQ-target-inspection), under caller-owned
+// cancellation.
+func (t *Tree) DescribeTargets(ctx context.Context, targets []Target) ([]TargetDescription, error) {
 	descriptions := make([]TargetDescription, 0, len(targets))
 	seen := map[string]bool{}
 	for _, target := range targets {

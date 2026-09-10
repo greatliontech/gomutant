@@ -653,14 +653,6 @@ func (s *observedViewSet) forTarget(target string, oracle []string, faults map[s
 	return narrowed, nil
 }
 
-func (t *Tree) newSubjectView(symbol string) (*subjectView, error) {
-	views, err := t.newSubjectViews(context.Background(), []string{symbol}, false, 0)
-	if err != nil {
-		return nil, err
-	}
-	return views.bySymbol[symbol], nil
-}
-
 func (s *subjectViewSet) validateProducers(ctx context.Context) error {
 	for _, module := range s.modules {
 		if err := ctx.Err(); err != nil {
@@ -779,10 +771,6 @@ func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(
 	return true, nil
 }
 
-func (s *subjectView) inspect(evidence SubjectEvidence) (FindingInspection, error) {
-	return s.inspectContext(context.Background(), evidence)
-}
-
 func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEvidence) (FindingInspection, error) {
 	if evidence.Symbol != s.symbol {
 		return FindingInspection{State: FindingStale, Reason: "subject identity changed"}, nil
@@ -854,22 +842,16 @@ func (s *subjectView) checkContext(ctx context.Context, fingerprint gofresh.Fing
 	return s.view.Check(ctx, fingerprint, s.subject)
 }
 
-// InspectFinding is InspectFindingContext without caller-owned
-// cancellation.
-func (t *Tree) InspectFinding(f Finding) (FindingInspection, error) {
-	return t.InspectFindingContext(context.Background(), f)
-}
-
-// InspectFindingContext is InspectFindingsContext over one record.
-func (t *Tree) InspectFindingContext(ctx context.Context, f Finding) (FindingInspection, error) {
-	inspections, err := t.InspectFindingsContext(ctx, []Finding{f}, nil)
+// InspectFinding is InspectFindings over one record.
+func (t *Tree) InspectFinding(ctx context.Context, f Finding) (FindingInspection, error) {
+	inspections, err := t.InspectFindings(ctx, []Finding{f}, nil)
 	if err != nil {
 		return FindingInspection{}, err
 	}
 	return inspections[0], nil
 }
 
-// InspectFindingsContext judges every record of a document in one pass
+// InspectFindings judges every record of a document in one pass
 // over the records' shared subject views: each record's view-free
 // pre-checks run first, over one declared-symbol walk and one oracle
 // validation per distinct oracle; the subjects the undecided records'
@@ -880,7 +862,7 @@ func (t *Tree) InspectFindingContext(ctx context.Context, f Finding) (FindingIns
 // pass, as a single-record inspection would. progress, when given,
 // names each stage as it begins (the admission, the view build, each
 // record's judgment).
-func (t *Tree) InspectFindingsContext(ctx context.Context, findings []Finding, progress func(stage string)) ([]FindingInspection, error) {
+func (t *Tree) InspectFindings(ctx context.Context, findings []Finding, progress func(stage string)) ([]FindingInspection, error) {
 	inspections, errs, err := t.inspectFindings(ctx, findings, progress, false)
 	if err != nil {
 		return nil, err

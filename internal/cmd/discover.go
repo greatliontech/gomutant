@@ -112,10 +112,10 @@ func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, err
 			return view, err
 		}
 	}
-	targets, err = tree.FilterTargetsContext(ctx, targets, o.packages, o.symbols)
+	targets, err = tree.FilterTargets(ctx, targets, o.packages, o.symbols)
 	if err != nil {
 		return view, err
 	}
-	view.Targets, err = tree.DescribeTargetsContext(ctx, targets)
+	view.Targets, err = tree.DescribeTargets(ctx, targets)
 	return view, err
 }
