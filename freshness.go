@@ -268,7 +268,8 @@ func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packagePro
 // set — target-local evidence faults (REQ-exec-quiescence); only the
 // run's own cancellation aborts. The decision set is this set; the
 // observed union captures its proofs on these same views (observed);
-// the strict callers promote the faults (newSubjectViewsWithPackageContext).
+// the strict callers promote the faults (newStrictSubjectViews,
+// newStrictObservedViews).
 func (t *Tree) buildSubjectViews(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*subjectViewSet, map[string]error, error) {
 	faults := map[string]error{}
 	groups, err := t.resolveModuleGroups(ctx, symbols, packageContext, func(symbol string, err error) error {
@@ -1987,7 +1988,7 @@ func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*
 	return memo.verify(ctx)
 }
 
-// ErrEvidenceFinalization marks the evidence-conversion error class:
+// errEvidenceFinalization marks the evidence-conversion error class:
 // the relative conversion revalidating a union against disk inside
 // the attach and splice seams. Only this class refuses
 // target-locally — input motion between execution and finalization is

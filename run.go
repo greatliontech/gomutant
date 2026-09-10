@@ -2469,12 +2469,15 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// execution windows.
 	// baselineFailures memoizes a package group's failing baseline for
 	// the campaign: siblings sharing the flaky package skip on the
-	// recorded reason without re-probing.
+	// recorded reason without re-probing. Serial-only (the preparation
+	// alone touches it), so it rides under no lock.
 	baselineFailures := map[baselineKey]string{}
-	// groupBudgets memoizes each oracle group's derived budget beside
-	// its measured baseline: written by the serial preparation as each
-	// group first probes, read by pipelined workers — the mutex covers
-	// that overlap (REQ-exec-oracle-run's derived campaign budget).
+	// groupBudgetMu guards the two group maps the preparation and the
+	// pipelined workers share: groupBaselines (written by the serial
+	// preparation as each group first probes, read by the workers —
+	// REQ-exec-oracle-run's derived campaign budget) and
+	// pendingBankDeposits (written by the preparation, read and deleted
+	// on the commit path, which runs concurrently with it).
 	var groupBudgetMu sync.Mutex
 	// groupBaselines keys each group's ONE baseline measurement: the
 	// raw passing wall-clock (the window cost model's whole-group
@@ -2489,7 +2492,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	groupBaselines := map[baselineKey]groupBaseline{}
 	// pendingBankDeposits holds really-probed baselines until their
 	// finding's evidence rows complete the deposit (guarded by
-	// groupBudgetMu with the other group maps).
+	// groupBudgetMu; the scope is stated there).
 	pendingBankDeposits := map[baselineKey]pendingBankDeposit{}
 	budgetFor := func(g group) time.Duration {
 		if !deriveOracleBudgets {

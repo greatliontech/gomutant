@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-result-export"
 reason: "example pins anchor the behaviors while property witnesses or analyzer proofs are pending — the adoption sweep bound the example surface; the invariant and structural kinds await their proof class"
-content_hash: "76e11c208c06236b061381aa2377539a05b336cd3012ecef203e1f0d20190fee"
-source_hash: "982357d5a66c070349690178152a53ce16e5b490b6cf11e0a111fd8814c91ad3"
+content_hash: "19029c9413efbf2e8ddf7f2c2aa7fbc75fc703de642dc3388b359ac38c5a8524"
+source_hash: "821770b1cdbbaebd77f53be61e2e7727f82370a48a93c33377964ca98acd9d63"
 lands { covered: "REQ-result-export" }

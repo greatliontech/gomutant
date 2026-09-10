@@ -661,8 +661,9 @@ unrepresentable, and a 70 MB field store re-encodes at 3.2 MB with
 every record byte-identical on round-trip. An older reader cannot
 re-inline the tables, so the shape rides the bump (the
 candidate-evidence precedent); versions 4-10 keep reading through the
-inline path, and an expanded version-11 document re-validates through
-that same path record by record, so every inline-era semantic check
+inline path, and an expanded interned document (versions 11 and 12)
+re-validates through that same path record by record, so every
+inline-era semantic check
 applies verbatim while the reader's footprint and churn track the
 document on disk, never the duplicated inline form it stands for.
 This is the inverse of the targeting seam: gomutant

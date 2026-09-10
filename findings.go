@@ -90,7 +90,8 @@ type SubjectEvidence struct {
 	// are tree-relative and resolve at the store root); a record from
 	// the member-anchored era carries its member module, and the store,
 	// with no views at write time, resolves that subject's manifest
-	// against Join(storeDir, ModuleBase) (REQ-result-layers).
+	// against Join(moduleDir, ModuleBase), as evidenceBase does on the
+	// tree side (REQ-result-layers).
 	ModuleBase          string `json:"moduleBase,omitempty"`
 	RuntimeInputs       string `json:"runtimeInputs"`
 	RuntimeDigest       string `json:"runtimeDigest"`
@@ -634,58 +635,20 @@ func (f *Finding) Attest(position, operator, reason string) error {
 	return nil
 }
 
-// DocumentVersion tags the finding document format; a consumer rejects a
-// version it does not understand (REQ-result-export), while unknown fields
-// within an understood version are discarded (REQ-result-tolerant). Version 2
-// introduced candidate evidence: the field narrows reuse, so a version-1
-// consumer's field tolerance would have served flagged kills with the
-// evidence silently dropped — exactly what the version boundary exists to
-// refuse. Version 3 introduced the test-variant compartment pin on every
-// subject's evidence: the field is what stales a record across sibling-test
-// movement, so an older consumer's tolerance would have dropped the pin and
-// served results whose oracle set silently changed. Version 5 introduced
-// the survivor site anchor: attestation inheritance narrowed to matching
-// site content, so an older consumer's tolerance would have dropped the
-// anchor and re-opened cross-site inheritance. Version 4 documents are
-// still readable - their empty sites are the grandfathered
-// match-by-position form that adopts sites on first carry - while an
-// unknown version still refuses.
-// Version 6 introduced the
-// property-regime measurement pin: the field is what stales a
-// rapid-oracle record measured under unpinned draws, so an older
-// consumer's tolerance would have dropped it and served verdicts from
-// draw sequences the pinned regime never executes.
-// Version 8 introduced positional init targets
-// (<pkg>.init#<file>#<ordinal>): their symbols resolve in no earlier
-// release, so an older consumer's routine prune would classify every
-// init finding detached and destroy the records - the version boundary
-// refuses the destruction instead.
-// Version 9 introduced shaped targets (structural classes and manual
-// recipes): their identities resolve to no symbol, so an older
-// consumer's routine prune would classify every shaped finding
-// detached and destroy the records - the same destruction class the
-// version-8 boundary refuses - and its serving would compare a zero
-// target-evidence row as if it were measured symbol evidence.
-// Version 10 introduced the dynamic-state strategy pin on every
-// subject's evidence: the field is what stales a record across a
-// dynamic-state derivation move, so an older consumer's tolerance
-// would have dropped the pin and served verdicts computed under
-// semantics its engine does not implement. The package-process
-// discharge field landed beside it WITHOUT narrowing reuse (an audit
-// acceptance, the vouches' class) and needed no boundary of its own.
-// The survivor extent field (advisory coverage-probe geometry)
-// landed at version 10 likewise without a boundary: no reuse
-// decision reads it, and an absent extent keeps the anchor-point
-// coverage fallback an older record was bucketed under.
-// Version 11 is a structural re-shape, not a field: the document
-// interns its three measured-dominant components (per-oracle subject
-// evidence — 93% of a 66 MB field store at 8.8x duplication; the
-// runtime-inputs manifests inside it — eight unique strings behind
-// 53 MB; the compartment ledgers) into document-level tables that
-// records reference by index, so the document scales with UNIQUE
-// evidence and a divergent second copy of one fact is
-// unrepresentable. An older reader cannot re-inline the tables, so
-// the shape rides the bump (the candidate-evidence precedent).
+// DocumentVersion is the findings document's current version. A bump
+// draws a reading boundary: a field that narrows reuse or moves a pin
+// (candidate evidence, the compartment pin, the site anchor, the
+// property-regime pin, the dynamic-state strategy) or a shape an older
+// reader cannot re-derive (positional init targets, shaped targets, the
+// interned tables) bumps it, because an older consumer's tolerance would
+// serve verdicts computed under semantics its engine does not implement
+// or destroy records it cannot resolve; so does a field whose absence an
+// older reader would take in the flattering direction (the
+// coverage-bounds table: a dropped bound reads as full coverage); an
+// audit field, whose absence widens no claim (a discharge list; a
+// survivor extent, which falls back to the anchor-point bucket), lands
+// without one. The reading
+// range each boundary draws is ParseDocument's.
 const DocumentVersion = 12
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
@@ -741,12 +704,12 @@ func (e *DocumentVersionError) Error() string {
 func (e *DocumentVersionError) Unwrap() error { return e.Sentinel }
 
 // OldestReadableDocumentVersion bounds the known older document versions the
-// parser upgrades on read (REQ-result-tolerant).
+// parser upgrades on read (REQ-result-tolerant); the range is ParseDocument's.
 const OldestReadableDocumentVersion = 4
 
-// document is the inline finding set shape of versions 4-10; version
-// 11 writes internedDocument and the parser expands it back through this
-// path so every inline-era semantic check applies verbatim
+// document is the inline finding set shape of versions 4-10; versions
+// 11 and 12 write internedDocument and the parser expands it back
+// through this path so every inline-era semantic check applies verbatim
 // (REQ-result-export).
 type document struct {
 	Version  int       `json:"version"`
@@ -757,6 +720,11 @@ type document struct {
 // versions 11 and 12): subject evidence, runtime-inputs manifests, and
 // compartment ledgers live once each in document-level tables; records
 // reference them by index; version 12 adds the coverage-bounds table.
+// The tables exist because those three components dominated the
+// inline shape — per-oracle subject evidence was 93% of a 66 MB field
+// store at 8.8× duplication, and eight unique runtime-inputs manifests
+// stood behind 53 MB of it — so the document scales with unique
+// evidence and a divergent second copy of one fact is unrepresentable.
 type internedDocument struct {
 	Version       int                 `json:"version"`
 	RuntimeInputs []string            `json:"runtimeInputsTable"`
@@ -1055,8 +1023,13 @@ type Document struct {
 }
 
 // ParseDocument loads a finding document with its document-level
-// tables: an unknown version is refused (REQ-result-export), an unknown
-// field within a known version is discarded (REQ-result-tolerant).
+// tables. The reading range, stated once here: a version above
+// DocumentVersion refuses as ErrVersionAhead and one below
+// OldestReadableDocumentVersion as ErrVersionBehind (REQ-result-export);
+// versions 4-10 are the inline shape, upgraded on read; 11 interns the
+// three measured-dominant components into document-level tables; 12
+// adds the coverage-bounds table; an unknown field within a known
+// version is discarded (REQ-result-tolerant).
 func ParseDocument(data []byte) (Document, error) {
 	top, err := decodeKnownObject(data, map[string]bool{"version": true, "findings": true})
 	if err != nil {
@@ -1197,8 +1170,8 @@ func validateInternedRecords(doc internedDocument) error {
 }
 
 // parseInlineFindings validates and decodes the inline finding array —
-// the shape of versions 4-10 and the re-validation path for expanded
-// version-11 documents.
+// the inline shape's own path and the re-validation path for every
+// expanded interned document (the version mapping is ParseDocument's).
 func parseInlineFindings(top map[string]json.RawMessage) ([]Finding, error) {
 	if isJSONNull(top["findings"]) {
 		return nil, fmt.Errorf("gomutant: findings must be an array")
@@ -1599,10 +1572,13 @@ func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
 	if evidence.RuntimeUnverifiable != (evidence.RuntimeReason != "") {
 		return false, nil
 	}
-	// The module base is written only by treeRelModuleBase, which never
-	// produces an absolute or escaping form; admitting one from a
-	// hand-edited document would draw the portable-containment line
-	// outside the tree (REQ-result-layers).
+	// No writer produces a module base today: a re-measure carries none,
+	// and the attestation-pin view strips it so the absence sheds no
+	// disposition. A persisted pre-anchor record still carries one, read
+	// by evidenceBase on the tree side and by the store's manifest
+	// resolution, and an absolute or escaping form would draw the
+	// portable-containment line outside the tree (REQ-result-layers), so
+	// the parse refuses it.
 	if evidence.ModuleBase != "" {
 		if strings.HasPrefix(evidence.ModuleBase, "/") || strings.Contains(evidence.ModuleBase, "\\") {
 			return false, fmt.Errorf("module base %q is not a tree-relative slash path", evidence.ModuleBase)
