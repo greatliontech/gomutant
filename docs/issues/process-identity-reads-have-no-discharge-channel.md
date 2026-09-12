@@ -22,4 +22,13 @@ non-behavioral by construction and never a reuse blocker, or a
 declarable surface for exactly that class carrying the caller's
 assertion the way bracket-path does for tree paths.
 
-Lands: awaiting triage
+Triage (2026-09-12, chunk 244's open gate): "non-behavioral by
+construction" does not hold for a liveness read — the holder's start
+time decides whether a lock is broken, an output the subject can vary
+by — so a classification carve-out would be unsound; the sound shape
+is a declared surface carrying the caller's assertion for exactly
+this path class (gofresh REQ-inputs-volatile-os-roots gains the
+declaration, gomutant passes it as bracket-path is passed). A new
+declared surface is product scope.
+
+Lands: user decision

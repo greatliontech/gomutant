@@ -35,4 +35,12 @@ Related: own-face-gate-suite-decomposition.md (narrowing engaged but
 bought little where covering ≈ suite — a different cause with the
 same symptom, which is why the ground must be named).
 
-Lands: awaiting triage
+Triage (2026-09-12, chunk 244's open gate): (2) is answered by the code
+— the one covering/exempt decision (`narrowingBatches`) reads reach
+facts alone (fewer than two probed batches, a batch without a coverage
+verdict, an all- or none-reaching partition); no freshness fact enters
+it, and instability only relabels a narrowed survivor after scoring.
+Chunk 254 states that in the spec and lands (1): the estimate event
+carries the ground on which narrowing did not engage, on both faces.
+
+Lands: cross-tool train chunk 254

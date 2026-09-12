@@ -23,4 +23,9 @@ the invoke site in the subject (the call expression and its operand
 type) beside the reached sink, so the consumer can tell an
 over-approximated interface invoke from a real reach.
 
-Lands: awaiting triage
+Triage (2026-09-12, chunk 244's open gate): (1) is gofresh's
+WithAssumePure reaching a run surface on both faces, recorded on the
+evidence as vouches are — chunk 254; (2) is gofresh's downgrade-reason
+composition naming the invoke site — gofresh chunk 255.
+
+Lands: cross-tool train chunk 254 (the reason half at gofresh 255)

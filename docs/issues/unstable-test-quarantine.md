@@ -26,4 +26,11 @@ them. The consumer's obligation stays: the surfaced test is a defect
 to fix, and the exclusion is a stated coverage cap, never a silent
 one.
 
-Lands: awaiting triage
+Triage (2026-09-12, chunk 244's open gate): a per-test exclusion
+narrows the oracle for the rest of the campaign — a mutant killed only
+by the excluded test becomes a survivor under a stated cap — so the
+shape is a verdict-affecting narrowing whose acceptance is the user's;
+what is derivable today (naming the flipping test with its flip
+evidence on every face) rides the same design.
+
+Lands: user decision
