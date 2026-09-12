@@ -31,4 +31,20 @@ this path class (gofresh REQ-inputs-volatile-os-roots gains the
 declaration, gomutant passes it as bracket-path is passed). A new
 declared surface is product scope.
 
+Follow-up evidence (gmdb v0.5.2, gitfs, gomutant v0.57.7): gmdb's
+author put `//gofresh:pure` on `lock.ProcessStartTime`. The plan verb
+then showed no unverifiable clause on the consumer's targets (the
+static closure is discharged), but a bounded campaign still observed
+`/proc/<pid>/stat` at run time and reported it as "unstable oracle
+evidence (volatile OS input)", classing every survivor of every target
+`[unstable-oracle]` and prescribing an explicit oracle that excludes
+every test opening a database. So the dependency's directive lifts
+the closure clause and not the observed-input clause, and the
+observed input is scored as *instability*, not only as a reuse
+blocker — a survivor verdict is withheld for a reason that has
+nothing to do with whether the test flips. The discharge channel this
+issue asks for must cover the observation bracket, and the volatile
+input must not feed the unstable-oracle class (see
+narrowing-exemption-and-freshness-clauses-judged-apart.md).
+
 Lands: user decision

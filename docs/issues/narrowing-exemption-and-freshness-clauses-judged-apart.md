@@ -31,6 +31,17 @@ freshness clauses never withhold the exemption, or, if they do,
 decouple them: reach completeness keys the exemption, determinism
 keys quarantine, freshness keys reuse.
 
+Follow-up evidence (same consumer, later change set, dependency's
+`/proc` read carrying `//gofresh:pure`): narrowing DID engage —
+windows priced "(16 narrowed, 0 full)", "(8 narrowed, 0 full)", ~5 min
+instead of ~16 — once the flaky consumer test was fixed, so the
+withheld exemption in the first report was the unstable test, not the
+freshness clauses. But every survivor of every target still carries
+`[unstable-oracle]`, with the run naming the ground as the volatile
+`/proc/<pid>/stat` observation: a freshness clause is being scored as
+determinism evidence. Reach, determinism, and reuse are the three
+facts; this run conflates the last two.
+
 Related: own-face-gate-suite-decomposition.md (narrowing engaged but
 bought little where covering ≈ suite — a different cause with the
 same symptom, which is why the ground must be named).
