@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	gomutant "github.com/greatliontech/gomutant"
-	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/spf13/cobra"
 )
 
@@ -89,12 +88,31 @@ func newFindingsCommand() *cobra.Command {
 func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) error {
 	// The judge's cadence goroutine shares the writer with the rows.
 	out = &syncWriter{w: out}
-	switch o.state {
-	case "", string(gomutant.FindingCurrent), string(gomutant.FindingStale), string(gomutant.FindingUnverifiable), string(gomutant.FindingDetached):
-	default:
-		return fmt.Errorf("unknown state %q (current, stale, unverifiable, detached)", o.state)
+	// The inputs decide their refusals before the store opens: the
+	// state's spelling and the vouches' (REQ-exec-preparation).
+	if err := gomutant.ValidateFindingState(o.state); err != nil {
+		return err
 	}
-	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(o.dir, o.findingsFile), o.dir)
+	if err := selectionOf(o.tags, o.toolchain).Validate(); err != nil {
+		return err
+	}
+	var vouches []string
+	if len(o.vouches) > 0 {
+		var err error
+		if vouches, err = gomutant.ParseDynamicStateVouches(o.vouches); err != nil {
+			return err
+		}
+	}
+	// A changed ref's surface is read at preparation, in the tree root,
+	// before any record is read — the one order every verb keeps
+	// (REQ-exec-preparation); the cut resolves after the load.
+	request, err := gomutant.PrepareSelection(ctx, o.dir, nil, targetInputs(o.dir, "", o.changed), nil, nil)
+	if err != nil {
+		return err
+	}
+	document := gomutant.FindingsPathAt(o.dir, o.findingsFile)
+	filter := gomutant.RecordFilter{Label: o.label, Symbol: o.symbol, Run: o.run}
+	store, err := gomutant.OpenStore(document, o.dir)
 	if err != nil {
 		return err
 	}
@@ -103,6 +121,14 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		return err
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// What rides beside the rows is read with them, before any judging,
+	// as the structured face reads it: the stated coverage bounds and
+	// the committed ephemeral-equivalence record (REQ-result-unreached-bound,
+	// REQ-result-ephemeral-attest).
+	tail, err := readDocumentTail(ctx, store, document)
+	if err != nil {
 		return err
 	}
 	// Preserved legacy entries are named before any row on the human
@@ -117,17 +143,33 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 			fmt.Fprintln(notes, line)
 		}
 	}
-	if len(all) == 0 {
+	// Zero rows is an answer: after the tail — the attestation record
+	// and the coverage bounds can exist without findings (the primary
+	// loop shape persists no finding at all, and a wholly unreached leg
+	// records a bound alone) — the note names the input that emptied
+	// the roster, as the structured face does (REQ-result-inspection,
+	// REQ-result-ephemeral-attest, REQ-result-unreached-bound).
+	noRows := func(matched int) error {
+		note := gomutant.NoRecordsNote(document, len(all), matched, filter, o.state)
 		if o.json {
+			// The JSON face is the rows alone; the note rides the human
+			// channel beside it.
+			if o.errOut != nil {
+				fmt.Fprintln(o.errOut, note)
+			}
 			return renderFindingsJSON(out, []findingView{})
 		}
 		fmt.Fprintln(out, "no findings")
-		// The attestation record and the coverage bounds can exist
-		// without findings — the primary loop shape persists no finding
-		// at all, and a wholly unreached leg records a bound alone — so
-		// the empty-document face still surfaces them
-		// (REQ-result-ephemeral-attest, REQ-result-unreached-bound).
-		return printDocumentTail(ctx, out, store, o)
+		renderDocumentTail(out, tail)
+		fmt.Fprintln(out, note)
+		return nil
+	}
+	if len(all) == 0 {
+		return noRows(0)
+	}
+	matched := gomutant.FilterRecords(all, filter)
+	if len(matched) == 0 {
+		return noRows(0)
 	}
 	judge := o.judged()
 	var tree *gomutant.Tree
@@ -153,27 +195,19 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		if err != nil {
 			return err
 		}
-		if len(o.vouches) > 0 {
-			identities, err := gomutant.ParseDynamicStateVouches(o.vouches)
-			if err != nil {
-				return err
-			}
-			tree.SetDynamicStateVouches(identities...)
+		if len(vouches) > 0 {
+			tree.SetDynamicStateVouches(vouches...)
 		}
 	}
 	var cut *gomutant.DeltaCut
-	if o.changed != "" {
-		surface, err := gitref.ChangedSurfaceContext(ctx, o.dir, o.changed)
+	if request.Changed != nil {
+		selected, err := tree.SelectTargets(ctx, gomutant.SelectionRequest{Changed: request.Changed, Cut: true})
 		if err != nil {
 			return err
 		}
-		_, _, delta, err := tree.DiscoverChangedSurfaceContext(ctx, surface, gitref.ContentAt(ctx, o.dir, o.changed))
-		if err != nil {
-			return err
-		}
-		cut = &delta
+		cut = selected.Cut
 	}
-	views, err := inspectFindings(ctx, tree, store, all, findingFilters{RecordFilter: gomutant.RecordFilter{Label: o.label, Symbol: o.symbol, Run: o.run}, state: o.state, judge: judge, cut: cut}, phase)
+	views, inspection, err := inspectFindings(ctx, tree, store, matched, findingFilters{state: o.state, judge: judge, cut: cut}, phase)
 	// The rows render through the reporter's epilogue when one runs:
 	// the cadence stops and joins before the first row.
 	stop()
@@ -188,64 +222,58 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		return renderFindingsJSON(out, views)
 	}
 	if len(views) == 0 {
-		fmt.Fprintln(out, "no findings")
-		return printDocumentTail(ctx, out, store, o)
+		return noRows(len(matched))
 	}
 	if !o.detail {
-		renderFindingSummaries(out, views, judge, cut != nil)
+		renderFindingSummaries(out, views, inspection, judge, cut != nil)
 	} else {
-		renderFindingViews(out, views)
+		renderFindingViews(out, views, inspection)
 	}
-	return printDocumentTail(ctx, out, store, o)
+	renderDocumentTail(out, tail)
+	return nil
 }
 
 // printDocumentTail prints what rides the inspection beside the rows:
 // the document's stated coverage bounds per declared selection
 // (REQ-result-unreached-bound), then the committed
 // ephemeral-equivalence record.
-func printDocumentTail(ctx context.Context, out io.Writer, store *gomutant.Store, o findingsOptions) error {
-	bounds, err := store.CoverageBounds(ctx)
+func readDocumentTail(ctx context.Context, store *gomutant.Store, document string) (documentTail, error) {
+	var tail documentTail
+	var err error
+	if tail.bounds, err = store.CoverageBounds(ctx); err != nil {
+		return tail, err
+	}
+	tail.attestations = gomutant.EphemeralAttestationsPathFor(document)
+	atts, err := gomutant.LoadEphemeralAttestations(tail.attestations)
 	if err != nil {
-		return err
+		return tail, err
 	}
-	for _, b := range bounds {
-		renderCoverageBound(out, b.Selection, b.Unreached)
-	}
-	return printEphemeralAttestationLine(out, o)
+	tail.attested = len(atts)
+	return tail, nil
 }
 
-// printEphemeralAttestationLine surfaces the committed
-// ephemeral-equivalence record beside the finding rows on the human
-// face: a judged-equivalent manual probe is auditable next to the
-// findings it complements, never only in a commit message. The JSON
-// face keeps its array shape; the structured record is the MCP
-// findings tool's and the record file's own
-// (REQ-result-ephemeral-attest).
-func printEphemeralAttestationLine(out io.Writer, o findingsOptions) error {
-	attPath := gomutant.EphemeralAttestationsPathFor(gomutant.FindingsPathAt(o.dir, o.findingsFile))
-	atts, err := gomutant.LoadEphemeralAttestations(attPath)
-	if err != nil {
-		return err
+// documentTail is what rides beside the rows, read with them.
+type documentTail struct {
+	bounds       []gomutant.CoverageBound
+	attestations string
+	attested     int
+}
+
+func renderDocumentTail(out io.Writer, tail documentTail) {
+	for _, b := range tail.bounds {
+		renderCoverageBound(out, b.Selection, b.Unreached)
 	}
-	if len(atts) == 0 {
-		return nil
+	if tail.attested > 0 {
+		fmt.Fprintf(out, "%d ephemeral equivalence attestation%s on record — %s\n", tail.attested, plural(tail.attested), tail.attestations)
 	}
-	fmt.Fprintf(out, "%d ephemeral equivalence attestation%s on record — %s\n", len(atts), plural(len(atts)), attPath)
-	return nil
 }
 
 // renderFindingSummaries is the bounded default: one row per record -
 // state, symbol, layer, open and attested counts, the cause when the
 // record cannot serve - with the full lists behind --detail
 // (REQ-result-inspection).
-func renderFindingSummaries(w io.Writer, views []findingView, judged bool, cut bool) {
-	repoCount, localOnly := 0, 0
+func renderFindingSummaries(w io.Writer, views []findingView, inspection gomutant.Inspection, judged bool, cut bool) {
 	for _, view := range views {
-		if view.Layer == "repo" {
-			repoCount++
-		} else {
-			localOnly++
-		}
 		layer := view.Layer
 		if layer == "local" {
 			layer = "machine-local"
@@ -260,7 +288,7 @@ func renderFindingSummaries(w io.Writer, views []findingView, judged bool, cut b
 		}
 		fmt.Fprintln(w, runSuffix(view.Run))
 	}
-	fmt.Fprintf(w, "%d repo-committable, %d machine-local; --detail for survivors and dispositions", repoCount, localOnly)
+	fmt.Fprintf(w, "%d repo-committable, %d machine-local; --detail for survivors and dispositions", inspection.Repo, inspection.Local)
 	if !judged {
 		// The recorded default must name the judged opt-in at the
 		// point of use, or the freshness states are undiscoverable
@@ -270,15 +298,8 @@ func renderFindingSummaries(w io.Writer, views []findingView, judged bool, cut b
 	fmt.Fprintln(w)
 }
 
-func renderFindingViews(w io.Writer, views []findingView) {
-	repoCount, localOnly := 0, 0
-	for _, view := range views {
-		if view.Layer == "repo" {
-			repoCount++
-		} else {
-			localOnly++
-		}
-	}
+func renderFindingViews(w io.Writer, views []findingView, inspection gomutant.Inspection) {
+	repoCount, localOnly := inspection.Repo, inspection.Local
 	for _, view := range views {
 		labels := view.Labels
 		if len(labels) == 0 {
@@ -333,7 +354,6 @@ func renderFindingsJSON(w io.Writer, views []findingView) error {
 // recorded-fact filter the library defines, plus the judged state
 // applied after inspection (REQ-result-inspection).
 type findingFilters struct {
-	gomutant.RecordFilter
 	state string
 	// judge derives each record's freshness against the tree; the
 	// tree may be loaded for the cut alone, so presence never implies it.
@@ -342,67 +362,32 @@ type findingFilters struct {
 	cut *gomutant.DeltaCut
 }
 
-func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.Store, all []gomutant.Finding, filters findingFilters, phase func(string)) ([]findingView, error) {
-	state := filters.state
-	if phase == nil {
-		phase = func(string) {}
+func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.Store, matched []gomutant.Finding, filters findingFilters, phase func(string)) ([]findingView, gomutant.Inspection, error) {
+	inspection, err := gomutant.InspectDocument(ctx, tree, store, matched, gomutant.InspectionRequest{Judge: filters.judge, State: filters.state, Cut: filters.cut, Phase: phase})
+	if err != nil {
+		return nil, inspection, err
 	}
-	var selected []gomutant.Finding
-	for _, finding := range all {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if !filters.Admits(finding) {
-			continue
-		}
-		selected = append(selected, finding)
-	}
-	// The judged pass derives every selected record's freshness in one
-	// pass over their shared subject views (REQ-result-inspection).
-	inspections := make([]gomutant.FindingInspection, len(selected))
-	for i, finding := range selected {
-		inspections[i] = gomutant.RecordedInspection(finding)
-	}
-	if filters.judge && len(selected) > 0 {
-		phase(fmt.Sprintf("judging %d record(s)", len(selected)))
-		judged, err := tree.InspectFindings(ctx, selected, phase)
-		if err != nil {
-			return nil, err
-		}
-		inspections = judged
-	}
-	views := make([]findingView, 0, len(selected))
-	for i, finding := range selected {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		inspection := inspections[i]
-		if state != "" && string(inspection.State) != state {
-			continue
-		}
-		layer, layerReason := store.Layer(finding)
+	views := make([]findingView, 0, len(inspection.Rows))
+	for _, row := range inspection.Rows {
+		finding := row.Finding
 		labels := append([]string(nil), finding.Labels...)
 		sort.Strings(labels)
 		var onDelta *[]gomutant.Survivor
 		var split gomutant.DeltaSurvivors
-		if filters.cut != nil {
-			var err error
-			if split, err = tree.CutSurvivorsContext(ctx, finding, *filters.cut); err != nil {
-				return nil, err
-			}
+		if row.Delta != nil {
+			split = *row.Delta
 			listed := append([]gomutant.Survivor{}, split.OnDelta...)
 			onDelta = &listed
 		}
 		views = append(views, findingView{
-			Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-			Layer: layer, LayerReason: layerReason, Run: finding.Run, DeltaOpen: onDelta, split: split,
+			Symbol: finding.Symbol, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
+			Layer: row.Layer, LayerReason: row.LayerReason, Run: finding.Run, DeltaOpen: onDelta, split: split,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
 			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
-			Candidates: inspection.CandidateEvidence,
+			Candidates: row.Inspection.CandidateEvidence,
 		})
 	}
-	sort.Slice(views, func(i, j int) bool { return views[i].Symbol < views[j].Symbol })
-	return views, nil
+	return views, inspection, nil
 }

@@ -1106,3 +1106,6 @@ machine-local record without re-deriving which observed object moved.
 Best-effort identity naming is count-capped: a long identity list renders
 its total with leading exemplars, never the whole roster, because the count
 and the first names carry the signal and the detail surfaces carry the rest.
+A zero-row answer names the input that emptied the roster — no record at
+all, the record filters given (label, symbol, run identity), or the
+state — and the next step, on both faces.

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -181,5 +182,70 @@ func TestTargetsDocumentIsParsedBeforeTheLoad(t *testing.T) {
 	_, err = discoverTargets(context.Background(), discoverOptions{dir: dir, targetsFile: targetsPath})
 	if err == nil || !strings.Contains(err.Error(), "parse targets document") {
 		t.Fatalf("discover refused with %v, want the document's own refusal before the load", err)
+	}
+}
+
+// The findings verb refuses what its inputs decide before it reads
+// anything: the state's spelling before the store opens, a malformed
+// vouch before the tree loads (REQ-exec-preparation).
+func TestFindingsRefusesItsInputsBeforeAnyRead(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/broken\n\ngo 1.26.4\n\nrequire (\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := gomutant.FindingsPathAt(dir, defaultFindings)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An exemptions record the store refuses at open: the state's
+	// refusal must come before the store opens.
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(path), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := findingsCommand(context.Background(), findingsOptions{dir: dir, findingsFile: defaultFindings, state: "recorded"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), `unknown state "recorded"`) {
+		t.Fatalf("an unknown state beside an unopenable store = %v, want the state refused first", err)
+	}
+	if err := os.Remove(gomutant.ExemptionsPathFor(path)); err != nil {
+		t.Fatal(err)
+	}
+	// A record, so the verb would load the tree; a malformed vouch
+	// beside a tree that cannot load: the vouch's refusal, never the
+	// load's — and with a well-formed vouch the load's own.
+	evidence := func(symbol string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "eyJ2IjoxfQ", RuntimeDigest: "digest"}
+	}
+	seed := gomutant.Finding{Symbol: "example.com/broken.F", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Commit: "abc",
+		TargetEvidence: evidence("example.com/broken.F"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/broken.TestF")}}
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{seed}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := findingsCommand(context.Background(), findingsOptions{dir: dir, findingsFile: defaultFindings, vouches: []string{"example.com/dep:Var"}}, io.Discard); err == nil || strings.Contains(err.Error(), "vouch") {
+		t.Fatalf("a well-formed vouch under an unloadable tree = %v, want the load's own refusal", err)
+	}
+	// What rides beside the rows is read with the records: an unreadable
+	// attestation record refuses before any row renders or judges.
+	if err := os.WriteFile(gomutant.EphemeralAttestationsPathFor(path), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var rows bytes.Buffer
+	if err := findingsCommand(context.Background(), findingsOptions{dir: dir, findingsFile: defaultFindings}, &rows); err == nil || rows.Len() != 0 {
+		t.Fatalf("an unreadable attestation record: %v with %q rendered; want the refusal before any row", err, rows.String())
+	}
+	if err := os.Remove(gomutant.EphemeralAttestationsPathFor(path)); err != nil {
+		t.Fatal(err)
+	}
+	// The build selection's shape refuses before any record is read, on
+	// the zero-match path too.
+	err = findingsCommand(context.Background(), findingsOptions{dir: dir, findingsFile: defaultFindings, symbol: "example.com/broken.Nope", toolchain: "not a toolchain"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "not a toolchain") {
+		t.Fatalf("a malformed toolchain beside an emptying filter = %v, want the selection refused", err)
+	}
+	err = findingsCommand(context.Background(), findingsOptions{dir: dir, findingsFile: defaultFindings, vouches: []string{"no-colon-no-dot"}}, io.Discard)
+	if err == nil || strings.Contains(err.Error(), "go.mod") || !strings.Contains(err.Error(), "vouch") {
+		t.Fatalf("a malformed vouch beside an unloadable tree = %v, want the vouch refused before the load", err)
 	}
 }

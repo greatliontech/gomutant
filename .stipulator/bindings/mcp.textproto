@@ -333,8 +333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "147315da70583a4166802fa90d75be75e5fc4bd4af7f5abe4cdf5bc66af17f7c"
-  source_hash: "58e5cd81634ecf265da1778b7500f3239eed89734ddb767d797e79b1fc7bd678"
+  content_hash: "fdf0c9f12d6017477e2493c2571c98e14e99625b5d52425a6ae755c50de22328"
+  source_hash: "38d2b97a1788ea6041dbf1cbe6546870b8701f6760a4469d9a8bb4ec4cae31ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableTracksTheGuidanceVerbs"
   role: BINDING_ROLE_TESTS
@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "147315da70583a4166802fa90d75be75e5fc4bd4af7f5abe4cdf5bc66af17f7c"
-  source_hash: "58e5cd81634ecf265da1778b7500f3239eed89734ddb767d797e79b1fc7bd678"
+  content_hash: "fdf0c9f12d6017477e2493c2571c98e14e99625b5d52425a6ae755c50de22328"
+  source_hash: "38d2b97a1788ea6041dbf1cbe6546870b8701f6760a4469d9a8bb4ec4cae31ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableStatesTheHeldBounds"
   role: BINDING_ROLE_TESTS
@@ -629,4 +629,24 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunParsesTheTargetsDocumentBeforeTheLoad"
   role: BINDING_ROLE_TESTS
   shape_hash: "4b8e919ad6be19c58beff880f1db00e6beeeefbf97a4b4f8d89c70fc286895a5"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "f5838a02cb5130cd550017eb704dbe591ad552739589b5cb36b4f128b3e8d7bd"
+  source_hash: "30ca10e747f2960a2a06ab521789d474156741f5925c282c6ca91f74cd885a4e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestInspectionInputsAndNotes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0027d1422912d8a68e8d7f19101b948fddced654c4cd3d6f2fd3a440fa34376d"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "f5838a02cb5130cd550017eb704dbe591ad552739589b5cb36b4f128b3e8d7bd"
+  source_hash: "30ca10e747f2960a2a06ab521789d474156741f5925c282c6ca91f74cd885a4e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolFindingsReadsTheRefBeforeTheRecordsAndNamesTheEmptier"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5ac7ee9ceaedf012fd2f785b5584b487a141ae313dc5a4e8a82335e8a4709c41"
 }

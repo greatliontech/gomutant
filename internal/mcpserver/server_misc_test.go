@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"github.com/greatliontech/gomutant"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,5 +108,50 @@ func TestToolRunParsesTheTargetsDocumentBeforeTheLoad(t *testing.T) {
 		if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsPath: escape}); err == nil || !strings.Contains(err.Error(), "escapes the tree") {
 			t.Fatalf("discover read %q: %v, want the confinement refusal", escape, err)
 		}
+	}
+}
+
+// The findings tool refuses the state's spelling before it reads
+// anything — the document and the ephemeral-attestation record
+// included (REQ-exec-preparation).
+func TestToolFindingsRefusesTheStateBeforeAnyRead(t *testing.T) {
+	dir := t.TempDir()
+	path := gomutant.FindingsPathAt(dir, "")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Every record unreadable, the exemptions the store opens included:
+	// only a refusal ahead of every read can name the state.
+	for _, p := range []string{path, gomutant.EphemeralAttestationsPathFor(path), gomutant.ExemptionsPathFor(path)} {
+		if err := os.WriteFile(p, []byte("{not json"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, err := New(dir).toolFindings(context.Background(), nil, findingsIn{State: "recorded"})
+	if err == nil || !strings.Contains(err.Error(), `unknown state "recorded"`) {
+		t.Fatalf("an unknown state beside unreadable records = %v, want the state refused first", err)
+	}
+}
+
+// The findings tool reads a changed ref at preparation: an unreachable
+// ref refuses even when the filters would empty the roster, and the
+// zero-row note names the filter given — run identity included
+// (REQ-exec-preparation, REQ-mcp-envelope).
+func TestToolFindingsReadsTheRefBeforeTheRecordsAndNamesTheEmptier(t *testing.T) {
+	s, _, _ := seededSurvivorServer(t)
+	if _, _, err := s.toolFindings(context.Background(), nil, findingsIn{Symbol: "example.com/nowhere.F", Changed: "no-such-ref"}); err == nil || !strings.Contains(err.Error(), "git") {
+		t.Fatalf("an unreachable ref beside an emptying filter = %v, want the ref refused", err)
+	}
+	_, out, err := s.toolFindings(context.Background(), nil, findingsIn{Run: "no-such-run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.Note, "the run filter matched none of ") {
+		t.Fatalf("run filter's empty answer = %q, want the run filter named", out.Note)
+	}
+	// The build selection's shape refuses before any record is read, on
+	// the zero-match path too.
+	if _, _, err := s.toolFindings(context.Background(), nil, findingsIn{Symbol: "example.com/nowhere.F", selectionIn: selectionIn{Toolchain: "not a toolchain"}}); err == nil || !strings.Contains(err.Error(), "not a toolchain") {
+		t.Fatalf("a malformed toolchain beside an emptying filter = %v, want the selection refused", err)
 	}
 }

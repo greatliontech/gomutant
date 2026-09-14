@@ -92,8 +92,10 @@ func TestFindingsCommandDefaultsToSummaryRows(t *testing.T) {
 	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, state: "stale"}, &filtered); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(filtered.String(), "no findings") {
-		t.Fatalf("state filter kept a detached record: %q", filtered.String())
+	// The zero-row answer names the input that emptied it, as the
+	// structured face does (REQ-mcp-envelope).
+	if !strings.Contains(filtered.String(), "no findings\nstate=stale matched none of the 1 finding(s) the other filters kept; drop it to list them\n") {
+		t.Fatalf("state filter kept a detached record or named no emptier: %q", filtered.String())
 	}
 	// A MATCHING state filter returns the judged row: the filter
 	// implies judging rather than comparing against the recorded
@@ -105,12 +107,46 @@ func TestFindingsCommandDefaultsToSummaryRows(t *testing.T) {
 	if !strings.Contains(byState.String(), "detached  example.com/empty.Gone") {
 		t.Fatalf("matching state filter dropped the row: %q", byState.String())
 	}
+	// The layer counts are the walk's, rendered once (REQ-result-layers).
+	if !strings.Contains(byState.String(), "0 repo-committable, 1 machine-local;") {
+		t.Fatalf("summary counts not the walk's: %q", byState.String())
+	}
 	var bySymbol bytes.Buffer
 	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, symbol: "example.com/empty.Other"}, &bySymbol); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(bySymbol.String(), "no findings") {
-		t.Fatalf("symbol filter kept a foreign record: %q", bySymbol.String())
+	if !strings.Contains(bySymbol.String(), "no findings\nthe symbol filter matched none of 1 recorded finding(s); drop it to list the document\n") {
+		t.Fatalf("symbol filter kept a foreign record or named no emptier: %q", bySymbol.String())
+	}
+	// The label filter narrows the roster too, and the note names it.
+	var byLabel bytes.Buffer
+	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, label: "REQ-nowhere"}, &byLabel); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(byLabel.String(), "no findings\nthe label filter matched none of 1 recorded finding(s); drop it to list the document\n") {
+		t.Fatalf("label filter kept an unlabeled record or named no emptier: %q", byLabel.String())
+	}
+	// A changed ref is read at preparation: an unreachable ref refuses
+	// even when the filters would empty the roster (REQ-exec-preparation).
+	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, symbol: "example.com/empty.Other", changed: "no-such-ref"}, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "git") {
+		t.Fatalf("an unreachable ref beside an emptying filter = %v, want the ref refused", err)
+	}
+	// An empty document names its emptier after the tail.
+	empty := t.TempDir()
+	var none bytes.Buffer
+	if err := findingsCommand(ctx, findingsOptions{dir: empty, findingsFile: defaultFindings}, &none); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(none.String(), "no findings\nno findings recorded at "+gomutant.FindingsPathAt(empty, defaultFindings)+" - run measures the tree first\n") {
+		t.Fatalf("empty document named no emptier: %q", none.String())
+	}
+	// The JSON face keeps its document; the note rides the human channel.
+	var doc, notes bytes.Buffer
+	if err := findingsCommand(ctx, findingsOptions{dir: empty, findingsFile: defaultFindings, json: true, errOut: &notes}, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(doc.String()) != "[]" || !strings.HasPrefix(notes.String(), "no findings recorded at ") {
+		t.Fatalf("json zero-row answer: document %q, notes %q", doc.String(), notes.String())
 	}
 	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, state: "bogus"}, &bytes.Buffer{}); err == nil {
 		t.Fatal("unknown state accepted")

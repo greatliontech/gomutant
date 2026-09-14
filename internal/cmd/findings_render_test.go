@@ -18,7 +18,7 @@ func TestRenderFindingViewsLeadsWithTheCause(t *testing.T) {
 		Reason: "oracle p.TestF: observation bracket moved: /dev/pts/3",
 		Layer:  "local", LayerReason: "runtime-unverifiable evidence for p.TestF",
 		Open: []gomutant.Survivor{{Position: "f.go:1:1", Operator: "zero return"}},
-	}})
+	}}, gomutant.Inspection{Local: 1})
 	text := out.String()
 	cause := strings.Index(text, "cause: oracle p.TestF")
 	survivor := strings.Index(text, "survivor f.go:1:1")
@@ -45,7 +45,7 @@ func TestRenderFindingSummariesIsOneRowPerRecord(t *testing.T) {
 		},
 		{Symbol: "p.G", State: gomutant.FindingCurrent, Layer: "repo",
 			Attested: []gomutant.Attestation{{Position: "g.go:1:1", Operator: "op", Reason: "equivalent"}}},
-	}, true, false)
+	}, gomutant.Inspection{Repo: 1, Local: 1}, true, false)
 	text := out.String()
 	if !strings.Contains(text, "stale  p.F  [machine-local]  1 open, 0 attested  (oracle p.TestF: subject identity changed)") {
 		t.Fatalf("summary row missing state, layer, counts, or cause:\n%s", text)

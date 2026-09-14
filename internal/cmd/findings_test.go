@@ -34,8 +34,8 @@ func TestFindingsTailStatesTheDocumentCoverageBounds(t *testing.T) {
 	if err := findingsCommand(context.Background(), findingsOptions{dir: dir, findingsFile: defaultFindings}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "no findings\nunreached under selection tags:wasm: 1 target no oracle of the selection's leg reaches — example.com/empty/leg.Dark\n") {
-		t.Fatalf("findings tail = %q, want the bound after the rows", out.String())
+	if !strings.Contains(out.String(), "no findings\nunreached under selection tags:wasm: 1 target no oracle of the selection's leg reaches — example.com/empty/leg.Dark\nno findings recorded at ") {
+		t.Fatalf("findings tail = %q, want the bound after the rows and the note after the tail", out.String())
 	}
 }
 

@@ -1474,18 +1474,22 @@ type findingsOut struct {
 
 func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in findingsIn) (*mcp.CallToolResult, findingsOut, error) {
 	out := findingsOut{Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
-	// The committed ephemeral-equivalence record rides the inspection,
-	// independent of the finding rows (REQ-result-ephemeral-attest).
-	atts, err := gomutant.LoadEphemeralAttestations(gomutant.EphemeralAttestationsPathFor(out.Document))
+	// The state's spelling is refused before anything is read
+	// (REQ-exec-preparation).
+	if err := gomutant.ValidateFindingState(in.State); err != nil {
+		return nil, out, err
+	}
+	if err := in.selection().Validate(); err != nil {
+		return nil, out, err
+	}
+	// A changed ref's surface is read at preparation, in the tree root,
+	// before any record is read (REQ-exec-preparation); the cut
+	// resolves after the load.
+	request, err := gomutant.PrepareSelection(ctx, s.dir, nil, s.targetInputs("", "", in.Changed), nil, nil)
 	if err != nil {
 		return nil, out, err
 	}
-	out.EphemeralAttestations, out.OmittedEphemeralAttestations = capRows(atts)
-	switch in.State {
-	case "", string(gomutant.FindingCurrent), string(gomutant.FindingStale), string(gomutant.FindingUnverifiable), string(gomutant.FindingDetached):
-	default:
-		return nil, out, fmt.Errorf("unknown state %q (current, stale, unverifiable, detached)", in.State)
-	}
+	filter := gomutant.RecordFilter{Label: in.Label, Symbol: in.Symbol, Run: in.Run}
 	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
@@ -1494,6 +1498,13 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
+	// The committed ephemeral-equivalence record rides the inspection,
+	// independent of the finding rows (REQ-result-ephemeral-attest).
+	atts, err := gomutant.LoadEphemeralAttestations(gomutant.EphemeralAttestationsPathFor(out.Document))
+	if err != nil {
+		return nil, out, err
+	}
+	out.EphemeralAttestations, out.OmittedEphemeralAttestations = capRows(atts)
 	// The document's stated coverage bounds ride the inspection, rows
 	// and rosters capped like every list (REQ-result-unreached-bound,
 	// REQ-mcp-envelope).
@@ -1510,18 +1521,12 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	// first, or widen the filters - so the response says which
 	// (REQ-mcp-envelope).
 	if len(all) == 0 {
-		out.Note = "no findings recorded at " + out.Document + " - run measures the tree first"
+		out.Note = gomutant.NoRecordsNote(out.Document, len(all), 0, filter, in.State)
 		return nil, out, nil
 	}
-	matched := make([]gomutant.Finding, 0, len(all))
-	for _, finding := range all {
-		if !(gomutant.RecordFilter{Label: in.Label, Symbol: in.Symbol, Run: in.Run}).Admits(finding) {
-			continue
-		}
-		matched = append(matched, finding)
-	}
+	matched := gomutant.FilterRecords(all, filter)
 	if len(matched) == 0 {
-		out.Note = fmt.Sprintf("the label/symbol filters matched none of %d recorded finding(s); drop them to list the document", len(all))
+		out.Note = gomutant.NoRecordsNote(out.Document, len(all), 0, filter, in.State)
 		return nil, out, nil
 	}
 	notify := progressNotifier(ctx, req)
@@ -1537,23 +1542,17 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		}
 	}
 	var cut *gomutant.DeltaCut
-	if in.Changed != "" {
-		surface, err := gitref.ChangedSurfaceContext(ctx, s.dir, in.Changed)
+	if request.Changed != nil {
+		selected, err := s.selectTargets(ctx, tree, gomutant.SelectionRequest{Changed: request.Changed, Cut: true})
 		if err != nil {
 			return nil, out, err
 		}
-		_, _, delta, err := tree.DiscoverChangedSurfaceContext(ctx, surface, gitref.ContentAt(ctx, s.dir, in.Changed))
-		if err != nil {
-			return nil, out, err
-		}
-		cut = &delta
+		cut = selected.Cut
 	}
 	// The inspection stretch announces itself once and rides the
 	// heartbeat: freshness judging over a large document is
 	// minutes-class work, and a silent stretch reads as a hang
-	// (REQ-mcp-envelope). Rows build one inspection at a time so
-	// summary reads never retain per-candidate evidence for the whole
-	// document.
+	// (REQ-mcp-envelope).
 	if notify != nil && judge {
 		notify(fmt.Sprintf("inspecting %d record(s)", len(matched)))
 	}
@@ -1561,78 +1560,48 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if judge {
 		stretch = fmt.Sprintf("inspecting %d record(s)", len(matched))
 	}
-	rows, err := withHeartbeat(ctx, notify, stretch, func(ctx context.Context) (findingsOut, error) {
-		var res findingsOut
-		// One pass over the matched records' shared subject views
-		// (REQ-result-inspection).
-		inspections := make([]gomutant.FindingInspection, len(matched))
-		for i, finding := range matched {
-			inspections[i] = gomutant.RecordedInspection(finding)
-		}
-		if judge && len(matched) > 0 {
-			judged, err := tree.InspectFindings(ctx, matched, nil)
-			if err != nil {
-				return res, err
-			}
-			inspections = judged
-		}
-		for i, finding := range matched {
-			if err := ctx.Err(); err != nil {
-				return res, err
-			}
-			inspection := inspections[i]
-			if in.State != "" && string(inspection.State) != in.State {
-				continue
-			}
-			layer, layerReason := store.Layer(finding)
-			if layer == "repo" {
-				res.RepoCommittable++
-			} else {
-				res.LocalOnly++
-			}
-			var onDelta []gomutant.Survivor
-			var deltaCount *int
-			if cut != nil {
-				split, err := tree.CutSurvivorsContext(ctx, finding, *cut)
-				if err != nil {
-					return res, err
-				}
-				onDelta = append([]gomutant.Survivor{}, split.OnDelta...)
-				n := len(onDelta)
-				deltaCount = &n
-			}
-			if !in.Detail {
-				res.Summary = append(res.Summary, findingSummary{
-					Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
-					Layer: layer, Run: finding.Run, Open: len(finding.Open()), DeltaOpen: deltaCount, Attested: len(finding.AttestedDispositions()),
-				})
-				continue
-			}
-			labels := append([]string(nil), finding.Labels...)
-			sort.Strings(labels)
-			res.Findings = append(res.Findings, inspectedFinding{
-				Symbol: finding.Symbol, Labels: labels, State: inspection.State, Reason: inspection.Reason,
-				Layer: layer, LayerReason: layerReason, Run: finding.Run, DeltaOpen: onDelta,
-				CandidateCount: finding.CandidateCount, Generated: finding.Generated,
-				Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
-				Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
-				Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
-				Candidates: inspection.CandidateEvidence,
-			})
-		}
-		return res, nil
+	// One walk both faces render from (REQ-result-inspection); the face
+	// projects its rows from the walk's, the summary row carrying counts
+	// alone.
+	inspection, err := withHeartbeat(ctx, notify, stretch, func(ctx context.Context) (gomutant.Inspection, error) {
+		return gomutant.InspectDocument(ctx, tree, store, matched, gomutant.InspectionRequest{Judge: judge, State: in.State, Cut: cut})
 	})
 	if err != nil {
 		return nil, out, err
 	}
-	out.RepoCommittable, out.LocalOnly = rows.RepoCommittable, rows.LocalOnly
-	out.Summary, out.Findings = rows.Summary, rows.Findings
-	sort.Slice(out.Summary, func(i, j int) bool { return out.Summary[i].Symbol < out.Summary[j].Symbol })
-	sort.Slice(out.Findings, func(i, j int) bool { return out.Findings[i].Symbol < out.Findings[j].Symbol })
+	out.RepoCommittable, out.LocalOnly = inspection.Repo, inspection.Local
+	for _, row := range inspection.Rows {
+		finding := row.Finding
+		var onDelta []gomutant.Survivor
+		var deltaCount *int
+		if row.Delta != nil {
+			onDelta = append([]gomutant.Survivor{}, row.Delta.OnDelta...)
+			n := len(onDelta)
+			deltaCount = &n
+		}
+		if !in.Detail {
+			out.Summary = append(out.Summary, findingSummary{
+				Symbol: finding.Symbol, State: row.Inspection.State, Reason: row.Inspection.Reason,
+				Layer: row.Layer, Run: finding.Run, Open: len(finding.Open()), DeltaOpen: deltaCount, Attested: len(finding.AttestedDispositions()),
+			})
+			continue
+		}
+		labels := append([]string(nil), finding.Labels...)
+		sort.Strings(labels)
+		out.Findings = append(out.Findings, inspectedFinding{
+			Symbol: finding.Symbol, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
+			Layer: row.Layer, LayerReason: row.LayerReason, Run: finding.Run, DeltaOpen: onDelta,
+			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
+			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
+			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
+			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
+			Candidates: row.Inspection.CandidateEvidence,
+		})
+	}
 	// The state filter drops rows during judging, after the earlier
 	// zero-match returns - its empty answer names itself the same way.
-	if in.State != "" && len(out.Summary) == 0 && len(out.Findings) == 0 {
-		out.Note = fmt.Sprintf("state=%s matched none of the %d finding(s) the other filters kept; drop it to list them", in.State, len(matched))
+	if len(inspection.Rows) == 0 {
+		out.Note = gomutant.NoRecordsNote(out.Document, len(all), len(matched), filter, in.State)
 	}
 	var omittedSummary, omittedFindings int
 	out.Summary, omittedSummary = capRows(out.Summary)
