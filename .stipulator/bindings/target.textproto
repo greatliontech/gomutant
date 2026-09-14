@@ -490,3 +490,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "1784e31c91632399835cff259320c17cc81bc891526f25ce8c61025519d02eed"
 }
+
+bindings {
+  requirement_id: "REQ-target-filtering"
+  content_hash: "9136ef6a26d5796607a1bcc34cf781ead93d7f68e8d9e18c74d2690137f64144"
+  source_hash: "4a6bb21f8f6774bb9acb892710a0413600a69a523322a944eda7e541cfce8b21"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSelectTargetsIsTheOneDispatch"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fa2338f74e5a2b72a9bf3944a859d8dd6c57f03e1adb83aa42a3975265b3dc94"
+}
+
+bindings {
+  requirement_id: "REQ-target-changed"
+  content_hash: "9d68b3302833cb211c1db76b7f7c0801b825f9b0a9cb1db2736500ae0ba01ba8"
+  source_hash: "525cc4ee05a577280d9fba0eb3bf4383689d3add6abd5049e64d36d4ef3b6dbc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestDiscoverChangedCarriesTheResidue"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "88c5806719550a1cf2396d6fb229cb6233e904b42b706478339f1a1790bde513"
+}

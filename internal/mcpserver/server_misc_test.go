@@ -3,6 +3,8 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,5 +68,44 @@ func TestWithHeartbeatNotifiesDuringTheStretch(t *testing.T) {
 	}
 	if _, err := withHeartbeat(context.Background(), nil, "probe", func(context.Context) (int, error) { return 1, nil }); err != nil {
 		t.Fatalf("nil-notifier stretch failed: %v", err)
+	}
+}
+
+// The targets document is an input on this face too: run and discover
+// parse the inline document, or the confined path's, before the tree
+// loads, so a malformed one refuses with its own error and never pays a
+// load (REQ-exec-preparation).
+func TestToolRunParsesTheTargetsDocumentBeforeTheLoad(t *testing.T) {
+	dir := t.TempDir()
+	// A go.mod the go command refuses: a load here fails for its own
+	// reason, so the document's refusal is only reachable before it.
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/broken\n\ngo 1.26.4\n\nrequire (\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: `{"nope":[]}`}); err == nil || !strings.Contains(err.Error(), "parse targets document") {
+		t.Fatalf("run refused with %v, want the document's own refusal before the load", err)
+	}
+	// Refused before the lock: nothing of the campaign's state was minted.
+	if _, err := os.Stat(filepath.Join(dir, ".gomutant")); !os.IsNotExist(err) {
+		t.Fatalf("a document refusal minted the campaign directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "targets.json"), []byte(`{"nope":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsPath: "targets.json"}); err == nil || !strings.Contains(err.Error(), "parse targets document") {
+		t.Fatalf("discover refused with %v, want the document's own refusal before the load", err)
+	}
+	// The path is confined to the tree before it is read (REQ-mcp-envelope).
+	if err := os.WriteFile(filepath.Join(filepath.Dir(dir), "escape.json"), []byte(`{"targets":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, escape := range []string{"../escape.json", filepath.Join(filepath.Dir(dir), "escape.json")} {
+		if _, _, err := s.toolRun(context.Background(), nil, runIn{TargetsPath: escape}); err == nil || !strings.Contains(err.Error(), "escapes the tree") {
+			t.Fatalf("run read %q: %v, want the confinement refusal", escape, err)
+		}
+		if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{TargetsPath: escape}); err == nil || !strings.Contains(err.Error(), "escapes the tree") {
+			t.Fatalf("discover read %q: %v, want the confinement refusal", escape, err)
+		}
 	}
 }

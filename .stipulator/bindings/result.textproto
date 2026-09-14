@@ -1590,3 +1590,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "a6f9c1dbda0a31e8b74b059c00bbe774775276375d3c9cc91b00fdd24243fecc"
 }
+
+bindings {
+  requirement_id: "REQ-result-hygiene"
+  content_hash: "96a2215f800155ee3f80ae9a53ef36b021cb6beaee1a4384063455ced9e3a71d"
+  source_hash: "837969cd0d42851875bab55d1b8f0bf4284cbf6960e5a08c814551cb493dc5ae"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSelectTargetsIsTheOneDispatch"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fa2338f74e5a2b72a9bf3944a859d8dd6c57f03e1adb83aa42a3975265b3dc94"
+}

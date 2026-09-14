@@ -12,25 +12,6 @@ import (
 	"strings"
 )
 
-// ChangedPaths lists tree-relative paths differing from ref: tracked changes
-// (--relative keeps them tree-relative when the tree is not the repo root)
-// plus untracked files — a brand-new uncommitted file is part of the changed
-// surface, never silently absent (REQ-target-changed). quotepath is off so a
-// non-ASCII path arrives as bytes, not an escaped quoted string.
-func ChangedPaths(dir, ref string) ([]string, error) {
-	return ChangedPathsContext(context.Background(), dir, ref)
-}
-
-// ChangedPathsContext is ChangedPaths with caller-owned cancellation.
-// It is the changed surface's path list alone (ChangedSurfaceContext).
-func ChangedPathsContext(ctx context.Context, dir, ref string) ([]string, error) {
-	surface, err := ChangedSurfaceContext(ctx, dir, ref)
-	if err != nil {
-		return nil, err
-	}
-	return surface.Paths, nil
-}
-
 // Show reads a tree-relative path's content at ref; ok=false when the path
 // did not exist there (a new file reads as all changed). The ./ form
 // resolves against the command's directory, so it stays correct when the

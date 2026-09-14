@@ -39,8 +39,15 @@ type CampaignInputs struct {
 	BracketPaths      []string
 	// TargetSources names the target sources the caller supplied, in
 	// the caller's own spelling — the flags or parameters given; at most
-	// one may be given.
+	// one may be given. Targets carries the one given, read here at its
+	// enumerated place; Packages and Symbols are the filters, and
+	// CutChanged asks a changed-ref selection for its survivor cut (a
+	// plan renders none).
 	TargetSources []string
+	Targets       TargetInputs
+	Packages      []string
+	Symbols       []string
+	CutChanged    bool
 }
 
 // CampaignPreparation is the prepared campaign: every declaration
@@ -56,6 +63,9 @@ type CampaignPreparation struct {
 	// document's own refusals (unreadable, a version this binary does
 	// not read) fire here.
 	Prior []Finding
+	// Request is the target-source request the dispatch resolves after
+	// the load: the document parsed and the ref's surface read here.
+	Request SelectionRequest
 	// ReleaseCampaign releases the campaign lock; a no-op for a plan.
 	ReleaseCampaign func()
 }
@@ -102,12 +112,14 @@ func ValidateTargetSources(given []string) error {
 
 // PrepareCampaign fires every refusal a findings-producing run can
 // decide from its inputs alone, in one place and before any tree load:
-// the bounds' signs, the target-source exclusivity, the scratch and
-// vouch declarations, the selection's shape, the tree root's
-// existence, the harness environment (the load ladder's
-// input-decidable arm), the bracket paths' shape and presence, the
-// exemptions document, the findings document (unreadable, or a version this
-// binary does not read), and last the campaign lock (fail-fast — a
+// the bounds' signs, the target-source exclusivity and the targets
+// document's parse, the scratch and vouch declarations, the
+// selection's shape, the tree root's existence and then the changed
+// ref's surface (the git seam reads in that root), the harness
+// environment (the load ladder's input-decidable arm), the bracket
+// paths' shape and presence, the exemptions document, the findings
+// document (unreadable, or a version this binary does not read), and
+// last the campaign lock (fail-fast — a
 // second campaign against the same document refuses immediately,
 // naming the holder, per REQ-exec-exclusivity) — last, because the
 // lock's file outlives its holder by design, so no refusal may follow
@@ -119,6 +131,12 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 	if err := ValidateTargetSources(in.TargetSources); err != nil {
 		return nil, err
 	}
+	request := SelectionRequest{Packages: in.Packages, Symbols: in.Symbols, Cut: in.CutChanged}
+	targets, given, err := in.Targets.parseTargets(ctx)
+	if err != nil {
+		return nil, err
+	}
+	request.Targets, request.TargetsGiven = targets, given
 	scratch, err := ParseScratchNamespaces(in.ScratchNamespaces)
 	if err != nil {
 		return nil, err
@@ -135,12 +153,12 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 	// The tree root is an input too: a root that is not a directory
 	// refuses here, before the lock — whose directory creation would
 	// otherwise conjure an empty tree for the load to find.
-	info, err := os.Stat(in.ModuleDir)
-	if err != nil {
-		return nil, fmt.Errorf("gomutant: tree root %s: %w", in.ModuleDir, err)
+	if err := treeRootExists(in.ModuleDir); err != nil {
+		return nil, err
 	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("gomutant: tree root %s is not a directory", in.ModuleDir)
+	// The ref's surface is read in the root just proven to exist.
+	if request.Changed, err = in.Targets.readChanged(ctx); err != nil {
+		return nil, err
 	}
 	// The load ladder's environment arm is decidable from the root and
 	// the selection alone: a GODEBUG that silences the harness's
@@ -178,7 +196,7 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 			return nil, err
 		}
 	}
-	return &CampaignPreparation{ScratchNamespaces: scratch, Vouches: vouches, Exemptions: store.Exemptions(), Store: store, Prior: prior, ReleaseCampaign: release}, nil
+	return &CampaignPreparation{ScratchNamespaces: scratch, Vouches: vouches, Exemptions: store.Exemptions(), Store: store, Prior: prior, Request: request, ReleaseCampaign: release}, nil
 }
 
 // ValidateEphemeralRuns refuses a runs count outside 1..MaxEphemeralRuns
@@ -245,6 +263,18 @@ func ValidateRetargetPair(from, to string) error {
 	}
 	if terminator(from) != terminator(to) {
 		return fmt.Errorf("retarget prefixes must be like-terminated - %q and %q end differently, and splicing across unlike edges corrupts identities; terminate both with the same separator or neither", from, to)
+	}
+	return nil
+}
+
+// treeRootExists refuses a tree root that is not a directory.
+func treeRootExists(root string) error {
+	info, err := os.Stat(root)
+	if err != nil {
+		return fmt.Errorf("gomutant: tree root %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("gomutant: tree root %s is not a directory", root)
 	}
 	return nil
 }

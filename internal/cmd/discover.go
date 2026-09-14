@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	gomutant "github.com/greatliontech/gomutant"
-	"github.com/greatliontech/gomutant/internal/contextio"
-	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/spf13/cobra"
 )
 
@@ -76,46 +74,21 @@ func discoverCommand(ctx context.Context, o discoverOptions) error {
 func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, error) {
 	view := discoveryView{Targets: []gomutant.TargetDescription{}, Residue: []gomutant.Residue{}}
 	sources := gomutant.TargetSourcesGiven(gomutant.TargetSource{Name: "--targets", Given: o.targetsFile != ""}, gomutant.TargetSource{Name: "--changed", Given: o.changed != ""})
-	if err := gomutant.ValidateTargetSources(sources); err != nil {
+	request, err := gomutant.PrepareSelection(ctx, o.dir, sources, targetInputs(o.dir, o.targetsFile, o.changed), o.packages, o.symbols)
+	if err != nil {
 		return view, err
 	}
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return view, err
 	}
-	var targets []gomutant.Target
-	switch {
-	case o.targetsFile != "":
-		data, err := contextio.ReadFile(ctx, o.targetsFile)
-		if err != nil {
-			return view, err
-		}
-		if err := ctx.Err(); err != nil {
-			return view, err
-		}
-		targets, err = gomutant.LoadTargetsContext(ctx, data)
-		if err != nil {
-			return view, err
-		}
-	case o.changed == "":
-		targets, err = tree.DiscoverContext(ctx)
-		if err != nil {
-			return view, err
-		}
-	default:
-		paths, err := gitref.ChangedPathsContext(ctx, o.dir, o.changed)
-		if err != nil {
-			return view, err
-		}
-		targets, view.Residue, err = tree.DiscoverChangedContext(ctx, paths, gitref.ContentAt(ctx, o.dir, o.changed))
-		if err != nil {
-			return view, err
-		}
-	}
-	targets, err = tree.FilterTargets(ctx, targets, o.packages, o.symbols)
+	selected, err := tree.SelectTargets(ctx, request)
 	if err != nil {
 		return view, err
 	}
+	targets := selected.Targets
+	// The JSON face's residue is a list, empty or not.
+	view.Residue = append(view.Residue, selected.Residue...)
 	view.Targets, err = tree.DescribeTargets(ctx, targets)
 	return view, err
 }

@@ -24,11 +24,6 @@ import (
 // file whole. Only Go files can carry survivors, so only they are
 // diffed and counted. The added-line surface is the delta geometry the
 // faces cut open survivors by — advisory, never a pin.
-func ChangedSurface(dir, ref string) (gomutant.ChangedSurface, error) {
-	return ChangedSurfaceContext(context.Background(), dir, ref)
-}
-
-// ChangedSurfaceContext is ChangedSurface with caller-owned cancellation.
 func ChangedSurfaceContext(ctx context.Context, dir, ref string) (gomutant.ChangedSurface, error) {
 	surface := gomutant.ChangedSurface{Ref: ref, Added: map[string][]gomutant.LineRange{}}
 	tracked, err := outputContext(ctx, dir, "-c", "core.quotepath=off", "diff", "--name-only", "--relative", ref)
@@ -192,4 +187,17 @@ func lineCount(path string) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// ChangedSelection binds a changed ref's read to a directory: the
+// reader a target request carries (gomutant.TargetInputs.Changed),
+// answering the ref's surface with the content reader at the ref.
+func ChangedSelection(dir, ref string) func(context.Context) (*gomutant.ChangedSelection, error) {
+	return func(ctx context.Context) (*gomutant.ChangedSelection, error) {
+		surface, err := ChangedSurfaceContext(ctx, dir, ref)
+		if err != nil {
+			return nil, err
+		}
+		return &gomutant.ChangedSelection{Surface: surface, Ref: ContentAt(ctx, dir, ref)}, nil
+	}
 }

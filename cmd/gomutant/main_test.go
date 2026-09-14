@@ -36,3 +36,14 @@ func TestExitCodeIsTheTreesOwn(t *testing.T) {
 		t.Fatalf("wrapped subprocess exit = %d, want the tree's one failure code", got)
 	}
 }
+
+// The tool names itself once on an error line: a library error that
+// already carries the prefix is printed as it is.
+func TestErrorLineNamesTheToolOnce(t *testing.T) {
+	if got := prefixed(errors.New("gomutant: parse targets document: x")); got != "gomutant: parse targets document: x" {
+		t.Fatalf("library error line = %q", got)
+	}
+	if got := prefixed(errors.New("no such file")); got != "gomutant: no such file" {
+		t.Fatalf("plain error line = %q", got)
+	}
+}

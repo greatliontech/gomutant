@@ -50,10 +50,11 @@ func TestChangedPaths(t *testing.T) {
 	write("日本.go", "package svc\n\nfunc G() {}\n")
 	write("untracked.go", "package svc\n\nfunc H() {}\n")
 
-	paths, err := ChangedPaths(sub, "HEAD")
+	surface, err := ChangedSurfaceContext(context.Background(), sub, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
+	paths := surface.Paths
 	sort.Strings(paths)
 	want := []string{"tracked.go", "untracked.go", "日本.go"}
 	sort.Strings(want)

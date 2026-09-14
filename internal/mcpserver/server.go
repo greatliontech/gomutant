@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -20,7 +19,6 @@ import (
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
-	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -607,7 +605,8 @@ func (r runStreams) stretch(label string) {
 }
 
 // stretchObserverForTest sees every stretch label a run records and
-// selectionObserverForTest the selection's start, so a test can pin
+// selectionObserverForTest the dispatch's start (the inputs were read
+// at preparation), so a test can pin
 // the labels' order against the work; nil outside tests, which never
 // run in parallel.
 var (
@@ -709,11 +708,8 @@ func localPath(name, p string) error {
 	if p == "" {
 		return nil
 	}
-	drive := len(p) >= 2 && p[1] == ':' && ((p[0] >= 'a' && p[0] <= 'z') || (p[0] >= 'A' && p[0] <= 'Z'))
-	if !strings.Contains(p, `\`) && !path.IsAbs(p) && !drive && path.Clean(p) == p && p != "." && !strings.HasPrefix(p, "../") {
-		return nil
-	}
-	return fmt.Errorf("%s %q escapes the tree", name, p)
+	_, err := gomutant.ConfineToTree(name, "", p)
+	return err
 }
 
 // selectionIn is the build-selection surface every tree-consuming tool
@@ -869,71 +865,28 @@ func selectionEmptiedNote(targetsDoc bool, changed string) string {
 	}
 }
 
-// targetSelection is one resolved target-selection request.
-type targetSelection struct {
-	targets   []gomutant.Target
-	residue   []gomutant.Residue
-	wholeTree bool
-	// cut is a changed-ref selection's added-line surface, the run's
-	// survivor cut (REQ-exec-run-status); nil otherwise.
-	cut *gomutant.DeltaCut
+// targetInputs are the wire's target sources as given: the document
+// path with the tree as its root (confined and resolved by the
+// preparation, REQ-mcp-envelope), the inline document's bytes, a
+// changed ref through the git seam — read at their enumerated places.
+func (s *Server) targetInputs(targetsPath, targetsJSON, changed string) gomutant.TargetInputs {
+	in := gomutant.TargetInputs{TargetsPath: targetsPath, TargetsRoot: s.dir}
+	if targetsJSON != "" {
+		in.TargetsJSON = []byte(targetsJSON)
+	}
+	if changed != "" {
+		in.Changed = gitref.ChangedSelection(s.dir, changed)
+	}
+	return in
 }
 
-// selectTargets resolves a selection request through the one preamble
-// run and discover share — the source dispatch (targets document, inline
-// document, changed ref, or whole tree; their exclusivity was refused at
-// preparation, before the load) and the filter walk — whose empty-selection discrimination
-// lives in the library, so the callers' zero-target notes name the
-// true emptier (REQ-target-filtering, REQ-mcp-envelope).
-func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, targetsPath, targetsJSON, changed string, packages, symbols []string) (targetSelection, error) {
+// selectTargets resolves a prepared request through the library's one
+// dispatch (REQ-target-filtering, REQ-mcp-envelope).
+func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, request gomutant.SelectionRequest) (gomutant.TargetSelection, error) {
 	if selectionObserverForTest != nil {
 		selectionObserverForTest()
 	}
-	var sel targetSelection
-	var err error
-	switch {
-	case targetsPath != "":
-		if err := localPath("targets_path", targetsPath); err != nil {
-			return sel, err
-		}
-		data, err := contextio.ReadFile(ctx, filepath.Join(s.dir, filepath.FromSlash(targetsPath)))
-		if err != nil {
-			return sel, err
-		}
-		if err := ctx.Err(); err != nil {
-			return sel, err
-		}
-		if sel.targets, err = gomutant.LoadTargetsContext(ctx, data); err != nil {
-			return sel, err
-		}
-	case targetsJSON != "":
-		if sel.targets, err = gomutant.LoadTargetsContext(ctx, []byte(targetsJSON)); err != nil {
-			return sel, err
-		}
-	case changed != "":
-		surface, err := gitref.ChangedSurfaceContext(ctx, s.dir, changed)
-		if err != nil {
-			return sel, err
-		}
-		var delta gomutant.DeltaCut
-		sel.targets, sel.residue, delta, err = tree.DiscoverChangedSurfaceContext(ctx, surface, gitref.ContentAt(ctx, s.dir, changed))
-		if err != nil {
-			return sel, err
-		}
-		sel.cut = &delta
-	default:
-		if sel.targets, err = tree.DiscoverContext(ctx); err != nil {
-			return sel, err
-		}
-		sel.wholeTree = true
-	}
-	if sel.targets, err = tree.FilterTargets(ctx, sel.targets, packages, symbols); err != nil {
-		return sel, err
-	}
-	if len(packages) != 0 || len(symbols) != 0 {
-		sel.wholeTree = false
-	}
-	return sel, nil
+	return tree.SelectTargets(ctx, request)
 }
 
 // capAdvisories bounds the run response's five advisory lists and each
@@ -1013,11 +966,13 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// Every refusal the inputs decide fires here, before the load
 	// (REQ-exec-preparation); the target-source exclusivity counts the
 	// inline document as a targets source.
+	sources := wireTargetSources(in.TargetsPath, in.TargetsJSON, in.Changed)
+	inputs := s.targetInputs(in.TargetsPath, in.TargetsJSON, in.Changed)
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: gomutant.FindingsPathAt(s.dir, in.Findings), ModuleDir: s.dir, Selection: in.selection(),
 		Budget: in.Budget, OracleTimeout: oracleTimeout,
 		ScratchNamespaces: in.ScratchNamespaces, BracketPaths: in.BracketPaths,
-		TargetSources: wireTargetSources(in.TargetsPath, in.TargetsJSON, in.Changed),
+		TargetSources: sources, Targets: inputs, Packages: in.Packages, Symbols: in.Symbols, CutChanged: true,
 	})
 	if err != nil {
 		return err
@@ -1041,12 +996,12 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	var targets []gomutant.Target
 	wholeTree := false
 	streams.stretch("selecting targets")
-	sel, err := s.selectTargets(ctx, tree, in.TargetsPath, in.TargetsJSON, in.Changed, in.Packages, in.Symbols)
+	sel, err := s.selectTargets(ctx, tree, prepared.Request)
 	if err != nil {
 		return err
 	}
-	targets, wholeTree = sel.targets, sel.wholeTree
-	out.Residue = sel.residue
+	targets, wholeTree = sel.Targets, sel.WholeTree
+	out.Residue = sel.Residue
 	prior := prepared.Prior
 	// The ledger is the run's document side on both faces
 	// (REQ-attest-survivor, REQ-mcp-findings-doc); its writes take the
@@ -1231,9 +1186,9 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// The cut is derived once per row; the summary sums the rows. The
 	// rows beyond the response cap are cut too, so the total is exact.
 	var onDelta func(gomutant.Finding) ([]gomutant.Survivor, error)
-	if sel.cut != nil {
+	if sel.Cut != nil {
 		onDelta = func(f gomutant.Finding) ([]gomutant.Survivor, error) {
-			split, err := tree.CutSurvivorsContext(ctx, f, *sel.cut)
+			split, err := tree.CutSurvivorsContext(ctx, f, *sel.Cut)
 			return split.OnDelta, err
 		}
 	}
@@ -1248,8 +1203,8 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	if err != nil {
 		return err
 	}
-	if sel.cut != nil {
-		out.Summary.Delta = &gomutant.DeltaSummary{Ref: sel.cut.Ref, Open: deltaOpen}
+	if sel.Cut != nil {
+		out.Summary.Delta = &gomutant.DeltaSummary{Ref: sel.Cut.Ref, Open: deltaOpen}
 	}
 	out.Residue, out.OmittedResidue = capRows(out.Residue)
 	// A shed disposition is surfaced once, never silently dropped
@@ -1362,7 +1317,8 @@ type discoverOut struct {
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
 	var out discoverOut
-	if err := gomutant.ValidateTargetSources(wireTargetSources(in.TargetsPath, in.TargetsJSON, in.Changed)); err != nil {
+	request, err := gomutant.PrepareSelection(ctx, s.dir, wireTargetSources(in.TargetsPath, in.TargetsJSON, in.Changed), s.targetInputs(in.TargetsPath, in.TargetsJSON, in.Changed), in.Packages, in.Symbols)
+	if err != nil {
 		return nil, out, err
 	}
 	notify := progressNotifier(ctx, req)
@@ -1370,12 +1326,12 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
-	sel, err := s.selectTargets(ctx, tree, in.TargetsPath, in.TargetsJSON, in.Changed, in.Packages, in.Symbols)
+	sel, err := s.selectTargets(ctx, tree, request)
 	if err != nil {
 		return nil, out, err
 	}
-	targets := sel.targets
-	out.Residue = sel.residue
+	targets := sel.Targets
+	out.Residue = sel.Residue
 	descriptions, err := tree.DescribeTargets(ctx, targets)
 	if err != nil {
 		return nil, out, err

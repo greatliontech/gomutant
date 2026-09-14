@@ -620,3 +620,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "28d2e8b72e769a5455702648c4f763f74610ad7cc0a64c94a6912e4ad910d692"
 }
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "f5838a02cb5130cd550017eb704dbe591ad552739589b5cb36b4f128b3e8d7bd"
+  source_hash: "30ca10e747f2960a2a06ab521789d474156741f5925c282c6ca91f74cd885a4e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunParsesTheTargetsDocumentBeforeTheLoad"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4b8e919ad6be19c58beff880f1db00e6beeeefbf97a4b4f8d89c70fc286895a5"
+}

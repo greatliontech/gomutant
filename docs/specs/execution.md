@@ -898,10 +898,13 @@ advisory and do not change successful exit semantics.
 
 **REQ-exec-preparation** (behavior): Every verb MUST fire each refusal
 its inputs alone decide — the bounds' signs, the run count, the target
-sources' exclusivity, a declaration's shape (scratch namespaces,
+sources' exclusivity and the targets document's parse (a path's content
+or an inline document, read and parsed as the request's own input), a
+declaration's shape (scratch namespaces,
 vouches, a retarget pair, an attestation's reasoning, the build
-selection's tags and toolchain), the tree root's existence, the harness
-environment (the load ladder's input-decidable arm, a GODEBUG that
+selection's tags and toolchain), the tree root's existence and then a
+changed ref's surface (the git seam's read, in the root just proven to
+exist), the harness environment (the load ladder's input-decidable arm, a GODEBUG that
 silences the build-fail events), the bracket paths' shape and presence,
 the exemptions document, the findings document (unreadable, or a version
 this binary does not read), and last the campaign lock — before its

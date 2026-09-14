@@ -1,6 +1,7 @@
 package gitref
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,7 +76,7 @@ func TestChangedSurface(t *testing.T) {
 	r.write("notes.md", "one\ntwo\n")
 	r.write("data.bin", strings.Repeat("x", 1<<20))
 
-	surface, err := ChangedSurface(r.sub, "HEAD")
+	surface, err := ChangedSurfaceContext(context.Background(), r.sub, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestChangedSurfaceContentCannotRekeyTheFile(t *testing.T) {
 	r.git("add", ".")
 	r.git("commit", "-q", "-m", "init")
 	r.write("doc.go", "package svc\n\n// l1\n++ edit.go\n// l2\n// l3\n// tail\n")
-	surface, err := ChangedSurface(r.sub, "HEAD")
+	surface, err := ChangedSurfaceContext(context.Background(), r.sub, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func TestChangedSurfaceIgnoresDiffConfiguration(t *testing.T) {
 		{"diff.context", "3"},
 	} {
 		r.git("config", cfg[0], cfg[1])
-		surface, err := ChangedSurface(r.sub, "HEAD")
+		surface, err := ChangedSurfaceContext(context.Background(), r.sub, "HEAD")
 		if err != nil {
 			t.Fatalf("%s: %v", cfg[0], err)
 		}
@@ -198,7 +199,7 @@ func TestChangedSurfaceReadsARenamedFileWhole(t *testing.T) {
 	r.git("mv", "svc/old.go", "svc/new.go")
 	r.write("new.go", "package svc\n\nfunc F() {}\n\nfunc G() {}\n")
 	r.git("add", ".")
-	surface, err := ChangedSurface(r.sub, "HEAD")
+	surface, err := ChangedSurfaceContext(context.Background(), r.sub, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}

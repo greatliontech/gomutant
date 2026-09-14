@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -152,5 +153,33 @@ func TestDiscoverRefusesTwoTargetSourcesBeforeAnyLoad(t *testing.T) {
 	err := discoverCommand(context.Background(), discoverOptions{dir: nowhere, targetsFile: "targets.json", changed: "HEAD"})
 	if err == nil || !strings.Contains(err.Error(), "--targets and --changed were given") {
 		t.Fatalf("discover with two sources: %v; want the refusal before any load", err)
+	}
+}
+
+// The targets document is an input: run and discover parse it before
+// the tree loads, so a malformed document refuses with its own error
+// and never pays a load (REQ-exec-preparation).
+func TestTargetsDocumentIsParsedBeforeTheLoad(t *testing.T) {
+	dir := t.TempDir()
+	// A go.mod the go command refuses: a load here fails for its own
+	// reason, so the document's refusal is only reachable before it.
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/broken\n\ngo 1.26.4\n\nrequire (\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targetsPath := filepath.Join(dir, "targets.json")
+	if err := os.WriteFile(targetsPath, []byte(`{"nope":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, targetsFile: targetsPath, output: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "parse targets document") {
+		t.Fatalf("run refused with %v, want the document's own refusal before the load", err)
+	}
+	// Refused before the lock: nothing of the campaign's state was minted.
+	if _, err := os.Stat(filepath.Join(dir, ".gomutant")); !os.IsNotExist(err) {
+		t.Fatalf("a document refusal minted the campaign directory: %v", err)
+	}
+	_, err = discoverTargets(context.Background(), discoverOptions{dir: dir, targetsFile: targetsPath})
+	if err == nil || !strings.Contains(err.Error(), "parse targets document") {
+		t.Fatalf("discover refused with %v, want the document's own refusal before the load", err)
 	}
 }

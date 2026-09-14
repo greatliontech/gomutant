@@ -12,7 +12,6 @@ import (
 	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
-	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/spf13/cobra"
 )
@@ -117,19 +116,24 @@ func runCommand(ctx context.Context, o runOptions) error {
 	rep.phase("loading")
 	rep.startCadence(o.progressEvery)
 	// Every refusal the inputs decide fires here, before the load: the
-	// bounds, the declarations, the target sources, the harness
-	// environment, the exemptions, the store, and last the campaign
-	// lock (REQ-exec-preparation).
+	// bounds, the target sources and the document they name, the
+	// declarations, the tree root and the changed ref's surface, the
+	// harness environment, the exemptions, the store, and last the
+	// campaign lock (REQ-exec-preparation).
 	docPath := gomutant.FindingsPathAt(o.dir, o.findingsFile)
 	if trimmed := strings.TrimSpace(o.targetsFile); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		return fmt.Errorf("--targets expects a file path; the value looks like an inline JSON document - write it to a file first")
 	}
 	sources := gomutant.TargetSourcesGiven(gomutant.TargetSource{Name: "--targets", Given: o.targetsFile != ""}, gomutant.TargetSource{Name: "--changed", Given: o.changed != ""})
+	// The target inputs are read by the preparation at their enumerated
+	// places — the document's parse, then the ref's surface once the
+	// root exists — before the lock and the load; a plan renders no cut.
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: docPath, ModuleDir: o.dir, Plan: o.plan, Selection: selectionOf(o.tags, o.toolchain),
 		Budget: o.budget, OracleTimeout: o.oracleTimeout,
 		ScratchNamespaces: o.scratchNamespaces, Vouches: o.vouches, BracketPaths: o.bracketPaths,
-		TargetSources: sources,
+		TargetSources: sources, Targets: targetInputs(o.dir, o.targetsFile, o.changed),
+		Packages: o.packages, Symbols: o.symbols, CutChanged: !o.plan,
 	})
 	if err != nil {
 		return err
@@ -149,47 +153,11 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if len(prepared.Vouches) > 0 {
 		tree.SetDynamicStateVouches(prepared.Vouches...)
 	}
-	var targets []gomutant.Target
-	var cut *gomutant.DeltaCut
-	var residue []gomutant.Residue
-	switch {
-	case o.targetsFile != "":
-		data, err := contextio.ReadFile(ctx, o.targetsFile)
-		if err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if targets, err = gomutant.LoadTargetsContext(ctx, data); err != nil {
-			return err
-		}
-	case o.changed != "":
-		surface, err := gitref.ChangedSurfaceContext(ctx, o.dir, o.changed)
-		if err != nil {
-			return err
-		}
-		// The delta cut and the target set come from the one surface
-		// (REQ-exec-run-status); a plan measures nothing and cuts nothing.
-		var delta gomutant.DeltaCut
-		targets, residue, delta, err = tree.DiscoverChangedSurfaceContext(ctx, surface, gitref.ContentAt(ctx, o.dir, o.changed))
-		if err != nil {
-			return err
-		}
-		if !o.plan {
-			cut = &delta
-		}
-	default:
-		targets, err = tree.DiscoverContext(ctx)
-		if err != nil {
-			return err
-		}
-	}
-	targets, err = tree.FilterTargets(ctx, targets, o.packages, o.symbols)
+	selected, err := tree.SelectTargets(ctx, prepared.Request)
 	if err != nil {
 		return err
 	}
-	wholeTree := o.targetsFile == "" && o.changed == "" && len(o.packages) == 0 && len(o.symbols) == 0
+	targets, residue, cut, wholeTree := selected.Targets, selected.Residue, selected.Cut, selected.WholeTree
 	rep.setSelected(len(targets))
 	rep.phase("preparing")
 	if residue, err = tree.OracleClosureSignpostContext(ctx, residue, prior, targets, rep.phase); err != nil {
@@ -783,4 +751,14 @@ func renderReconcileDrop(w io.Writer, outcome gomutant.RunOutcome) {
 	if line := outcome.DropText(); line != "" {
 		fmt.Fprintln(w, line)
 	}
+}
+
+// targetInputs are the CLI's target sources as given: the document's
+// path as typed, a changed ref through the git seam.
+func targetInputs(dir, targetsFile, changed string) gomutant.TargetInputs {
+	in := gomutant.TargetInputs{TargetsPath: targetsFile}
+	if changed != "" {
+		in.Changed = gitref.ChangedSelection(dir, changed)
+	}
+	return in
 }

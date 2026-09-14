@@ -5,8 +5,8 @@
 ### run
 **does:** Measure mutants and update the findings document.
 **knobs:**
-- `targets_path` (mcp, cli as `targets`) — path to a targets document (gomutant's or a producer's export); overrides discovery.
-- `targets_json` (mcp) — an inline targets document, same formats as targets_path.
+- `targets_path` (mcp, cli as `targets`) — path to a targets document (gomutant's or a producer's export); overrides discovery; parsed at preparation, before the lock and any load.
+- `targets_json` (mcp) — an inline targets document, same formats as targets_path; parsed at preparation, before the lock and any load.
 - `changed` (mcp, cli) — target only symbols whose bodies differ from this git ref (requires git). At most one target source: two of targets_path, targets_json, and changed refuse together, naming them, before any load.
 - `budget` (mcp, cli) — candidates per symbol; 0 means exhaustive.
 - `timeout_sec` (mcp, cli as `timeout`) — cancel work before the final findings commit; on mcp omitted means 300 seconds and an explicit 0 unlimited, on the cli a duration defaulting to unlimited.
@@ -64,8 +64,8 @@ first when the target decision set is in doubt.
 ### discover
 **does:** Inspect effective mutation targets without measuring.
 **knobs:**
-- `targets_path` (mcp, cli as `targets`) — path to a targets document; overrides discovery.
-- `targets_json` (mcp) — inline targets document; overrides discovery.
+- `targets_path` (mcp, cli as `targets`) — path to a targets document; overrides discovery; parsed at preparation, before any load.
+- `targets_json` (mcp) — inline targets document; overrides discovery; parsed at preparation, before any load.
 - `changed` (mcp, cli) — changed-scope vs this git ref; empty means the whole tree. At most one target source, as on run.
 - `packages` (mcp, cli as `package`) — complete package import-path glob filters; alternatives.
 - `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters; alternatives.

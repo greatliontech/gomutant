@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	internalcmd "github.com/greatliontech/gomutant/internal/cmd"
 )
@@ -20,7 +21,7 @@ func main() {
 	// kill window and then dies cleanly — never eating a SIGKILL with
 	// orphaned oracle process trees.
 	if err := internalcmd.ExecuteContext(context.Background(), os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "gomutant:", err)
+		fmt.Fprintln(os.Stderr, prefixed(err))
 		os.Exit(exitCode(err))
 	}
 }
@@ -36,4 +37,13 @@ func exitCode(err error) int {
 		return coded.MCPExitCode()
 	}
 	return 1
+}
+
+// prefixed names the tool once on an error line: a library error
+// already carries the "gomutant: " prefix and is printed as it is.
+func prefixed(err error) string {
+	if strings.HasPrefix(err.Error(), "gomutant: ") {
+		return err.Error()
+	}
+	return "gomutant: " + err.Error()
 }
