@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [findings-row-projections-one-shape](findings-row-projections-one-shape.md) | the findings faces project the one inspection walk's rows three ways, differing in the delta's representation alone; one wire shape with a summary projection | cross-tool train chunk 220 |
 | [mcp-run-observability](mcp-run-observability.md) | Stash's long campaign progressed in the local store without visible progress or a recoverable final report; token-dependent streaming and CLI-only preflight need an actionable caller workflow | cross-tool train chunk 207 |
 | [vmm-finding-admission-refusals](vmm-finding-admission-refusals.md) | the audit-key half closed at the gofresh v0.99.0 bump (nodwarf5 leg clean); VMM's residual file-I/O (intended), testing-receiver (gofresh immutable-after-construction-objects) and dynamic-carrier (gofresh invoke-targets-narrowed-by-operand) refusals are gofresh positions | cross-tool train chunk 193 (the two gofresh docs) |
 | [explicit-testdata-package-selection](explicit-testdata-package-selection.md) | an explicit fixture directory/import selector cannot load a package excluded by ./...; package-local ephemeral success does not establish campaign freshness | cross-tool train chunk 188 |
