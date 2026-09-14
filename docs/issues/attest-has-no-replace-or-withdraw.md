@@ -20,4 +20,9 @@ ephemeral face applies), and a withdraw form that returns the
 survivor to open with the withdrawal reason on record, so the
 attestation history reads forward like the findings document does.
 
-Lands: awaiting triage
+Triage (2026-09-14, during chunk 244): the document face lacks the
+guard the ephemeral face already applies (`--reattest`, chunk 160);
+the replace form is parity, the withdraw form a new lifecycle
+transition recorded forward — both chartered as chunk 256.
+
+Lands: cross-tool train chunk 256
