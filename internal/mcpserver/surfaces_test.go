@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -9,26 +8,14 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/spectable"
 )
 
 // surfaceTable is REQ-mcp-surfaces' table: the section of mcp.md from
 // the requirement to the next, so no other table's rows are read.
 func surfaceTable(t *testing.T) string {
 	t.Helper()
-	spec, err := os.ReadFile(filepath.Join("..", "..", "docs", "specs", "mcp.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	section := string(spec)
-	start := strings.Index(section, "**REQ-mcp-surfaces**")
-	if start < 0 {
-		t.Fatal("REQ-mcp-surfaces not found in mcp.md")
-	}
-	section = section[start:]
-	if end := strings.Index(section[1:], "**REQ-"); end >= 0 {
-		section = section[:end+1]
-	}
-	return section
+	return spectable.Section(t, filepath.Join("..", "..", "docs", "specs", "mcp.md"), "REQ-mcp-surfaces")
 }
 
 // The surface table REQ-mcp-surfaces records lists exactly the guidance
@@ -79,29 +66,35 @@ func TestSurfaceTableTracksTheGuidanceVerbs(t *testing.T) {
 // clauses to their bounds — and "N seconds" to the MCP command deadline;
 // a number after "at" or "to" that no phrase keys fails closed.
 func TestSurfaceTableStatesTheHeldBounds(t *testing.T) {
-	table := surfaceTable(t)
+	// The MCP face keys the bounds of its own column and the shared one;
+	// the CLI column is the CLI face's to key (internal/cmd).
+	table := spectable.Columns(t, surfaceTable(t), 4, 5)
 	keyed := []struct {
 		phrase *regexp.Regexp
 		want   int
 	}{
-		{regexp.MustCompile(`(?:rows?|record|attestations inline[^|]*?|groups|rewrites) (?:capped )?at (\d+)`), envelope.rows},
+		{regexp.MustCompile(`(?:rows?|record|attestations inline[^\n|]*?|groups|rewrites) (?:capped )?at (\d+)`), envelope.rows},
 		{regexp.MustCompile(`symbols per group at (\d+)`), envelope.nested},
 		{regexp.MustCompile(`open survivors at (\d+)`), envelope.open},
 		{regexp.MustCompile(`open survivors and clauses at (\d+)`), envelope.reasons},
 		{regexp.MustCompile(`not-reusable roster at (\d+)`), gomutant.PostureCap},
+		{regexp.MustCompile(`analysis events likewise, inline at (\d+)`), envelope.rows},
 	}
-	seen := map[string]bool{}
+	seen := map[int]bool{}
 	for _, k := range keyed {
 		for _, m := range k.phrase.FindAllStringSubmatchIndex(table, -1) {
 			n, _ := strconv.Atoi(table[m[2]:m[3]])
 			if n != k.want {
 				t.Fatalf("the surface table states %q with %d; the policy holds %d", table[m[0]:m[1]], n, k.want)
 			}
-			seen[strconv.Itoa(m[2])] = true
+			seen[m[2]] = true
 		}
 	}
+	if len(seen) == 0 {
+		t.Fatal("the surface table's MCP columns state no bound")
+	}
 	for _, m := range regexp.MustCompile(`\b(?:at|to) (\d+)\b`).FindAllStringSubmatchIndex(table, -1) {
-		if !seen[strconv.Itoa(m[2])] {
+		if !seen[m[2]] {
 			t.Fatalf("the surface table states a bound %q that no phrase keys to a policy field", table[m[0]:m[1]])
 		}
 	}
@@ -117,7 +110,32 @@ func TestSurfaceTableStatesTheHeldBounds(t *testing.T) {
 			t.Fatalf("the surface table states a %d-second deadline; the MCP command deadline is %d", n, defaultCommandTimeoutSec)
 		}
 	}
-	if !strings.Contains(table, `{"edits":[`) {
-		t.Fatal("the surface table does not state the CLI edit-batch shape")
+}
+
+// The envelope clause states the same bounds in prose: every row cap
+// it names is the policy's row bound, every per-record survivor cap the
+// open bound (REQ-mcp-envelope).
+func TestEnvelopeClauseStatesTheHeldBounds(t *testing.T) {
+	section := spectable.Section(t, filepath.Join("..", "..", "docs", "specs", "mcp.md"), "REQ-mcp-envelope")
+	open := regexp.MustCompile(`open survivors per finding at (\d+)`)
+	seen := map[int]bool{}
+	for _, m := range open.FindAllStringSubmatchIndex(section, -1) {
+		if n, _ := strconv.Atoi(section[m[2]:m[3]]); n != envelope.open {
+			t.Fatalf("the envelope clause states %q; the policy holds %d", section[m[0]:m[1]], envelope.open)
+		}
+		seen[m[2]] = true
+	}
+	stated := 0
+	for _, m := range regexp.MustCompile(`\bat (\d+)\b`).FindAllStringSubmatchIndex(section, -1) {
+		stated++
+		if seen[m[2]] {
+			continue
+		}
+		if n, _ := strconv.Atoi(section[m[2]:m[3]]); n != envelope.rows {
+			t.Fatalf("the envelope clause states a bound %q that is neither the row bound %d nor a keyed one", section[m[0]:m[1]], envelope.rows)
+		}
+	}
+	if stated == 0 || len(seen) == 0 {
+		t.Fatalf("the envelope clause states %d bounds, %d of them the open bound; want both kinds", stated, len(seen))
 	}
 }

@@ -41,9 +41,10 @@ cancels hard and discards unfinished work whole.
 Each mutant's oracle executes once, bracketing runtime-input
 observation — the bracket a declared external surface extends;
 prefer ephemeral for one hand-written probe. Survivors are findings
-awaiting disposition, never verdicts. Preparation and decision
-streams leave the response when a progress token streamed them —
-their totals stay. Long campaigns exceed MCP client timeouts —
+awaiting disposition, never verdicts. Preparation, decision, and
+analysis streams leave the response when a progress token streamed
+them — their totals stay; without one the payload-bearing analysis
+events ride the response, capped. Long campaigns exceed MCP client timeouts —
 raise the timeout or use the cli.
 A window's coverage-probe phase announces its cost's upper bound
 before its first batch and reports the batches paid after each, before

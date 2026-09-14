@@ -561,6 +561,14 @@ type contradictionOut struct {
 	Reason   string `json:"reason"`
 }
 
+// analysisOut is one payload-bearing analysis event kept inline: the
+// phase, the package it speaks for, and its payload under its own key.
+type analysisOut struct {
+	Phase   string `json:"phase"`
+	Package string `json:"package,omitempty"`
+	Detail  string `json:"detail"`
+}
+
 // appendGuidance folds a per-target attribution into its oracle set's
 // aggregated entry, keyed by the suggestion and unstable set.
 func appendGuidance(entries *[]guidanceOut, g gomutant.OracleGuidance) {
@@ -583,6 +591,9 @@ type runStreams struct {
 	out       *runOut
 	notify    func(string)
 	lastPhase *atomic.Value
+	// analysisMu serializes the analysis hook, exempt from the run's
+	// callback lock by its own contract.
+	analysisMu *sync.Mutex
 }
 
 // analysisEventMessage renders an analysis event for the advisory
@@ -617,7 +628,7 @@ var (
 func newRunStreams(out *runOut, notify func(string)) runStreams {
 	var phase atomic.Value
 	phase.Store("preparing")
-	return runStreams{out: out, notify: notify, lastPhase: &phase}
+	return runStreams{out: out, notify: notify, lastPhase: &phase, analysisMu: &sync.Mutex{}}
 }
 
 func (r runStreams) decision(decision gomutant.RunDecision) {
@@ -628,9 +639,46 @@ func (r runStreams) decision(decision gomutant.RunDecision) {
 		r.notify(decisionMessage(decision))
 		return
 	}
-	if len(r.out.Decisions) < envelope.streamed {
-		r.out.Decisions = append(r.out.Decisions, decision)
+	r.out.Decisions, _ = appendCapped(r.out.Decisions, envelope.streamed, decision)
+}
+
+// analysis is the run tool's one analysis-event hook: a token hears
+// every event; without one, a payload-bearing event — a distinct fact
+// no face may discard at the source (REQ-exec-run-status) — rides the
+// response inline at the row bound with the remainder counted, while
+// the detail-free keep-alives, the throttled kind with no channel to
+// keep alive here, are dropped (REQ-mcp-envelope). The hook is exempt
+// from the run's callback serialization by the library's own contract,
+// so it serializes itself.
+func (r runStreams) analysis(event gomutant.AnalysisEvent) {
+	if r.notify != nil {
+		if event.Detail != "" {
+			r.analysisMu.Lock()
+			r.out.AnalysisCount++
+			r.analysisMu.Unlock()
+		}
+		r.notify(analysisEventMessage(event))
+		return
 	}
+	if event.Detail == "" {
+		return
+	}
+	r.analysisMu.Lock()
+	defer r.analysisMu.Unlock()
+	r.out.AnalysisCount++
+	var kept bool
+	if r.out.AnalysisEvents, kept = appendCapped(r.out.AnalysisEvents, envelope.rows, analysisOut{Phase: event.Phase, Package: event.Package, Detail: event.Detail}); !kept {
+		r.out.OmittedAnalysisEvents++
+	}
+}
+
+// appendCapped appends v while the list is under the bound, reporting
+// whether it was kept — the one inline-without-a-token policy.
+func appendCapped[T any](list []T, bound int, v T) ([]T, bool) {
+	if len(list) >= bound {
+		return list, false
+	}
+	return append(list, v), true
 }
 
 // executing is the run tool's one execution-event hook: it names the
@@ -666,9 +714,7 @@ func (r runStreams) progress(event gomutant.PreparationEvent) {
 		r.notify(preparationMessage(event))
 		return
 	}
-	if len(r.out.Preparation) < envelope.streamed {
-		r.out.Preparation = append(r.out.Preparation, event)
-	}
+	r.out.Preparation, _ = appendCapped(r.out.Preparation, envelope.streamed, event)
 }
 
 // progressNotifier returns a concurrency-safe sender of MCP progress
@@ -801,6 +847,9 @@ type runOut struct {
 	PreparationCount          int                         `json:"preparationCount"`
 	Decisions                 []gomutant.RunDecision      `json:"decisions,omitempty" jsonschema:"absent when a progress token streamed the decisions; decisionsCount still totals them"`
 	DecisionsCount            int                         `json:"decisionsCount"`
+	AnalysisEvents            []analysisOut               `json:"analysisEvents,omitempty" jsonschema:"payload-bearing freshness-analysis events - a failing baseline's own output, a per-subject analysis-unavailable provenance, an unlisted-toolchain notice - kept inline when no progress token streamed them; capped at the row bound, the remainder counted"`
+	OmittedAnalysisEvents     int                         `json:"omittedAnalysisEvents,omitempty" jsonschema:"analysis events beyond the inline cap - counted, never silent"`
+	AnalysisCount             int                         `json:"analysisCount" jsonschema:"payload-bearing analysis events the run emitted, streamed or inline; analysisEvents carries them inline up to the row bound"`
 	Note                      string                      `json:"note,omitempty" jsonschema:"set when the run measured nothing (names the input that selected zero targets and the next step) or when a whole-tree reconcile dropped records whose targets left the code"`
 	LegacyOverlays            []gomutant.LegacyEntry      `json:"legacyOverlays,omitempty" jsonschema:"machine-local overlay entries preserved unread because their document version predates this binary's range: an older gomutant's records, attested dispositions included, never served and never deleted; capped, the overlay directory holds the full set"`
 	OmittedUnreached          int                         `json:"omittedUnreached,omitempty" jsonschema:"unreached symbols beyond the summary's row cap - counted, never silent; the findings document's coverage-bounds table holds the full roster"`
@@ -830,7 +879,9 @@ var envelope = struct {
 	nested int
 	// streamed bounds the preparation events and decisions kept inline
 	// for a request without a progress token (a token receives them all
-	// as notifications).
+	// as notifications); the payload-bearing analysis events kept inline
+	// the same way take the row bound — each carries up to a
+	// diagnostic's worth of the oracle's own output.
 	streamed int
 }{rows: 50, open: 20, reasons: 20, nested: 10, streamed: 100}
 
@@ -1085,6 +1136,9 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 			out.Contradictions = append(out.Contradictions, contradictionOut{
 				Symbol: c.Symbol, Position: c.Position, Operator: c.Operator, Killer: c.Killer, Reason: c.Reason,
 			})
+			if notify != nil {
+				notify("contradiction " + c.Symbol + " " + c.Text())
+			}
 		},
 		AttestationSiteShed: ledger.SiteShed,
 		AttestationCarried: func(c gomutant.AttestationCarry) {
@@ -1108,11 +1162,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		// final merge below remains the authority (REQ-exec-cancellation).
 		Commit: ledger.Commit(ctx),
 	}
-	if notify != nil {
-		options.AnalysisEvent = func(event gomutant.AnalysisEvent) {
-			notify(analysisEventMessage(event))
-		}
-	}
+	options.AnalysisEvent = streams.analysis
 	// The heartbeat keeps long compile and execution stretches audible
 	// under the client's deadline: no phase goes silent longer than the
 	// cadence while a token listens (REQ-mcp-envelope).
@@ -1130,7 +1180,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		// (REQ-exec-banked-summary; REQ-mcp-envelope). A run cancelled
 		// before measurement began has nothing banked and errors.
 		if tallies == nil {
-			return shedsRidingAbort(err, out.AttestationSheds)
+			return ridingAbort(err, out)
 		}
 		out.Summary = bankedRunSummary(*tallies, gomutant.ExitCause(err), time.Since(callStart), tree.Selection(), runID)
 		out.Exit = out.Summary.Banked.Cause
@@ -1159,7 +1209,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		return fmt.Errorf("%w — additionally, %s (persisted)", err, outcome.DropText())
 	}
 	if err != nil {
-		return withDrop(shedsRidingAbort(err, out.AttestationSheds))
+		return withDrop(ridingAbort(err, out))
 	}
 	if afterFinalReplacementForTest != nil {
 		afterFinalReplacementForTest()
@@ -1266,6 +1316,44 @@ func shedsRidingAbort(err error, sheds []string) error {
 		return err
 	}
 	return fmt.Errorf("%w; attestation sheds persisted before this abort (re-review and re-attest if genuinely equivalent): %s", err, cappedSheds(sheds))
+}
+
+// ridingAbort composes what an aborted run must not lose onto its
+// error, the SDK discarding the typed output when the handler errors:
+// the attestation sheds persisted before the abort, and the analysis
+// payloads a tokenless run recorded (REQ-attest-survivor,
+// REQ-exec-run-status) — one composition at every abort return.
+func ridingAbort(err error, out *runOut) error {
+	return analysisRidingAbort(shedsRidingAbort(err, out.AttestationSheds), out.AnalysisEvents, out.AnalysisCount)
+}
+
+// analysisRidingAbort folds the inline analysis payloads into an abort:
+// a tokenless run has no other channel for them — a failing baseline's
+// own output must reach the reader (REQ-exec-run-status). Exemplars,
+// bounded as the sheds are: each payload's first line, the remainder
+// counted from the run's total, which the inline cap never cuts.
+func analysisRidingAbort(err error, events []analysisOut, total int) error {
+	if len(events) == 0 {
+		return err
+	}
+	const exemplars = 5
+	var heads []string
+	for i, e := range events {
+		if i == exemplars {
+			break
+		}
+		head, _, _ := strings.Cut(strings.TrimSpace(e.Detail), "\n")
+		subject := e.Phase
+		if e.Package != "" {
+			subject += " " + e.Package
+		}
+		heads = append(heads, subject+": "+head)
+	}
+	rest := ""
+	if total > exemplars {
+		rest = fmt.Sprintf(" (+%d more)", total-exemplars)
+	}
+	return fmt.Errorf("%w; analysis payloads recorded before this abort: %s%s", err, strings.Join(heads, "; "), rest)
 }
 
 // driftError folds attestation sheds into a drift refusal: the SDK

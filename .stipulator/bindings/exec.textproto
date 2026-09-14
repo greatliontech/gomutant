@@ -2570,3 +2570,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "5ac7ee9ceaedf012fd2f785b5584b487a141ae313dc5a4e8a82335e8a4709c41"
 }
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "9fd6aca4f6e328bee925f463e6a926af7ff5e351f67c400744e5650a83dcf81e"
+  source_hash: "7a0eba52e09c58b5573c2dcb638d7523dca51db34715d6d5ea8fd39bf3895bf3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunKeepsAnalysisPayloadsInlineWithoutAToken"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7c5c91acf4705feb60711b24440e20ed3791c195a06862648e48249988bcedd0"
+}

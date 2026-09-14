@@ -56,7 +56,14 @@ never silently dropped — the findings document on disk always carries the
 full set and the response names its path. Preparation events and target
 decisions are progress data, not result data: a request carrying a progress
 token receives them as notifications and the response keeps only their
-totals; a request without one keeps them inline, capped, with honest totals.
+totals; a request without one keeps them inline, capped, with honest totals
+— and the payload-bearing advisory analysis events, which the run-status
+clause forbids discarding at the source, ride the same way: streamed under
+a token, inline at the row bound with the remainder counted without one,
+their total honest either way, and an aborted tokenless run's recorded
+payloads riding its error as sheds do (the detail-free keep-alives, the
+throttled kind, have no channel to keep alive on a response and are
+dropped).
 Candidate evidence is drill-down via the findings tool, never run payload.
 Advisory lists — oracle guidance, attestation sheds and carries,
 attestation contradictions, property-oracle statements, discovery's oracle
@@ -124,7 +131,7 @@ surface-table pin).
 
 | verb | faces | CLI default | MCP default | shared values |
 | --- | --- | --- | --- | --- |
-| run | mcp, cli | a human progress line on the shared cadence, then the report with each record's reuse posture beside its row and the summary's reuse line and capped roster; `--json` the JSON-lines stream (a posture object per record, the audit rate on the summary event); `--plan` the preflight; the command timeout unlimited | counts lead, the summary's reusable count and its not-reusable roster at 20 beside them; finding rows capped at 50 with open survivors at 20 per record, each row carrying its reuse, reasons, and analysis; preparation events and decisions as notifications under a progress token (a heartbeat on the shared cadence naming the current stretch — the load, the selection and its signposts, each execution phase, the merge, the rendering), inline and capped without one; the command timeout 300 seconds; a cancellation after measurement began returns the banked state (summary.banked, exit) as a succeeding result | oracle timeout 0 derives each group's budget from its measured baseline; vouches per call on the CLI, per server on MCP |
+| run | mcp, cli | a human progress line on the shared cadence, then the report with each record's reuse posture beside its row and the summary's reuse line and its not-reusable roster and the coverage-bound line's unreached roster (at 20 each); `--json` the JSON-lines stream (a posture object per record, the audit rate on the summary event); `--plan` the preflight; the command timeout unlimited | counts lead, the summary's reusable count and its not-reusable roster at 20 beside them; finding rows capped at 50 with open survivors at 20 per record, each row carrying its reuse, reasons, and analysis; preparation events and decisions as notifications under a progress token (a heartbeat on the shared cadence naming the current stretch — the load, the selection and its signposts, each execution phase, the merge, the rendering), inline and capped without one — the payload-bearing analysis events likewise, inline at 50 without one; the command timeout 300 seconds; a cancellation after measurement began returns the banked state (summary.banked, exit) as a succeeding result | oracle timeout 0 derives each group's budget from its measured baseline; vouches per call on the CLI, per server on MCP |
 | discover | mcp, cli | a human table; `--json` the target document | counts lead; target, oracle-set, and residue rows capped at 50 unless `detail`; oracle sets referenced by id | one target source: the tree, `changed`, or a targets document |
 | findings | mcp, cli | a human summary with the ephemeral-attestation count and the layer counts; `--json` the complete finding rows (the ephemeral-attestation record is the file beside the document, which a CLI reader has) | one summary row per record capped at 50; the ephemeral attestations inline (an MCP reader has no file) capped at 50; the layer counts | `detail` for full rows on both faces; `judge` re-derives freshness (a state filter or a selection implies it); filters by state, symbol, label, and run identity |
 | explain | mcp | — | a symbol's causal record, or the document's promotion triage; groups capped at 50, symbols per group at 10, open survivors and clauses at 20 | — |

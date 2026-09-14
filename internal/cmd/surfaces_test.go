@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/spectable"
 	"github.com/spf13/cobra"
 )
 
@@ -117,4 +121,36 @@ func TestBatchShapeIsStatedWhereItIsRead(t *testing.T) {
 		return
 	}
 	t.Fatal("no ephemeral verb in the guidance document")
+}
+
+// The CLI face keys the bounds its own surface-table column states —
+// the rosters the human summary cuts — to the policy that holds them,
+// failing closed on any bound no phrase keys (REQ-mcp-surfaces).
+func TestSurfaceTableStatesTheCLIBounds(t *testing.T) {
+	table := spectable.Section(t, filepath.Join("..", "..", "docs", "specs", "mcp.md"), "REQ-mcp-surfaces")
+	column := spectable.Columns(t, table, 3)
+	rosters := regexp.MustCompile(`unreached roster \(at (\d+) each\)`)
+	seen := map[int]bool{}
+	for _, m := range rosters.FindAllStringSubmatchIndex(column, -1) {
+		n, _ := strconv.Atoi(column[m[2]:m[3]])
+		if n != unreachedShown {
+			t.Fatalf("the CLI column states rosters at %d; the unreached roster is cut at %d", n, unreachedShown)
+		}
+		if n != gomutant.PostureCap {
+			t.Fatalf("the CLI column states rosters at %d; the not-reusable roster is cut at %d", n, gomutant.PostureCap)
+		}
+		seen[m[2]] = true
+	}
+	if len(seen) == 0 {
+		t.Fatal("the CLI column states no roster bound")
+	}
+	for _, m := range regexp.MustCompile(`\b(?:at|to) (\d+)\b`).FindAllStringSubmatchIndex(column, -1) {
+		if !seen[m[2]] {
+			t.Fatalf("the CLI column states a bound %q that no phrase keys to a policy field", column[m[0]:m[1]])
+		}
+	}
+	// The CLI's edit-batch shape is stated in its column.
+	if !strings.Contains(column, `{"edits":[`) {
+		t.Fatal("the surface table's CLI column does not state the edit-batch shape")
+	}
 }
