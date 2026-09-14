@@ -142,3 +142,106 @@ func TestToolRunReportsPromotedRecords(t *testing.T) {
 		t.Fatalf("document lost the carried disposition: %+v, %v", final, err)
 	}
 }
+
+// A whole-tree run states its reconcile's drop on the response — the
+// measuring main path and the zero-target reconcile alike
+// (REQ-mcp-findings-doc).
+func TestToolRunStatesTheReconcileDrop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test for one mutant")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":          "module example.com/current\n\ngo 1.26.4\n",
+		"current.go":      "package current\n\nfunc Value() int { return 1 }\n",
+		"current_test.go": "package current\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evidence := func(symbol string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	stale := func(symbol string) gomutant.Finding {
+		return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
+			TargetEvidence: evidence(symbol), OracleEvidence: []gomutant.SubjectEvidence{evidence(symbol + "Test")}}
+	}
+	path := gomutant.FindingsPathAt(dir, "")
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{stale("example.com/current.Old")}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir)
+	_, run, err := s.toolRun(context.Background(), nil, runIn{Budget: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Findings) != 1 || run.Note != "the whole-tree reconcile dropped 1 record(s) whose targets left the code" {
+		t.Fatalf("measuring whole-tree run: note %q, rows %d; want the drop stated", run.Note, len(run.Findings))
+	}
+	// A scoped run, zero targets or not, claims none.
+	if err := gomutant.UpdateDocument(context.Background(), path, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+		return append(current, stale("example.com/current.Older")), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, empty, err := s.toolRun(context.Background(), nil, runIn{Budget: 1, Symbols: []string{"example.com/current.Value"}, Packages: nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(empty.Note, "reconcile dropped") {
+		t.Fatalf("a scoped run claimed a reconcile drop: %q", empty.Note)
+	}
+	if _, zero, err := s.toolRun(context.Background(), nil, runIn{Budget: 1, TargetsJSON: `{"targets":[]}`}); err != nil || strings.Contains(zero.Note, "reconcile dropped") {
+		t.Fatalf("a scoped zero-target run: note %q, %v", zero.Note, err)
+	}
+}
+
+// The zero-target whole-tree reconcile states a promotion it made on
+// the response, as the measuring path does (REQ-mcp-findings-doc).
+func TestToolRunStatesAPromotionOnTheZeroTargetReconcile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oracle := gomutant.SubjectEvidence{Symbol: "example.com/empty.TestBoundary", MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
+		ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+		ObservationSubjectSymbol: "example.com/empty.TestBoundary", ObservationObservable: true, ObservationEvidence: "proof",
+		RuntimeInputs: "eyJ2IjoxfQ", RuntimeDigest: "digest", RuntimeUnverifiable: true, RuntimeReason: "sealed reason"}
+	shaped := gomutant.Finding{Symbol: "example.com/empty.Boundary", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Commit: "abc",
+		Shape:          &gomutant.TargetShape{Structural: &gomutant.StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}},
+		OracleEvidence: []gomutant.SubjectEvidence{oracle}}
+	path := gomutant.FindingsPathAt(dir, "")
+	// Written through the store, the unverifiable record is placed in
+	// the machine-local overlay; the exemption then lands.
+	seed, err := gomutant.OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{shaped}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if layer, _ := seed.Layer(shaped); layer != "local" {
+		t.Fatalf("seeded record layered %s, want local", layer)
+	}
+	record := `{"version":1,"exemptions":[{"subject":"example.com/empty.TestBoundary","reason":"sealed reason","rationale":"reviewed"}]}`
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(path), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := New(dir).toolRun(context.Background(), nil, runIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Promoted != 1 {
+		t.Fatalf("zero-target reconcile promoted %d on the response, want 1", out.Promoted)
+	}
+}

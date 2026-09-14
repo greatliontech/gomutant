@@ -130,3 +130,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "3b43fa90f0571678960b3858e8cfb1a8671e75d8b75a3e882822a5ec4c01f77a"
 }
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "1dfc1de477a26517a8171e1156a728aef5ac468d91e1f4c2e8270ab113462e79"
+  source_hash: "4bdc8b44d8a2e12603cb917c8ec18617f32d09286111878374c561ea41be31f1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunLedgerReportsEachShedOnce"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "631909e7c8fb78041fb19df8bf35845ed58e7382f42f93c8b19568e8ec9ba908"
+}

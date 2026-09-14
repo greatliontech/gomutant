@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,5 +71,45 @@ func TestRunCommandReportsPromotedRecords(t *testing.T) {
 	}
 	if !strings.Contains(clean.String(), "1 record(s) promoted - findings document changed, commit it") {
 		t.Fatalf("clean serve did not report the promotion:\n%s", clean.String())
+	}
+}
+
+// The cumulative progress line banks each target as its commit
+// returns: the ledger's committed hook feeds the reporter, so the
+// structured progress event's committed count reaches the run's
+// committed targets (REQ-exec-run-status's progress line;
+// REQ-exec-cancellation's claims-only-committed clause).
+func TestRunProgressBanksCommittedTargets(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	fixture := isolatedFixture(t)
+	targetsPath := filepath.Join(t.TempDir(), "targets.json")
+	if err := os.WriteFile(targetsPath, []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute, jsonl: true, progressEvery: time.Millisecond, output: &out}
+	if err := runCommand(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	banked := -1
+	for _, line := range strings.Split(out.String(), "\n") {
+		if !strings.Contains(line, `"event":"progress"`) {
+			continue
+		}
+		var event struct {
+			TargetsDone *int `json:"targetsDone"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("progress line %q: %v", line, err)
+		}
+		if event.TargetsDone != nil && *event.TargetsDone > banked {
+			banked = *event.TargetsDone
+		}
+	}
+	if banked != 1 {
+		t.Fatalf("progress banked %d committed targets, want the run's 1:\n%s", banked, out.String())
 	}
 }

@@ -2470,3 +2470,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "264d533fdb81e48869c0fbe4f66e1d899f91e48107ebde61ba9e5e41012bd816"
 }
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "9fd6aca4f6e328bee925f463e6a926af7ff5e351f67c400744e5650a83dcf81e"
+  source_hash: "7a0eba52e09c58b5573c2dcb638d7523dca51db34715d6d5ea8fd39bf3895bf3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunProgressBanksCommittedTargets"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0934ffeba5296357bffe25e8e8481c68169e0b08050fdf2cf687a0a5b6a8cd9f"
+}
+
+bindings {
+  requirement_id: "REQ-exec-cancellation"
+  content_hash: "e0a84f109f34070ff5e4b3d8fdce70aabec0e935d3fea93785240a64f79426e7"
+  source_hash: "e5c9d1a9d5791d537efc0162796c0c6a7672b314a58bd06c0b4aab63a1d62d19"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunLedgerBanksOnlyReturnedCommits"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2138a6220a660d07fc1be51339899711fd6b50da3ed898be36b96ad199521505"
+}

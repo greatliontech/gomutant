@@ -72,6 +72,10 @@ type Store struct {
 	// against are fixed for the store's lifetime, so one content judges
 	// one way.
 	judged map[string]judgedRecord
+	// overlaid names the symbols whose served record came from the
+	// machine-local overlay at the last Load — a record's placement,
+	// which a later re-judgment under other exemptions cannot recover.
+	overlaid map[string]bool
 	// hooks observes the costs the store pays — the test seam for the
 	// once-per-content claims.
 	hooks storeHooks
@@ -553,7 +557,25 @@ func (s *Store) Load(ctx context.Context) ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
+	overlaid := make(map[string]bool, len(overlay))
+	for _, f := range overlay {
+		overlaid[f.Symbol] = true
+	}
+	s.mu.Lock()
+	s.overlaid = overlaid
+	s.mu.Unlock()
 	return mergeLayers(repo, overlay), nil
+}
+
+// Overlaid reports whether the symbol's record was served from the
+// machine-local overlay by the last Load: where the record sat, as
+// opposed to where Layer would place it now — the baseline a run's
+// promoted count is judged against, since an exemption landing between
+// two runs moves a standing record without any re-measure.
+func (s *Store) Overlaid(symbol string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.overlaid[symbol]
 }
 
 // readDocument parses the repo document's bytes through the

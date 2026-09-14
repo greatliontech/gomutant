@@ -165,7 +165,11 @@ summary counts describe the document the run left behind, on both faces, so
 the response and the document never disagree about a disposition's fate. A
 run that carries any record from the machine-local overlay into the
 committed document says so — the promoted count is a document change git
-only sees when committed.
+only sees when committed — and a whole-tree run whose reconcile dropped
+records whose targets left the code states the drop count, the same
+kind of change, on both faces: a completed run in its report, and the
+structured face's error exit after the write persisted in the error
+itself, as it carries sheds (REQ-mcp-envelope).
 
 **REQ-mcp-lifecycle** (behavior): The server MUST expose the prune and
 retarget verbs of REQ-result-lifecycle in [results.md](results.md) as

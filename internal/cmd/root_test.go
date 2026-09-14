@@ -225,9 +225,23 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if !strings.Contains(output.String(), "no targets\nsummary   0 targets: 0 measured, 0 cached, 0 skipped; 0 generated, 0 killed, 0 survived, 0 discarded; 0 attested, 0 open\n") {
 		t.Fatalf("empty whole-tree output = %q", output.String())
 	}
+	// The reconcile's drop is a document change git does not show
+	// until committed: the run states it, on this face as on the
+	// structured one (REQ-mcp-findings-doc).
+	if !strings.Contains(output.String(), "the whole-tree reconcile dropped 1 record(s) whose targets left the code\n") {
+		t.Fatalf("whole-tree drop unstated:\n%s", output.String())
+	}
 	got, err := loadFindings(filepath.Dir(filepath.Dir(path)), path)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("whole-tree empty discovery retained findings: %+v, %v", got, err)
+	}
+	// A reconcile that dropped nothing states nothing.
+	output.Reset()
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, output: &output}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "reconcile dropped") {
+		t.Fatalf("a dropless reconcile claimed a drop:\n%s", output.String())
 	}
 }
 
@@ -831,5 +845,89 @@ func TestRunSummaryStatesTheCoverageBound(t *testing.T) {
 	renderRunSummary(&output, gomutant.RunSummary{Targets: 2, Measured: 2})
 	if strings.Contains(output.String(), "unreached") {
 		t.Fatalf("no selection yet a bound line: %q", output.String())
+	}
+}
+
+// A whole-tree run that measured targets and dropped a stale record
+// states the drop on its report — the main path, not only the
+// zero-target reconcile (REQ-mcp-findings-doc).
+func TestRunCommandStatesTheReconcileDrop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test for one mutant")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":          "module example.com/current\n\ngo 1.26.4\n",
+		"current.go":      "package current\n\nfunc Value() int { return 1 }\n",
+		"current_test.go": "package current\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evidence := func(symbol string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	stale := gomutant.Finding{Symbol: "example.com/current.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence("example.com/current.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/current.TestOld")}}
+	path := gomutant.FindingsPathAt(dir, defaultFindings)
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{stale}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, budget: 1, jobs: 2, oracleTimeout: 2 * time.Minute, output: &output}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "measured  example.com/current.Value") || !strings.Contains(output.String(), "the whole-tree reconcile dropped 1 record(s) whose targets left the code\n") {
+		t.Fatalf("measuring whole-tree run left the drop unstated:\n%s", output.String())
+	}
+}
+
+// The zero-target whole-tree reconcile states a promotion it made: the
+// write re-judges the shaped records it keeps, and an exemption that
+// landed since the last run moves one into the committed document
+// (REQ-mcp-findings-doc).
+func TestRunCommandStatesAPromotionOnTheZeroTargetReconcile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/empty\n\ngo 1.26.4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oracle := gomutant.SubjectEvidence{Symbol: "example.com/empty.TestBoundary", MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
+		ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+		ObservationSubjectSymbol: "example.com/empty.TestBoundary", ObservationObservable: true, ObservationEvidence: "proof",
+		RuntimeInputs: "eyJ2IjoxfQ", RuntimeDigest: "digest", RuntimeUnverifiable: true, RuntimeReason: "sealed reason"}
+	shaped := gomutant.Finding{Symbol: "example.com/empty.Boundary", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Commit: "abc",
+		Shape:          &gomutant.TargetShape{Structural: &gomutant.StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}},
+		OracleEvidence: []gomutant.SubjectEvidence{oracle}}
+	path := gomutant.FindingsPathAt(dir, defaultFindings)
+	// Written through the store, the unverifiable record is placed in
+	// the machine-local overlay; the exemption then lands.
+	seed, err := gomutant.OpenStore(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{shaped}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if layer, _ := seed.Layer(shaped); layer != "local" {
+		t.Fatalf("seeded record layered %s, want local", layer)
+	}
+	record := `{"version":1,"exemptions":[{"subject":"example.com/empty.TestBoundary","reason":"sealed reason","rationale":"reviewed"}]}`
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(path), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, output: &output}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "1 record(s) promoted - findings document changed, commit it\n") {
+		t.Fatalf("zero-target reconcile left its promotion unstated:\n%s", output.String())
 	}
 }

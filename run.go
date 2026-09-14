@@ -1098,6 +1098,11 @@ type AttestationCarry struct {
 	Reason   string
 }
 
+// Text is the carry's one rendering on every face.
+func (c AttestationCarry) Text() string {
+	return c.Symbol + " " + c.Position + " " + c.Operator + " - measurement pins moved; the mutated source is unchanged and the mutant survived re-execution"
+}
+
 // AttestationContradiction reports one attested survivor a drift serve's
 // added or moved tests killed, with the shed attestation's reasoning and
 // the killer so the re-judgment starts from the evidence.
@@ -1107,6 +1112,12 @@ type AttestationContradiction struct {
 	Operator string
 	Killer   string
 	Reason   string
+}
+
+// Text is the contradiction's one rendering after its symbol: the
+// attested survivor, its killer, and the reasoning the shed strips.
+func (c AttestationContradiction) Text() string {
+	return "attested survivor " + c.Position + " (" + c.Operator + ") killed by " + c.Killer + "; attestation shed (was: " + c.Reason + ")"
 }
 
 // work is one target's resolved measurement state across the run's

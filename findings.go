@@ -1795,7 +1795,7 @@ func DedupeAttestationSheds(sheds []AttestationShed) []AttestationShed {
 	seen := make(map[string]bool, len(sheds))
 	out := sheds[:0:0]
 	for _, d := range sheds {
-		key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
+		key := mutantKey(d.Symbol, d.Position, d.Operator)
 		if seen[key] {
 			continue
 		}
@@ -1871,6 +1871,12 @@ type AttestationShed struct {
 	Position string
 	Operator string
 	Reason   string
+}
+
+// Text is the shed's one rendering on every face: the mutant, then its
+// reason.
+func (d AttestationShed) Text() string {
+	return d.Symbol + " " + d.Position + " " + d.Operator + " - " + d.Reason
 }
 
 // graftAttestations returns fresh's attestations plus every prior attestation

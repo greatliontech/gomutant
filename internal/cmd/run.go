@@ -199,6 +199,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 	for _, r := range residue {
 		fmt.Fprintf(&terminal, "changed, untargeted  %s  (%s)\n", r.Path, r.Reason)
 	}
+	// The ledger is the run's document side on both faces
+	// (REQ-attest-survivor, REQ-mcp-findings-doc).
+	ledger := gomutant.NewRunLedger(docStore, prior, runID, wholeTree)
 	if len(targets) == 0 {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -226,63 +229,35 @@ func runCommand(ctx context.Context, o runOptions) error {
 			fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
 			return rep.flushProse(terminal.String())
 		}
-		if wholeTree {
-			// The reconcile against zero targets is a whole-tree run's
-			// write: the selection's bound — empty — rides it and clears
-			// a standing row (REQ-result-unreached-bound).
-			docStore.RecordRunBound(nil, tree.Selection(), runID, wholeTree)
-			if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				merged, _ := gomutant.MergeWholeFindings(current, nil, nil, nil)
-				return merged, nil
-			}); err != nil {
-				return err
-			}
+		// A whole-tree selection of nothing still reconciles the
+		// document — the write that drops records whose targets left
+		// the code, stated here as on the other face; a scoped one
+		// writes nothing.
+		outcome, err := ledger.Finish(ctx, nil, nil, tree.Selection())
+		if err != nil {
+			return err
 		}
+		renderPromoted(&terminal, outcome)
+		renderReconcileDrop(&terminal, outcome)
 		return rep.flushProse(terminal.String())
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	var planMeasure, planCandidates, planCached, planSkipped int
-	var commitSheds []gomutant.AttestationShed
-	// The run-start snapshot of dispositions per symbol makes the merge
-	// graft pin-correct, and the post-merge rows are the rendering
-	// truth: what the response describes is what the document holds
-	// (REQ-attest-survivor, REQ-mcp-findings-doc).
-	attestSnapshot := map[string][]gomutant.Attestation{}
-	for _, f := range prior {
-		attestSnapshot[f.Symbol] = append([]gomutant.Attestation(nil), f.Attested...)
-	}
-	postMerge := map[string]gomutant.Finding{}
-	contradicted := map[string]bool{}
-	// A shed is reported the moment its strip persists: the incremental
-	// commit survives an aborted run (that is its purpose), so a shed
-	// buffered for the epilogue is silently dropped exactly when the
-	// document kept the stripped record (REQ-attest-survivor's "loudly, in
-	// every mode"). The epilogue renders only what no commit streamed - the
-	// final merge's residue. A mutant whose fate the contradiction line
-	// already told is not retold: execution precedes its target's commit,
-	// so the filter is complete at print time.
-	printedSheds := map[string]bool{}
-	streamShed := func(d gomutant.AttestationShed) {
-		key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
-		if printedSheds[key] || contradicted[key] {
-			return
-		}
-		printedSheds[key] = true
+	// A shed reaches the terminal the moment its strip persists, never
+	// under the document lock; the epilogue renders only the final
+	// merge's residue (REQ-attest-survivor's "loudly, in every mode").
+	ledger.Shed = func(d gomutant.AttestationShed) {
 		rep.line("attestation-shed", d, func(w io.Writer) {
-			fmt.Fprintf(w, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)
+			fmt.Fprintf(w, "attestation shed: %s\n", d.Text())
 		})
 	}
+	// Banked only after the update returned: the exit summary claims
+	// committed work alone (REQ-exec-cancellation).
+	ledger.Committed = rep.bankedFinding
 	var analysisMu sync.Mutex
 	var analysisLast time.Time
-	priorLayer := map[string]string{}
-	for _, f := range prior {
-		priorLayer[f.Symbol], _ = docStore.Layer(f)
-	}
 	// The first SIGINT drains: no new mutants, in-flight ones finish,
 	// measured prefixes commit as candidate-capped records; the second
 	// cancels hard (REQ-exec-cancellation's graceful-interrupt clause).
@@ -388,18 +363,15 @@ func runCommand(ctx context.Context, o runOptions) error {
 			})
 		},
 		Contradiction: func(c gomutant.AttestationContradiction) {
-			contradicted[c.Symbol+"\x00"+c.Position+"\x00"+c.Operator] = true
+			ledger.Contradiction(c)
 			rep.line("contradiction", c, func(w io.Writer) {
-				fmt.Fprintf(w, "contradiction  %s  attested survivor %s (%s) killed by %s; attestation shed (was: %s)\n", c.Symbol, c.Position, c.Operator, c.Killer, c.Reason)
+				fmt.Fprintf(w, "contradiction  %s  %s\n", c.Symbol, c.Text())
 			})
 		},
-		AttestationSiteShed: func(d gomutant.AttestationShed) {
-			commitSheds = append(commitSheds, d)
-			streamShed(d)
-		},
+		AttestationSiteShed: ledger.SiteShed,
 		AttestationCarried: func(c gomutant.AttestationCarry) {
 			rep.line("attestation-carried", c, func(w io.Writer) {
-				fmt.Fprintf(w, "attestation carried: %s %s %s - measurement pins moved; the mutated source is unchanged and the mutant survived re-execution\n", c.Symbol, c.Position, c.Operator)
+				fmt.Fprintf(w, "attestation carried: %s\n", c.Text())
 			})
 		},
 		PropertyOracle: func(n gomutant.PropertyOracleNote) {
@@ -416,41 +388,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		Tallies: func(r gomutant.RunTallies) { tallies = &r },
 		// Plan mode suppresses this at the library boundary — the run owns
 		// the plan clause's no-write guarantee.
-		Commit: func(finding gomutant.Finding) error {
-			var dropped []gomutant.AttestationShed
-			err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				// The incremental commit is where a cross-site shed
-				// actually happens against the prior document - the final
-				// merge sees an already-stripped record, so the shed must
-				// be collected here or it is silent (REQ-attest-survivor).
-				merged, shed := gomutant.MergeFindings(current, []gomutant.Finding{finding}, attestSnapshot)
-				dropped = shed
-				for _, m := range merged {
-					if m.Symbol == finding.Symbol {
-						postMerge[finding.Symbol] = m
-					}
-				}
-				return merged, nil
-			})
-			if err != nil {
-				return err
-			}
-			// Banked ONLY after the update returned: a failed or
-			// cancelled commit is work the findings document does not
-			// hold, and the exit summary must never claim it
-			// (REQ-exec-cancellation's claims-only-committed clause).
-			rep.bankedFinding(finding)
-			// Streamed after the update returns: the strip persisted, and
-			// terminal writes must not extend the document-lock hold.
-			commitSheds = append(commitSheds, dropped...)
-			for _, d := range dropped {
-				streamShed(d)
-			}
-			return nil
-		},
+		Commit: ledger.Commit(ctx),
 	})
 	if soft != nil {
 		soft.disarm()
@@ -473,28 +411,12 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// the rows the document actually holds - a disposition recorded
 	// concurrently between a symbol's incremental commit and the end of
 	// the run is in both or in neither (REQ-mcp-findings-doc).
-	var finalSheds []gomutant.AttestationShed
-	if !o.plan {
-		// The run's coverage bound rides the final merge through the one
-		// recording seam (REQ-result-unreached-bound).
-		docStore.RecordRunBound(findings, tree.Selection(), runID, wholeTree)
-		if err := docStore.Update(ctx, func(current []gomutant.Finding) ([]gomutant.Finding, error) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			var merged []gomutant.Finding
-			if wholeTree {
-				merged, finalSheds = gomutant.MergeWholeFindings(current, findings, targets, attestSnapshot)
-			} else {
-				merged, finalSheds = gomutant.MergeFindings(current, findings, attestSnapshot)
-			}
-			for _, m := range merged {
-				if _, ran := postMerge[m.Symbol]; ran {
-					postMerge[m.Symbol] = m
-				}
-			}
-			return merged, nil
-		}); err != nil {
+	var outcome gomutant.RunOutcome
+	if o.plan {
+		outcome.Rendered = ledger.Rendered(findings)
+	} else {
+		var err error
+		if outcome, err = ledger.Finish(ctx, findings, targets, tree.Selection()); err != nil {
 			return err
 		}
 		if afterFinalReplacementForTest != nil {
@@ -510,8 +432,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		ctx, cancelRender = gomutant.PostCommitRenderContext(ctx)
 		defer cancelRender()
 	}
-	rendered := gomutant.RenderedFindings(findings, postMerge)
-	localOnly := 0
+	rendered := outcome.Rendered
 	deltaOpen := 0
 	for _, f := range rendered {
 		if err := ctx.Err(); err != nil {
@@ -525,7 +446,6 @@ func runCommand(ctx context.Context, o runOptions) error {
 			// that rendered healthy counts never leaves the repo document
 			// silently missing the record.
 			if l, reason := docStore.Layer(f); l == "local" {
-				localOnly++
 				layer, layerReason = l, reason
 			}
 		}
@@ -651,11 +571,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// contradiction line already told (killed evidence with the shed
 		// reasoning attached), is not retold with a vaguer reason. What
 		// remains here is the final merge's residue.
-		for _, d := range gomutant.DedupeAttestationSheds(append(append([]gomutant.AttestationShed(nil), commitSheds...), finalSheds...)) {
-			key := d.Symbol + "\x00" + d.Position + "\x00" + d.Operator
-			if contradicted[key] || printedSheds[key] {
-				continue
-			}
+		for _, d := range outcome.ResidueSheds {
 			if o.jsonl {
 				// One wire shape per class: the final-merge residue
 				// emits the same structured event the streamed sheds
@@ -663,27 +579,20 @@ func runCommand(ctx context.Context, o runOptions) error {
 				rep.emit("attestation-shed", d)
 				continue
 			}
-			fmt.Fprintf(&terminal, "attestation shed: %s %s %s - %s\n", d.Symbol, d.Position, d.Operator, d.Reason)
+			fmt.Fprintf(&terminal, "attestation shed: %s\n", d.Text())
 		}
 		// A record this run carried from the machine-local overlay into
 		// the committed document is a state change git does not see until
 		// committed, so the run says it happened (REQ-mcp-findings-doc).
-		promoted := 0
-		for symbol, merged := range postMerge {
-			if layer, _ := docStore.Layer(merged); layer == "repo" && priorLayer[symbol] == "local" {
-				promoted++
-			}
-		}
-		if promoted > 0 {
-			fmt.Fprintf(&terminal, "%d record(s) promoted - findings document changed, commit it\n", promoted)
-		}
+		renderPromoted(&terminal, outcome)
+		renderReconcileDrop(&terminal, outcome)
 		// The aggregate form of the per-record signpost, printed when
 		// any record stayed machine-local: without it a run leaving
 		// the repo document unchanged reads as a silent write failure
 		// from outside (the field shape: real measured counts, an
 		// empty committed document, no stated cause).
-		if localOnly > 0 {
-			fmt.Fprintf(&terminal, "%d record(s) machine-local only (disqualifiers named above) - the repo findings document gains nothing from them until the disqualifiers clear; a pre-commit loop can measure the staged index clean with --staged\n", localOnly)
+		if outcome.MachineLocal > 0 {
+			fmt.Fprintf(&terminal, "%d record(s) machine-local only (disqualifiers named above) - the repo findings document gains nothing from them until the disqualifiers clear; a pre-commit loop can measure the staged index clean with --staged\n", outcome.MachineLocal)
 		}
 	}
 	if err := rep.flushProse(terminal.String()); err != nil {
@@ -853,5 +762,25 @@ func renderAnalysis(w io.Writer, event gomutant.AnalysisEvent) {
 	fmt.Fprintf(w, "analysis  %s:\n", event.Head())
 	for _, line := range strings.Split(strings.TrimRight(event.Detail, "\n"), "\n") {
 		fmt.Fprintf(w, "          %s\n", line)
+	}
+}
+
+// renderPromoted states the records the run's writes carried from the
+// machine-local overlay into the committed document — a state change
+// git does not see until committed, so the run says it happened on
+// every path that writes (REQ-mcp-findings-doc).
+func renderPromoted(w io.Writer, outcome gomutant.RunOutcome) {
+	if outcome.Promoted > 0 {
+		fmt.Fprintf(w, "%d record(s) promoted - findings document changed, commit it\n", outcome.Promoted)
+	}
+}
+
+// renderReconcileDrop states a whole-tree reconcile's persisted drop:
+// records whose targets left the code are a document change git does
+// not show until committed, so the run owns it on this face as the
+// structured face does (REQ-mcp-envelope).
+func renderReconcileDrop(w io.Writer, outcome gomutant.RunOutcome) {
+	if line := outcome.DropText(); line != "" {
+		fmt.Fprintln(w, line)
 	}
 }
