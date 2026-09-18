@@ -18,9 +18,9 @@ import (
 // drain disarms the deadline, so the final merge is never shot
 // mid-write; a second signal of EITHER kind cancels hard.
 func TestSIGTERMJoinsGracefulPolicy(t *testing.T) {
-	oldDeadline := sigtermDrainDeadline
-	sigtermDrainDeadline = 300 * time.Millisecond
-	t.Cleanup(func() { sigtermDrainDeadline = oldDeadline })
+	oldDeadline := seams.sigtermDrainDeadline
+	seams.sigtermDrainDeadline = 300 * time.Millisecond
+	t.Cleanup(func() { seams.sigtermDrainDeadline = oldDeadline })
 
 	// First SIGTERM drains; the deadline then hard-cancels a drain
 	// that never completes.
@@ -63,7 +63,7 @@ func TestSIGTERMJoinsGracefulPolicy(t *testing.T) {
 	select {
 	case <-ctx.Done():
 		t.Fatal("the deadline fired after the drain completed and disarmed")
-	case <-time.After(2 * sigtermDrainDeadline):
+	case <-time.After(2 * seams.sigtermDrainDeadline):
 	}
 
 	// The second stage is signal-agnostic: SIGTERM then SIGINT

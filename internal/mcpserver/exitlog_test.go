@@ -136,8 +136,8 @@ func TestExitLogNamesEveryEndOfASession(t *testing.T) {
 	// The process's standard error stream by descriptor: under `go test
 	// -json` the testing package points os.Stderr at stdout after
 	// package init, so identity with os.Stderr is not the fact.
-	if f, ok := exitLogNotice.(*os.File); !ok || f.Fd() != uintptr(syscall.Stderr) {
-		t.Fatalf("the unwritable-log notice must reach the process's stderr in production: %T", exitLogNotice)
+	if f, ok := seams.exitLogNotice.(*os.File); !ok || f.Fd() != uintptr(syscall.Stderr) {
+		t.Fatalf("the unwritable-log notice must reach the process's stderr in production: %T", seams.exitLogNotice)
 	}
 	// The host closes the transport: host-closed, no error, the calls
 	// answered — one of them naming another findings document, the log
@@ -365,16 +365,16 @@ func TestExitLogRotatesAndDegrades(t *testing.T) {
 		t.Fatal(err)
 	}
 	var notice bytes.Buffer
-	prior := exitLogNotice
-	exitLogNotice = &notice
-	t.Cleanup(func() { exitLogNotice = prior })
+	prior := seams.exitLogNotice
+	seams.exitLogNotice = &notice
+	t.Cleanup(func() { seams.exitLogNotice = prior })
 	if err := serveOnce(t, s, hostCloses); err != nil {
 		t.Fatalf("unwritable log failed serving: %v", err)
 	}
 	if !strings.Contains(notice.String(), "exit log "+s.ExitLogPath()+" unwritable") {
 		t.Fatalf("notice = %q", notice.String())
 	}
-	var _ io.Writer = exitLogNotice
+	var _ io.Writer = seams.exitLogNotice
 }
 
 // Opening the exit log mints the store's ignore first, so a read-only

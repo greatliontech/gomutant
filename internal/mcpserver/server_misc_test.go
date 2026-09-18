@@ -33,9 +33,9 @@ func TestDriftErrorCarriesSheds(t *testing.T) {
 // (REQ-mcp-envelope's no-silent-stretch clause for tree loads and
 // oracle stretches).
 func TestWithHeartbeatNotifiesDuringTheStretch(t *testing.T) {
-	prior := heartbeatInterval
-	heartbeatInterval = 5 * time.Millisecond
-	defer func() { heartbeatInterval = prior }()
+	prior := seams.heartbeatInterval
+	seams.heartbeatInterval = 5 * time.Millisecond
+	defer func() { seams.heartbeatInterval = prior }()
 	var beats atomic.Int64
 	notify := func(string) { beats.Add(1) }
 	got, err := withHeartbeat(context.Background(), notify, "probe", func(context.Context) (int, error) {
@@ -54,9 +54,9 @@ func TestWithHeartbeatNotifiesDuringTheStretch(t *testing.T) {
 	label := atomic.Value{}
 	label.Store("baseline")
 	if _, err := withHeartbeatLabel(context.Background(), func(m string) { mu.Lock(); labels = append(labels, m); mu.Unlock() }, func() string { return label.Load().(string) }, func(context.Context) (int, error) {
-		time.Sleep(4 * heartbeatInterval)
+		time.Sleep(4 * seams.heartbeatInterval)
 		label.Store("mutant-run 1/1")
-		time.Sleep(4 * heartbeatInterval)
+		time.Sleep(4 * seams.heartbeatInterval)
 		return 1, nil
 	}); err != nil {
 		t.Fatal(err)

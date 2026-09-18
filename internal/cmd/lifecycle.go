@@ -39,7 +39,7 @@ func pruneCommand(ctx context.Context, o pruneOptions, out io.Writer) error {
 	rep := newRunReporter(out, false, 0)
 	defer rep.stop()
 	rep.phase("loading")
-	rep.startCadence(verbProgressInterval)
+	rep.startCadence(seams.progressInterval)
 	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
@@ -106,7 +106,7 @@ func retargetCommand(ctx context.Context, o retargetOptions, out io.Writer) erro
 	rep := newRunReporter(out, false, 0)
 	defer rep.stop()
 	rep.phase("loading")
-	rep.startCadence(verbProgressInterval)
+	rep.startCadence(seams.progressInterval)
 	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {

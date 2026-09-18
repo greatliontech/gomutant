@@ -23,12 +23,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// clientKeepAliveInterval paces the server's keepalive pings - the
-// disconnect detector for in-flight campaigns. A variable so tests can
-// tighten it; production always uses the default. It equals the
-// progress cadence by coincidence, not by policy: a transport pace and
-// a silence bound, deliberately independent.
-var clientKeepAliveInterval = 30 * time.Second
+// clientKeepAliveInterval paces the server's keepalive pings — the
+// disconnect detector for in-flight campaigns. It equals the progress
+// cadence by coincidence, not by policy: a transport pace and a silence
+// bound, deliberately independent; no test tightens it, so it is a
+// constant, not a seam.
+const clientKeepAliveInterval = 30 * time.Second
 
 // Server is a dir-bound MCP server over the gomutant library.
 type Server struct {
@@ -81,16 +81,6 @@ func bankedRunSummary(tallies gomutant.RunTallies, cause string, elapsed time.Du
 	}
 	return summary
 }
-
-// afterCommitForTest and afterFinalReplacementForTest observe a run's
-// two commit boundaries — after an incremental commit returned, and
-// after the final replacement returned — so tests can end the request
-// exactly there and pin what each boundary claims (REQ-exec-banked-summary,
-// REQ-exec-cancellation); nil outside tests, which never run in parallel.
-var (
-	afterCommitForTest           func(gomutant.Finding)
-	afterFinalReplacementForTest func()
-)
 
 // updateStore commits through the one store a verb opened: a run's
 // per-target commits and its final merge share the store's caches and
@@ -230,20 +220,15 @@ func exitClass(err, ctxErr error) (ExitClass, string) {
 // generation kept.
 const exitLogMaxBytes = 1 << 20
 
-// exitLogNotice receives the one line the server writes outside its
-// log — that the log is unwritable — so serving never fails on its own
-// diagnostics. A variable so a test can read it; production is stderr.
-var exitLogNotice io.Writer = os.Stderr
-
 // exitLogger opens the exit log for appending under its size bound and
 // returns the logger the protocol layer and the exit line share; an
 // unwritable log degrades to a discarding logger with the reason on
-// exitLogNotice.
+// seams.exitLogNotice.
 func (s *Server) exitLogger() (*slog.Logger, func()) {
 	path := s.ExitLogPath()
 	f, err := openRotatingFile(path, gomutant.ExitLogPaths(s.dir)[1], exitLogMaxBytes)
 	if err != nil {
-		fmt.Fprintf(exitLogNotice, "gomutant mcp: exit log %s unwritable (%v); serving without it\n", path, err)
+		fmt.Fprintf(seams.exitLogNotice, "gomutant mcp: exit log %s unwritable (%v); serving without it\n", path, err)
 		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}
 	}
 	// The log is a machine-local file beside the document: minted into
@@ -342,11 +327,6 @@ func serverOptions() *mcp.ServerOptions {
 	}
 }
 
-// heartbeatInterval paces withHeartbeat's still-working notifications
-// on the one cadence every face's progress keeps; a variable so the
-// emission is testable without a thirty-second test.
-var heartbeatInterval = gomutant.ProgressCadence
-
 // loadTreeReporting is every tool's typed load: `loading` announced at
 // once when a token listens (REQ-exec-run-status), then the load under
 // the heartbeat.
@@ -378,7 +358,7 @@ func withHeartbeatLabel[T any](ctx context.Context, notify func(string), label f
 	defer close(stop)
 	go func() {
 		started := time.Now()
-		ticker := time.NewTicker(heartbeatInterval)
+		ticker := time.NewTicker(seams.heartbeatInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -616,20 +596,10 @@ func analysisEventMessage(event gomutant.AnalysisEvent) string {
 // test can pin the sequence without racing the cadence.
 func (r runStreams) stretch(label string) {
 	r.lastPhase.Store(label)
-	if stretchObserverForTest != nil {
-		stretchObserverForTest(label)
+	if seams.stretchObserver != nil {
+		seams.stretchObserver(label)
 	}
 }
-
-// stretchObserverForTest sees every stretch label a run records and
-// selectionObserverForTest the dispatch's start (the inputs were read
-// at preparation), so a test can pin
-// the labels' order against the work; nil outside tests, which never
-// run in parallel.
-var (
-	stretchObserverForTest   func(string)
-	selectionObserverForTest func()
-)
 
 func newRunStreams(out *runOut, notify func(string)) runStreams {
 	var phase atomic.Value
@@ -921,8 +891,8 @@ func (s *Server) targetInputs(targetsPath, targetsJSON, changed string) gomutant
 // selectTargets resolves a prepared request through the library's one
 // dispatch (REQ-target-filtering, REQ-mcp-envelope).
 func (s *Server) selectTargets(ctx context.Context, tree *gomutant.Tree, request gomutant.SelectionRequest) (gomutant.TargetSelection, error) {
-	if selectionObserverForTest != nil {
-		selectionObserverForTest()
+	if seams.selectionObserver != nil {
+		seams.selectionObserver()
 	}
 	return tree.SelectTargets(ctx, request)
 }
@@ -1100,8 +1070,8 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 			notify("attestation shed: " + line)
 		}
 	}
-	if afterCommitForTest != nil {
-		ledger.Committed = afterCommitForTest
+	if seams.afterCommit != nil {
+		ledger.Committed = seams.afterCommit
 	}
 	postures := map[string]gomutant.RecordPosture{}
 	var tallies *gomutant.RunTallies
@@ -1204,8 +1174,8 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	for _, d := range outcome.ResidueSheds {
 		out.AttestationSheds = append(out.AttestationSheds, d.Text())
 	}
-	if afterFinalReplacementForTest != nil {
-		afterFinalReplacementForTest()
+	if seams.afterFinalReplacement != nil {
+		seams.afterFinalReplacement()
 	}
 	// The final replacement is the success boundary
 	// (REQ-exec-cancellation): rendering after it runs under a context

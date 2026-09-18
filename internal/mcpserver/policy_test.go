@@ -15,8 +15,8 @@ import (
 // (the MCP heartbeat clause of REQ-mcp-envelope), and the envelope's
 // bounds are the ones the requirement names.
 func TestHeartbeatAndEnvelopeAreOnePolicyEach(t *testing.T) {
-	if heartbeatInterval != gomutant.ProgressCadence {
-		t.Fatalf("heartbeat cadence = %s; want the shared %s", heartbeatInterval, gomutant.ProgressCadence)
+	if seams.heartbeatInterval != gomutant.ProgressCadence {
+		t.Fatalf("heartbeat cadence = %s; want the shared %s", seams.heartbeatInterval, gomutant.ProgressCadence)
 	}
 	if envelope.rows != 50 {
 		t.Fatalf("envelope rows = %d; want the requirement's 50", envelope.rows)

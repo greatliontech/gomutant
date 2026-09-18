@@ -278,13 +278,13 @@ func TestToolRunDriftExitCarriesThePersistedDrop(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	afterCommitForTest = func(gomutant.Finding) {
+	seams.afterCommit = func(gomutant.Finding) {
 		if err := os.WriteFile(filepath.Join(dir, "current.go"), []byte(src+"\nfunc Drifted() int { return 9 }\n"), 0o644); err != nil {
 			t.Error(err)
 		}
-		afterCommitForTest = nil
+		seams.afterCommit = nil
 	}
-	t.Cleanup(func() { afterCommitForTest = nil })
+	t.Cleanup(func() { seams.afterCommit = nil })
 	_, _, err := New(dir).toolRun(context.Background(), nil, runIn{Jobs: 1, OracleTimeoutSec: 60})
 	if err == nil || !strings.Contains(err.Error(), "tree changed under measurement") {
 		t.Fatalf("run over a tree moved after its first commit = %v; want the drift refusal", err)

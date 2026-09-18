@@ -9,27 +9,13 @@ import (
 	"time"
 )
 
-// sigtermDrainDeadline bounds a SIGTERM-initiated drain: a supervisor
-// that sends SIGTERM follows with SIGKILL on its own clock, and
-// SIGKILL bypasses context cancellation entirely — in-flight oracle
-// process trees would survive as orphans and per-process scratch
-// would never sweep. The deadline is derived from the ecosystem's
-// smallest common kill window (docker stop defaults to 10s;
-// Kubernetes 30s; systemd 90s): 5 seconds drains what a short-oracle
-// campaign can bank and hard-cancels — processes reaped, scratch
-// swept — before ANY common supervisor escalates. An interactive
-// SIGINT keeps the unbounded patient drain: the human at the terminal
-// escalates by pressing Ctrl-C again. A var for deadline-injection in
-// tests.
-var sigtermDrainDeadline = 5 * time.Second
-
 // softInterrupt is the interrupt policy the command tree runs under —
 // SIGINT and SIGTERM alike: the first signal invokes an armed drain
 // hook (the run verb's graceful stop) or, with none armed, cancels
 // outright; a second signal of either kind always cancels hard. A
 // SIGINT drain is bounded only by the in-flight oracles' own budgets
 // (the human escalates); a SIGTERM drain additionally arms
-// sigtermDrainDeadline, so a supervisor's stop banks what fits its
+// seams.sigtermDrainDeadline, so a supervisor's stop banks what fits its
 // kill window and then dies CLEANLY instead of eating a SIGKILL with
 // orphaned process trees (REQ-exec-cancellation's graceful-interrupt
 // clause).
@@ -85,7 +71,7 @@ func (s *softInterrupt) fire(term bool) bool {
 	drain, fired := s.drain, s.fired
 	s.fired = true
 	if drain != nil && !fired && term {
-		s.deadline = time.AfterFunc(sigtermDrainDeadline, s.cancel)
+		s.deadline = time.AfterFunc(seams.sigtermDrainDeadline, s.cancel)
 	}
 	s.mu.Unlock()
 	if drain != nil && !fired {

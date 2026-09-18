@@ -184,7 +184,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 			defer rep.stop()
 			stop = rep.stop
 			rep.phase("loading")
-			rep.startCadence(verbProgressInterval)
+			rep.startCadence(seams.progressInterval)
 			rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 			phase = rep.phase
 		}

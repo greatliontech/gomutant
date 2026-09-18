@@ -56,7 +56,8 @@ func TestStructuredOutputIsOneFlagName(t *testing.T) {
 
 // The progress cadence is one policy: the run and ephemeral flags
 // default to the library's cadence, and the verb line keeps it
-// (REQ-exec-run-status).
+// (REQ-exec-run-status); the verb line's own default is pinned by
+// TestCommandSeamsDefaultToProduction.
 func TestProgressCadenceIsOnePolicy(t *testing.T) {
 	if gomutant.ProgressCadence != 30*time.Second {
 		t.Fatalf("cadence = %s; want the thirty seconds the spec fixes", gomutant.ProgressCadence)
@@ -72,9 +73,6 @@ func TestProgressCadenceIsOnePolicy(t *testing.T) {
 		if f == nil || f.DefValue != want {
 			t.Fatalf("%s --progress-interval default = %v; want %s", verb, f, want)
 		}
-	}
-	if verbProgressInterval != gomutant.ProgressCadence {
-		t.Fatalf("verb line cadence = %s; want %s", verbProgressInterval, gomutant.ProgressCadence)
 	}
 }
 

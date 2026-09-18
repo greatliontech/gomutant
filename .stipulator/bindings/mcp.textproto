@@ -790,3 +790,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "7b7077a9cb165a693aa4dff28f4511f69770c6000ece09b0801c1a4a9ed36088"
 }
+
+bindings {
+  requirement_id: "REQ-mcp-liveness"
+  content_hash: "5582574979578e18c464b3234dc42c87f3035382a1d3433737f4c657571227ff"
+  source_hash: "f24942d68601c1b7393dc31bdd6a3bd37712d9df1c8cb57a54ecb4cbab2c8baf"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestServerSeamsDefaultToProduction"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cc7825b39d6688988d19630c9f6e7bb0d11c763dc1fd50df7cb0e0d14483b98d"
+}

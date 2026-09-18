@@ -1675,8 +1675,8 @@ func TestToolRunCancelledAfterACommitReturnsTheBankedState(t *testing.T) {
 	s := serverAt(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	afterCommitForTest = func(gomutant.Finding) { cancel() }
-	t.Cleanup(func() { afterCommitForTest = nil })
+	seams.afterCommit = func(gomutant.Finding) { cancel() }
+	t.Cleanup(func() { seams.afterCommit = nil })
 	_, out, err := s.toolRun(ctx, nil, runIn{
 		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
 		Jobs:        1,
@@ -1710,8 +1710,8 @@ func TestToolRunDeadlineAfterTheFinalReplacementStillSucceeds(t *testing.T) {
 	s := New(gitfixture.Changed(t))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	afterFinalReplacementForTest = cancel
-	t.Cleanup(func() { afterFinalReplacementForTest = nil })
+	seams.afterFinalReplacement = cancel
+	t.Cleanup(func() { seams.afterFinalReplacement = nil })
 	_, out, err := s.toolRun(ctx, nil, runIn{Changed: "HEAD"})
 	if err != nil {
 		t.Fatalf("a deadline after the final replacement failed the run: %v", err)
@@ -1760,8 +1760,8 @@ func TestToolRunBankedResultListsEachShedOnce(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	afterCommitForTest = func(gomutant.Finding) { cancel() }
-	t.Cleanup(func() { afterCommitForTest = nil })
+	seams.afterCommit = func(gomutant.Finding) { cancel() }
+	t.Cleanup(func() { seams.afterCommit = nil })
 	_, out, err := s.toolRun(ctx, nil, runIn{Changed: "HEAD"})
 	if err != nil || out.Exit == "" {
 		t.Fatalf("banked run = %v, exit %q; want the banked result", err, out.Exit)
@@ -1830,19 +1830,19 @@ func TestToolRunHeartbeatSpansEveryStretch(t *testing.T) {
 	}
 	var mu sync.Mutex
 	var labels []string
-	stretchObserverForTest = func(label string) {
+	seams.stretchObserver = func(label string) {
 		mu.Lock()
 		defer mu.Unlock()
 		labels = append(labels, label)
 	}
 	// The selection's own start is a marker in the same sequence: the
 	// label must be stored before the work it names begins.
-	selectionObserverForTest = func() {
+	seams.selectionObserver = func() {
 		mu.Lock()
 		defer mu.Unlock()
 		labels = append(labels, "<selection begins>")
 	}
-	t.Cleanup(func() { stretchObserverForTest, selectionObserverForTest = nil, nil })
+	t.Cleanup(func() { seams.stretchObserver, seams.selectionObserver = nil, nil })
 	s := New(gitfixture.Changed(t))
 	if _, _, err := s.toolRun(context.Background(), nil, runIn{Changed: "HEAD"}); err != nil {
 		t.Fatal(err)
@@ -1867,9 +1867,9 @@ func TestToolRunHeartbeatFiresUnderAToken(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
-	prior := heartbeatInterval
-	heartbeatInterval = 5 * time.Millisecond
-	t.Cleanup(func() { heartbeatInterval = prior })
+	prior := seams.heartbeatInterval
+	seams.heartbeatInterval = 5 * time.Millisecond
+	t.Cleanup(func() { seams.heartbeatInterval = prior })
 	s := serverAt(t)
 	ctx := context.Background()
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()

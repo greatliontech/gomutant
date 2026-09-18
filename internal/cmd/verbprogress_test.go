@@ -17,9 +17,9 @@ import (
 // the test's duration.
 func fastCadence(t *testing.T) {
 	t.Helper()
-	prior := verbProgressInterval
-	verbProgressInterval = time.Millisecond
-	t.Cleanup(func() { verbProgressInterval = prior })
+	prior := seams.progressInterval
+	seams.progressInterval = time.Millisecond
+	t.Cleanup(func() { seams.progressInterval = prior })
 }
 
 func seedFinding(t *testing.T, dir, symbol, test, pkg string) {

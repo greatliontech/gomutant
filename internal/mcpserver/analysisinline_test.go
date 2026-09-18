@@ -227,14 +227,14 @@ func TestToolRunCancelledBeforeMeasurementCarriesTheAnalysisPayloads(t *testing.
 	// group's baseline stretch is the cancellation point — before any
 	// execution event, so nothing is banked.
 	baselines := 0
-	stretchObserverForTest = func(label string) {
+	seams.stretchObserver = func(label string) {
 		if label == "prepare baseline" {
 			if baselines++; baselines == 2 {
 				cancel()
 			}
 		}
 	}
-	t.Cleanup(func() { stretchObserverForTest = nil })
+	t.Cleanup(func() { seams.stretchObserver = nil })
 	targets := `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/failing.TestAlwaysFails"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`
 	_, out, err := s.toolRun(ctx, nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60})
 	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "analysis payloads seen before this abort: baseline-output example.com/fixture/failing:") {
@@ -278,15 +278,15 @@ func TestToolRunDriftExitCarriesTheAnalysisPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterCommitForTest = func(gomutant.Finding) {
+	seams.afterCommit = func(gomutant.Finding) {
 		// The first commit lands; the tree moves under the target still
 		// to be stamped.
 		if err := os.WriteFile(libPath, append(append([]byte{}, src...), []byte("\nfunc Drifted() int { return 9 }\n")...), 0o644); err != nil {
 			t.Error(err)
 		}
-		afterCommitForTest = nil
+		seams.afterCommit = nil
 	}
-	t.Cleanup(func() { afterCommitForTest = nil })
+	t.Cleanup(func() { seams.afterCommit = nil })
 	targets := `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/failing.TestAlwaysFails"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Guarded","oracle":["example.com/fixture/lib.TestGuarded"],"oracleExplicit":true}]}`
 	_, out, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60, Jobs: 1})
 	if err == nil || !strings.Contains(err.Error(), "tree changed under measurement") {

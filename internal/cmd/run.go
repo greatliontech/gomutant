@@ -387,8 +387,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if outcome, err = ledger.Finish(ctx, findings, targets, tree.Selection()); err != nil {
 			return err
 		}
-		if afterFinalReplacementForTest != nil {
-			afterFinalReplacementForTest()
+		if seams.afterFinalReplacement != nil {
+			seams.afterFinalReplacement()
 		}
 		// The final replacement is the success boundary
 		// (REQ-exec-cancellation): rendering after it runs detached
@@ -623,11 +623,6 @@ func renderAudit(w io.Writer, summary gomutant.RunSummary) {
 	}
 	fmt.Fprintf(w, "audit     %d narrowed survivor(s) re-scored under the full oracle this run, %d disagreed\n", summary.Audit.Narrowed, summary.Audit.Disagreed)
 }
-
-// afterFinalReplacementForTest observes the final replacement's
-// return, so a test can end the command exactly at the success
-// boundary; nil outside tests, which never run in parallel.
-var afterFinalReplacementForTest func()
 
 func renderRunSummary(w io.Writer, summary gomutant.RunSummary) {
 	fmt.Fprintf(w, "summary   %d targets: %d measured, %d cached, %d skipped; %d generated, %d killed, %d survived, %d discarded; %d attested, %d open",

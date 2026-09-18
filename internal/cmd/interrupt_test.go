@@ -61,9 +61,9 @@ func TestSoftInterruptTwoStagePolicy(t *testing.T) {
 // the term gate would silently deadline-bound the interactive drain
 // and discard the window an operator expected to commit.
 func TestDrainDeadlineArmsOnSIGTERMOnly(t *testing.T) {
-	oldDeadline := sigtermDrainDeadline
-	sigtermDrainDeadline = 100 * time.Millisecond
-	t.Cleanup(func() { sigtermDrainDeadline = oldDeadline })
+	oldDeadline := seams.sigtermDrainDeadline
+	seams.sigtermDrainDeadline = 100 * time.Millisecond
+	t.Cleanup(func() { seams.sigtermDrainDeadline = oldDeadline })
 
 	newPolicy := func() (*softInterrupt, context.Context) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -75,7 +75,7 @@ func TestDrainDeadlineArmsOnSIGTERMOnly(t *testing.T) {
 	if !s.fire(false) {
 		t.Fatal("armed interactive drain retired the watcher")
 	}
-	time.Sleep(3 * sigtermDrainDeadline)
+	time.Sleep(3 * seams.sigtermDrainDeadline)
 	if ctx.Err() != nil {
 		t.Fatal("an interactive (SIGINT) drain was deadline-bounded — the human escalates, no timer may")
 	}

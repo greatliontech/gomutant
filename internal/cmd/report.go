@@ -104,14 +104,6 @@ func (r *runReporter) interrupted(cause string) {
 	})
 }
 
-// verbProgressInterval is the cadence of the phase-naming progress
-// line on the verbs whose cost is one call (a load, a judged record, a
-// prune, a retarget): the run and ephemeral verbs expose the same
-// cadence as a flag because their stretches are the caller's to size.
-// A variable so a test can lower it — the package's tests run
-// serially, so the swap is race-free.
-var verbProgressInterval = gomutant.ProgressCadence
-
 // progressIntervalFlag registers a verb's cadence flag: one name and one
 // default (the shared cadence) on every verb that exposes it, the usage
 // the verb's own.

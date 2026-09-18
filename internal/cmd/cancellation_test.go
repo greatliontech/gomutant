@@ -20,8 +20,8 @@ func TestRunDeadlineAfterTheFinalReplacementStillSucceeds(t *testing.T) {
 	dir := gitfixture.Changed(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	afterFinalReplacementForTest = cancel
-	t.Cleanup(func() { afterFinalReplacementForTest = nil })
+	seams.afterFinalReplacement = cancel
+	t.Cleanup(func() { seams.afterFinalReplacement = nil })
 	var out bytes.Buffer
 	if err := runCommand(ctx, runOptions{dir: dir, changed: "HEAD", findingsFile: defaultFindings, output: &out}); err != nil {
 		t.Fatalf("a cancellation after the final replacement failed the run: %v\n%s", err, out.String())
