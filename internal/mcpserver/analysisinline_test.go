@@ -41,12 +41,12 @@ func TestToolRunKeepsAnalysisPayloadsInlineWithoutAToken(t *testing.T) {
 		t.Fatalf("tokenless analysis = %+v (omitted %d, count %d); want the failing baseline's output inline and the count honest", out.AnalysisEvents, out.OmittedAnalysisEvents, out.AnalysisCount)
 	}
 	// An aborted tokenless run has no response to carry them: the
-	// payloads recorded before the abort ride its error.
+	// payloads seen before the abort ride its error.
 	aborted := serverAt(t)
 	aborted.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
 		return errors.New("the document write refused")
 	}
-	if _, _, err := aborted.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "analysis payloads recorded before this abort: baseline-output example.com/fixture/failing:") {
+	if _, _, err := aborted.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "analysis payloads seen before this abort: baseline-output example.com/fixture/failing:") {
 		t.Fatalf("aborted tokenless run = %v; want the payloads riding the error", err)
 	}
 
@@ -237,7 +237,7 @@ func TestToolRunCancelledBeforeMeasurementCarriesTheAnalysisPayloads(t *testing.
 	t.Cleanup(func() { stretchObserverForTest = nil })
 	targets := `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/failing.TestAlwaysFails"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`
 	_, out, err := s.toolRun(ctx, nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60})
-	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "analysis payloads recorded before this abort: baseline-output example.com/fixture/failing:") {
+	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "analysis payloads seen before this abort: baseline-output example.com/fixture/failing:") {
 		t.Fatalf("cancelled before measurement = %v (banked %v); want the cancellation carrying the payloads", err, out.Summary.Banked != nil)
 	}
 	if baselines < 2 {
@@ -255,11 +255,44 @@ func TestAnalysisRidingAbortCountsFromTheTotal(t *testing.T) {
 	}
 	events[0] = analysisOut{Phase: "toolchain-unaudited", Detail: "go1.99 unlisted\nmore"}
 	err := analysisRidingAbort(errors.New("aborted"), events, 200)
-	want := "aborted; analysis payloads recorded before this abort: toolchain-unaudited: go1.99 unlisted; baseline-output p: TestX:; baseline-output p: TestX:; baseline-output p: TestX:; baseline-output p: TestX: (+195 more)"
+	want := "aborted; analysis payloads seen before this abort: toolchain-unaudited: go1.99 unlisted; baseline-output p: TestX:; baseline-output p: TestX:; baseline-output p: TestX:; baseline-output p: TestX: (+195 more)"
 	if err == nil || err.Error() != want {
 		t.Fatalf("abort fold = %v\nwant %s", err, want)
 	}
 	if err := analysisRidingAbort(errors.New("aborted"), nil, 0); err.Error() != "aborted" {
 		t.Fatalf("an abort with no payload = %v", err)
+	}
+}
+
+// A drift-refused tokenless run has no response to carry its recorded
+// analysis payloads either: they ride the drift error beside the sheds
+// and the persisted drop, so a failing baseline's own output reaches
+// the reader whichever exit the run took (REQ-mcp-envelope).
+func TestToolRunDriftExitCarriesTheAnalysisPayloads(t *testing.T) {
+	if testing.Short() {
+		t.Skip("probes the failing fixture package and drifts the tree mid-run")
+	}
+	s := serverAt(t)
+	libPath := filepath.Join(s.dir, "lib", "lib.go")
+	src, err := os.ReadFile(libPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterCommitForTest = func(gomutant.Finding) {
+		// The first commit lands; the tree moves under the target still
+		// to be stamped.
+		if err := os.WriteFile(libPath, append(append([]byte{}, src...), []byte("\nfunc Drifted() int { return 9 }\n")...), 0o644); err != nil {
+			t.Error(err)
+		}
+		afterCommitForTest = nil
+	}
+	t.Cleanup(func() { afterCommitForTest = nil })
+	targets := `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/failing.TestAlwaysFails"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Guarded","oracle":["example.com/fixture/lib.TestGuarded"],"oracleExplicit":true}]}`
+	_, out, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60, Jobs: 1})
+	if err == nil || !strings.Contains(err.Error(), "tree changed under measurement") {
+		t.Fatalf("run over a tree moved after its first commit = %v (exit %q, findings %d); want the drift refusal", err, out.Exit, len(out.Findings))
+	}
+	if !strings.Contains(err.Error(), "analysis payloads seen before this abort: baseline-output example.com/fixture/failing:") {
+		t.Fatalf("drift exit = %v; want the failing baseline's payload riding it", err)
 	}
 }

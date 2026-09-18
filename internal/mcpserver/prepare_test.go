@@ -76,3 +76,13 @@ func TestRunToolRefusesItsInputsBeforeAnyLoad(t *testing.T) {
 	defer release()
 	refuses("held campaign lock", runIn{}, "a campaign already holds")
 }
+
+// discover refuses its inputs in the one preparation order every verb
+// keeps on this face too: the build selection's shape before the tree
+// root and the changed ref's surface (REQ-exec-preparation).
+func TestToolDiscoverRefusesTheSelectionBeforeTheSurface(t *testing.T) {
+	s := New(t.TempDir())
+	if _, _, err := s.toolDiscover(context.Background(), nil, discoverIn{Changed: "nosuchref", Tags: []string{"a,b"}}); err == nil || !strings.Contains(err.Error(), "constraint tag") || strings.Contains(err.Error(), "nosuchref") {
+		t.Fatalf("discover with a malformed tag and a bad ref = %v; want the tag refused before the surface is read", err)
+	}
+}

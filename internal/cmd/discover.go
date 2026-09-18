@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -17,6 +18,8 @@ type discoverOptions struct {
 	tags                      []string
 	toolchain                 string
 	json                      bool
+	// output receives the rendering; nil means stdout.
+	output io.Writer
 }
 
 type discoveryView struct {
@@ -45,28 +48,32 @@ func discoverCommand(ctx context.Context, o discoverOptions) error {
 	if err != nil {
 		return err
 	}
+	out := o.output
+	if out == nil {
+		out = os.Stdout
+	}
 	if o.json {
-		return json.NewEncoder(os.Stdout).Encode(view)
+		return json.NewEncoder(out).Encode(view)
 	}
 	if len(view.Targets) == 0 {
-		fmt.Println("no targets")
+		fmt.Fprintln(out, "no targets: "+gomutant.SelectionEmptiedNote(o.targetsFile != "", o.changed, "--changed"))
 	}
 	for _, target := range view.Targets {
 		mode := "derived"
 		if target.OracleExplicit {
 			mode = "explicit"
 		}
-		fmt.Printf("%s\n", target.Symbol)
-		fmt.Printf("  oracle (%s): %s\n", mode, strings.Join(target.Oracle, ", "))
+		fmt.Fprintf(out, "%s\n", target.Symbol)
+		fmt.Fprintf(out, "  oracle (%s): %s\n", mode, strings.Join(target.Oracle, ", "))
 		if target.Skipped != "" {
-			fmt.Printf("  skipped: %s\n", target.Skipped)
+			fmt.Fprintf(out, "  skipped: %s\n", target.Skipped)
 		}
 		if len(target.Labels) != 0 {
-			fmt.Printf("  labels: %s\n", strings.Join(target.Labels, ", "))
+			fmt.Fprintf(out, "  labels: %s\n", strings.Join(target.Labels, ", "))
 		}
 	}
 	for _, residue := range view.Residue {
-		fmt.Printf("changed, untargeted  %s  (%s)\n", residue.Path, residue.Reason)
+		fmt.Fprintf(out, "changed, untargeted  %s  (%s)\n", residue.Path, residue.Reason)
 	}
 	return nil
 }
@@ -74,7 +81,7 @@ func discoverCommand(ctx context.Context, o discoverOptions) error {
 func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, error) {
 	view := discoveryView{Targets: []gomutant.TargetDescription{}, Residue: []gomutant.Residue{}}
 	sources := gomutant.TargetSourcesGiven(gomutant.TargetSource{Name: "--targets", Given: o.targetsFile != ""}, gomutant.TargetSource{Name: "--changed", Given: o.changed != ""})
-	request, err := gomutant.PrepareSelection(ctx, o.dir, sources, targetInputs(o.dir, o.targetsFile, o.changed), o.packages, o.symbols)
+	request, err := gomutant.PrepareSelection(ctx, o.dir, sources, targetInputs(o.dir, o.targetsFile, o.changed), selectionOf(o.tags, o.toolchain), o.packages, o.symbols)
 	if err != nil {
 		return view, err
 	}

@@ -897,25 +897,6 @@ func capRows[T any](rows []T) ([]T, int) {
 	return rows[:envelope.rows:envelope.rows], len(rows) - envelope.rows
 }
 
-// selectionEmptiedNote names the input that emptied a target selection
-// so the caller's next step is a decision, not a diagnosis
-// (REQ-mcp-envelope). Shared by run and discover: one discrimination,
-// one wording. Filters never appear here — filtering an already-empty
-// selection is skipped (nothing exists for filters to drop, so blaming
-// them would teach the wrong next step), and filters that empty a
-// non-empty selection refuse inside FilterTargets with their
-// own teaching error.
-func selectionEmptiedNote(targetsDoc bool, changed string) string {
-	switch {
-	case targetsDoc:
-		return "the targets document selected zero effective targets; discover previews a document's effective targets"
-	case changed != "":
-		return fmt.Sprintf("no targets changed vs %s; omit changed to select the whole tree", changed)
-	default:
-		return "the tree has no mutation targets"
-	}
-}
-
 // targetInputs are the wire's target sources as given: the document
 // path with the tree as its root (confined and resolved by the
 // preparation, REQ-mcp-envelope), the inline document's bytes, a
@@ -1076,7 +1057,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		}
 		out.Residue, out.OmittedResidue = capRows(out.Residue)
 		out.Document = gomutant.FindingsPathAt(s.dir, in.Findings)
-		out.Note = selectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed)
+		out.Note = gomutant.SelectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed, "changed")
 		// A whole-tree selection of nothing still reconciles the
 		// document — a write the response owns, never buried in an
 		// empty success; a scoped one writes nothing.
@@ -1199,17 +1180,23 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// the run is in both or in neither (REQ-mcp-findings-doc).
 	streams.stretch("merging findings")
 	outcome, err := ledger.Finish(ctx, findings, targets, tree.Selection())
-	// From here every error exit owns the reconcile's PERSISTED drop:
-	// the SDK discards the response object on error, so the count folds
-	// into the error text exactly as sheds do (REQ-mcp-envelope).
-	withDrop := func(err error) error {
-		if outcome.Dropped == 0 {
-			return err
-		}
-		return fmt.Errorf("%w — additionally, %s (persisted)", err, outcome.DropText())
-	}
+	// A failed final merge persisted nothing (Finish returns the zero
+	// outcome on error): the exit carries the sheds and payloads already
+	// on the response, whose object the SDK discards (REQ-mcp-envelope).
 	if err != nil {
-		return withDrop(ridingAbort(err, out))
+		return ridingAbort(err, out)
+	}
+	// From here every error exit owns what the final merge PERSISTED —
+	// the reconcile's drop, a promotion, the merge's residue sheds —
+	// folded into the error text exactly as the response's sheds and
+	// the recorded analysis payloads are (REQ-mcp-findings-doc,
+	// REQ-mcp-envelope). A shed disposition is surfaced once, never
+	// silently dropped (REQ-attest-survivor): the first report wins - a
+	// shed the incremental commit already recorded, or a mutant whose
+	// fate the contradiction row already told, is not retold with the
+	// merge layer's vaguer reason.
+	for _, d := range outcome.ResidueSheds {
+		out.AttestationSheds = append(out.AttestationSheds, d.Text())
 	}
 	if afterFinalReplacementForTest != nil {
 		afterFinalReplacementForTest()
@@ -1251,20 +1238,12 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		}
 	}
 	if err != nil {
-		return err
+		return outcome.PersistedRiding(ridingAbort(err, out))
 	}
 	if sel.Cut != nil {
 		out.Summary.Delta = &gomutant.DeltaSummary{Ref: sel.Cut.Ref, Open: deltaOpen}
 	}
 	out.Residue, out.OmittedResidue = capRows(out.Residue)
-	// A shed disposition is surfaced once, never silently dropped
-	// (REQ-attest-survivor): the first report wins - a shed the
-	// incremental commit already recorded, or a mutant whose fate the
-	// contradiction row already told, is not retold with the merge
-	// layer's vaguer reason.
-	for _, d := range outcome.ResidueSheds {
-		out.AttestationSheds = append(out.AttestationSheds, d.Text())
-	}
 	// A record this run carried from the machine-local overlay into the
 	// committed document is a state change git does not see until
 	// committed, so the response says it happened (REQ-mcp-findings-doc).
@@ -1289,7 +1268,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// attestation sheds - fold into it via driftError: surfaced once,
 	// never silently dropped (REQ-attest-survivor).
 	if drift != nil {
-		return withDrop(driftError(drift, fullSheds))
+		return outcome.PersistedRiding(analysisRidingAbort(driftError(drift, fullSheds), out.AnalysisEvents, out.AnalysisCount))
 	}
 	return nil
 }
@@ -1353,7 +1332,7 @@ func analysisRidingAbort(err error, events []analysisOut, total int) error {
 	if total > exemplars {
 		rest = fmt.Sprintf(" (+%d more)", total-exemplars)
 	}
-	return fmt.Errorf("%w; analysis payloads recorded before this abort: %s%s", err, strings.Join(heads, "; "), rest)
+	return fmt.Errorf("%w; analysis payloads seen before this abort: %s%s", err, strings.Join(heads, "; "), rest)
 }
 
 // driftError folds attestation sheds into a drift refusal: the SDK
@@ -1405,7 +1384,7 @@ type discoverOut struct {
 
 func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in discoverIn) (*mcp.CallToolResult, discoverOut, error) {
 	var out discoverOut
-	request, err := gomutant.PrepareSelection(ctx, s.dir, wireTargetSources(in.TargetsPath, in.TargetsJSON, in.Changed), s.targetInputs(in.TargetsPath, in.TargetsJSON, in.Changed), in.Packages, in.Symbols)
+	request, err := gomutant.PrepareSelection(ctx, s.dir, wireTargetSources(in.TargetsPath, in.TargetsJSON, in.Changed), s.targetInputs(in.TargetsPath, in.TargetsJSON, in.Changed), in.selection(), in.Packages, in.Symbols)
 	if err != nil {
 		return nil, out, err
 	}
@@ -1436,7 +1415,7 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 	// input that emptied it, one discrimination shared with run
 	// (REQ-mcp-envelope).
 	if out.TargetCount == 0 {
-		out.Note = selectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed)
+		out.Note = gomutant.SelectionEmptiedNote(in.TargetsPath != "" || in.TargetsJSON != "", in.Changed, "changed")
 	}
 	out.capUnlessDetail(in.Detail)
 	return nil, out, nil
@@ -1567,13 +1546,10 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err := gomutant.ValidateFindingState(in.State); err != nil {
 		return nil, out, err
 	}
-	if err := in.selection().Validate(); err != nil {
-		return nil, out, err
-	}
 	// A changed ref's surface is read at preparation, in the tree root,
 	// before any record is read (REQ-exec-preparation); the cut
 	// resolves after the load.
-	request, err := gomutant.PrepareSelection(ctx, s.dir, nil, s.targetInputs("", "", in.Changed), nil, nil)
+	request, err := gomutant.PrepareSelection(ctx, s.dir, nil, s.targetInputs("", "", in.Changed), in.selection(), nil, nil)
 	if err != nil {
 		return nil, out, err
 	}

@@ -1610,3 +1610,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "ae0c7ee994f282b48c772c6ed5ae670b77eab379ca0b46298a6eb2028f7d4b05"
 }
+
+bindings {
+  requirement_id: "REQ-result-inspection"
+  content_hash: "0b774cd9c73d4b587320e1add01e7811d448b01f478411d6c3d026be7f89b8ba"
+  source_hash: "62e49b8ff25360d8fbfad43f8b1c9594390c3442439893b72c5778336d901631"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestInspectionInputsAndNotes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0027d1422912d8a68e8d7f19101b948fddced654c4cd3d6f2fd3a440fa34376d"
+}

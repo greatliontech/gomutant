@@ -245,3 +245,51 @@ func TestToolRunStatesAPromotionOnTheZeroTargetReconcile(t *testing.T) {
 		t.Fatalf("zero-target reconcile promoted %d on the response, want 1", out.Promoted)
 	}
 }
+
+// A drift-refused whole-tree run still persisted its reconcile: the
+// dropped count rides the drift error, as it rides every error exit
+// after the final merge (REQ-mcp-findings-doc).
+func TestToolRunDriftExitCarriesThePersistedDrop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test for two mutants and drifts the tree mid-run")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	src := "package current\n\nfunc Value() int { return 1 }\n\nfunc Other() int { return 2 }\n"
+	for name, content := range map[string]string{
+		"go.mod":          "module example.com/current\n\ngo 1.26.4\n",
+		"current.go":      src,
+		"current_test.go": "package current\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }\n\nfunc TestOther(t *testing.T) { if Other() != 2 { t.Fatal(Other()) } }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evidence := func(symbol string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	path := gomutant.FindingsPathAt(dir, "")
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{{Symbol: "example.com/current.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
+			TargetEvidence: evidence("example.com/current.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/current.OldTest")}}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	afterCommitForTest = func(gomutant.Finding) {
+		if err := os.WriteFile(filepath.Join(dir, "current.go"), []byte(src+"\nfunc Drifted() int { return 9 }\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+		afterCommitForTest = nil
+	}
+	t.Cleanup(func() { afterCommitForTest = nil })
+	_, _, err := New(dir).toolRun(context.Background(), nil, runIn{Jobs: 1, OracleTimeoutSec: 60})
+	if err == nil || !strings.Contains(err.Error(), "tree changed under measurement") {
+		t.Fatalf("run over a tree moved after its first commit = %v; want the drift refusal", err)
+	}
+	if !strings.Contains(err.Error(), "additionally, ") || !strings.Contains(err.Error(), "reconcile dropped 1 record(s)") || !strings.Contains(err.Error(), "(persisted)") {
+		t.Fatalf("drift exit = %v; want the reconcile's persisted drop riding it", err)
+	}
+}

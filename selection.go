@@ -82,18 +82,22 @@ func (in TargetInputs) readChanged(ctx context.Context) (*ChangedSelection, erro
 }
 
 // PrepareSelection is the preparation of a verb that takes no campaign
-// lock (discovery): the refusals its inputs decide, in the enumerated
-// order — the sources' exclusivity (sources in the face's spelling),
-// the document's parse, the tree root's existence, then the ref's
-// surface read in that root — into the request the dispatch resolves
-// after the load (REQ-exec-preparation). A discovery renders no cut.
-func PrepareSelection(ctx context.Context, root string, sources []string, in TargetInputs, packages, symbols []string) (SelectionRequest, error) {
+// lock (discovery, inspection): the refusals its inputs decide, in the
+// enumerated order — the sources' exclusivity (sources in the face's
+// spelling), the document's parse, the build selection's shape, the
+// tree root's existence, then the ref's surface read in that root —
+// into the request the dispatch resolves after the load
+// (REQ-exec-preparation). A discovery renders no cut.
+func PrepareSelection(ctx context.Context, root string, sources []string, in TargetInputs, sel Selection, packages, symbols []string) (SelectionRequest, error) {
 	request := SelectionRequest{Packages: packages, Symbols: symbols}
 	if err := ValidateTargetSources(sources); err != nil {
 		return request, err
 	}
 	var err error
 	if request.Targets, request.TargetsGiven, err = in.parseTargets(ctx); err != nil {
+		return request, err
+	}
+	if err := sel.Validate(); err != nil {
 		return request, err
 	}
 	if err := treeRootExists(root); err != nil {
@@ -167,4 +171,23 @@ func (t *Tree) SelectTargets(ctx context.Context, req SelectionRequest) (TargetS
 		sel.WholeTree = false
 	}
 	return sel, nil
+}
+
+// SelectionEmptiedNote names the input that emptied a selection and
+// the next step — one discrimination both faces render on a zero-target
+// answer: a targets document that selected nothing, a changed ref that
+// touched nothing, or a tree with no mutation targets; changedSource is
+// the changed input's name in the face's spelling (the wire knob or the
+// CLI flag), so the next step names what the reader typed. Filters that
+// empty a non-empty selection refuse inside FilterTargets with their
+// own teaching error.
+func SelectionEmptiedNote(targetsDoc bool, changed, changedSource string) string {
+	switch {
+	case targetsDoc:
+		return "the targets document selected zero effective targets; discover previews a document's effective targets"
+	case changed != "":
+		return fmt.Sprintf("nothing changed vs %s; omit %s to select the whole tree", changed, changedSource)
+	default:
+		return "the tree has no mutation targets"
+	}
 }

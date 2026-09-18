@@ -97,6 +97,14 @@ func TestFindingsCommandDefaultsToSummaryRows(t *testing.T) {
 	if !strings.Contains(filtered.String(), "no findings\nstate=stale matched none of the 1 finding(s) the other filters kept; drop it to list them\n") {
 		t.Fatalf("state filter kept a detached record or named no emptier: %q", filtered.String())
 	}
+	// The JSON face names the same emptier beside its empty list.
+	var filteredJSON, filteredNote bytes.Buffer
+	if err := findingsCommand(ctx, findingsOptions{dir: dir, findingsFile: defaultFindings, state: "stale", json: true, errOut: &filteredNote}, &filteredJSON); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(filteredJSON.String()) != "[]" || !strings.Contains(filteredNote.String(), "state=stale matched none of the 1 finding(s)") {
+		t.Fatalf("JSON face under a state that emptied the roster = %q / note %q; want the empty list and the emptier named", filteredJSON.String(), filteredNote.String())
+	}
 	// A MATCHING state filter returns the judged row: the filter
 	// implies judging rather than comparing against the recorded
 	// state, which would silently empty every roster.

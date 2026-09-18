@@ -93,9 +93,6 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	if err := gomutant.ValidateFindingState(o.state); err != nil {
 		return err
 	}
-	if err := selectionOf(o.tags, o.toolchain).Validate(); err != nil {
-		return err
-	}
 	var vouches []string
 	if len(o.vouches) > 0 {
 		var err error
@@ -106,7 +103,7 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	// A changed ref's surface is read at preparation, in the tree root,
 	// before any record is read — the one order every verb keeps
 	// (REQ-exec-preparation); the cut resolves after the load.
-	request, err := gomutant.PrepareSelection(ctx, o.dir, nil, targetInputs(o.dir, "", o.changed), nil, nil)
+	request, err := gomutant.PrepareSelection(ctx, o.dir, nil, targetInputs(o.dir, "", o.changed), selectionOf(o.tags, o.toolchain), nil, nil)
 	if err != nil {
 		return err
 	}
@@ -214,15 +211,15 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	if err != nil {
 		return err
 	}
+	if len(views) == 0 {
+		return noRows(len(matched))
+	}
 	if o.json {
 		// The JSON face is the rows alone: the document on disk is the
 		// machine face for what rides beside them — the coverage-bounds
 		// table and the attestation record — exactly as the attestation
 		// precedent below reads it.
 		return renderFindingsJSON(out, views)
-	}
-	if len(views) == 0 {
-		return noRows(len(matched))
 	}
 	if !o.detail {
 		renderFindingSummaries(out, views, inspection, judge, cut != nil)
@@ -233,7 +230,8 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	return nil
 }
 
-// printDocumentTail prints what rides the inspection beside the rows:
+// readDocumentTail reads what rides the inspection beside the rows,
+// for renderDocumentTail to print:
 // the document's stated coverage bounds per declared selection
 // (REQ-result-unreached-bound), then the committed
 // ephemeral-equivalence record.
@@ -259,6 +257,7 @@ type documentTail struct {
 	attested     int
 }
 
+// renderDocumentTail prints the tail readDocumentTail read.
 func renderDocumentTail(out io.Writer, tail documentTail) {
 	for _, b := range tail.bounds {
 		renderCoverageBound(out, b.Selection, b.Unreached)

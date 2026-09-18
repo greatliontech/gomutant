@@ -133,8 +133,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRenderedFindingsSubstitutePostMergeRows"
   role: BINDING_ROLE_TESTS
@@ -143,8 +143,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestUpdateDocument"
   role: BINDING_ROLE_TESTS
@@ -153,8 +153,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCarriesAcrossPinsAndShedsOnDomainMove"
   role: BINDING_ROLE_TESTS
@@ -163,8 +163,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCommandReportsPromotedRecords"
   role: BINDING_ROLE_TESTS
@@ -173,8 +173,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunFindingsAttest"
   role: BINDING_ROLE_TESTS
@@ -183,8 +183,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunReportsPromotedRecords"
   role: BINDING_ROLE_TESTS
@@ -543,8 +543,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestOneSourceHelpersForBothFaces"
   role: BINDING_ROLE_TESTS
@@ -553,8 +553,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunLedgerCountsPromotedMachineLocalAndDropped"
   role: BINDING_ROLE_TESTS
@@ -563,8 +563,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunLedgerCountsAStandingRecordTheWritePromotes"
   role: BINDING_ROLE_TESTS
@@ -573,8 +573,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCommandStatesTheReconcileDrop"
   role: BINDING_ROLE_TESTS
@@ -583,8 +583,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunStatesTheReconcileDrop"
   role: BINDING_ROLE_TESTS
@@ -593,8 +593,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunLedgerCountsAPromotionOnTheZeroTargetWrite"
   role: BINDING_ROLE_TESTS
@@ -603,8 +603,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCommandStatesAPromotionOnTheZeroTargetReconcile"
   role: BINDING_ROLE_TESTS
@@ -613,8 +613,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-findings-doc"
-  content_hash: "a592b0e7f2b96ee68460b0a0ba86f3c7ea0894a1b77c72c5e2602455d5a0df9c"
-  source_hash: "6e2dbff2afdd78c241fe10e20502315ff0f3b6b3d6aa726c8ef7d336898ecda8"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunStatesAPromotionOnTheZeroTargetReconcile"
   role: BINDING_ROLE_TESTS
@@ -709,4 +709,54 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestAnalysisRidingAbortCountsFromTheTotal"
   role: BINDING_ROLE_TESTS
   shape_hash: "547d0ab1c46b6723b97b79ea6ba55cf7cb2be8ad0c3f1443b8b6c0375f3928ee"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-findings-doc"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestDroppedSymbolsCountsEachSymbolOnce"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "dba794a0049ed5ec6203366043992b94f2b13b3134c3576ab8c029f1ce87044e"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "3492249af4a99360e5bb408a584724f5341aa2af90b6c02f6053f3025d8ca281"
+  source_hash: "c3955b16a8faf6b361cc83f3832b92027f164060f517848422e87336d7ae6ff1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunDriftExitCarriesTheAnalysisPayloads"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ad59313f78166d2b22b96681267d9e5a24f05d28f5af3b9bc5bc3f3d50ba117f"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-findings-doc"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunDriftExitCarriesThePersistedDrop"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d46d2f8cdbf188cbc15dede8f107a8d39e6ab574a84148f43fd84557101b880b"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-findings-doc"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunOutcomePersistedChangesRideTheError"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "840a7328e4c674b96de91d3081a56469d5aeef843febf1cea8be7221b5ca6ef6"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "3492249af4a99360e5bb408a584724f5341aa2af90b6c02f6053f3025d8ca281"
+  source_hash: "c3955b16a8faf6b361cc83f3832b92027f164060f517848422e87336d7ae6ff1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSelectionEmptiedNoteSpellsTheFacesInput"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c87d870ca1192be61a948406d80eadc329fabea92d5508e2450b49f3ee03c2f9"
 }

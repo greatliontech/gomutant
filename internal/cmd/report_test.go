@@ -430,7 +430,7 @@ func TestRunCommandJSONLPlanAndNoTargetsStayPure(t *testing.T) {
 		t.Fatalf("no-targets: %v", err)
 	}
 	assertPure(t, none.String())
-	if !strings.Contains(none.String(), `"no targets"`) {
+	if !strings.Contains(none.String(), `"text":"no targets: the targets document selected zero effective targets`) {
 		t.Fatalf("no-targets note missing from the structured stream: %q", none.String())
 	}
 }

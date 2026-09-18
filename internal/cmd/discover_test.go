@@ -167,3 +167,14 @@ func TestDiscoverChangedCarriesTheResidue(t *testing.T) {
 		t.Fatalf("changed discovery residue = %+v, want the edited test file", view.Residue)
 	}
 }
+
+// discover refuses its inputs in the one preparation order every verb
+// keeps: the build selection's shape before the tree root and the
+// changed ref's surface, so a malformed tag is named before git is
+// asked about a ref (REQ-exec-preparation).
+func TestDiscoverRefusesTheSelectionBeforeTheSurface(t *testing.T) {
+	_, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, changed: "nosuchref", tags: []string{"a,b"}})
+	if err == nil || !strings.Contains(err.Error(), "constraint tag") || strings.Contains(err.Error(), "nosuchref") {
+		t.Fatalf("discover with a malformed tag and a bad ref = %v; want the tag refused before the surface is read", err)
+	}
+}

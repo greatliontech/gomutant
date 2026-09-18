@@ -89,8 +89,16 @@ func TestToolsCutSurvivorsByTheDelta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reflowed.Summary.Targets != 0 || reflowed.Note == "" {
-		t.Fatalf("a reflow-only change targeted %d symbols (note %q); want none", reflowed.Summary.Targets, reflowed.Note)
+	// The note names the emptier in this face's spelling of the input.
+	if reflowed.Summary.Targets != 0 || reflowed.Note != "nothing changed vs HEAD; omit changed to select the whole tree" {
+		t.Fatalf("a reflow-only change targeted %d symbols (note %q); want none, the emptier named", reflowed.Summary.Targets, reflowed.Note)
+	}
+	_, discovered, err := s.toolDiscover(context.Background(), nil, discoverIn{Changed: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if discovered.TargetCount != 0 || discovered.Note != "nothing changed vs HEAD; omit changed to select the whole tree" {
+		t.Fatalf("discover over a reflow-only change = %d targets (note %q); want none, the emptier named in the wire's spelling", discovered.TargetCount, discovered.Note)
 	}
 }
 

@@ -134,11 +134,17 @@ func TestPrepareCampaignReadsTheTargetInputsInOrder(t *testing.T) {
 	// Discovery's preparation keeps the same order without a lock: the
 	// sources' exclusivity, the document, the root, then the surface.
 	read = false
-	if _, err := PrepareSelection(ctx, filepath.Join(dir, "nonexistent"), nil, TargetInputs{Changed: reader}, nil, nil); err == nil || !strings.Contains(err.Error(), "tree root") || read {
+	if _, err := PrepareSelection(ctx, filepath.Join(dir, "nonexistent"), nil, TargetInputs{Changed: reader}, Selection{}, nil, nil); err == nil || !strings.Contains(err.Error(), "tree root") || read {
 		t.Fatalf("discovery's reader under a missing root = %v (read %v), want the root refused first", err, read)
 	}
-	if _, err := PrepareSelection(ctx, dir, []string{"a", "b"}, TargetInputs{TargetsPath: malformed}, nil, nil); err == nil || !strings.Contains(err.Error(), "a and b were given") {
+	if _, err := PrepareSelection(ctx, dir, []string{"a", "b"}, TargetInputs{TargetsPath: malformed}, Selection{}, nil, nil); err == nil || !strings.Contains(err.Error(), "a and b were given") {
 		t.Fatalf("discovery's two sources = %v, want the exclusivity refusal first", err)
+	}
+	// The build selection's shape is refused before the root and the
+	// surface on the lockless preparation too.
+	read = false
+	if _, err := PrepareSelection(ctx, filepath.Join(dir, "nonexistent"), nil, TargetInputs{Changed: reader}, Selection{Tags: []string{"a,b"}}, nil, nil); err == nil || !strings.Contains(err.Error(), "constraint tag") || read {
+		t.Fatalf("discovery's malformed tag under a missing root = %v (read %v), want the tag refused first", err, read)
 	}
 	if _, err := ConfineToTree("targets_path", dir, ".."); err == nil {
 		t.Fatal("the literal .. escaped the tree")

@@ -15,7 +15,7 @@ import (
 	"github.com/greatliontech/gomutant"
 )
 
-// ChangedSurface reads the changed surface against ref in one git
+// ChangedSurfaceContext reads the changed surface against ref in one git
 // question: the tree-relative changed paths (tracked changes plus
 // untracked files, REQ-target-changed) and, for the Go files among
 // them, the lines the working tree ADDED — git's line diff of the

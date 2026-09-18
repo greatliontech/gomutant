@@ -53,7 +53,7 @@ func TestRunLedgerReportsEachShedOnce(t *testing.T) {
 	// told first. pkg.C sheds a site carry as the run reports it.
 	prior := []Finding{attested("pkg.A", "a.go:1:1"), attested("pkg.B", "b.go:1:1")}
 	store, _ := ledgerStore(t, prior)
-	ledger := NewRunLedger(store, prior, "run-1", false)
+	ledger := NewRunLedger(store, prior, "run-1", true)
 	var delivered []string
 	ledger.Shed = func(d AttestationShed) { delivered = append(delivered, d.Text()) }
 	var committed []string
@@ -73,7 +73,9 @@ func TestRunLedgerReportsEachShedOnce(t *testing.T) {
 	if strings.Join(committed, ",") != "pkg.A,pkg.B,pkg.C" {
 		t.Fatalf("committed = %v", committed)
 	}
-	outcome, err := ledger.Finish(ctx, fresh, nil, Selection{})
+	// A whole-tree finish runs the final merge over the run's targets,
+	// so the residue below is the merge's own answer, not a short cut.
+	outcome, err := ledger.Finish(ctx, fresh, []Target{{Symbol: "pkg.A"}, {Symbol: "pkg.B"}, {Symbol: "pkg.C"}}, Selection{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,5 +298,52 @@ func TestRunLedgerCountsAPromotionOnTheZeroTargetWrite(t *testing.T) {
 	}
 	if outcome.Promoted != 1 || outcome.Dropped != 0 {
 		t.Fatalf("zero-target write: promoted %d, dropped %d; want 1, 0", outcome.Promoted, outcome.Dropped)
+	}
+}
+
+// The document changes a final merge persisted — a reconcile's drop, a
+// promotion — ride an error exit after it on both faces: the counts
+// fold into the error text, as sheds do on the structured face, and an
+// error alone stands when nothing changed (REQ-mcp-findings-doc).
+func TestRunOutcomePersistedChangesRideTheError(t *testing.T) {
+	base := errors.New("render deadline")
+	got := (RunOutcome{Dropped: 2, Promoted: 1}).PersistedRiding(base)
+	if !errors.Is(got, base) || !strings.Contains(got.Error(), "render deadline — additionally, ") || !strings.Contains(got.Error(), "; 1 record(s) promoted - findings document changed, commit it (persisted)") {
+		t.Fatalf("persisted changes riding the error = %v", got)
+	}
+	if got := (RunOutcome{Promoted: 1}).PersistedRiding(base); !strings.Contains(got.Error(), "additionally, 1 record(s) promoted") || strings.Contains(got.Error(), "; ") {
+		t.Fatalf("a promotion alone riding the error = %v", got)
+	}
+	if got := (RunOutcome{}).PersistedRiding(base); got != base {
+		t.Fatalf("no change wrapped the error: %v", got)
+	}
+	if got := (RunOutcome{Dropped: 2}).PersistedRiding(nil); got != nil {
+		t.Fatalf("a drop minted an error out of success: %v", got)
+	}
+}
+
+// The empty-selection note spells the changed input as the face's
+// reader typed it — the wire knob on the structured face, the flag on
+// the CLI — and never stutters after the CLI's "no targets:" lead.
+func TestSelectionEmptiedNoteSpellsTheFacesInput(t *testing.T) {
+	if got := SelectionEmptiedNote(false, "HEAD~1", "--changed"); got != "nothing changed vs HEAD~1; omit --changed to select the whole tree" {
+		t.Fatalf("CLI note = %q", got)
+	}
+	if got := SelectionEmptiedNote(false, "HEAD~1", "changed"); got != "nothing changed vs HEAD~1; omit changed to select the whole tree" {
+		t.Fatalf("wire note = %q", got)
+	}
+	if got := SelectionEmptiedNote(true, "HEAD~1", "changed"); !strings.HasPrefix(got, "the targets document selected zero") {
+		t.Fatalf("document note = %q", got)
+	}
+}
+
+// The reconcile's drop counts symbols, not records: a document
+// hand-edited into duplicate records for one symbol cannot overcount
+// what the reconcile dropped (REQ-mcp-findings-doc).
+func TestDroppedSymbolsCountsEachSymbolOnce(t *testing.T) {
+	rec := func(symbol string) Finding { return storeFinding(symbol, nil) }
+	current := []Finding{rec("pkg.A"), rec("pkg.A"), rec("pkg.B"), rec("pkg.C")}
+	if got := droppedSymbols(current, []Finding{rec("pkg.C")}); got != 2 {
+		t.Fatalf("dropped = %d, want 2 (pkg.A once, pkg.B)", got)
 	}
 }

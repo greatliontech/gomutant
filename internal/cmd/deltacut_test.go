@@ -174,6 +174,18 @@ func TestRunAndFindingsCutSurvivorsByTheDelta(t *testing.T) {
 	if strings.Contains(reflowed.String(), "measure ") || strings.Contains(reflowed.String(), "candidates") {
 		t.Fatalf("a reflow-only change measured a symbol on the CLI:\n%s", reflowed.String())
 	}
+	// The note names the emptier in this face's spelling of the input,
+	// on run and on discover alike.
+	if !strings.Contains(reflowed.String(), "no targets: nothing changed vs HEAD; omit --changed to select the whole tree\n") {
+		t.Fatalf("a reflow-only change named no emptier on the CLI:\n%s", reflowed.String())
+	}
+	var discovered bytes.Buffer
+	if err := discoverCommand(context.Background(), discoverOptions{dir: dir, changed: "HEAD", output: &discovered}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(discovered.String(), "no targets: nothing changed vs HEAD; omit --changed to select the whole tree\n") {
+		t.Fatalf("discover over a reflow-only change = %q; want the emptier named in the CLI's spelling", discovered.String())
+	}
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

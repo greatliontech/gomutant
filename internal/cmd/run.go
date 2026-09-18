@@ -181,12 +181,12 @@ func runCommand(ctx context.Context, o runOptions) error {
 				return err
 			}
 			terminal.Reset()
-			rep.emit("note", map[string]string{"text": "no targets"})
+			rep.emit("note", map[string]string{"text": "no targets: " + gomutant.SelectionEmptiedNote(o.targetsFile != "", o.changed, "--changed")})
 			if !o.plan {
 				rep.emit("summary", gomutant.RunSummary{Run: runID})
 			}
 		} else {
-			fmt.Fprintln(&terminal, "no targets")
+			fmt.Fprintln(&terminal, "no targets: "+gomutant.SelectionEmptiedNote(o.targetsFile != "", o.changed, "--changed"))
 			if !o.plan {
 				renderRunSummary(&terminal, gomutant.RunSummary{})
 			}
@@ -402,9 +402,19 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	rendered := outcome.Rendered
 	deltaOpen := 0
+	// An error exit after the final merge persisted flushes what was
+	// rendered so far with the merge's residue sheds (surfaced once,
+	// never silently dropped — REQ-attest-survivor) and carries the
+	// document changes it persisted in its text, as the structured face
+	// does (REQ-mcp-findings-doc).
+	exitAfterWrite := func(err error) error {
+		renderResidueSheds(o, rep, &terminal, outcome)
+		_ = rep.flushProse(terminal.String())
+		return outcome.PersistedRiding(err)
+	}
 	for _, f := range rendered {
 		if err := ctx.Err(); err != nil {
-			return err
+			return exitAfterWrite(err)
 		}
 		var layer, layerReason string
 		if f.Skipped == "" {
@@ -425,7 +435,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if cut != nil && f.Skipped == "" {
 			var err error
 			if split, err = tree.CutSurvivorsContext(ctx, f, *cut); err != nil {
-				return err
+				return exitAfterWrite(err)
 			}
 			onDelta = split.OnDelta
 			deltaOpen += len(onDelta)
@@ -533,22 +543,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		renderCoverageBound(&terminal, planSummary.Selection, planSummary.Unreached)
 		fmt.Fprintln(&terminal, "plan only: no baselines probed, no mutants executed, nothing persisted")
 	} else {
-		// A shed disposition is surfaced once, never silently dropped
-		// (REQ-attest-survivor): the first report wins - a shed the
-		// incremental commit already streamed, or a mutant whose fate the
-		// contradiction line already told (killed evidence with the shed
-		// reasoning attached), is not retold with a vaguer reason. What
-		// remains here is the final merge's residue.
-		for _, d := range outcome.ResidueSheds {
-			if o.jsonl {
-				// One wire shape per class: the final-merge residue
-				// emits the same structured event the streamed sheds
-				// do, never a prose note.
-				rep.emit("attestation-shed", d)
-				continue
-			}
-			fmt.Fprintf(&terminal, "attestation shed: %s\n", d.Text())
-		}
+		renderResidueSheds(o, rep, &terminal, outcome)
 		// A record this run carried from the machine-local overlay into
 		// the committed document is a state change git does not see until
 		// committed, so the run says it happened (REQ-mcp-findings-doc).
@@ -733,13 +728,32 @@ func renderAnalysis(w io.Writer, event gomutant.AnalysisEvent) {
 	}
 }
 
+// renderResidueSheds renders the final merge's residue sheds — a shed
+// disposition is surfaced once, never silently dropped
+// (REQ-attest-survivor): the first report wins, a shed the incremental
+// commit already streamed, or a mutant whose fate the contradiction
+// line already told (killed evidence with the shed reasoning attached),
+// is not retold with a vaguer reason; what remains is the merge's
+// residue. One wire shape per class: on the structured stream the
+// residue emits the same event the streamed sheds do, never a prose
+// note.
+func renderResidueSheds(o runOptions, rep *runReporter, terminal io.Writer, outcome gomutant.RunOutcome) {
+	for _, d := range outcome.ResidueSheds {
+		if o.jsonl {
+			rep.emit("attestation-shed", d)
+			continue
+		}
+		fmt.Fprintf(terminal, "attestation shed: %s\n", d.Text())
+	}
+}
+
 // renderPromoted states the records the run's writes carried from the
 // machine-local overlay into the committed document — a state change
 // git does not see until committed, so the run says it happened on
 // every path that writes (REQ-mcp-findings-doc).
 func renderPromoted(w io.Writer, outcome gomutant.RunOutcome) {
-	if outcome.Promoted > 0 {
-		fmt.Fprintf(w, "%d record(s) promoted - findings document changed, commit it\n", outcome.Promoted)
+	if line := outcome.PromotedText(); line != "" {
+		fmt.Fprintln(w, line)
 	}
 }
 

@@ -3,6 +3,7 @@ package gomutant
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // RunLedger is a run's document side, one implementation both faces
@@ -274,6 +275,37 @@ func droppedSymbols(current, merged []Finding) int {
 		}
 	}
 	return dropped
+}
+
+// PromotedText states the records the run's writes carried from the
+// machine-local overlay into the committed document — a document change
+// git only sees when committed — or nothing when none was.
+func (o RunOutcome) PromotedText() string {
+	if o.Promoted == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d record(s) promoted - findings document changed, commit it", o.Promoted)
+}
+
+// PersistedRiding folds the document changes the final merge persisted
+// — a reconcile's drop, a promotion — into an error exit after it: a
+// face that reports the error alone would hide a document change git
+// only sees when committed, so the counts ride the error text on both
+// faces, as sheds do on the structured one (REQ-mcp-findings-doc).
+func (o RunOutcome) PersistedRiding(err error) error {
+	if err == nil {
+		return nil
+	}
+	var parts []string
+	for _, line := range []string{o.DropText(), o.PromotedText()} {
+		if line != "" {
+			parts = append(parts, line)
+		}
+	}
+	if len(parts) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w — additionally, %s (persisted)", err, strings.Join(parts, "; "))
 }
 
 // mutantKey identifies one mutant across the run's reports: the

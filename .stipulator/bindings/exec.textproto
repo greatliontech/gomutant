@@ -2580,3 +2580,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "7c5c91acf4705feb60711b24440e20ed3791c195a06862648e48249988bcedd0"
 }
+
+bindings {
+  requirement_id: "REQ-exec-preparation"
+  content_hash: "3aa09fb7e32fbba6201cb12cc35e9855af6839f8f47671a2f6d143dda47b047d"
+  source_hash: "16d3b8d96632256b0e909c91c952a886f9b5503d947999a3c85f2482de8ff4f2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestDiscoverRefusesTheSelectionBeforeTheSurface"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "180e7d571e365414b9bde23b16d01226be39a812ff99363b83604c04dec319f7"
+}
+
+bindings {
+  requirement_id: "REQ-exec-preparation"
+  content_hash: "3aa09fb7e32fbba6201cb12cc35e9855af6839f8f47671a2f6d143dda47b047d"
+  source_hash: "16d3b8d96632256b0e909c91c952a886f9b5503d947999a3c85f2482de8ff4f2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolDiscoverRefusesTheSelectionBeforeTheSurface"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "316976b22ed46b5f9a20805b442849ec8bf4cd69a9e1e2cd5c6df14780b2bb63"
+}
