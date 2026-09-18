@@ -18,9 +18,10 @@ context, the per-call arguments shrinking to the mutant, the package
 set, the pattern, and the timeout. Invariants preserved: every spawn
 under the run's bounds (`TestConcurrentProbesSpawnUnderTheirOwnBounds`,
 `TestCampaignAndProbeKeepTheirOwnBounds`); the test seams
-(`runMutantObservedEnv`, `groupBaselineProbe`, `testProbe`,
-`runMutantEvidence`, `coveredPositions`, `phaseBaselineProbe`,
-`campaignCoveredPositions`) keep observing each spawn's inputs.
+(the root's `seams` fields `runMutantObserved`, `runMutantShaped`,
+`baselineProbe`, `killGround`, `advisoryProbe`, `testProbe`,
+`runMutantEvidence`, `coveredPositions`) keep observing each spawn's
+inputs.
 
 Lands: cross-tool train chunk 214
 signatures.

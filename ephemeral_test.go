@@ -168,9 +168,9 @@ func TestEphemeral(t *testing.T) {
 	// process launches for a pattern selecting nothing, and the
 	// unmeetable timeout below would name itself first if one did.
 	probes := 0
-	probe := testProbe
-	defer func() { testProbe = probe }()
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	probe := seams.testProbe
+	defer func() { seams.testProbe = probe }()
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
 		probes++
 		return probe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}
@@ -190,14 +190,14 @@ func TestEphemeral(t *testing.T) {
 	}
 	// A failing baseline with nothing rendered (an output-less failure)
 	// refuses on one line — no dangling diagnostic separator.
-	counting := testProbe
-	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
+	counting := seams.testProbe
+	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
 		return 1, false, "", nil
 	}
 	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") || strings.HasSuffix(err.Error(), "\n") {
 		t.Fatalf("output-less failing baseline: %q; want the one-line refusal", err)
 	}
-	testProbe = counting
+	seams.testProbe = counting
 	// The failing-clean pairing edits the failing package's OWN test
 	// file: the linkage gate admits it (the oracle's own files are in
 	// its linked set), so the baseline probe is what refuses.
@@ -355,11 +355,11 @@ func TestEphemeralProbeFailureLeavesLabelAbsent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per probe")
 	}
-	restore := coveredPositions
-	coveredPositions = func(context.Context, string, string, string, string, time.Duration, []string, []string, engine.DirectiveCoverageView, engine.OracleBounds) (engine.Coverage, error) {
+	restore := seams.coveredPositions
+	seams.coveredPositions = func(context.Context, string, string, string, string, time.Duration, []string, []string, engine.DirectiveCoverageView, engine.OracleBounds) (engine.Coverage, error) {
 		return engine.Coverage{}, errors.New("probe refused")
 	}
-	defer func() { coveredPositions = restore }()
+	defer func() { seams.coveredPositions = restore }()
 	tr := fixtureTree(t)
 	linkedIdle, err := os.ReadFile("internal/engine/testdata/fixturemod/genp/gen.go")
 	if err != nil {
@@ -405,13 +405,13 @@ func TestEphemeralCoverageProbeRunsUnderMeasurementLeash(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per probe")
 	}
-	restore := coveredPositions
+	restore := seams.coveredPositions
 	var got []time.Duration
-	coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
+	seams.coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
 		got = append(got, timeout)
 		return engine.Coverage{}, errors.New("probe refused")
 	}
-	defer func() { coveredPositions = restore }()
+	defer func() { seams.coveredPositions = restore }()
 	tr := fixtureTree(t)
 	linkedIdle, err := os.ReadFile("internal/engine/testdata/fixturemod/genp/gen.go")
 	if err != nil {
@@ -441,13 +441,13 @@ func TestEphemeralBaselineRunsUnderLeash(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per probe")
 	}
-	restore := testProbe
+	restore := seams.testProbe
 	var bounds []time.Duration
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, oracleBounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, oracleBounds engine.OracleBounds) (int, bool, string, error) {
 		bounds = append(bounds, timeout)
 		return restore(ctx, dir, testPkg, run, timeout, binFlags, env, oracleBounds)
 	}
-	defer func() { testProbe = restore }()
+	defer func() { seams.testProbe = restore }()
 	tr := fixtureTree(t)
 	inside, err := os.ReadFile("internal/engine/testdata/fixturemod/lib/lib.go")
 	if err != nil {
@@ -486,7 +486,7 @@ func TestEphemeralDerivesOracleBudgetFromBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	derived, err := time.ParseDuration(res.OracleBudget)
-	if err != nil || derived < ephemeralBudgetFloor || derived >= ephemeralBaselineLeash {
+	if err != nil || derived < seams.ephemeralBudgetFloor || derived >= ephemeralBaselineLeash {
 		t.Fatalf("derived budget = %q (%v), want the floor <= budget < the baseline leash — a budget equal to the leash means the derivation never ran", res.OracleBudget, err)
 	}
 	// The derivation input is pinned on the result: a zeroed or
@@ -516,10 +516,10 @@ func TestEphemeralDerivesOracleBudgetFromBaseline(t *testing.T) {
 // mutant always recompiles), and a timeout is a kill — the flattering
 // direction.
 func TestDerivedOracleBudget(t *testing.T) {
-	if ephemeralBudgetFloor < 60*time.Second {
-		t.Fatalf("floor = %v, below the retired 60s fixed default — a derived budget must never be less patient than the knob it replaced", ephemeralBudgetFloor)
+	if seams.ephemeralBudgetFloor < 60*time.Second {
+		t.Fatalf("floor = %v, below the retired 60s fixed default — a derived budget must never be less patient than the knob it replaced", seams.ephemeralBudgetFloor)
 	}
-	if got := derivedOracleBudget(time.Second); got != ephemeralBudgetFloor {
+	if got := derivedOracleBudget(time.Second); got != seams.ephemeralBudgetFloor {
 		t.Fatalf("sub-floor baseline budget = %v, want the floor", got)
 	}
 	if got := derivedOracleBudget(time.Minute); got != 4*time.Minute {

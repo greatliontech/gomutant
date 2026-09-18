@@ -335,13 +335,13 @@ func TestConcurrentProbesSpawnUnderTheirOwnBounds(t *testing.T) {
 		defer mu.Unlock()
 		spawns[run] = append(spawns[run], bounds)
 	}
-	priorProbe, priorMutant := testProbe, runMutantEvidence
-	defer func() { testProbe, runMutantEvidence = priorProbe, priorMutant }()
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	priorProbe, priorMutant := seams.testProbe, seams.runMutantEvidence
+	defer func() { seams.testProbe, seams.runMutantEvidence = priorProbe, priorMutant }()
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
 		record(run, bounds)
 		return priorProbe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}
-	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
+	seams.runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		record(runRegex, bounds)
 		return priorMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env, bounds)
 	}
@@ -394,29 +394,29 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 	broken := strings.Replace(string(original), "return a + b", "return a - b", 1)
 	var mu sync.Mutex
 	var campaignSpawns, probeSpawns []engine.OracleBounds
-	priorProbe, priorMutant, priorCampaign, priorBaseline := testProbe, runMutantEvidence, runMutantObservedEnv, groupBaselineProbe
+	priorProbe, priorMutant, priorCampaign, priorBaseline := seams.testProbe, seams.runMutantEvidence, seams.runMutantObserved, seams.baselineProbe
 	defer func() {
-		testProbe, runMutantEvidence, runMutantObservedEnv, groupBaselineProbe = priorProbe, priorMutant, priorCampaign, priorBaseline
+		seams.testProbe, seams.runMutantEvidence, seams.runMutantObserved, seams.baselineProbe = priorProbe, priorMutant, priorCampaign, priorBaseline
 	}()
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
 		mu.Lock()
 		probeSpawns = append(probeSpawns, bounds)
 		mu.Unlock()
 		return priorProbe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}
-	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
+	seams.runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		mu.Lock()
 		probeSpawns = append(probeSpawns, bounds)
 		mu.Unlock()
 		return priorMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env, bounds)
 	}
-	runMutantObservedEnv = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 		mu.Lock()
 		campaignSpawns = append(campaignSpawns, bounds)
 		mu.Unlock()
 		return priorCampaign(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 	}
-	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
 		mu.Lock()
 		campaignSpawns = append(campaignSpawns, bounds)
 		mu.Unlock()

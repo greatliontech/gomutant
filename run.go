@@ -1019,7 +1019,7 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 		if pkg == "" || fn == "" || !ok {
 			continue
 		}
-		_, passed, _, _, observed, err := engine.TestProbeObservedEnv(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.advisoryLeash(g), g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+		_, passed, _, _, observed, err := seams.advisoryProbe(ctx, t.dir, pkg, "^"+regexp.QuoteMeta(fn)+"$", opts.advisoryLeash(g), g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return oracleAttribution{}, ctx.Err()
@@ -1291,7 +1291,7 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 		return nil
 	}()
 	if scopedGroup != nil && t.scopedBaselinePasses(ctx, *scopedGroup, scopedBaselines, opts, runEnv) {
-		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, confirmBudget, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := seams.runMutantObserved(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, confirmBudget, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		if err != nil {
 			return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: killer-scoped confirmation: %w", m.Symbol, m.Position, m.Operator, err)
 		}
@@ -1333,7 +1333,7 @@ func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scope
 	if passed, ok := memo[key]; ok {
 		return passed
 	}
-	ran, passed, _, _, _, err := engine.TestProbeObservedEnv(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+	ran, passed, _, _, _, err := seams.killGround(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 	ok := err == nil && ran > 0 && passed
 	memo[key] = ok
 	return ok
@@ -1405,7 +1405,7 @@ type stepResult struct {
 // ran its differential baseline under this very pattern inside the
 // engine.
 func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string, g group, narrowed bool, timeout time.Duration) (stepResult, error) {
-	out, killer, memoryDecided, state, incomplete, diagnostic, err := runMutantObservedEnv(ctx, t.dir, m, g.pkgs, g.runRegex, timeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+	out, killer, memoryDecided, state, incomplete, diagnostic, err := seams.runMutantObserved(ctx, t.dir, m, g.pkgs, g.runRegex, timeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 	res := stepResult{out: out, killer: killer, memoryDecided: memoryDecided, state: state, incomplete: incomplete, diagnostic: diagnostic}
 	if err != nil {
 		return res, fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
@@ -2151,7 +2151,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			// to the loosest budget any verdict runs under
 			// (mergeScoredFacts); the leash is a measurement ceiling,
 			// never a recorded bound.
-			f.OracleTimeout = ephemeralBudgetFloor.String()
+			f.OracleTimeout = seams.ephemeralBudgetFloor.String()
 			f.OracleTimeoutDerived = true
 		}
 		if tg.Shaped() {
@@ -2375,8 +2375,8 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// holds it exclusively (REQ-exec-attribution).
 	var probeGate sync.RWMutex
 	opts.probeGate = &probeGate
-	if probeGateInstalled != nil {
-		probeGateInstalled(&probeGate)
+	if seams.probeGateInstalled != nil {
+		seams.probeGateInstalled(&probeGate)
 	}
 	// One observed union over every target and oracle replaces the
 	// per-target proof builds the campaign previously paid (the measured
@@ -2622,7 +2622,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				}
 				baselineStart := time.Now()
 				probeGate.RLock()
-				ran, passed, failedTests, diagnostic, observed, err := groupBaselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+				ran, passed, failedTests, diagnostic, observed, err := seams.baselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 				probeGate.RUnlock()
 				baselineElapsed := time.Since(baselineStart)
 				var reason string
@@ -3458,7 +3458,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		defer close(items)
 		delivered := 0
 		err := deliverPrepared(runCtx, func(w work) error {
-			if runTruncateAfterItems > 0 && delivered >= runTruncateAfterItems {
+			if seams.truncateAfterItems > 0 && delivered >= seams.truncateAfterItems {
 				return errTruncateSeam
 			}
 			select {
@@ -3472,10 +3472,10 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if errors.Is(err, errTruncateSeam) {
 			// The seam models the failure REQ-exec-completion exists
 			// for: a pipeline that ends early with its error lost.
-			// With runTruncateErr set it models the OTHER failure - a
+			// With seams.truncateErr set it models the OTHER failure - a
 			// preparation error that surfaces - so the error path's
 			// held-window aggregation is testable.
-			err = runTruncateErr
+			err = seams.truncateErr
 		}
 		prepErr = err
 	}()
@@ -3503,7 +3503,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// partition never moves between runs of an unchanged tree under the
 	// same workers and the same derivations, and audited sets nest
 	// (REQ-exec-oracle-run's window rule).
-	windowBudget, windowMinimum := windowcost.Bounds(jobs, runWindowCandidates)
+	windowBudget, windowMinimum := windowcost.Bounds(jobs, seams.windowCandidates)
 	var treeDrift error
 	// commitAndAttribute is the one epilogue every measured or spliced
 	// finding leaves aggregation through: install, persist, and — when
@@ -4461,7 +4461,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			pool = append(pool, mkReady(window))
 		}
 		if windowChOpen {
-			if runWaitPreparedBeforePick {
+			if seams.waitPreparedBeforePick {
 				// Test seam: hold each pick until preparation
 				// completes, so ordering assertions see the whole
 				// pool instead of racing the serial preparation.
@@ -4668,37 +4668,6 @@ func snapshotFindings(findings []Finding) []Finding {
 	}
 	return snapshot
 }
-
-// runWindowCandidates fixes the execution window when positive — a
-// test seam taking BOTH bounds, the ceiling and the minimum, so the
-// execution budget never splits a fixed window; zero means the
-// jobs-derived rule (windowcost.Bounds).
-var runWindowCandidates int
-
-// groupBaselineProbe is the baseline probe seam — a var so the bank
-// e2e can count real probes without stubbing the engine wholesale.
-var groupBaselineProbe = engine.TestProbeObservedEnv
-
-// runWaitPreparedBeforePick holds each window pick until preparation
-// completes — a test seam: value-order assertions see the whole ready
-// pool instead of racing the serial preparation. Production picks
-// never wait: a window that has not been gathered is not ready.
-var runWaitPreparedBeforePick bool
-
-// runTruncateAfterItems, when positive, makes the preparation pipeline
-// stop delivering work after that many items with the stopping error
-// lost - a test seam reproducing the truncation shape
-// REQ-exec-completion refuses. Production never sets it.
-var runTruncateAfterItems int
-
-var errTruncateSeam = errors.New("truncation seam")
-
-// runTruncateErr, when non-nil beside runTruncateAfterItems, is
-// surfaced as the preparation pipeline's own error instead of being
-// swallowed: the seam for the error path's held-window aggregation -
-// completed windows, the held one included, commit before the error
-// returns (REQ-exec-attribution's abort terms).
-var runTruncateErr error
 
 // gatherWindow blocks for the next prepared work item and keeps blocking
 // until the window's candidate budget is met or preparation ends. Blocking —
@@ -5569,7 +5538,7 @@ func (t *Tree) oracleCoverage(ctx context.Context, w work, opts runOptions, runE
 		key := coverageKey(g, coverPkg)
 		got, ok := cache[key]
 		if !ok {
-			probed, err := campaignCoveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.advisoryLeash(g), g.flags, runEnv, t.eng.DirectiveCoverage(), opts.bounds)
+			probed, err := seams.coveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.advisoryLeash(g), g.flags, runEnv, t.eng.DirectiveCoverage(), opts.bounds)
 			if err != nil {
 				if ctx.Err() != nil {
 					return engine.Coverage{}, false, ctx.Err()

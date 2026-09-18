@@ -3319,10 +3319,10 @@ func TestRunStaleReasonReusesTheRunsViews(t *testing.T) {
 	}
 
 	var supplementary [][]string
-	inspectionSupplementaryViewHook = func(symbols []string) {
+	seams.inspectionSupplementaryView = func(symbols []string) {
 		supplementary = append(supplementary, append([]string(nil), symbols...))
 	}
-	defer func() { inspectionSupplementaryViewHook = nil }()
+	defer func() { seams.inspectionSupplementaryView = nil }()
 
 	tampered := append([]Finding(nil), first...)
 	tampered[0].TargetEvidence.MaximalClosure = "not-the-current-closure"
@@ -4281,9 +4281,9 @@ func TestRunCommitsEarlierWindowsBeforeLaterOnesDispatch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test")
 	}
-	old := runWindowCandidates
-	runWindowCandidates = 1
-	t.Cleanup(func() { runWindowCandidates = old })
+	old := seams.windowCandidates
+	seams.windowCandidates = 1
+	t.Cleanup(func() { seams.windowCandidates = old })
 	tree := fixtureTree(t)
 	targets := []Target{
 		{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}},
@@ -4340,10 +4340,10 @@ func TestRunExecutesCheapestReadyWindowFirst(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test with sleeping oracles")
 	}
-	old := runWindowCandidates
-	runWindowCandidates = 1
-	runWaitPreparedBeforePick = true
-	t.Cleanup(func() { runWindowCandidates = old; runWaitPreparedBeforePick = false })
+	old := seams.windowCandidates
+	seams.windowCandidates = 1
+	seams.waitPreparedBeforePick = true
+	t.Cleanup(func() { seams.windowCandidates = old; seams.waitPreparedBeforePick = false })
 	files := map[string]string{
 		"go.mod": "module example.com/valueorder\n\ngo 1.26\n",
 		// a: the slow first window — its oracle sleep keeps the driver
@@ -5741,9 +5741,9 @@ func TestRunMeasuresDerivedBudgetFromBaseline(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test baselines and mutants")
 	}
-	oldFloor := ephemeralBudgetFloor
-	ephemeralBudgetFloor = time.Millisecond
-	defer func() { ephemeralBudgetFloor = oldFloor }()
+	oldFloor := seams.ephemeralBudgetFloor
+	seams.ephemeralBudgetFloor = time.Millisecond
+	defer func() { seams.ephemeralBudgetFloor = oldFloor }()
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":      "module example.com/measuredmod\n\ngo 1.26\n",
@@ -5806,9 +5806,9 @@ func TestRunServesDerivedTimeoutKillsByReexecution(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test baselines and a hanging mutant")
 	}
-	oldFloor := ephemeralBudgetFloor
-	ephemeralBudgetFloor = 2 * time.Second
-	defer func() { ephemeralBudgetFloor = oldFloor }()
+	oldFloor := seams.ephemeralBudgetFloor
+	seams.ephemeralBudgetFloor = 2 * time.Second
+	defer func() { seams.ephemeralBudgetFloor = oldFloor }()
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":      "module example.com/hangmod\n\ngo 1.26\n",
@@ -6050,9 +6050,9 @@ func TestRunGracefulInterruptDiscardsServeWorkWhole(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test baselines and a hanging mutant")
 	}
-	oldFloor := ephemeralBudgetFloor
-	ephemeralBudgetFloor = 2 * time.Second
-	defer func() { ephemeralBudgetFloor = oldFloor }()
+	oldFloor := seams.ephemeralBudgetFloor
+	seams.ephemeralBudgetFloor = 2 * time.Second
+	defer func() { seams.ephemeralBudgetFloor = oldFloor }()
 	dir := t.TempDir()
 	// Two independent hang points, so the serve work carries TWO flagged
 	// candidates and the drain can land mid-serve (k=1) — the arm that
@@ -6116,9 +6116,9 @@ func TestShapedMutantRunsUnderDerivedBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test baselines and a hanging shaped mutant")
 	}
-	oldFloor := ephemeralBudgetFloor
-	ephemeralBudgetFloor = 2 * time.Second
-	defer func() { ephemeralBudgetFloor = oldFloor }()
+	oldFloor := seams.ephemeralBudgetFloor
+	seams.ephemeralBudgetFloor = 2 * time.Second
+	defer func() { seams.ephemeralBudgetFloor = oldFloor }()
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":      "module example.com/hangshaped\n\ngo 1.26\n",

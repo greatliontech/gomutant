@@ -53,10 +53,10 @@ func TestInspectFindingsJudgesInOnePass(t *testing.T) {
 		OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/lib.TestGone"}}})
 	var supplementary, builds int
 	var built [][]string
-	prior, priorBuild := inspectionSupplementaryViewHook, subjectViewBuildHook
-	inspectionSupplementaryViewHook = func([]string) { supplementary++ }
-	subjectViewBuildHook = func(symbols []string) { builds++; built = append(built, symbols) }
-	defer func() { inspectionSupplementaryViewHook, subjectViewBuildHook = prior, priorBuild }()
+	prior, priorBuild := seams.inspectionSupplementaryView, seams.subjectViewBuild
+	seams.inspectionSupplementaryView = func([]string) { supplementary++ }
+	seams.subjectViewBuild = func(symbols []string) { builds++; built = append(built, symbols) }
+	defer func() { seams.inspectionSupplementaryView, seams.subjectViewBuild = prior, priorBuild }()
 	var progressed []string
 	batched, err := tr.InspectFindings(ctx, records, func(stage string) { progressed = append(progressed, stage) })
 	if err != nil {

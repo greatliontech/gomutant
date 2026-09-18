@@ -6,7 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // A kill measured under a concurrent pool re-executes alone and the
@@ -35,8 +40,8 @@ func TestRunConfirmsKillsSerially(t *testing.T) {
 	// while the confirmation holds the gate — it succeeds the instant
 	// the exclusive hold is dropped, readers or not.
 	var gate *sync.RWMutex
-	probeGateInstalled = func(g *sync.RWMutex) { gate = g }
-	t.Cleanup(func() { probeGateInstalled = nil })
+	seams.probeGateInstalled = func(g *sync.RWMutex) { gate = g }
+	t.Cleanup(func() { seams.probeGateInstalled = nil })
 	confirmations, unguarded := 0, 0
 	fs, err := tr.Run(context.Background(), []Target{target}, Options{Jobs: 2, confirmScoped: func(string, string, []string) {
 		confirmations++
@@ -293,5 +298,37 @@ func TestRunKillerScopedRefusesOrderDependentKiller(t *testing.T) {
 	}
 	if len(f.Survivors) == 0 {
 		t.Fatalf("the false kill did not flip to a survivor: %+v", f)
+	}
+}
+
+// The killer-scoped differential ground a confirmation is scored
+// against runs through the run's kill-ground seam: a test stubbing it
+// sees every confirmation's probe — one per distinct killer, memoized —
+// so no confirmation is judged for real behind a stub's back
+// (REQ-exec-attribution).
+func TestKillGroundIsTheConfirmationsSeam(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr, err := Load(fixtureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := Target{Symbol: "example.com/fixture/counting.Value", Oracle: []string{"example.com/fixture/counting.TestCountingStrict"}}
+	prior := seams.killGround
+	t.Cleanup(func() { seams.killGround = prior })
+	var grounds atomic.Int64
+	seams.killGround = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+		grounds.Add(1)
+		return prior(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
+	}
+	// Two workers: a kill confirmed serially is one a concurrent worker
+	// scored first — under one worker no kill is confirmed.
+	fs, err := tr.Run(context.Background(), []Target{target}, Options{Jobs: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fs[0].Killed == 0 || grounds.Load() != 1 {
+		t.Fatalf("kill-ground probes seen by the seam = %d over %d kills; want the one memoized ground per distinct killer", grounds.Load(), fs[0].Killed)
 	}
 }

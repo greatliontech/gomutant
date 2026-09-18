@@ -49,35 +49,6 @@ import (
 // measurement (inter-test state moves branches both ways), and the
 // spec pins "measured once per oracle group".
 
-// The seams below are package-level variables a test swaps for the
-// duration of one Run: they are read unsynchronized from the run's
-// goroutines, so the package's tests run sequentially — a parallel
-// test swapping one mid-Run would race the read and leak into its
-// siblings.
-//
-// campaignCoveredPositions is the schedule's (and the survivor
-// buckets') probe; a variable so tests can supply crafted coverage
-// without constructing real coverage fixtures per shape.
-var campaignCoveredPositions = engine.CoveredPositions
-
-// runMutantObservedEnv is the group executor's engine call; a variable
-// so a test can observe the executed patterns — the exemption's one
-// direct observable is which patterns ran (the exempt remainder's
-// never appears outside the audit's full runs).
-var runMutantObservedEnv = engine.RunMutantObservedEnv
-
-// probeGateInstalled observes the run's producer-probe gate at its
-// installation; a variable so a test can hold the gate's handle and
-// pin, from inside a confirmation, that the confirmation runs under
-// the gate held exclusively (REQ-exec-attribution's isolation from
-// preparation probes). Sequential tests only, as every seam above.
-var probeGateInstalled func(gate *sync.RWMutex)
-
-// phaseBaselineProbe is the phase-pattern baseline runner; a variable
-// so the order-dependent-suite degrade is testable without an
-// order-dependent fixture.
-var phaseBaselineProbe = engine.TestProbeObservedEnv
-
 // scheduleBatch is one probe batch: the test function names it ran
 // (package-local, sorted), the coverage they produced together, and
 // the probe's own wall-clock — the batch's measured cost, the window
@@ -360,7 +331,7 @@ func (t *Tree) probeScheduleUnit(ctx context.Context, unit probeUnit, opts runOp
 			return err
 		}
 		probeStart := time.Now()
-		cov, err := campaignCoveredPositions(ctx, t.dir, unit.g.pkgs[0], testRunRegex(batch), unit.coverPkg, opts.advisoryLeash(unit.g), unit.g.flags, runEnv, t.eng.DirectiveCoverage(), opts.bounds)
+		cov, err := seams.coveredPositions(ctx, t.dir, unit.g.pkgs[0], testRunRegex(batch), unit.coverPkg, opts.advisoryLeash(unit.g), unit.g.flags, runEnv, t.eng.DirectiveCoverage(), opts.bounds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -520,7 +491,7 @@ func (t *Tree) phaseKillVouched(ctx context.Context, g group, bound time.Duratio
 			opts.probeGate.RLock()
 			defer opts.probeGate.RUnlock()
 		}
-		ran, passed, _, _, _, err := phaseBaselineProbe(ctx, t.dir, g.pkgs[0], g.runRegex, bound, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+		ran, passed, _, _, _, err := seams.killGround(ctx, t.dir, g.pkgs[0], g.runRegex, bound, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		return err == nil && ran > 0 && passed
 	})
 }

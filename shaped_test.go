@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 func writeShapedFixture(t *testing.T) string {
@@ -291,9 +293,30 @@ func TestShapedWorkspaceCompileKill(t *testing.T) {
 	target := Target{Symbol: "structural:ws-satisfies",
 		Structural: &StructuralSpec{Class: "interface-satisfaction", Type: "example.com/ws/iface.Impl", Interface: "example.com/ws/iface.Doer"},
 		Oracle:     []string{"example.com/ws/iface.TestSatisfies"}, OracleExplicit: true}
+	// The shaped path's two verdict-bearing engine calls — the scratch
+	// twin's mutant run and the clean twin's probe that turns a compile
+	// refusal into the oracle's kill — run through the seams, so a stub
+	// sees each and no verdict is judged for real behind its back.
+	priorShaped, priorProbe := seams.runMutantShaped, seams.testProbe
+	t.Cleanup(func() { seams.runMutantShaped, seams.testProbe = priorShaped, priorProbe })
+	shapedRuns, cleanProbes := 0, 0
+	seams.runMutantShaped = func(ctx context.Context, dir, cleanDir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env, cleanEnv []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, string, error) {
+		shapedRuns++
+		return priorShaped(ctx, dir, cleanDir, m, testPkgs, runRegex, timeout, binFlags, env, cleanEnv, bounds)
+	}
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+		cleanProbes++
+		return priorProbe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
+	}
 	findings, err := tree.Run(context.Background(), []Target{target}, Options{OracleTimeout: 2 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A kill runs twice under more than one worker (its concurrent
+	// execution and the serial confirmation), once under one; each run
+	// pays one clean-twin probe.
+	if shapedRuns == 0 || cleanProbes != shapedRuns {
+		t.Fatalf("shaped runs seen by the seams = %d, clean probes %d; want every run and its probe", shapedRuns, cleanProbes)
 	}
 	if f := findings[0]; f.Skipped != "" || f.Killed != 1 {
 		t.Fatalf("workspace satisfaction probe not killed: %+v", f)

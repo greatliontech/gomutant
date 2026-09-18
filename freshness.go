@@ -235,22 +235,6 @@ func findingPackageProcessAttestable(f Finding) bool {
 	return packageProcessAttestable(f.Symbol, oracle)
 }
 
-// subjectViewBuildHook observes each subject-view build with its
-// requested symbols — a test seam for the one-build claims (the batched
-// judge's one set per posture, the campaign's one build per mode shared
-// by the decision and the producer roles). Fired from the one build
-// loop over resolved groups, so every build is counted whatever its
-// caller's fault disposition; a strict call aborting at resolution
-// built nothing and fires nothing. Sequential tests only, as every
-// package-level seam.
-var subjectViewBuildHook func(symbols []string)
-
-// observedUnionHook observes each proof capture pass with the symbols
-// it covers, fired before the first module's capture — a test seam for
-// the capture-time fault routes (a tree moving between a strict
-// build's construction and its proof capture). Sequential tests only.
-var observedUnionHook func(symbols []string)
-
 // newSubjectViews is the standalone inspection's strict build: its
 // evidence environment carries the width the caller names — a
 // campaign's, when the views supplement a campaign's own set; none
@@ -296,8 +280,8 @@ func (t *Tree) buildSubjectViews(ctx context.Context, symbols []string, packageC
 // hook's argument (the requested set, unresolvable symbols included),
 // never read for the build itself.
 func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups []moduleGroup, engines *subjectEngines, faults map[string]error) (*subjectViewSet, error) {
-	if subjectViewBuildHook != nil {
-		subjectViewBuildHook(requested)
+	if seams.subjectViewBuild != nil {
+		seams.subjectViewBuild(requested)
 	}
 	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(requested)), width: engines.width}
 	env := engines.evidenceEnv
@@ -568,8 +552,8 @@ func (s *subjectViewSet) observed(ctx context.Context) (*observedViewSet, map[st
 		symbols = append(symbols, symbol)
 	}
 	sort.Strings(symbols)
-	if observedUnionHook != nil {
-		observedUnionHook(symbols)
+	if seams.observedUnion != nil {
+		seams.observedUnion(symbols)
 	}
 	for _, group := range s.groupByModule(symbols) {
 		if err := ctx.Err(); err != nil {
@@ -1110,7 +1094,7 @@ func (t *Tree) admitFindingContext(ctx context.Context, f Finding, shared *admis
 // judgeAdmittedContext finishes an admitted record's judgment over the
 // views it reads — the prebuilt set where it serves the subject, a
 // supplementary view otherwise (the per-record judgment's own path,
-// reported through inspectionSupplementaryViewHook).
+// reported through seams.inspectionSupplementaryView).
 func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgmentAdmission, prebuilt *subjectViewSet) (FindingInspection, error) {
 	if adm.decided != nil {
 		inspection := *adm.decided
@@ -1180,8 +1164,8 @@ func (t *Tree) viewsFor(ctx context.Context, symbols []string, prebuilt *subject
 		missing = append(missing, symbol)
 	}
 	if len(missing) > 0 {
-		if inspectionSupplementaryViewHook != nil {
-			inspectionSupplementaryViewHook(missing)
+		if seams.inspectionSupplementaryView != nil {
+			seams.inspectionSupplementaryView(missing)
 		}
 		supplementary, err := t.supplementaryViews(ctx, missing, prebuilt, packageProcess)
 		if err != nil {
@@ -1204,11 +1188,6 @@ func canonicalCandidateEvidence(evidence []CandidateEvidence) []CandidateEvidenc
 	})
 	return sorted
 }
-
-// inspectionSupplementaryViewHook observes the supplementary view build for
-// symbols a caller-supplied prebuilt set does not cover — the event tests pin
-// to prove the run's stale-reason enrichment reuses the run's own views.
-var inspectionSupplementaryViewHook func(symbols []string)
 
 // inspectFindingStateContext classifies a record against the current tree.
 // A non-nil prebuilt view set serves the symbols it covers — the run's

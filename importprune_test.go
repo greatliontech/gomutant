@@ -194,10 +194,10 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 	}
 	mutated := strings.Replace(string(inside), "return x - 1", "return x - 2", 1)
 	crash := &engine.BaselineBuildError{Diagnostic: "# example.com/fixture/lib\n/usr/lib/go/pkg/tool/linux_amd64/compile: signal: segmentation fault (core dumped)"}
-	restore := testProbe
-	defer func() { testProbe = restore }()
+	restore := seams.testProbe
+	defer func() { seams.testProbe = restore }()
 	calls := 0
-	testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
 		calls++
 		if calls == 1 {
 			return 0, false, "", crash
@@ -213,7 +213,7 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 		t.Fatalf("baseline probed %d times, result %+v; want the crash retried once and the measured survivor", calls, res)
 	}
 	calls = 0
-	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
 		calls++
 		return 0, false, "", crash
 	}
@@ -223,7 +223,7 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 	// A baseline test that FAILS printing crash-shaped output is a
 	// failing test: no retry, the ordinary refusal.
 	calls = 0
-	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
 		calls++
 		return 1, false, "--- FAIL: TestWeak\n    cmd/compile panic: signal: goroutine dump quoted by the test", nil
 	}
@@ -247,10 +247,10 @@ func TestEphemeralMixedOutcomeKeepsTheUnexercisedAdvisory(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutated := strings.Replace(string(linkedIdle), "type G struct{}", "type G struct{ X int }", 1)
-	restore := runMutantEvidence
-	defer func() { runMutantEvidence = restore }()
+	restore := seams.runMutantEvidence
+	defer func() { seams.runMutantEvidence = restore }()
 	calls := 0
-	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
+	seams.runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		if calls == 1 {
 			return engine.MutantKilled, "TestWeak", "planted kill", "", nil
@@ -284,10 +284,10 @@ func TestEphemeralRetriesACompilerCrashOnce(t *testing.T) {
 		t.Fatal("fixture edit failed")
 	}
 	const crash = "# example.com/fixture/lib\n/usr/lib/go/pkg/tool/linux_amd64/compile: signal: segmentation fault (core dumped)"
-	restore := runMutantEvidence
-	defer func() { runMutantEvidence = restore }()
+	restore := seams.runMutantEvidence
+	defer func() { seams.runMutantEvidence = restore }()
 	calls := 0
-	runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
+	seams.runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		if calls == 1 {
 			return engine.MutantDiscarded, "", "", crash, nil
@@ -303,7 +303,7 @@ func TestEphemeralRetriesACompilerCrashOnce(t *testing.T) {
 		t.Fatalf("calls = %d, result = %+v; want one retry and the measured survivor", calls, res)
 	}
 	calls = 0
-	runMutantEvidence = func(context.Context, string, engine.Mutant, []string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
+	seams.runMutantEvidence = func(context.Context, string, engine.Mutant, []string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		return engine.MutantDiscarded, "", "", crash, nil
 	}
@@ -315,7 +315,7 @@ func TestEphemeralRetriesACompilerCrashOnce(t *testing.T) {
 	}
 	// A genuine compile diagnostic is not retried.
 	calls = 0
-	runMutantEvidence = func(context.Context, string, engine.Mutant, []string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
+	seams.runMutantEvidence = func(context.Context, string, engine.Mutant, []string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		return engine.MutantDiscarded, "", "", "# example.com/fixture/lib\n./lib.go:9:2: undefined: nope", nil
 	}

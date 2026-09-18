@@ -47,9 +47,9 @@ func TestEphemeralLeashLiftsFromTheBank(t *testing.T) {
 	tr := fixtureTree(t)
 	captured := errors.New("bound captured")
 	var bound time.Duration
-	probe := testProbe
-	defer func() { testProbe = probe }()
-	testProbe = func(_ context.Context, _, _, _ string, timeout time.Duration, _, _ []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	probe := seams.testProbe
+	defer func() { seams.testProbe = probe }()
+	seams.testProbe = func(_ context.Context, _, _, _ string, timeout time.Duration, _, _ []string, bounds engine.OracleBounds) (int, bool, string, error) {
 		bound = timeout
 		return 0, false, "", captured
 	}
@@ -76,7 +76,7 @@ func TestEphemeralLeashLiftsFromTheBank(t *testing.T) {
 		t.Fatalf("banked leash = %s; want the lift to %s (the package's LONGEST entry; another package's entry must not lift it)", bound, want)
 	}
 	// The command-deadline refusal names the leash that governed.
-	testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
 		return 0, false, "", fmt.Errorf("running baseline: %w", context.DeadlineExceeded)
 	}
 	if _, err := tr.RunEphemeral(context.Background(), req); err == nil || !strings.Contains(err.Error(), want.String()+"-leashed") {
@@ -93,13 +93,13 @@ func TestEphemeralCoverageProbeLeashLiftsFromTheBank(t *testing.T) {
 		t.Skip("runs go test per probe")
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	restore := coveredPositions
+	restore := seams.coveredPositions
 	var got []time.Duration
-	coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
+	seams.coveredPositions = func(_ context.Context, _, _, _, _ string, timeout time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
 		got = append(got, timeout)
 		return engine.Coverage{}, errors.New("probe refused")
 	}
-	defer func() { coveredPositions = restore }()
+	defer func() { seams.coveredPositions = restore }()
 	tr := fixtureTree(t)
 	bank := openBaselineBank(tr.dir)
 	bank.putBaseline("example.com/fixture/lib\x00^TestOther$\x00\x00"+tr.dir+"\x00"+tr.dir+"\x00", bankedBaseline{RawMillis: int64((20 * time.Minute) / time.Millisecond)})
@@ -134,8 +134,8 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 		t.Skip("runs go test baselines across four campaigns")
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	restoreProbe := groupBaselineProbe
-	restoreCov := campaignCoveredPositions
+	restoreProbe := seams.baselineProbe
+	restoreCov := seams.coveredPositions
 	restoreMinT := windowcost.ScheduleMinTests
 	restoreMinC := windowcost.ScheduleMinCandidates
 	// Lowered so the schedule's coverage probe fires over this two-test
@@ -144,17 +144,17 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 	windowcost.ScheduleMinTests = 2
 	windowcost.ScheduleMinCandidates = 1
 	t.Cleanup(func() {
-		groupBaselineProbe = restoreProbe
-		campaignCoveredPositions = restoreCov
+		seams.baselineProbe = restoreProbe
+		seams.coveredPositions = restoreCov
 		windowcost.ScheduleMinTests = restoreMinT
 		windowcost.ScheduleMinCandidates = restoreMinC
 	})
 	var bounds, probeBounds []time.Duration
-	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
 		bounds = append(bounds, timeout)
 		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, oracleBounds)
 	}
-	campaignCoveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView, oracleBounds engine.OracleBounds) (engine.Coverage, error) {
+	seams.coveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView, oracleBounds engine.OracleBounds) (engine.Coverage, error) {
 		probeBounds = append(probeBounds, timeout)
 		return engine.CoveredPositions(ctx, dir, testPkg, runRegex, coverPkg, timeout, flags, env, view, oracleBounds)
 	}

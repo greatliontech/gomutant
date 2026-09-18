@@ -510,3 +510,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "88c5806719550a1cf2396d6fb229cb6233e904b42b706478339f1a1790bde513"
 }
+
+bindings {
+  requirement_id: "REQ-target-structural"
+  content_hash: "9b52e5453c771f0adfb6b3c33dac05d8d22e2494f079e538e4b3ad827701f9d8"
+  source_hash: "79195945df2c5b8a30a99c6e29146b80fcb18ba0b5db3272be66b077dec2f123"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestShapedWorkspaceCompileKill"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0b86914b864aea769ba3a019933c85331c6bcb861ca674e067f83da3b7990bdd"
+}

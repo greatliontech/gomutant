@@ -219,13 +219,13 @@ func TestStrictObservedBuildPromotesACaptureFault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prior := observedUnionHook
-	observedUnionHook = func([]string) {
+	prior := seams.observedUnion
+	seams.observedUnion = func([]string) {
 		if err := os.Remove(filepath.Join(tmp, "lib", "lib.go")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	defer func() { observedUnionHook = prior }()
+	defer func() { seams.observedUnion = prior }()
 	union, err := tr.newStrictObservedViews(context.Background(), []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0))
 	if err == nil {
 		t.Fatalf("strict observed build over a tree that moved at the proof capture returned a union of %d symbols, want the capture fault", len(union.bySymbol))

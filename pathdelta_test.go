@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // The divergence stamp's best-effort naming: the paths present in
@@ -184,13 +185,22 @@ func TestProbeOracleInstabilityCollectsProbedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The solo probes run through the run's advisory seam: a stub sees
+	// one probe per oracle test.
+	prior := seams.advisoryProbe
+	t.Cleanup(func() { seams.advisoryProbe = prior })
+	probes := 0
+	seams.advisoryProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+		probes++
+		return prior(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
+	}
 	groups := []group{{pkgs: []string{"example.com/probe"}, moduleDir: root, packageDir: root}}
 	attr, err := tree.probeOracleInstability(context.Background(), []string{"example.com/probe.TestF"}, groups, runOptions{Options: Options{OracleTimeout: 2 * time.Minute}}, tree.eng.GoEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attr.completed != 1 {
-		t.Fatalf("probe did not complete: %+v", attr)
+	if attr.completed != 1 || probes != 1 {
+		t.Fatalf("probe did not complete through the seam: %+v (seam probes %d)", attr, probes)
 	}
 	if !attr.probedPaths["data.txt"] {
 		t.Fatalf("probed input not collected: %+v", attr.probedPaths)

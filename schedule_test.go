@@ -144,12 +144,12 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	}
 	restoreMin := windowcost.ScheduleMinTests
 	windowcost.ScheduleMinTests = 2
-	restoreProbe := campaignCoveredPositions
-	restoreRun := runMutantObservedEnv
+	restoreProbe := seams.coveredPositions
+	restoreRun := seams.runMutantObserved
 	defer func() {
 		windowcost.ScheduleMinTests = restoreMin
-		campaignCoveredPositions = restoreProbe
-		runMutantObservedEnv = restoreRun
+		seams.coveredPositions = restoreProbe
+		seams.runMutantObserved = restoreRun
 	}()
 	var oracleRuns atomic.Int64
 	var patternMu sync.Mutex
@@ -172,7 +172,7 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	const realKiller = "example.com/fixture/lib.TestAdd"
 	const auditObservationEnv = "GOMUTANT_AUDIT_OBSERVATION_MARKER"
 	fullPattern := testRunRegex([]string{"TestAdd", "TestWeak"})
-	runMutantObservedEnv = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 		oracleRuns.Add(1)
 		patternMu.Lock()
 		mutantPatterns = append(mutantPatterns, runRegex)
@@ -217,7 +217,7 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 	// TestWeak's crafted coverage claims the whole file (the reaching
 	// phase that kills nothing on Add mutants); TestAdd — the real
 	// killer — claims nothing, landing it in the remainder phase.
-	campaignCoveredPositions = func(_ context.Context, _, testPkg, runRegex, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
+	seams.coveredPositions = func(_ context.Context, _, testPkg, runRegex, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
 		mu.Lock()
 		probed = append(probed, runRegex)
 		mu.Unlock()
@@ -531,14 +531,14 @@ func TestPhaseKillWithoutPhaseBaselineDegradesToUnsplit(t *testing.T) {
 	}}
 	opts := runOptions{scheduleStore: store}
 
-	restoreRun := runMutantObservedEnv
-	restoreProbe := phaseBaselineProbe
+	restoreRun := seams.runMutantObserved
+	restoreProbe := seams.killGround
 	defer func() {
-		runMutantObservedEnv = restoreRun
-		phaseBaselineProbe = restoreProbe
+		seams.runMutantObserved = restoreRun
+		seams.killGround = restoreProbe
 	}()
 	var patterns []string
-	runMutantObservedEnv = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 		patterns = append(patterns, runRegex)
 		if runRegex == testRunRegex([]string{"TestA", "TestB"}) {
 			// The narrowed phase claims a kill — which the failing
@@ -547,7 +547,7 @@ func TestPhaseKillWithoutPhaseBaselineDegradesToUnsplit(t *testing.T) {
 		}
 		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
 	}
-	phaseBaselineProbe = func(_ context.Context, _, _, _ string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.killGround = func(_ context.Context, _, _, _ string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
 		return 1, false, []string{pkg + ".TestA"}, "", runtimeinput.Observation{}, nil
 	}
 
@@ -591,20 +591,20 @@ func TestPhaseKillVouchRunsUnderRunWideBound(t *testing.T) {
 	}}
 	opts := runOptions{Options: Options{OracleTimeout: time.Minute}, scheduleStore: store}
 
-	restoreRun := runMutantObservedEnv
-	restoreProbe := phaseBaselineProbe
+	restoreRun := seams.runMutantObserved
+	restoreProbe := seams.killGround
 	defer func() {
-		runMutantObservedEnv = restoreRun
-		phaseBaselineProbe = restoreProbe
+		seams.runMutantObserved = restoreRun
+		seams.killGround = restoreProbe
 	}()
-	runMutantObservedEnv = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 		if runRegex == testRunRegex([]string{"TestA", "TestB"}) {
 			return engine.MutantKilled, pkg + ".TestA", false, runtimeinput.Observation{}, "", "", nil
 		}
 		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
 	}
 	var vouchBounds []time.Duration
-	phaseBaselineProbe = func(_ context.Context, _, _, _ string, bound time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.killGround = func(_ context.Context, _, _, _ string, bound time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
 		vouchBounds = append(vouchBounds, bound)
 		return 1, true, nil, "", runtimeinput.Observation{}, nil
 	}
@@ -641,11 +641,11 @@ func TestNarrowedSurvivorSkipsNonCoveringRemainder(t *testing.T) {
 	}}
 	opts := runOptions{Options: Options{OracleTimeout: time.Minute}, scheduleStore: store}
 
-	restoreRun := runMutantObservedEnv
-	defer func() { runMutantObservedEnv = restoreRun }()
+	restoreRun := seams.runMutantObserved
+	defer func() { seams.runMutantObserved = restoreRun }()
 	var patterns []string
 	var timeouts []time.Duration
-	runMutantObservedEnv = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, timeout time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, timeout time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 		patterns = append(patterns, runRegex)
 		timeouts = append(timeouts, timeout)
 		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "covering-phase process exited before observation finalization", "", nil
@@ -680,15 +680,15 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 		t.Skip("loads the fixture tree")
 	}
 	tr := fixtureTree(t)
-	restoreProbe := campaignCoveredPositions
+	restoreProbe := seams.coveredPositions
 	restoreMin := windowcost.ScheduleMinTests
 	windowcost.ScheduleMinTests = 2
 	defer func() {
-		campaignCoveredPositions = restoreProbe
+		seams.coveredPositions = restoreProbe
 		windowcost.ScheduleMinTests = restoreMin
 	}()
 	var calls atomic.Int64
-	campaignCoveredPositions = func(_ context.Context, _, _, _, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
+	seams.coveredPositions = func(_ context.Context, _, _, _, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
 		calls.Add(1)
 		return engine.Coverage{}, fmt.Errorf("probe refused")
 	}
@@ -735,7 +735,7 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 
 	// A healthy probe records one coverage run per batch.
 	calls.Store(0)
-	campaignCoveredPositions = func(_ context.Context, _, _, _, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
+	seams.coveredPositions = func(_ context.Context, _, _, _, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
 		calls.Add(1)
 		// A measurable probe duration for the batch-price assertion —
 		// an instant stub could round to zero on a coarse clock.
@@ -781,10 +781,10 @@ func TestSerialConfirmationRunsUnscheduled(t *testing.T) {
 	}}
 	opts := runOptions{scheduleStore: store}
 
-	restoreRun := runMutantObservedEnv
-	defer func() { runMutantObservedEnv = restoreRun }()
+	restoreRun := seams.runMutantObserved
+	defer func() { seams.runMutantObserved = restoreRun }()
 	var patterns []string
-	runMutantObservedEnv = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 		patterns = append(patterns, runRegex)
 		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
 	}
@@ -820,11 +820,11 @@ func TestNarrowedPhaseTimeoutDegradesToUnsplit(t *testing.T) {
 	}}
 	opts := runOptions{Options: Options{OracleTimeout: time.Minute}, scheduleStore: store}
 
-	restoreRun := runMutantObservedEnv
-	defer func() { runMutantObservedEnv = restoreRun }()
+	restoreRun := seams.runMutantObserved
+	defer func() { seams.runMutantObserved = restoreRun }()
 	var patterns []string
 	full := testRunRegex(fns)
-	runMutantObservedEnv = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, runRegex string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
 		patterns = append(patterns, runRegex)
 		if runRegex != full {
 			// Every narrowed phase claims a timeout kill — the shape

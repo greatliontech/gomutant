@@ -18,22 +18,6 @@ import (
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
-// coveredPositions is the baseline coverage probe; a variable so the
-// probe-failure arm - the label stays absent and the measurement stays
-// sound - is testable without constructing a genuinely unbuildable
-// probe.
-var coveredPositions = engine.CoveredPositions
-
-// testProbe is the baseline probe; a variable so the bound each mode
-// hands it — the measurement leash in derived-budget mode, the
-// caller's override otherwise — is pinnable by a delegating recorder
-// without constructing a genuinely slow baseline.
-var testProbe = engine.TestProbeEnv
-
-// runMutantEvidence is the mutant runner seam: tests plant a compiler
-// crash the probe must retry once and never read as a verdict.
-var runMutantEvidence = engine.RunMutantEvidenceEnv
-
 // EphemeralResult is one manual mutant's evidence (REQ-exec-ephemeral): what
 // was mutated, the test it ran against, whether that test killed it, and the
 // attributed killer. It is evidence for the caller to act on, never
@@ -471,24 +455,13 @@ func leashFor(fixed, banked time.Duration) time.Duration {
 	return fixed
 }
 
-// ephemeralBudgetFloor keeps a derived budget from ever being less
-// patient than the fixed default it replaced: the floor is the
-// retired 60s, because a warm-cache baseline pays no compile while
-// the mutant run always recompiles the mutated package inside its
-// bound — the multiple alone would time out honest slow mutants of
-// fast tests, and a timeout is a kill, the flattering direction. A
-// variable only so tests can pin the measured derivation and the
-// timeout-kill serve without minute-class hangs; production never
-// writes it.
-var ephemeralBudgetFloor = 60 * time.Second
-
 // derivedOracleBudget maps a measured baseline duration to the mutant
 // budget: a multiple with a floor (REQ-exec-ephemeral's derived
 // budget; the values are incidental, not contract).
 func derivedOracleBudget(baseline time.Duration) time.Duration {
 	budget := 4 * baseline
-	if budget < ephemeralBudgetFloor {
-		budget = ephemeralBudgetFloor
+	if budget < seams.ephemeralBudgetFloor {
+		budget = seams.ephemeralBudgetFloor
 	}
 	return budget
 }
@@ -665,13 +638,13 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	report(PreparationEvent{Stage: PreparationBaseline, Symbol: run, Package: testPkg, OracleBudget: baselineBound.String()})
 	baselineStart := time.Now()
-	ran, passed, diagnostic, err := testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
+	ran, passed, diagnostic, err := seams.testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
 	if baselineCompilerCrashed(err) {
 		// The baseline's compiler died: a toolchain transient, retried
 		// once so it never reads as the baseline failing to build; a
 		// second death is reported as the crash it is.
 		report(PreparationEvent{Stage: PreparationBaseline, Symbol: run + " (compiler crashed; retrying once)", Package: testPkg, OracleBudget: baselineBound.String()})
-		ran, passed, diagnostic, err = testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
+		ran, passed, diagnostic, err = seams.testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
 		if baselineCompilerCrashed(err) {
 			return nil, fmt.Errorf("compiler crashed twice on the baseline — re-run to confirm; not a verdict, and not the baseline failing to build:\n%w", err)
 		}
@@ -749,7 +722,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	// draw luck (REQ-exec-ephemeral).
 	for i := 0; i < runs; i++ {
 		report(PreparationEvent{Stage: PreparationMutantRun, Symbol: fmt.Sprintf("%d/%d", i+1, runs), Package: testPkg, OracleBudget: mutantBudget.String()})
-		outcome, killer, evidence, diagnostic, err := runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env, bounds)
+		outcome, killer, evidence, diagnostic, err := seams.runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env, bounds)
 		if err != nil {
 			return nil, err
 		}
@@ -759,7 +732,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 			// crashes the compiler, and neither reads as "did not
 			// compile" (REQ-exec-ephemeral).
 			report(PreparationEvent{Stage: PreparationMutantRun, Symbol: fmt.Sprintf("%d/%d (compiler crashed; retrying once)", i+1, runs), Package: testPkg, OracleBudget: mutantBudget.String()})
-			outcome, killer, evidence, diagnostic, err = runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env, bounds)
+			outcome, killer, evidence, diagnostic, err = seams.runMutantEvidence(ctx, t.dir, m, []string{testPkg}, run, mutantBudget, binFlags, env, bounds)
 			if err != nil {
 				return nil, err
 			}
@@ -806,7 +779,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// runs under the measurement leash in both modes. Its expiry is
 		// the advisory posture, never a verdict — CoverageUnknown, the
 		// label absent — and the command timeout still bounds.
-		if coverage, err := coveredPositions(ctx, t.dir, testPkg, run, "./...", probeLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage(), bounds); err != nil {
+		if coverage, err := seams.coveredPositions(ctx, t.dir, testPkg, run, "./...", probeLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage(), bounds); err != nil {
 			// Every measured file is unknown; a mutated test file is
 			// never measured, so it is not unknown either.
 			for _, file := range files {

@@ -33,8 +33,8 @@ func TestTruncatedPipelineFailsLoudlyNamingUnfinishedTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runTruncateAfterItems = 1
-	t.Cleanup(func() { runTruncateAfterItems = 0 })
+	seams.truncateAfterItems = 1
+	t.Cleanup(func() { seams.truncateAfterItems = 0 })
 	targets := []Target{
 		{Symbol: "example.com/trunc.A", Oracle: []string{"example.com/trunc.TestA"}, OracleExplicit: true},
 		{Symbol: "example.com/trunc.B", Oracle: []string{"example.com/trunc.TestB"}, OracleExplicit: true},

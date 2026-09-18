@@ -2610,3 +2610,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "7b7077a9cb165a693aa4dff28f4511f69770c6000ece09b0801c1a4a9ed36088"
 }
+
+bindings {
+  requirement_id: "REQ-exec-oracle-run"
+  content_hash: "afecaf1141dcae45ec74a6d6a25b05d37eb6b612a6a6f45fcdf656462e235d38"
+  source_hash: "c5c8bbcccc09f17f97d91c8b5d918780f3ebdbdb30e7b9f2bbf10b62d29f8c65"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSeamsDefaultToTheEngine"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "56d8d5426719f5cef4207d8348f0cef42af6b8333cec312592b7ba26efe0ae84"
+}
+
+bindings {
+  requirement_id: "REQ-exec-attribution"
+  content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestKillGroundIsTheConfirmationsSeam"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3960d0c10af0fd42a06a2078f0f621d871fd2768546d3601a915f27526c1dcfa"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-guidance"
+  content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
+  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestProbeOracleInstabilityCollectsProbedPaths"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "01e1720dc6b7e628f29b24f6ee16b4c81c050ba034a0579e56c4a8ec30521f4d"
+}

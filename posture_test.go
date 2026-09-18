@@ -32,9 +32,9 @@ func TestRunStatesEachRecordsReusePosture(t *testing.T) {
 	// during the posture pass (the judgment's own fallback, which the
 	// hook observes; the derived-oracle delta's route is unreachable for
 	// a record this run measured) is the fault this pins against.
-	priorHook := inspectionSupplementaryViewHook
-	inspectionSupplementaryViewHook = func(symbols []string) { t.Errorf("the posture pass built supplementary views for %v", symbols) }
-	t.Cleanup(func() { inspectionSupplementaryViewHook = priorHook })
+	priorHook := seams.inspectionSupplementaryView
+	seams.inspectionSupplementaryView = func(symbols []string) { t.Errorf("the posture pass built supplementary views for %v", symbols) }
+	t.Cleanup(func() { seams.inspectionSupplementaryView = priorHook })
 	tr, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)

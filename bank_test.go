@@ -147,24 +147,24 @@ func TestRunServesBankedBaselinesAcrossRuns(t *testing.T) {
 		t.Skip("runs go test baselines across three campaigns")
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	restoreProbe := groupBaselineProbe
-	restoreCov := campaignCoveredPositions
+	restoreProbe := seams.baselineProbe
+	restoreCov := seams.coveredPositions
 	restoreMinT := windowcost.ScheduleMinTests
 	restoreMinC := windowcost.ScheduleMinCandidates
 	windowcost.ScheduleMinTests = 2
 	windowcost.ScheduleMinCandidates = 1
 	t.Cleanup(func() {
-		groupBaselineProbe = restoreProbe
-		campaignCoveredPositions = restoreCov
+		seams.baselineProbe = restoreProbe
+		seams.coveredPositions = restoreCov
 		windowcost.ScheduleMinTests = restoreMinT
 		windowcost.ScheduleMinCandidates = restoreMinC
 	})
 	var baselineProbes, coverageProbes atomic.Int64
-	groupBaselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
 		baselineProbes.Add(1)
 		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 	}
-	campaignCoveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView, bounds engine.OracleBounds) (engine.Coverage, error) {
+	seams.coveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView, bounds engine.OracleBounds) (engine.Coverage, error) {
 		coverageProbes.Add(1)
 		return engine.CoveredPositions(ctx, dir, testPkg, runRegex, coverPkg, timeout, flags, env, view, bounds)
 	}

@@ -49,9 +49,9 @@ func TestRunPipelinesPreparationWithExecution(t *testing.T) {
 	}
 	// One-candidate windows: the first target forms its own window and
 	// executes while the second target's slow baseline still probes.
-	prev := runWindowCandidates
-	runWindowCandidates = 1
-	defer func() { runWindowCandidates = prev }()
+	prev := seams.windowCandidates
+	seams.windowCandidates = 1
+	defer func() { seams.windowCandidates = prev }()
 
 	var log []string
 	seen := map[string]bool{}
@@ -136,9 +136,9 @@ func TestRunJoinsPreparationOnEarlyReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prev := runWindowCandidates
-	runWindowCandidates = 1
-	defer func() { runWindowCandidates = prev }()
+	prev := seams.windowCandidates
+	seams.windowCandidates = 1
+	defer func() { seams.windowCandidates = prev }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -209,9 +209,9 @@ func TestRunFailingBaselineSkipsBesideMeasuredWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prev := runWindowCandidates
-	runWindowCandidates = 1
-	defer func() { runWindowCandidates = prev }()
+	prev := seams.windowCandidates
+	seams.windowCandidates = 1
+	defer func() { seams.windowCandidates = prev }()
 
 	var committed []string
 	_, err = tr.Run(context.Background(), []Target{
@@ -269,16 +269,16 @@ func TestRunPreparationErrorCommitsHeldWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prevWindow := runWindowCandidates
-	runWindowCandidates = 1
-	prevTrunc := runTruncateAfterItems
-	runTruncateAfterItems = 2
-	prevErr := runTruncateErr
-	runTruncateErr = errors.New("preparation broke mid-campaign")
+	prevWindow := seams.windowCandidates
+	seams.windowCandidates = 1
+	prevTrunc := seams.truncateAfterItems
+	seams.truncateAfterItems = 2
+	prevErr := seams.truncateErr
+	seams.truncateErr = errors.New("preparation broke mid-campaign")
 	defer func() {
-		runWindowCandidates = prevWindow
-		runTruncateAfterItems = prevTrunc
-		runTruncateErr = prevErr
+		seams.windowCandidates = prevWindow
+		seams.truncateAfterItems = prevTrunc
+		seams.truncateErr = prevErr
 	}()
 
 	var committed []string
