@@ -479,8 +479,14 @@ func commandTimeout(name string, seconds *int) (time.Duration, error) {
 // the record is safe to stage is answered by the response, never by a
 // second findings call after a run that rendered healthy counts while
 // the store routed the record to the machine-local overlay.
-func capRunFindings(findings []gomutant.Finding, layer func(gomutant.Finding) (string, string), onDelta func(gomutant.Finding) ([]gomutant.Survivor, error)) (rows []findingOut, omitted, deltaOpen int, err error) {
+func capRunFindings(ctx context.Context, findings []gomutant.Finding, layer func(gomutant.Finding) (string, string), onDelta func(gomutant.Finding) ([]gomutant.Survivor, error)) (rows []findingOut, omitted, deltaOpen int, err error) {
 	for _, f := range findings {
+		// The render bound is consulted per row, as the CLI's loop
+		// consults it: the bound alone ends a render that outlives it
+		// (the context is detached from the request), cut or no cut.
+		if err := ctx.Err(); err != nil {
+			return nil, 0, 0, err
+		}
 		// The cut is derived for every measured or cached record — the
 		// summary's total counts rows past the cap too — and listed on
 		// the rows within it.
@@ -1180,8 +1186,9 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// The final replacement is the success boundary
 	// (REQ-exec-cancellation): rendering after it runs under a context
 	// detached from the request's deadline and bounded by its own, so
-	// a deadline expiring after the commit never fails a committed run.
-	ctx, cancelRender := gomutant.PostCommitRenderContext(ctx)
+	// the request's deadline never fails a committed run; the bound's
+	// own expiry ends the render carrying what the write persisted.
+	ctx, cancelRender := gomutant.PostCommitRenderContext(ctx, seams.postCommitRenderBound)
 	defer cancelRender()
 	streams.stretch("rendering the response")
 	rendered := outcome.Rendered
@@ -1206,7 +1213,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		}
 	}
 	var deltaOpen int
-	if out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(rendered, runStore.Layer, onDelta); err == nil {
+	if out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(ctx, rendered, runStore.Layer, onDelta); err == nil {
 		for i := range out.Findings {
 			if p, ok := postures[out.Findings[i].Symbol]; ok {
 				out.Findings[i].Reuse, out.Findings[i].Reasons, out.Findings[i].Analysis = string(p.Reuse), p.Reasons, p.Analysis

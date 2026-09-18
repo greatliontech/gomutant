@@ -69,10 +69,13 @@ const PostCommitRenderBound = 2 * time.Minute
 
 // PostCommitRenderContext is the context a face renders under after
 // the final replacement returned: detached from the request's deadline
-// and cancellation, bounded by PostCommitRenderBound — a deadline
-// expiring after the commit never fails a committed run.
-func PostCommitRenderContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), PostCommitRenderBound)
+// and cancellation, bounded by the caller's bound —
+// PostCommitRenderBound is the faces' production value — so the
+// request's deadline expiring after the commit never fails a committed
+// run; the bound's own expiry ends the render and carries what the
+// write persisted.
+func PostCommitRenderContext(ctx context.Context, bound time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), bound)
 }
 
 // Text renders the banked state as the one sentence both faces show.

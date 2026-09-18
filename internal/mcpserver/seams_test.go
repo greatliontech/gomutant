@@ -21,8 +21,8 @@ func TestServerSeamsDefaultToProduction(t *testing.T) {
 	if d.afterCommit != nil || d.afterFinalReplacement != nil || d.stretchObserver != nil || d.selectionObserver != nil {
 		t.Fatal("an observer is installed by default")
 	}
-	if d.heartbeatInterval != gomutant.ProgressCadence {
-		t.Fatalf("heartbeat pace = %s, want the progress cadence", d.heartbeatInterval)
+	if d.heartbeatInterval != gomutant.ProgressCadence || d.postCommitRenderBound != gomutant.PostCommitRenderBound {
+		t.Fatalf("heartbeat pace = %s / render bound %s, want the progress cadence and the library's render bound", d.heartbeatInterval, d.postCommitRenderBound)
 	}
 	// By descriptor, not identity: under `go test -json` the testing
 	// package reassigns os.Stderr, so the file the init-time default

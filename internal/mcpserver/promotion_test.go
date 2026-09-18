@@ -2,11 +2,13 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/greatliontech/gomutant"
 )
@@ -291,5 +293,46 @@ func TestToolRunDriftExitCarriesThePersistedDrop(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "additionally, ") || !strings.Contains(err.Error(), "reconcile dropped 1 record(s)") || !strings.Contains(err.Error(), "(persisted)") {
 		t.Fatalf("drift exit = %v; want the reconcile's persisted drop riding it", err)
+	}
+}
+
+// An error exit after the final merge persisted — the render bound
+// elapsing — carries what the merge persisted in the error text: the
+// bound is the face's seam, so the exit the bound gates is reachable
+// (REQ-mcp-findings-doc, REQ-exec-cancellation).
+func TestToolRunRenderBoundExitCarriesThePersistedDrop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test for one mutant")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":          "module example.com/current\n\ngo 1.26.4\n",
+		"current.go":      "package current\n\nfunc Value() int { return 1 }\n",
+		"current_test.go": "package current\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal(Value()) } }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evidence := func(symbol string) gomutant.SubjectEvidence {
+		return gomutant.SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
+			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
+			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
+			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	}
+	path := gomutant.FindingsPathAt(dir, "")
+	if err := gomutant.UpdateDocument(context.Background(), path, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+		return []gomutant.Finding{{Symbol: "example.com/current.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
+			TargetEvidence: evidence("example.com/current.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/current.TestOld")}}}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bound := seams.postCommitRenderBound
+	seams.postCommitRenderBound = time.Nanosecond
+	t.Cleanup(func() { seams.postCommitRenderBound = bound })
+	_, _, err := New(dir).toolRun(context.Background(), nil, runIn{Budget: 1})
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "additionally, the whole-tree reconcile dropped 1 record(s)") || !strings.Contains(err.Error(), "(persisted)") {
+		t.Fatalf("render-bound exit = %v; want the deadline with the persisted drop riding it", err)
 	}
 }

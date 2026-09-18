@@ -21,7 +21,7 @@ func TestCommandSeamsDefaultToProduction(t *testing.T) {
 	if d.afterFinalReplacement != nil {
 		t.Fatal("an observer is installed by default")
 	}
-	if d.progressInterval != gomutant.ProgressCadence || d.sigtermDrainDeadline != 5*time.Second {
-		t.Fatalf("paces = %s / %s, want the progress cadence and the five-second SIGTERM drain", d.progressInterval, d.sigtermDrainDeadline)
+	if d.progressInterval != gomutant.ProgressCadence || d.sigtermDrainDeadline != 5*time.Second || d.postCommitRenderBound != gomutant.PostCommitRenderBound {
+		t.Fatalf("paces = %s / %s / render bound %s, want the progress cadence, the five-second SIGTERM drain, and the library's render bound", d.progressInterval, d.sigtermDrainDeadline, d.postCommitRenderBound)
 	}
 }

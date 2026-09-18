@@ -800,3 +800,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "cc7825b39d6688988d19630c9f6e7bb0d11c763dc1fd50df7cb0e0d14483b98d"
 }
+
+bindings {
+  requirement_id: "REQ-mcp-findings-doc"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestRunCommandRenderBoundExitCarriesThePersistedDrop"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "774ed8921c12eeee764b9c5f0a7759b2fd874c247e14880cf9f386ec686aa827"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-findings-doc"
+  content_hash: "189244eeff8ae1b5ffd940d45a95d37c21b208880eff4af21a0d45141c58e9c4"
+  source_hash: "fe8c8c4c43d92d27f21da0339ebb08117433195ea416873b0e132167fd31256e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolRunRenderBoundExitCarriesThePersistedDrop"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d2fc41313f78f405f200991add2551398ce63bdf836253969496963e73a7defc"
+}

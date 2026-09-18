@@ -117,7 +117,7 @@ func TestCapRunFindingsCapsTheDeltaList(t *testing.T) {
 	for i := 0; i < envelope.rows; i++ {
 		findings = append(findings, seededFinding(fmt.Sprintf("example.com/empty.Row%02d", i)))
 	}
-	rows, omitted, deltaOpen, err := capRunFindings(findings, func(gomutant.Finding) (string, string) { return "repo", "" }, func(g gomutant.Finding) ([]gomutant.Survivor, error) {
+	rows, omitted, deltaOpen, err := capRunFindings(context.Background(), findings, func(gomutant.Finding) (string, string) { return "repo", "" }, func(g gomutant.Finding) ([]gomutant.Survivor, error) {
 		if g.Symbol == f.Symbol {
 			return many, nil
 		}

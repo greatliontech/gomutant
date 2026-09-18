@@ -393,11 +393,12 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// The final replacement is the success boundary
 		// (REQ-exec-cancellation): rendering after it runs detached
 		// from the command's deadline and interrupt under its own
-		// bound, so a deadline or interrupt after the commit never
-		// fails a committed run. A plan replaces nothing and renders
+		// bound, so the command's deadline or interrupt never fails a
+		// committed run; the bound's own expiry ends the render carrying
+		// what the write persisted. A plan replaces nothing and renders
 		// under the command's own context.
 		var cancelRender context.CancelFunc
-		ctx, cancelRender = gomutant.PostCommitRenderContext(ctx)
+		ctx, cancelRender = gomutant.PostCommitRenderContext(ctx, seams.postCommitRenderBound)
 		defer cancelRender()
 	}
 	rendered := outcome.Rendered

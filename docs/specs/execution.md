@@ -1002,8 +1002,10 @@ interrupted run keeps every finding committed before cancellation became
 observable while an unfinished target's work is discarded whole. The final
 merge of the complete result remains the authority — and its atomic
 replacement is the success boundary: rendering after it runs detached
-from the request's deadline under its own bound, so a deadline expiring
-after the commit never fails a committed run; re-merging a committed
+from the request's deadline and cancellation under its own bound, so the
+request's deadline expiring after the commit never fails a committed
+run, and the render bound's own expiry ends the render and carries what
+the write persisted (REQ-mcp-findings-doc); re-merging a committed
 finding is idempotent. A finding's capture commit is read at stamp time, so
 an incremental or final commit records the repository state its evidence was
 validated against; repository ref motion never discards completed evidence,

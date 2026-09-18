@@ -35,6 +35,10 @@ type commandSeams struct {
 	// escalates by pressing Ctrl-C again. A seam for deadline-injection in
 	// tests.
 	sigtermDrainDeadline time.Duration
+	// postCommitRenderBound bounds the rendering after the final
+	// replacement (gomutant.PostCommitRenderBound in production): a seam
+	// so the error exits the bound gates are reachable by a test.
+	postCommitRenderBound time.Duration
 }
 
 // seams is the one variable tests write; defaultSeams is what
@@ -43,7 +47,8 @@ var seams = defaultSeams()
 
 func defaultSeams() commandSeams {
 	return commandSeams{
-		progressInterval:     gomutant.ProgressCadence,
-		sigtermDrainDeadline: 5 * time.Second,
+		progressInterval:      gomutant.ProgressCadence,
+		sigtermDrainDeadline:  5 * time.Second,
+		postCommitRenderBound: gomutant.PostCommitRenderBound,
 	}
 }
