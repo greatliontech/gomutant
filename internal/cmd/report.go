@@ -66,7 +66,12 @@ type runReporter struct {
 // label yields to the run tallies at the first decision — from then
 // on the served, skipped, and committed counts are the forward-progress
 // signal, whatever stretch is in flight.
-func (r *runReporter) phase(label string) { r.phaseLabel.Store(label) }
+func (r *runReporter) phase(label string) {
+	r.phaseLabel.Store(label)
+	if seams.stretchObserver != nil {
+		seams.stretchObserver(label)
+	}
+}
 
 // phaseInFlight is the primed label while no decision has been
 // reported, else empty.
@@ -82,7 +87,7 @@ func (r *runReporter) phaseInFlight() string {
 // structured record, or the human prepare line — and primes the phase
 // label with it (REQ-exec-run-status).
 func (r *runReporter) preparation(event gomutant.PreparationEvent) {
-	r.phase(event.Text())
+	r.phase(gomutant.StretchPreparing(event))
 	r.line("prepare", event, func(w io.Writer) { renderPreparation(w, event) })
 }
 

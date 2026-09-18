@@ -54,6 +54,7 @@ func TestToolEphemeralNotifiesItsPhases(t *testing.T) {
 		"test_pkg": "example.com/fixture/lib", "run": "^TestWeak$", "oracle_timeout_sec": 60, "oracle_memory_mib": 512,
 	}}
 	params.SetProgressToken("tok")
+	labels := observeStretches(t)
 	result, err := clientSession.CallTool(ctx, params)
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +62,9 @@ func TestToolEphemeralNotifiesItsPhases(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("ephemeral tool errored: %+v", result)
 	}
+	// The heartbeat's stretch is the probe's phase under the one lead
+	// — the CLI's cadence's words (REQ-exec-run-status).
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchPreparing(loadingEvent), "prepare baseline", "prepare mutant-run", "prepare coverage"})
 	// The probe ran under the ceiling the call asked for: the request's
 	// knob reaches the probe's own bounds and the result states them
 	// (REQ-exec-oracle-memory's per-run configuration).
@@ -160,14 +164,14 @@ func TestRunStreamsNameTheProbePhase(t *testing.T) {
 	if len(notified) != 1 || notified[0] != "probing target 0/0 p.F  probes 0/3  (up to ~2m0s, 1 unpriced)" {
 		t.Fatalf("notifications after the announcement and a tick = %q; want the priced announcement alone", notified)
 	}
-	if got := streams.lastPhase.Load().(string); got != "probing 1/3 p.F" {
+	if got := streams.lastPhase.get(); got != "probing 1/3 p.F" {
 		t.Fatalf("heartbeat label during probing = %q", got)
 	}
 	streams.executing(gomutant.ExecutionEvent{Phase: "estimate", Symbol: "p.F", TargetIndex: 1, TargetCount: 1})
 	if len(notified) != 2 || !strings.HasPrefix(notified[1], "estimate target 1/1 p.F") {
 		t.Fatalf("notifications after the estimate = %q", notified)
 	}
-	if got := streams.lastPhase.Load().(string); got != "estimating p.F" {
+	if got := streams.lastPhase.get(); got != "estimating p.F" {
 		t.Fatalf("heartbeat label after the estimate = %q", got)
 	}
 }

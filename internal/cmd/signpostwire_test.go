@@ -14,7 +14,11 @@ import (
 
 // A test-only delta's residue row names the oracle closure it left
 // stale and the re-measure move - the run face carries the signpost,
-// not only the library (REQ-target-changed).
+// not only the library (REQ-target-changed). The stretches the run
+// names on the way are the vocabulary's, in order — the preparation,
+// the load's event, the selection before the selection runs, the
+// signpost's pass under the inspection lead — the same words the
+// structured face's heartbeat reads (REQ-exec-run-status).
 func TestRunCommandChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
@@ -46,6 +50,7 @@ func TestRunCommandChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) 
 		t.Fatal(err)
 	}
 
+	labels := observeStretches(t)
 	var output bytes.Buffer
 	if err := runCommand(context.Background(), runOptions{
 		dir: fixture, changed: "HEAD", findingsFile: defaultFindings, output: &output,
@@ -55,4 +60,5 @@ func TestRunCommandChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) 
 	if !strings.Contains(output.String(), "oracle closure of 1 stale finding(s) - re-measure by symbol: example.com/fixture/lib.Weak") {
 		t.Fatalf("changed-mode residue missing the signpost:\n%s", output.String())
 	}
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchPreparation, gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}), gomutant.StretchSelecting, gomutant.StretchInspecting("closure signpost over 1 prior record(s)")})
 }

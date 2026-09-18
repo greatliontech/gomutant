@@ -865,7 +865,7 @@ func TestToolFindingsAnnouncesInspection(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	awaitMessage("inspecting 1 record(s)")
+	awaitMessage(gomutant.StretchInspecting("reading 1 record(s)"))
 
 	// The explain tool's single-symbol inspection is the same
 	// minutes-class stretch; its announcement rides the same channel.
@@ -878,7 +878,7 @@ func TestToolFindingsAnnouncesInspection(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("explain tool errored: %+v", result)
 	}
-	awaitMessage("inspecting example.com/empty.Gone")
+	awaitMessage(gomutant.StretchInspecting("admitting 1 record(s)"))
 }
 
 // Run-response residue rows cap with the remainder counted on every
@@ -1801,15 +1801,15 @@ func TestRunStreamsNameTheStretchFromTheEvent(t *testing.T) {
 	streams := newRunStreams(&out, func(m string) { notes = append(notes, m) })
 	streams.executing(gomutant.ExecutionEvent{Phase: "executing", Symbol: "a.F", TargetIndex: 1, TargetCount: 1})
 	streams.decision(gomutant.RunDecision{Action: "cached", Symbol: "a.G"})
-	if got := streams.lastPhase.Load().(string); got != "executing mutants a.F" {
+	if got := streams.lastPhase.get(); got != "executing mutants a.F" {
 		t.Fatalf("a decision moved the stretch to %q", got)
 	}
 	streams.executing(gomutant.ExecutionEvent{Phase: "confirming", Symbol: "a.F", ConfirmationsTotal: 3})
-	if got := streams.lastPhase.Load().(string); got != "confirming a.F" {
+	if got := streams.lastPhase.get(); got != "confirming a.F" {
 		t.Fatalf("the confirming stretch = %q", got)
 	}
 	streams.executing(gomutant.ExecutionEvent{Phase: "audit-flip", Symbol: "a.F", FlipPosition: "f.go:1:1", FlipKiller: "a.TestF"})
-	if got := streams.lastPhase.Load().(string); got != "confirming a.F" {
+	if got := streams.lastPhase.get(); got != "confirming a.F" {
 		t.Fatalf("an audit flip moved the stretch to %q", got)
 	}
 	joined := strings.Join(notes, "\n")
@@ -1828,35 +1828,16 @@ func TestToolRunHeartbeatSpansEveryStretch(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
 	}
-	var mu sync.Mutex
-	var labels []string
-	seams.stretchObserver = func(label string) {
-		mu.Lock()
-		defer mu.Unlock()
-		labels = append(labels, label)
-	}
+	labels := observeStretches(t)
 	// The selection's own start is a marker in the same sequence: the
 	// label must be stored before the work it names begins.
-	seams.selectionObserver = func() {
-		mu.Lock()
-		defer mu.Unlock()
-		labels = append(labels, "<selection begins>")
-	}
-	t.Cleanup(func() { seams.stretchObserver, seams.selectionObserver = nil, nil })
+	seams.selectionObserver = func() { seams.stretchObserver("<selection begins>") }
+	t.Cleanup(func() { seams.selectionObserver = nil })
 	s := New(gitfixture.Changed(t))
 	if _, _, err := s.toolRun(context.Background(), nil, runIn{Changed: "HEAD"}); err != nil {
 		t.Fatal(err)
 	}
-	wants := []string{"loading tree", "selecting targets", "<selection begins>", "executing mutants example.com/dl.Value", "estimating example.com/dl.Value", "merging findings", "rendering the response"}
-	at := 0
-	for _, label := range labels {
-		if at < len(wants) && strings.HasPrefix(label, wants[at]) {
-			at++
-		}
-	}
-	if at != len(wants) {
-		t.Fatalf("the stretches never named %q in order; recorded %q", wants[at], labels)
-	}
+	wantStretchesInOrder(t, labels(), []string{"preparing", "prepare loading", "selecting targets", "<selection begins>", "executing mutants example.com/dl.Value", "estimating example.com/dl.Value", "merging findings", "rendering the response"})
 }
 
 // The heartbeat itself spans the run call: under a millisecond cadence
@@ -1904,7 +1885,7 @@ func TestToolRunHeartbeatFiresUnderAToken(t *testing.T) {
 		mu.Lock()
 		joined := strings.Join(notes, "\n")
 		mu.Unlock()
-		if strings.Contains(joined, "still working: loading tree") {
+		if strings.Contains(joined, "still working: prepare loading") {
 			return
 		}
 		if time.Now().After(deadline) {

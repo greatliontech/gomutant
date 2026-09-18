@@ -183,7 +183,7 @@ func TestRunAndFindingsCutSurvivorsByTheDelta(t *testing.T) {
 	if err := discoverCommand(context.Background(), discoverOptions{dir: dir, changed: "HEAD", output: &discovered}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(discovered.String(), "no targets: nothing changed vs HEAD; omit --changed to select the whole tree\n") {
+	if !strings.HasPrefix(discovered.String(), "prepare   loading\nno targets: nothing changed vs HEAD; omit --changed to select the whole tree\n") {
 		t.Fatalf("discover over a reflow-only change = %q; want the emptier named in the CLI's spelling", discovered.String())
 	}
 }

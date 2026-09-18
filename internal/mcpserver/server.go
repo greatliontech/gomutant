@@ -332,9 +332,57 @@ func serverOptions() *mcp.ServerOptions {
 // the heartbeat.
 func (s *Server) loadTreeReporting(ctx context.Context, notify func(string), sel gomutant.Selection) (*gomutant.Tree, error) {
 	if notify != nil {
-		notify("prepare loading")
+		notify(preparationMessage(loadingEvent))
 	}
-	return withHeartbeat(ctx, notify, "loading tree", func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, sel) })
+	label := newStretchLabel(gomutant.StretchPreparing(loadingEvent))
+	return withHeartbeatLabel(ctx, notify, label.get, func(ctx context.Context) (*gomutant.Tree, error) { return s.loadTreeContext(ctx, sel) })
+}
+
+// loadingEvent is the load's preparation event, the one every verb
+// that loads announces and names its stretch by.
+var loadingEvent = gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}
+
+// stretchLabel is a heartbeat's label — the stretch a call reports as
+// still working — behind the one setter every stretch of the call goes
+// through, so a test pins a face's sequence through the stretch
+// observer without racing the cadence (REQ-exec-run-status).
+type stretchLabel struct{ v atomic.Value }
+
+func newStretchLabel(seed string) *stretchLabel {
+	l := &stretchLabel{}
+	l.set(seed)
+	return l
+}
+
+func (l *stretchLabel) set(label string) {
+	l.v.Store(label)
+	if seams.stretchObserver != nil {
+		seams.stretchObserver(label)
+	}
+}
+
+func (l *stretchLabel) get() string { return l.v.Load().(string) }
+
+// inspectionHeartbeat runs a record walk under the heartbeat: the
+// walk's first stage is announced once to a listening token and every
+// stage names the heartbeat's stretch, through the one vocabulary the
+// CLI's cadence prints (REQ-exec-run-status) — one announcement per
+// walk, however many records it judges, so the notification channel
+// stays bounded (REQ-mcp-envelope); seed is the label until the walk
+// names its first stage — the load's where the call loaded, the
+// preparation's where it did not.
+func inspectionHeartbeat[T any](ctx context.Context, notify func(string), seed string, walk func(ctx context.Context, phase func(stage string)) (T, error)) (T, error) {
+	label := newStretchLabel(seed)
+	var announce sync.Once
+	return withHeartbeatLabel(ctx, notify, label.get, func(ctx context.Context) (T, error) {
+		return walk(ctx, func(stage string) {
+			stretch := gomutant.StretchInspecting(stage)
+			label.set(stretch)
+			if notify != nil {
+				announce.Do(func() { notify(stretch) })
+			}
+		})
+	})
 }
 
 // withHeartbeat runs fn while a bounded ticker tells a progress-token
@@ -344,12 +392,6 @@ func (s *Server) loadTreeReporting(ctx context.Context, notify func(string), sel
 // every stretch shares one monotonically increasing progress counter -
 // MCP requires the value to increase per token, and a fresh counter per
 // stretch would regress it. A nil notifier (no token) is exactly fn.
-func withHeartbeat[T any](ctx context.Context, notify func(string), label string, fn func(context.Context) (T, error)) (T, error) {
-	return withHeartbeatLabel(ctx, notify, func() string { return label }, fn)
-}
-
-// withHeartbeatLabel is withHeartbeat whose label is read at each beat —
-// a verb with phases of its own names the one in flight.
 func withHeartbeatLabel[T any](ctx context.Context, notify func(string), label func() string, fn func(context.Context) (T, error)) (T, error) {
 	if notify == nil {
 		return fn(ctx)
@@ -582,7 +624,7 @@ func appendGuidance(entries *[]guidanceOut, g gomutant.OracleGuidance) {
 type runStreams struct {
 	out       *runOut
 	notify    func(string)
-	lastPhase *atomic.Value
+	lastPhase *stretchLabel
 	// analysisMu serializes the analysis hook, exempt from the run's
 	// callback lock by its own contract.
 	analysisMu *sync.Mutex
@@ -600,17 +642,10 @@ func analysisEventMessage(event gomutant.AnalysisEvent) string {
 // stretch names the stretch the heartbeat reports as still working —
 // the one label setter every phase of the call goes through, so a
 // test can pin the sequence without racing the cadence.
-func (r runStreams) stretch(label string) {
-	r.lastPhase.Store(label)
-	if seams.stretchObserver != nil {
-		seams.stretchObserver(label)
-	}
-}
+func (r runStreams) stretch(label string) { r.lastPhase.set(label) }
 
 func newRunStreams(out *runOut, notify func(string)) runStreams {
-	var phase atomic.Value
-	phase.Store("preparing")
-	return runStreams{out: out, notify: notify, lastPhase: &phase, analysisMu: &sync.Mutex{}}
+	return runStreams{out: out, notify: notify, lastPhase: newStretchLabel(gomutant.StretchPreparation), analysisMu: &sync.Mutex{}}
 }
 
 func (r runStreams) decision(decision gomutant.RunDecision) {
@@ -691,7 +726,7 @@ func (r runStreams) executing(e gomutant.ExecutionEvent) {
 
 func (r runStreams) progress(event gomutant.PreparationEvent) {
 	r.out.PreparationCount++
-	r.stretch("prepare " + string(event.Stage))
+	r.stretch(gomutant.StretchPreparing(event))
 	if r.notify != nil {
 		r.notify(preparationMessage(event))
 		return
@@ -935,7 +970,7 @@ func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn
 	// than the cadence while a token listens (REQ-mcp-envelope).
 	notify := progressNotifier(ctx, req)
 	streams := newRunStreams(&out, notify)
-	_, err = withHeartbeatLabel(ctx, notify, func() string { return streams.lastPhase.Load().(string) }, func(ctx context.Context) (struct{}, error) {
+	_, err = withHeartbeatLabel(ctx, notify, streams.lastPhase.get, func(ctx context.Context) (struct{}, error) {
 		return struct{}{}, s.runTool(ctx, in, streams)
 	})
 	return nil, out, err
@@ -997,11 +1032,11 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// with one, the load itself announces it (loadTreeReporting).
 	out.PreparationCount++
 	if notify == nil {
-		out.Preparation = append(out.Preparation, gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
+		out.Preparation = append(out.Preparation, loadingEvent)
 	}
-	streams.stretch("loading tree")
+	streams.stretch(gomutant.StretchPreparing(loadingEvent))
 	if notify != nil {
-		notify("prepare loading")
+		notify(preparationMessage(loadingEvent))
 	}
 	tree, err := s.loadTreeContext(ctx, in.selection())
 	if err != nil {
@@ -1009,7 +1044,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	}
 	var targets []gomutant.Target
 	wholeTree := false
-	streams.stretch("selecting targets")
+	streams.stretch(gomutant.StretchSelecting)
 	sel, err := s.selectTargets(ctx, tree, prepared.Request)
 	if err != nil {
 		return err
@@ -1026,9 +1061,10 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	}
 	out.LegacyOverlays, out.OmittedLegacyOverlays = capRows(prepared.Store.LegacyEntries())
 	if out.Residue, err = tree.OracleClosureSignpostContext(ctx, out.Residue, prior, targets, func(stage string) {
-		streams.stretch("inspecting prior findings: " + stage)
+		stretch := gomutant.StretchInspecting(stage)
+		streams.stretch(stretch)
 		if notify != nil {
-			notify(stage)
+			notify(stretch)
 		}
 	}); err != nil {
 		return err
@@ -1044,7 +1080,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		// document — a write the response owns, never buried in an
 		// empty success; a scoped one writes nothing.
 		if wholeTree {
-			streams.stretch("reconciling the document")
+			streams.stretch(gomutant.StretchReconciling)
 		}
 		outcome, err := ledger.Finish(ctx, nil, nil, tree.Selection())
 		if err != nil {
@@ -1160,7 +1196,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// the rows the document actually holds - a disposition recorded
 	// concurrently between a symbol's incremental commit and the end of
 	// the run is in both or in neither (REQ-mcp-findings-doc).
-	streams.stretch("merging findings")
+	streams.stretch(gomutant.StretchMerging)
 	outcome, err := ledger.Finish(ctx, findings, targets, tree.Selection())
 	// A failed final merge persisted nothing (Finish returns the zero
 	// outcome on error): the exit carries the sheds and payloads already
@@ -1190,7 +1226,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// own expiry ends the render carrying what the write persisted.
 	ctx, cancelRender := gomutant.PostCommitRenderContext(ctx, seams.postCommitRenderBound)
 	defer cancelRender()
-	streams.stretch("rendering the response")
+	streams.stretch(gomutant.StretchRendering)
 	rendered := outcome.Rendered
 	out.Summary = gomutant.SummarizeRun(rendered, tree.Selection())
 	out.Summary.Run = runID
@@ -1376,17 +1412,27 @@ func (s *Server) toolDiscover(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
-	sel, err := s.selectTargets(ctx, tree, request)
+	// The selection and its descriptions ride the heartbeat under the
+	// selection's stretch, as the CLI's cadence names them: resolving
+	// every target's oracle is the expensive half (REQ-exec-run-status).
+	type selected struct {
+		sel          gomutant.TargetSelection
+		descriptions []gomutant.TargetDescription
+	}
+	label := newStretchLabel(gomutant.StretchSelecting)
+	described, err := withHeartbeatLabel(ctx, notify, label.get, func(ctx context.Context) (selected, error) {
+		sel, err := s.selectTargets(ctx, tree, request)
+		if err != nil {
+			return selected{}, err
+		}
+		descriptions, err := tree.DescribeTargets(ctx, sel.Targets)
+		return selected{sel: sel, descriptions: descriptions}, err
+	})
 	if err != nil {
 		return nil, out, err
 	}
-	targets := sel.Targets
-	out.Residue = sel.Residue
-	descriptions, err := tree.DescribeTargets(ctx, targets)
-	if err != nil {
-		return nil, out, err
-	}
-	out.OracleSets, out.Targets = compactTargetDescriptions(descriptions)
+	out.Residue = described.sel.Residue
+	out.OracleSets, out.Targets = compactTargetDescriptions(described.descriptions)
 	out.TargetCount = len(out.Targets)
 	for _, target := range out.Targets {
 		if target.Skipped != "" {
@@ -1596,22 +1642,17 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		}
 		cut = selected.Cut
 	}
-	// The inspection stretch announces itself once and rides the
-	// heartbeat: freshness judging over a large document is
-	// minutes-class work, and a silent stretch reads as a hang
-	// (REQ-mcp-envelope).
-	if notify != nil && judge {
-		notify(fmt.Sprintf("inspecting %d record(s)", len(matched)))
+	// One walk both faces render from (REQ-result-inspection), its
+	// stages announced and naming the heartbeat's stretch — freshness
+	// judging over a large document is minutes-class work, and a silent
+	// stretch reads as a hang; the face projects its rows from the
+	// walk's, the summary row carrying counts alone.
+	seed := gomutant.StretchPreparation
+	if tree != nil {
+		seed = gomutant.StretchPreparing(loadingEvent)
 	}
-	stretch := fmt.Sprintf("reading %d record(s)", len(matched))
-	if judge {
-		stretch = fmt.Sprintf("inspecting %d record(s)", len(matched))
-	}
-	// One walk both faces render from (REQ-result-inspection); the face
-	// projects its rows from the walk's, the summary row carrying counts
-	// alone.
-	inspection, err := withHeartbeat(ctx, notify, stretch, func(ctx context.Context) (gomutant.Inspection, error) {
-		return gomutant.InspectDocument(ctx, tree, store, matched, gomutant.InspectionRequest{Judge: judge, State: in.State, Cut: cut})
+	inspection, err := inspectionHeartbeat(ctx, notify, seed, func(ctx context.Context, phase func(string)) (gomutant.Inspection, error) {
+		return gomutant.InspectDocument(ctx, tree, store, matched, gomutant.InspectionRequest{Judge: judge, State: in.State, Cut: cut, Phase: phase})
 	})
 	if err != nil {
 		return nil, out, err
@@ -1725,14 +1766,11 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			if err != nil {
 				return nil, explainOut{}, err
 			}
-			// Freshness judging can be minutes-class; the stretch
-			// announces itself and rides the heartbeat so it never
-			// reads as a hang (REQ-mcp-envelope).
-			if notify != nil {
-				notify("inspecting " + finding.Symbol)
-			}
-			inspection, err := withHeartbeat(ctx, notify, "inspecting "+finding.Symbol, func(ctx context.Context) (gomutant.FindingInspection, error) {
-				return tree.InspectFinding(ctx, finding)
+			// Freshness judging can be minutes-class; the walk's stages
+			// are announced and ride the heartbeat so it never reads as
+			// a hang.
+			inspection, err := inspectionHeartbeat(ctx, notify, gomutant.StretchPreparing(loadingEvent), func(ctx context.Context, phase func(string)) (gomutant.FindingInspection, error) {
+				return tree.InspectFinding(ctx, finding, phase)
 			})
 			if err != nil {
 				return nil, explainOut{}, err
@@ -1898,7 +1936,9 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 		out.Posture = gomutant.RecordedPosture(attested, gomutant.FindingInspection{}, err)
 		return nil, out, nil
 	}
-	inspection, err := tree.InspectFinding(ctx, attested)
+	inspection, err := inspectionHeartbeat(ctx, notify, gomutant.StretchPreparing(loadingEvent), func(ctx context.Context, phase func(string)) (gomutant.FindingInspection, error) {
+		return tree.InspectFinding(ctx, attested, phase)
+	})
 	out.Posture = gomutant.RecordedPosture(attested, inspection, err)
 	return nil, out, nil
 }
@@ -2098,10 +2138,11 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	}
 	// The probe's phases ride the notifications as preparation events
 	// and name the heartbeat's stretch (REQ-exec-run-status).
-	var phase atomic.Value
-	phase.Store("ephemeral oracle")
+	// The label until the probe names its first phase is the load's —
+	// the last stretch this call named.
+	phase := newStretchLabel(gomutant.StretchPreparing(loadingEvent))
 	probe := gomutant.EphemeralRequest{Findings: gomutant.FindingsPathAt(s.dir, in.Findings), RefuseAttested: in.Attest != "" && !in.Reattest, File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB), Progress: func(event gomutant.PreparationEvent) {
-		phase.Store(event.Text())
+		phase.set(gomutant.StretchPreparing(event))
 		if notify != nil {
 			notify(preparationMessage(event))
 		}
@@ -2114,7 +2155,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	default:
 		probe.Mutant = []byte(in.Replacement)
 	}
-	res, err := withHeartbeatLabel(ctx, notify, func() string { return phase.Load().(string) }, func(ctx context.Context) (*gomutant.EphemeralResult, error) {
+	res, err := withHeartbeatLabel(ctx, notify, phase.get, func(ctx context.Context) (*gomutant.EphemeralResult, error) {
 		return tree.RunEphemeral(ctx, probe)
 	})
 	if err != nil {

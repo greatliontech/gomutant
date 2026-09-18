@@ -827,9 +827,10 @@ func (s *subjectView) checkContext(ctx context.Context, fingerprint gofresh.Fing
 	return s.view.Check(ctx, fingerprint, s.subject)
 }
 
-// InspectFinding is InspectFindings over one record.
-func (t *Tree) InspectFinding(ctx context.Context, f Finding) (FindingInspection, error) {
-	inspections, err := t.InspectFindings(ctx, []Finding{f}, nil)
+// InspectFinding is InspectFindings over one record; progress, when
+// non-nil, receives the walk's stages as InspectFindings reports them.
+func (t *Tree) InspectFinding(ctx context.Context, f Finding, progress func(stage string)) (FindingInspection, error) {
+	inspections, err := t.InspectFindings(ctx, []Finding{f}, progress)
 	if err != nil {
 		return FindingInspection{}, err
 	}
@@ -1137,8 +1138,6 @@ func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgment
 	return FindingInspection{State: FindingCurrent}, nil
 }
 
-// viewsFor serves each symbol's view from the prebuilt set, building
-// one supplementary set for the rest.
 // supplementaryViews builds views a prebuilt set lacks, beside it: the
 // one construction every inspection-time supplement shares, so a view
 // built beside a campaign's set judges under the set's width and a
@@ -1151,6 +1150,8 @@ func (t *Tree) supplementaryViews(ctx context.Context, symbols []string, prebuil
 	return t.newSubjectViews(ctx, symbols, packageProcess, width)
 }
 
+// viewsFor serves each symbol's view from the prebuilt set, building
+// one supplementary set for the rest.
 func (t *Tree) viewsFor(ctx context.Context, symbols []string, prebuilt *subjectViewSet, packageProcess bool) (map[string]*subjectView, error) {
 	viewFor := make(map[string]*subjectView, len(symbols))
 	var missing []string

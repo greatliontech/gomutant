@@ -111,9 +111,13 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if err := rep.flushProse(renderRunIdentity(runID)); err != nil {
 		return err
 	}
-	// The cadence starts before the load: a long typed load is a
-	// stretch the progress line must name, not a silence.
-	rep.phase("loading")
+	if trimmed := strings.TrimSpace(o.targetsFile); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		return fmt.Errorf("--targets expects a file path; the value looks like an inline JSON document - write it to a file first")
+	}
+	// The cadence starts before the preparation: a slow refusal, the
+	// lock, or a long typed load is a stretch the progress line must
+	// name, not a silence.
+	rep.phase(gomutant.StretchPreparation)
 	rep.startCadence(o.progressEvery)
 	// Every refusal the inputs decide fires here, before the load: the
 	// bounds, the target sources and the document they name, the
@@ -121,9 +125,6 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// harness environment, the exemptions, the store, and last the
 	// campaign lock (REQ-exec-preparation).
 	docPath := gomutant.FindingsPathAt(o.dir, o.findingsFile)
-	if trimmed := strings.TrimSpace(o.targetsFile); strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-		return fmt.Errorf("--targets expects a file path; the value looks like an inline JSON document - write it to a file first")
-	}
 	sources := gomutant.TargetSourcesGiven(gomutant.TargetSource{Name: "--targets", Given: o.targetsFile != ""}, gomutant.TargetSource{Name: "--changed", Given: o.changed != ""})
 	// The target inputs are read by the preparation at their enumerated
 	// places — the document's parse, then the ref's surface once the
@@ -153,14 +154,15 @@ func runCommand(ctx context.Context, o runOptions) error {
 	if len(prepared.Vouches) > 0 {
 		tree.SetDynamicStateVouches(prepared.Vouches...)
 	}
+	// A stretch is named before the work it names begins, on both faces.
+	rep.phase(gomutant.StretchSelecting)
 	selected, err := tree.SelectTargets(ctx, prepared.Request)
 	if err != nil {
 		return err
 	}
 	targets, residue, cut, wholeTree := selected.Targets, selected.Residue, selected.Cut, selected.WholeTree
 	rep.setSelected(len(targets))
-	rep.phase("preparing")
-	if residue, err = tree.OracleClosureSignpostContext(ctx, residue, prior, targets, rep.phase); err != nil {
+	if residue, err = tree.OracleClosureSignpostContext(ctx, residue, prior, targets, func(stage string) { rep.phase(gomutant.StretchInspecting(stage)) }); err != nil {
 		return err
 	}
 	var terminal bytes.Buffer
@@ -201,6 +203,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// document — the write that drops records whose targets left
 		// the code, stated here as on the other face; a scoped one
 		// writes nothing.
+		if wholeTree {
+			rep.phase(gomutant.StretchReconciling)
+		}
 		outcome, err := ledger.Finish(ctx, nil, nil, tree.Selection())
 		if err != nil {
 			return err

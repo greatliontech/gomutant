@@ -703,9 +703,16 @@ ephemeral probe's phase, a judged record — until the first decision,
 after which the line carries the served, skipped, and committed tallies,
 and the structured face's progress record carries the phase and elapsed
 time before that point and the tallies after; the MCP heartbeat names
-the same stretch); the ephemeral verb reports `baseline` before its
-probe, `mutant-run` before each run, and `coverage` before its advisory
-probe, on both faces; a window's coverage-probe phase announces
+the same stretch in the same words — the stretch in flight is named
+from one vocabulary both faces read: the preparation before the load, a
+preparation event's stage under one lead (the load's own event
+included), the target selection, the inspection of prior findings at
+the record walk's stage, the zero-target reconcile, the final merge,
+the response's rendering, and the execution stretches — so a reader of
+either face reads the other's words); the ephemeral verb reports
+`baseline` before its probe, `mutant-run` before each run, and
+`coverage` before its advisory probe, on both faces; a window's
+coverage-probe phase announces
 `probing` with its projected cost — an upper bound, each batch at its
 group's measured baseline, the batches of groups without one counted
 unpriced, and no figure at all when nothing is priced (a projection with

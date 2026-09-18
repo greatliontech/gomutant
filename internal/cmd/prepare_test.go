@@ -179,7 +179,7 @@ func TestTargetsDocumentIsParsedBeforeTheLoad(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, ".gomutant")); !os.IsNotExist(err) {
 		t.Fatalf("a document refusal minted the campaign directory: %v", err)
 	}
-	_, err = discoverTargets(context.Background(), discoverOptions{dir: dir, targetsFile: targetsPath})
+	_, err = discoverTargets(context.Background(), discoverOptions{dir: dir, targetsFile: targetsPath}, nil)
 	if err == nil || !strings.Contains(err.Error(), "parse targets document") {
 		t.Fatalf("discover refused with %v, want the document's own refusal before the load", err)
 	}

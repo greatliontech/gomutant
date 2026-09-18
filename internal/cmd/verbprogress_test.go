@@ -61,14 +61,40 @@ func TestFindingsFacesUnderTheCadence(t *testing.T) {
 	if !json.Valid(doc.Bytes()) || strings.Contains(doc.String(), "progress") || strings.Contains(doc.String(), "prepare") {
 		t.Fatalf("findings --json under the cadence is not a document: %q", doc.String())
 	}
-	var human bytes.Buffer
+	var human slowWriter
+	labels := observeStretches(t)
 	if err := findingsCommand(context.Background(), findingsOptions{dir: dir, findingsFile: defaultFindings, judge: true}, &human); err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimRight(human.String(), "\n"), "\n")
-	if lines[0] != "prepare   loading" || strings.HasPrefix(lines[len(lines)-1], "progress") {
-		t.Fatalf("findings human face = %q; want the loading line first and the rows last", human.String())
+	wantLoadingLineAheadOfTheRows(t, human.String())
+	// Zero rows is an answer that renders through the same epilogue:
+	// the cadence joins before "no findings", the tail, and the note.
+	var empty slowWriter
+	seams.stretchObserver = nil
+	if err := findingsCommand(context.Background(), findingsOptions{dir: dir, findingsFile: defaultFindings, judge: true, symbol: "example.com/fixture/lib.Absent"}, &empty); err != nil {
+		t.Fatal(err)
 	}
+	// No record matched, so no tree loaded: the cadence ran from the
+	// head and must have joined before the first row.
+	rows := strings.Split(strings.TrimRight(empty.String(), "\n"), "\n")
+	first := -1
+	for i, line := range rows {
+		if line == "no findings" {
+			first = i
+		}
+	}
+	if first < 0 {
+		t.Fatalf("zero-row judged findings = %q", empty.String())
+	}
+	for _, line := range rows[first:] {
+		if strings.HasPrefix(line, "progress") {
+			t.Fatalf("a progress line follows the zero-row answer: %q", empty.String())
+		}
+	}
+	// The cadence names the preparation, the load's event, and the
+	// record walk's stages under the inspection lead — the structured
+	// face's heartbeat's words (REQ-exec-run-status).
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchPreparation, gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}), gomutant.StretchInspecting("reading 1 record(s)"), gomutant.StretchInspecting("judging 1 record(s)")})
 }
 
 // Prune and retarget announce the load and end on their own rows: the
@@ -101,10 +127,7 @@ func TestLifecycleVerbsAnnounceTheLoadAndEndOnTheirRows(t *testing.T) {
 		if err := run(&out); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
-		if lines[0] != "prepare   loading" || strings.HasPrefix(lines[len(lines)-1], "progress") {
-			t.Fatalf("%s = %q; want the loading line first and the verb's rows last", name, out.String())
-		}
+		wantLoadingLineAheadOfTheRows(t, out.String())
 	}
 }
 
@@ -126,16 +149,22 @@ func TestEphemeralCommandReportsPhasesAndInterruptions(t *testing.T) {
 	}
 	var out bytes.Buffer
 	o := ephemeralOptions{dir: dir, file: "lib/lib.go", replacement: replacement, testPkg: "example.com/fixture/lib", runPat: "^TestAdd$", oracleTimeout: time.Minute, runs: 1, progressEvery: time.Millisecond, output: &out, oracleMemoryMiB: 768}
+	labels := observeStretches(t)
 	if err := ephemeralCommand(context.Background(), o); err != nil {
 		t.Fatal(err)
 	}
+	// The cadence's stretches are the probe's phases under the one
+	// lead, after the preparation (REQ-exec-run-status).
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchPreparation, gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}), "prepare baseline", "prepare mutant-run"})
+	seams.stretchObserver = nil
 	// The verb's memory knob reaches the probe's own bounds and the
 	// verdict states the ceiling the probe ran under.
 	if !strings.Contains(out.String(), "oracle memory 768 MiB") {
 		t.Fatalf("ephemeral output states no 768 MiB ceiling:\n%s", out.String())
 	}
+	wantLoadingLineAheadOfTheRows(t, out.String())
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
-	if lines[0] != "prepare   loading" || !strings.Contains(out.String(), "prepare   baseline ^TestAdd$ example.com/fixture/lib 1m0s") || !strings.Contains(out.String(), "prepare   mutant-run 1/1") {
+	if !strings.Contains(out.String(), "prepare   baseline ^TestAdd$ example.com/fixture/lib 1m0s") || !strings.Contains(out.String(), "prepare   mutant-run 1/1") {
 		t.Fatalf("ephemeral phases = %q", out.String())
 	}
 	verdict := -1
@@ -158,7 +187,7 @@ func TestEphemeralCommandReportsPhasesAndInterruptions(t *testing.T) {
 	if err := ephemeralCommand(cancelled, o); err == nil {
 		t.Fatal("cancelled probe succeeded")
 	}
-	if !strings.Contains(out.String(), "interrupted  context canceled during loading") {
+	if !strings.Contains(out.String(), "interrupted  context canceled during prepare loading") {
 		t.Fatalf("cancelled during the load = %q; want the interruption naming the load", out.String())
 	}
 }
@@ -168,10 +197,10 @@ func TestEphemeralCommandReportsPhasesAndInterruptions(t *testing.T) {
 func TestProgressLineYieldsToTheTalliesAtTheFirstDecision(t *testing.T) {
 	var out bytes.Buffer
 	rep := newRunReporter(&out, false, 0)
-	rep.phase("preparing")
+	rep.phase(gomutant.StretchSelecting)
 	rep.decision(gomutant.RunDecision{Symbol: "p.F", Action: "cached"})
 	rep.progressLine()
-	if !strings.Contains(out.String(), "targets committed") || strings.Contains(out.String(), "preparing") {
+	if !strings.Contains(out.String(), "targets committed") || strings.Contains(out.String(), gomutant.StretchSelecting) {
 		t.Fatalf("progress after a decision = %q; want the tallies", out.String())
 	}
 	// A later target's preparation (the pipelined run's baseline probe)
@@ -181,5 +210,21 @@ func TestProgressLineYieldsToTheTalliesAtTheFirstDecision(t *testing.T) {
 	rep.progressLine()
 	if !strings.Contains(out.String(), "targets committed") || strings.Contains(out.String(), "baseline") {
 		t.Fatalf("progress after a later preparation = %q; want the tallies still", out.String())
+	}
+}
+
+// The ephemeral verb's cadence flag names the stretches the face
+// prints — the vocabulary's own spellings, never a paraphrase of them
+// (REQ-exec-run-status).
+func TestProgressIntervalUsageNamesTheProbesStretches(t *testing.T) {
+	usage := newEphemeralCommand().Flags().Lookup("progress-interval").Usage
+	for _, want := range []string{gomutant.StretchPreparation,
+		gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}),
+		gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationBaseline}),
+		gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationMutantRun}),
+		gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationCoverage})} {
+		if !strings.Contains(usage, want) {
+			t.Fatalf("usage %q never names %q", usage, want)
+		}
 	}
 }

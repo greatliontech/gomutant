@@ -44,17 +44,34 @@ func newDiscoverCommand() *cobra.Command {
 }
 
 func discoverCommand(ctx context.Context, o discoverOptions) error {
-	view, err := discoverTargets(ctx, o)
-	if err != nil {
-		return err
-	}
 	out := o.output
 	if out == nil {
 		out = os.Stdout
 	}
 	if o.json {
+		view, err := discoverTargets(ctx, o, nil)
+		if err != nil {
+			return err
+		}
 		return json.NewEncoder(out).Encode(view)
 	}
+	// The human face names the preparation, the load, and the selection
+	// under the cadence, and its rows render through the epilogue so no
+	// progress line trails them (REQ-exec-run-status).
+	out = &syncWriter{w: out}
+	rep := newRunReporter(out, false, 0)
+	defer rep.stop()
+	rep.phase(gomutant.StretchPreparation)
+	rep.startCadence(seams.progressInterval)
+	view, err := discoverTargets(ctx, o, rep)
+	if err != nil {
+		return err
+	}
+	rep.epilogue(func(w io.Writer) { renderDiscovery(w, view, o) })
+	return nil
+}
+
+func renderDiscovery(out io.Writer, view discoveryView, o discoverOptions) {
 	if len(view.Targets) == 0 {
 		fmt.Fprintln(out, "no targets: "+gomutant.SelectionEmptiedNote(o.targetsFile != "", o.changed, "--changed"))
 	}
@@ -75,19 +92,26 @@ func discoverCommand(ctx context.Context, o discoverOptions) error {
 	for _, residue := range view.Residue {
 		fmt.Fprintf(out, "changed, untargeted  %s  (%s)\n", residue.Path, residue.Reason)
 	}
-	return nil
 }
 
-func discoverTargets(ctx context.Context, o discoverOptions) (discoveryView, error) {
+// discoverTargets resolves the effective targets; a non-nil reporter
+// names the load's event and the selection's stretch as they begin.
+func discoverTargets(ctx context.Context, o discoverOptions, rep *runReporter) (discoveryView, error) {
 	view := discoveryView{Targets: []gomutant.TargetDescription{}, Residue: []gomutant.Residue{}}
 	sources := gomutant.TargetSourcesGiven(gomutant.TargetSource{Name: "--targets", Given: o.targetsFile != ""}, gomutant.TargetSource{Name: "--changed", Given: o.changed != ""})
 	request, err := gomutant.PrepareSelection(ctx, o.dir, sources, targetInputs(o.dir, o.targetsFile, o.changed), selectionOf(o.tags, o.toolchain), o.packages, o.symbols)
 	if err != nil {
 		return view, err
 	}
+	if rep != nil {
+		rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
+	}
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
 		return view, err
+	}
+	if rep != nil {
+		rep.phase(gomutant.StretchSelecting)
 	}
 	selected, err := tree.SelectTargets(ctx, request)
 	if err != nil {

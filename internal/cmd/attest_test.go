@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
 )
@@ -65,8 +67,71 @@ func TestAttestedPostureJudgesUnderTheVouches(t *testing.T) {
 		t.Fatal(err)
 	}
 	vouches := []string{"example.com/dep.Var"}
-	judgeAttestedPosture(context.Background(), tree, vouches, gomutant.Finding{Symbol: "example.com/fixture/lib.Add"})
+	judgeAttestedPosture(context.Background(), tree, vouches, gomutant.Finding{Symbol: "example.com/fixture/lib.Add"}, nil)
 	if got := tree.DynamicStateVouches(); len(got) != 1 || got[0] != vouches[0] {
 		t.Fatalf("the tree judged under %v, want %v", got, vouches)
+	}
+}
+
+// lockedBuffer is a buffer a test reads while a verb's cadence writes.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// The attest verb's cadence names the preparation while the document
+// lock waits behind another writer: a held lock is a stretch the line
+// names, never a silence (REQ-exec-run-status).
+func TestAttestNamesThePreparationWhileTheDocumentLockWaits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	fastCadence(t)
+	dir := isolatedFixture(t)
+	seedFinding(t, dir, "example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd", "example.com/fixture/lib")
+	held, release := make(chan struct{}), make(chan struct{})
+	holder := make(chan error, 1)
+	go func() {
+		holder <- gomutant.UpdateDocument(context.Background(), gomutant.FindingsPathAt(dir, defaultFindings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+			close(held)
+			<-release
+			return all, nil
+		})
+	}()
+	<-held
+	var out lockedBuffer
+	done := make(chan error, 1)
+	go func() {
+		done <- attestCommand(context.Background(), attestOptions{dir: dir, findingsFile: defaultFindings, symbol: "example.com/fixture/lib.Add", position: "lib/lib.go:1:1", operator: "zero return", reason: "equivalent by inspection"}, &out)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(out.String(), "progress  "+gomutant.StretchPreparation+", elapsed ") {
+		if time.Now().After(deadline) {
+			close(release)
+			t.Fatalf("no preparation line while the document lock waited: %q", out.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	if err := <-holder; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "attested lib/lib.go:1:1 zero return") {
+		t.Fatalf("attest echo after the lock released = %q", out.String())
 	}
 }

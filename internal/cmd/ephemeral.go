@@ -39,7 +39,7 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.testPkg, "test-pkg", "", "package whose named test decides the kill: an import path, or a package directory spelled like go test does (. or ./x) resolved against --dir")
 	f.StringVar(&o.runPat, "run", "", "-run pattern naming the deciding test")
 	f.DurationVar(&o.timeout, "timeout", 0, "cancel command work before result completion after this duration; 0 = unlimited")
-	progressIntervalFlag(f, &o.progressEvery, "cadence of the progress line naming the phase in flight (loading, baseline, mutant run, coverage) and the elapsed time; 0 disables")
+	progressIntervalFlag(f, &o.progressEvery, "cadence of the progress line naming the stretch in flight (preparing, then prepare loading, prepare baseline, prepare mutant-run, prepare coverage) and the elapsed time; 0 disables")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "maximum duration of the baseline and mutant oracle processes; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "memory ceiling for the probe's oracle process tree in MiB: 0 derives RAM/2 floored at 1 GiB, -1 disables")
 	f.IntVar(&o.runs, "runs", 1, "run the mutant this many times (1-10): killed means every run killed - consecutive kills split deterministic kills from a property generator's draw luck")
@@ -92,6 +92,24 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	if o.batch != "" && o.file != "" {
 		return fmt.Errorf("--batch carries its own files; omit --file")
 	}
+	// The reporter names every phase as it begins and keeps a cadenced
+	// progress line through the long stretches (the batch's read, the
+	// load, the baseline probe, each mutant run, the coverage probe) so
+	// an interrupted probe names the phase it was in
+	// (REQ-exec-run-status).
+	out := o.output
+	if out == nil {
+		out = os.Stdout
+	}
+	// The cadence goroutine and the verb share the writer: serialized,
+	// as the run verb's is.
+	out = &syncWriter{w: out}
+	rep := newRunReporter(out, false, 0)
+	defer rep.stop()
+	// Primed before the cadence starts: a tick never precedes the
+	// loading line with run-shaped tallies a probe does not have.
+	rep.phase(gomutant.StretchPreparation)
+	rep.startCadence(o.progressEvery)
 	var batchEdits []gomutant.BatchEdit
 	if o.batch != "" {
 		if err := ctx.Err(); err != nil {
@@ -109,23 +127,6 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 			return err
 		}
 	}
-	// The reporter names every phase as it begins and keeps a cadenced
-	// progress line through the long stretches (the load, the baseline
-	// probe, each mutant run, the coverage probe) so an interrupted
-	// probe names the phase it was in (REQ-exec-run-status).
-	out := o.output
-	if out == nil {
-		out = os.Stdout
-	}
-	// The cadence goroutine and the verb share the writer: serialized,
-	// as the run verb's is.
-	out = &syncWriter{w: out}
-	rep := newRunReporter(out, false, 0)
-	defer rep.stop()
-	// Primed before the cadence starts: a tick never precedes the
-	// loading line with run-shaped tallies a probe does not have.
-	rep.phase("loading")
-	rep.startCadence(o.progressEvery)
 	// An interruption names the stretch it cut short, after the cadence
 	// has stopped, so nothing trails the verdict or the refusal.
 	interrupted := func(err error) error {

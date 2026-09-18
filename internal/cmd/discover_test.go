@@ -15,7 +15,7 @@ func TestDiscoverTargetsResolvesEffectiveOracle(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
 	}
-	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir})
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,14 +39,14 @@ func TestDiscoverTargetsLoadsExplicitDocument(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, targetsFile: path})
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, targetsFile: path}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(view.Targets) != 1 || !view.Targets[0].OracleExplicit || view.Targets[0].Oracle[0] != "example.com/fixture/lib.TestAdd" || view.Targets[0].Labels[0] != "a" {
 		t.Fatalf("explicit discovery = %+v", view)
 	}
-	if _, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, targetsFile: path, changed: "HEAD"}); err == nil {
+	if _, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, targetsFile: path, changed: "HEAD"}, nil); err == nil {
 		t.Fatal("targets and changed accepted together")
 	}
 }
@@ -60,7 +60,7 @@ func TestDiscoverTargetsLoadsExplicitEmptyOracle(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, targetsFile: path})
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, targetsFile: path}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,14 +76,14 @@ func TestDiscoverTargetsFiltersEveryProducer(t *testing.T) {
 	}
 	view, err := discoverTargets(context.Background(), discoverOptions{
 		dir: fixtureDir, packages: []string{"example.com/fixture/methods"}, symbols: []string{"example.com/fixture/methods.Counter.*"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(view.Targets) != 2 || view.Targets[0].Symbol != "example.com/fixture/methods.Counter.Inc" || view.Targets[1].Symbol != "example.com/fixture/methods.Counter.Value" {
 		t.Fatalf("filtered discovery = %+v", view.Targets)
 	}
-	if _, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, symbols: []string{"example.com/fixture/lib.Absent"}}); err == nil {
+	if _, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, symbols: []string{"example.com/fixture/lib.Absent"}}, nil); err == nil {
 		t.Fatal("empty filtered discovery succeeded")
 	}
 }
@@ -99,7 +99,7 @@ func TestDiscoverTargetsChangedAloneIsOneSource(t *testing.T) {
 		t.Skip("git binary not available")
 	}
 	dir := gitfixture.Changed(t)
-	view, err := discoverTargets(context.Background(), discoverOptions{dir: dir, changed: "HEAD"})
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: dir, changed: "HEAD"}, nil)
 	if err != nil {
 		t.Fatalf("discover --changed alone refused: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestDiscoverJSONResidueIsAList(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	view, err := discoverTargets(context.Background(), discoverOptions{dir: dir})
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: dir}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestDiscoverChangedCarriesTheResidue(t *testing.T) {
 	if err := os.WriteFile(libTest, append(original, []byte("\n// an uncommitted test edit\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixture, changed: "HEAD"})
+	view, err := discoverTargets(context.Background(), discoverOptions{dir: fixture, changed: "HEAD"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestDiscoverChangedCarriesTheResidue(t *testing.T) {
 // changed ref's surface, so a malformed tag is named before git is
 // asked about a ref (REQ-exec-preparation).
 func TestDiscoverRefusesTheSelectionBeforeTheSurface(t *testing.T) {
-	_, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, changed: "nosuchref", tags: []string{"a,b"}})
+	_, err := discoverTargets(context.Background(), discoverOptions{dir: fixtureDir, changed: "nosuchref", tags: []string{"a,b"}}, nil)
 	if err == nil || !strings.Contains(err.Error(), "constraint tag") || strings.Contains(err.Error(), "nosuchref") {
 		t.Fatalf("discover with a malformed tag and a bad ref = %v; want the tag refused before the surface is read", err)
 	}

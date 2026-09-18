@@ -16,9 +16,9 @@ import (
 func TestProgressLineNamesThePhaseInFlight(t *testing.T) {
 	var out bytes.Buffer
 	rep := newRunReporter(&out, false, 0)
-	rep.phase("loading")
+	rep.phase(gomutant.StretchPreparation)
 	rep.progressLine()
-	if !strings.HasPrefix(out.String(), "progress  loading, elapsed ") {
+	if !strings.HasPrefix(out.String(), "progress  preparing, elapsed ") {
 		t.Fatalf("phase line = %q", out.String())
 	}
 	out.Reset()
@@ -36,9 +36,9 @@ func TestProgressLineNamesThePhaseInFlight(t *testing.T) {
 	}
 	var jsonl bytes.Buffer
 	structured := newRunReporter(&jsonl, true, 0)
-	structured.phase("loading")
+	structured.phase(gomutant.StretchPreparation)
 	structured.progressLine()
-	if !strings.Contains(jsonl.String(), `"phase":"loading"`) {
+	if !strings.Contains(jsonl.String(), `"phase":"preparing"`) {
 		t.Fatalf("structured phase line = %q", jsonl.String())
 	}
 }
@@ -48,7 +48,7 @@ func TestProgressLineNamesThePhaseInFlight(t *testing.T) {
 func TestEpilogueEndsTheCadenceBeforeTheRows(t *testing.T) {
 	var out bytes.Buffer
 	rep := newRunReporter(&syncWriter{w: &out}, false, 0)
-	rep.phase("loading")
+	rep.phase(gomutant.StretchPreparation)
 	rep.startCadence(time.Millisecond)
 	time.Sleep(5 * time.Millisecond)
 	rep.epilogue(func(w io.Writer) { fmt.Fprintln(w, "rows") })
@@ -64,9 +64,9 @@ func TestEpilogueEndsTheCadenceBeforeTheRows(t *testing.T) {
 func TestPhasePrimedBeforeTheCadenceNeverPrintsTallies(t *testing.T) {
 	var out bytes.Buffer
 	rep := newRunReporter(&out, false, 0)
-	rep.phase("loading")
+	rep.phase(gomutant.StretchPreparation)
 	rep.progressLine()
-	if strings.Contains(out.String(), "targets committed") || !strings.HasPrefix(out.String(), "progress  loading") {
+	if strings.Contains(out.String(), "targets committed") || !strings.HasPrefix(out.String(), "progress  preparing") {
 		t.Fatalf("tick before the loading line = %q", out.String())
 	}
 }

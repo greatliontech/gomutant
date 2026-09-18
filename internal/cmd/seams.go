@@ -16,6 +16,9 @@ type commandSeams struct {
 	// afterFinalReplacement observes the final replacement's return,
 	// so a test can end the command exactly at the success boundary.
 	afterFinalReplacement func()
+	// stretchObserver sees every stretch a reporter names, in order, so
+	// a test pins the sequence whatever the cadence; nil in production.
+	stretchObserver func(label string)
 	// progressInterval is the cadence of the phase-naming progress
 	// line on the verbs whose cost is one call (a load, a judged
 	// record, a prune, a retarget): the run and ephemeral verbs expose

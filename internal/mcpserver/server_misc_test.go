@@ -38,7 +38,7 @@ func TestWithHeartbeatNotifiesDuringTheStretch(t *testing.T) {
 	defer func() { seams.heartbeatInterval = prior }()
 	var beats atomic.Int64
 	notify := func(string) { beats.Add(1) }
-	got, err := withHeartbeat(context.Background(), notify, "probe", func(context.Context) (int, error) {
+	got, err := withHeartbeatLabel(context.Background(), notify, func() string { return "probe" }, func(context.Context) (int, error) {
 		time.Sleep(60 * time.Millisecond)
 		return 7, nil
 	})
@@ -67,7 +67,7 @@ func TestWithHeartbeatNotifiesDuringTheStretch(t *testing.T) {
 	if !strings.Contains(joined, "still working: baseline") || !strings.Contains(joined, "still working: mutant-run 1/1") {
 		t.Fatalf("heartbeat labels = %q", labels)
 	}
-	if _, err := withHeartbeat(context.Background(), nil, "probe", func(context.Context) (int, error) { return 1, nil }); err != nil {
+	if _, err := withHeartbeatLabel(context.Background(), nil, func() string { return "probe" }, func(context.Context) (int, error) { return 1, nil }); err != nil {
 		t.Fatalf("nil-notifier stretch failed: %v", err)
 	}
 }

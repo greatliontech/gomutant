@@ -56,6 +56,16 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	if err := gomutant.CheckToolchainProvenance(ctx, o.dir, selectionOf(o.tags, o.toolchain)); err != nil {
 		return err
 	}
+	// The cadence starts before the store and the document lock — a
+	// lock held by a running campaign is a stretch the line names, not
+	// a silence; the posture's load and judgment follow under it, and
+	// the echo renders through the epilogue so no progress line trails
+	// it (REQ-exec-run-status).
+	out = &syncWriter{w: out}
+	rep := newRunReporter(out, false, 0)
+	defer rep.stop()
+	rep.phase(gomutant.StretchPreparation)
+	rep.startCadence(seams.progressInterval)
 	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err
@@ -78,30 +88,35 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// evidence by a reader who stopped at the echo
 	// (REQ-result-run-posture).
 	layer, layerReason := store.Layer(attested)
-	posture := attestedPosture(ctx, o.dir, selectionOf(o.tags, o.toolchain), vouches, attested)
+	posture := attestedPosture(ctx, o.dir, selectionOf(o.tags, o.toolchain), vouches, attested, rep)
 	layerText := "repo"
 	if layer != "repo" {
 		layerText = "machine-local (" + layerReason + ")"
 	}
-	fmt.Fprintf(out, "attested %s %s; %d open; layer: %s; reuse: %s\n", o.position, o.operator, len(attested.Open()), layerText, posture.Line())
+	rep.epilogue(func(w io.Writer) {
+		fmt.Fprintf(w, "attested %s %s; %d open; layer: %s; reuse: %s\n", o.position, o.operator, len(attested.Open()), layerText, posture.Line())
+	})
 	return nil
 }
 
 // attestedPosture judges the attested record once under the call's
-// selection; a tree or judgment fault is the posture's own reason.
-func attestedPosture(ctx context.Context, dir string, sel gomutant.Selection, vouches []string, attested gomutant.Finding) gomutant.RecordPosture {
+// selection, the load and the judgment named on the reporter; a tree
+// or judgment fault is the posture's own reason.
+func attestedPosture(ctx context.Context, dir string, sel gomutant.Selection, vouches []string, attested gomutant.Finding, rep *runReporter) gomutant.RecordPosture {
+	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, dir, sel)
 	if err != nil {
 		return gomutant.RecordedPosture(attested, gomutant.FindingInspection{}, err)
 	}
-	return judgeAttestedPosture(ctx, tree, vouches, attested)
+	return judgeAttestedPosture(ctx, tree, vouches, attested, func(stage string) { rep.phase(gomutant.StretchInspecting(stage)) })
 }
 
 // judgeAttestedPosture judges the record on a loaded tree under the
 // same acceptances the run judged under — the MCP face's server-wide
-// vouches give it those; the posture must not differ by face.
-func judgeAttestedPosture(ctx context.Context, tree *gomutant.Tree, vouches []string, attested gomutant.Finding) gomutant.RecordPosture {
+// vouches give it those; the posture must not differ by face. The
+// walk's stages reach progress when it is non-nil.
+func judgeAttestedPosture(ctx context.Context, tree *gomutant.Tree, vouches []string, attested gomutant.Finding, progress func(stage string)) gomutant.RecordPosture {
 	tree.SetDynamicStateVouches(vouches...)
-	inspection, err := tree.InspectFinding(ctx, attested)
+	inspection, err := tree.InspectFinding(ctx, attested, progress)
 	return gomutant.RecordedPosture(attested, inspection, err)
 }

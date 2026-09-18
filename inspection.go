@@ -78,6 +78,7 @@ func InspectDocument(ctx context.Context, tree *Tree, store *Store, matched []Fi
 	if phase == nil {
 		phase = func(string) {}
 	}
+	phase(fmt.Sprintf("reading %d record(s)", len(matched)))
 	inspections := make([]FindingInspection, len(matched))
 	for i, f := range matched {
 		inspections[i] = RecordedInspection(f)

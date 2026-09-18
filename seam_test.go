@@ -466,7 +466,7 @@ func TestSiblingTestAdditionStalesRecordAsTestVariants(t *testing.T) {
 		parsed[0].OracleEvidence[0].TestVariantClosure != f.OracleEvidence[0].TestVariantClosure {
 		t.Fatalf("compartment pin did not round-trip: %+v", parsed[0].TargetEvidence)
 	}
-	inspection, err := tr.InspectFinding(context.Background(), f)
+	inspection, err := tr.InspectFinding(context.Background(), f, nil)
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("just-measured inspection = %+v, %v", inspection, err)
 	}
@@ -483,7 +483,7 @@ func TestSiblingTestAdditionStalesRecordAsTestVariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inspection, err = edited.InspectFinding(context.Background(), f)
+	inspection, err = edited.InspectFinding(context.Background(), f, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "test variants") {
 		t.Fatalf("sibling-test inspection = %+v, %v; want stale with the discriminating reason", inspection, err)
 	}
@@ -514,7 +514,7 @@ func TestFresh(t *testing.T) {
 		f.TargetEvidence.ObservationEvidence == "" || f.OracleEvidence[0].ObservationEvidence == "" {
 		t.Fatalf("measured finding lacks observation proof: %+v", f)
 	}
-	inspection, err := tr.InspectFinding(context.Background(), f)
+	inspection, err := tr.InspectFinding(context.Background(), f, nil)
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("just-measured inspection = %+v, %v", inspection, err)
 	}
@@ -558,7 +558,7 @@ func TestFresh(t *testing.T) {
 	if ok, err := tr.Fresh(context.Background(), oldProof, tg, 1); err != nil || ok {
 		t.Fatalf("superseded observation proof read fresh: %v %v", ok, err)
 	}
-	inspection, err = tr.InspectFinding(context.Background(), oldProof)
+	inspection, err = tr.InspectFinding(context.Background(), oldProof, nil)
 	if err != nil || inspection.State != FindingUnverifiable {
 		t.Fatalf("superseded observation proof inspection = %+v, %v", inspection, err)
 	}
@@ -589,27 +589,27 @@ func TestFresh(t *testing.T) {
 	unverifiable := f
 	unverifiable.TargetEvidence.RuntimeUnverifiable = true
 	unverifiable.TargetEvidence.RuntimeReason = "manual input"
-	inspection, err = tr.InspectFinding(context.Background(), unverifiable)
+	inspection, err = tr.InspectFinding(context.Background(), unverifiable, nil)
 	if err != nil || inspection.State != FindingUnverifiable || inspection.Reason != "target: manual input" {
 		t.Fatalf("unverifiable inspection = %+v, %v; want the reason attributed to its subject", inspection, err)
 	}
 	detached := f
 	detached.Symbol = "example.com/fixture/lib.Deleted"
 	detached.OperatorSet = "go/1"
-	inspection, err = tr.InspectFinding(context.Background(), detached)
+	inspection, err = tr.InspectFinding(context.Background(), detached, nil)
 	if err != nil || inspection.State != FindingDetached {
 		t.Fatalf("detached inspection = %+v, %v", inspection, err)
 	}
 	oldOperator := f
 	oldOperator.OperatorSet = "go/1"
-	inspection, err = tr.InspectFinding(context.Background(), oldOperator)
+	inspection, err = tr.InspectFinding(context.Background(), oldOperator, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "operator") {
 		t.Fatalf("operator inspection = %+v, %v", inspection, err)
 	}
 	missingOracle := f
 	missingOracle.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
 	missingOracle.OracleEvidence[0].Symbol = "example.com/fixture/lib.TestDeleted"
-	inspection, err = tr.InspectFinding(context.Background(), missingOracle)
+	inspection, err = tr.InspectFinding(context.Background(), missingOracle, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "oracle") {
 		t.Fatalf("missing-oracle inspection = %+v, %v", inspection, err)
 	}
@@ -624,7 +624,7 @@ func TestFresh(t *testing.T) {
 	if ok, err := movedEnvironment.Fresh(context.Background(), f, tg, 1); err != nil || ok {
 		t.Fatalf("finding fresh after runtime input changed: %v %v", ok, err)
 	}
-	inspection, err = movedEnvironment.InspectFinding(context.Background(), f)
+	inspection, err = movedEnvironment.InspectFinding(context.Background(), f, nil)
 	if err != nil || inspection.State != FindingStale {
 		t.Fatalf("moved-input inspection = %+v, %v", inspection, err)
 	}
@@ -656,7 +656,7 @@ func TestInspectFindingStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	finding := Finding{Symbol: "example.com/fixture/lib.Add", OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: "1m0s", TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence}
-	inspection, err := tr.InspectFinding(context.Background(), finding)
+	inspection, err := tr.InspectFinding(context.Background(), finding, nil)
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("current inspection = %+v, %v", inspection, err)
 	}
@@ -675,65 +675,65 @@ func TestInspectFindingStates(t *testing.T) {
 	multi := finding
 	multi.TargetEvidence = multiTarget
 	multi.OracleEvidence = multiOracle
-	inspection, err = tr.InspectFinding(context.Background(), multi)
+	inspection, err = tr.InspectFinding(context.Background(), multi, nil)
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("multi-oracle current inspection = %+v, %v", inspection, err)
 	}
 	derived := finding
 	derived.OracleExplicit = false
-	inspection, err = tr.InspectFinding(context.Background(), derived)
+	inspection, err = tr.InspectFinding(context.Background(), derived, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "derived oracle") {
 		t.Fatalf("changed derived oracle inspection = %+v, %v", inspection, err)
 	}
 	oldOperator := finding
 	oldOperator.OperatorSet = "go/1"
-	inspection, err = tr.InspectFinding(context.Background(), oldOperator)
+	inspection, err = tr.InspectFinding(context.Background(), oldOperator, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "operator") {
 		t.Fatalf("operator inspection = %+v, %v", inspection, err)
 	}
 	detached := finding
 	detached.Symbol = "example.com/fixture/lib.Deleted"
 	detached.OperatorSet = "go/1"
-	inspection, err = tr.InspectFinding(context.Background(), detached)
+	inspection, err = tr.InspectFinding(context.Background(), detached, nil)
 	if err != nil || inspection.State != FindingDetached {
 		t.Fatalf("detached precedence = %+v, %v", inspection, err)
 	}
 	staleTarget := finding
 	staleTarget.TargetEvidence.MaximalClosure = "moved"
-	inspection, err = tr.InspectFinding(context.Background(), staleTarget)
+	inspection, err = tr.InspectFinding(context.Background(), staleTarget, nil)
 	if err != nil || inspection.State != FindingStale {
 		t.Fatalf("target stale inspection = %+v, %v", inspection, err)
 	}
 	staleRuntime := finding
 	staleRuntime.TargetEvidence.RuntimeDigest = "moved"
-	inspection, err = tr.InspectFinding(context.Background(), staleRuntime)
+	inspection, err = tr.InspectFinding(context.Background(), staleRuntime, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "runtime") {
 		t.Fatalf("runtime stale inspection = %+v, %v", inspection, err)
 	}
 	unverifiable := finding
 	unverifiable.TargetEvidence.RuntimeUnverifiable = true
 	unverifiable.TargetEvidence.RuntimeReason = "manual input"
-	inspection, err = tr.InspectFinding(context.Background(), unverifiable)
+	inspection, err = tr.InspectFinding(context.Background(), unverifiable, nil)
 	if err != nil || inspection.State != FindingUnverifiable || inspection.Reason != "target: manual input" {
 		t.Fatalf("unverifiable inspection = %+v, %v; want the reason attributed to its subject", inspection, err)
 	}
 	staleOracle := finding
 	staleOracle.OracleEvidence = append([]SubjectEvidence(nil), finding.OracleEvidence...)
 	staleOracle.OracleEvidence[0].MaximalClosure = "moved"
-	inspection, err = tr.InspectFinding(context.Background(), staleOracle)
+	inspection, err = tr.InspectFinding(context.Background(), staleOracle, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "oracle") {
 		t.Fatalf("oracle stale inspection = %+v, %v", inspection, err)
 	}
 	missingOracle := finding
 	missingOracle.OracleEvidence = append([]SubjectEvidence(nil), finding.OracleEvidence...)
 	missingOracle.OracleEvidence[0].Symbol = "example.com/fixture/lib.TestDeleted"
-	inspection, err = tr.InspectFinding(context.Background(), missingOracle)
+	inspection, err = tr.InspectFinding(context.Background(), missingOracle, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "no longer resolves") {
 		t.Fatalf("missing oracle inspection = %+v, %v", inspection, err)
 	}
 	staleAndMissing := missingOracle
 	staleAndMissing.TargetEvidence.MaximalClosure = "moved"
-	inspection, err = tr.InspectFinding(context.Background(), staleAndMissing)
+	inspection, err = tr.InspectFinding(context.Background(), staleAndMissing, nil)
 	if err != nil || inspection.State != FindingStale || strings.Contains(inspection.Reason, "no longer resolves") {
 		t.Fatalf("target-first inspection = %+v, %v", inspection, err)
 	}
@@ -741,7 +741,7 @@ func TestInspectFindingStates(t *testing.T) {
 	staleBeforeMissing.OracleEvidence = append([]SubjectEvidence(nil), multi.OracleEvidence...)
 	staleBeforeMissing.OracleEvidence[0].MaximalClosure = "moved"
 	staleBeforeMissing.OracleEvidence[1].Symbol = "example.com/fixture/lib.TestZZZDeleted"
-	inspection, err = tr.InspectFinding(context.Background(), staleBeforeMissing)
+	inspection, err = tr.InspectFinding(context.Background(), staleBeforeMissing, nil)
 	if err != nil || inspection.State != FindingStale || strings.Contains(inspection.Reason, "TestZZZDeleted") {
 		t.Fatalf("canonical valid-oracle precedence = %+v, %v", inspection, err)
 	}
@@ -752,13 +752,13 @@ func TestInspectFindingStates(t *testing.T) {
 	missingFirst := finding.OracleEvidence[0]
 	missingFirst.Symbol = "example.com/fixture/lib.TestAAADeleted"
 	setOrder.OracleEvidence = []SubjectEvidence{unverifiableOracle, missingFirst}
-	inspection, err = tr.InspectFinding(context.Background(), setOrder)
+	inspection, err = tr.InspectFinding(context.Background(), setOrder, nil)
 	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "TestAAADeleted") {
 		t.Fatalf("canonical oracle-set inspection = %+v, %v", inspection, err)
 	}
 	badTimeout := finding
 	badTimeout.OracleTimeout = "invalid"
-	if _, err := tr.InspectFinding(context.Background(), badTimeout); err == nil {
+	if _, err := tr.InspectFinding(context.Background(), badTimeout, nil); err == nil {
 		t.Fatal("invalid oracle timeout inspected")
 	}
 }

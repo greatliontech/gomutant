@@ -94,3 +94,32 @@ func with(e ExecutionEvent, f func(*ExecutionEvent)) ExecutionEvent {
 	f(&e)
 	return e
 }
+
+// The stretch vocabulary is one set of names: every stretch a face
+// records is one of these spellings, the preparation stretch its stage
+// under one lead, so both faces' readers read the same stretch in
+// flight (REQ-exec-run-status).
+func TestStretchVocabularyIsOneSetOfNames(t *testing.T) {
+	// Every produced name, the derived forms included — a list, so
+	// two stretches producing one string are seen, where a map literal
+	// would fold them (the compiler refuses only constant duplicates).
+	want := [][2]string{
+		{StretchPreparation, "preparing"}, {StretchSelecting, "selecting targets"}, {StretchReconciling, "reconciling the document"},
+		{StretchMerging, "merging findings"}, {StretchRendering, "rendering the response"},
+		{StretchInspecting("judging 3 record(s)"), "inspecting prior findings: judging 3 record(s)"},
+		{StretchPreparing(PreparationEvent{Stage: PreparationLoading}), "prepare loading"},
+		{StretchPreparing(PreparationEvent{Stage: PreparationBaseline, Symbol: "p.TestX"}), "prepare baseline"},
+		{StretchPreparing(PreparationEvent{Stage: PreparationMutantRun, Symbol: "p.TestX", Package: "p"}), "prepare mutant-run"},
+		{StretchPreparing(PreparationEvent{Stage: PreparationCoverage}), "prepare coverage"},
+	}
+	seen := map[string]bool{}
+	for _, row := range want {
+		if row[0] != row[1] {
+			t.Fatalf("stretch %q, want %q", row[0], row[1])
+		}
+		if seen[row[0]] {
+			t.Fatalf("two stretches share the name %q", row[0])
+		}
+		seen[row[0]] = true
+	}
+}

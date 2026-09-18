@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	gomutant "github.com/greatliontech/gomutant"
 )
 
 // A disposition is a judgment about the mutated source, so it carries
@@ -41,12 +43,21 @@ func TestRunCarriesAcrossPinsAndShedsOnDomainMove(t *testing.T) {
 	}
 	survivor := measured[0].Survivors[0]
 
+	// The disposition's posture judgment loads and judges under the
+	// reporter: the load's event, then the judged record's stretches
+	// under the inspection lead, before the echo (REQ-exec-run-status).
+	labels := observeStretches(t)
 	var echo bytes.Buffer
 	if err := attestCommand(ctx, attestOptions{
 		dir: fixture, findingsFile: defaultFindings,
 		symbol: measured[0].Symbol, position: survivor.Position, operator: survivor.Operator, reason: "equivalent by inspection",
 	}, &echo); err != nil {
 		t.Fatal(err)
+	}
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchPreparation, gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}), gomutant.StretchInspecting("judging " + measured[0].Symbol)})
+	seams.stretchObserver = nil
+	if !strings.HasPrefix(echo.String(), "prepare   loading\n") {
+		t.Fatalf("attest echo = %q; want the loading line first", echo.String())
 	}
 	// The disposition echo names what it did, the record's layer, and no
 	// warning while the record can serve as it stands

@@ -113,6 +113,45 @@ func (e ExecutionEvent) Stretch() string {
 	return ""
 }
 
+// The stretch vocabulary: the one set of names both faces record and
+// render for the stretch in flight — the CLI's cadenced progress line
+// and its interruption line, the structured face's heartbeat — so a
+// reader of either face reads the other's words (REQ-exec-run-status).
+// Every stretch a face names is one of: the preparation before the
+// load (StretchPreparation); a preparation event's stage under one
+// lead, the load's own event included (StretchPreparing); the target
+// selection; the inspection of prior findings at the record walk's
+// stage (StretchInspecting); the zero-target reconcile; the final
+// merge; the rendering; and the execution stretches
+// (ExecutionEvent.Stretch).
+const (
+	// StretchPreparation is the stretch before the load's own event:
+	// the preparation a verb runs once its inputs' shapes are refused
+	// — the store, the document lock, the records, a probe's batch —
+	// named from the cadence's start (REQ-exec-preparation).
+	StretchPreparation = "preparing"
+	// StretchSelecting is the target selection after the load.
+	StretchSelecting = "selecting targets"
+	// StretchReconciling is the zero-target whole-tree reconcile.
+	StretchReconciling = "reconciling the document"
+	// StretchMerging is the final merge into the document.
+	StretchMerging = "merging findings"
+	// StretchRendering is the response's or report's rendering.
+	StretchRendering = "rendering the response"
+)
+
+// StretchInspecting names the inspection of prior findings at one of
+// the record walk's stages — the read, the signpost's pass, the
+// admission, the view build, a record's judgment — as the walk reports
+// them.
+func StretchInspecting(stage string) string { return "inspecting prior findings: " + stage }
+
+// StretchPreparing names a preparation event's stretch by its stage
+// under one lead both faces share; what the stage names (a symbol, a
+// package, a budget) rides the event itself — the CLI's prepare line,
+// the structured face's notification — never the stretch's name.
+func StretchPreparing(e PreparationEvent) string { return "prepare " + string(e.Stage) }
+
 // AnalysisEvent is a payload-bearing analysis event from the freshness
 // engine, as Options.AnalysisEvent delivers it: the engine's phase,
 // the package, and the detail.

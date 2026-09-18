@@ -14,7 +14,9 @@ import (
 
 // The MCP run response's changed-mode residue carries the oracle
 // closure signpost like the CLI's (REQ-target-changed, spec mcp.md's
-// same-shell rule).
+// same-shell rule), and the signpost's pass names the heartbeat's
+// stretch under the inspection lead — the CLI's cadence's words
+// (REQ-exec-run-status).
 func TestToolRunChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test over a fixture module")
@@ -60,10 +62,12 @@ func TestToolRunChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	labels := observeStretches(t)
 	_, out, err := s.toolRun(context.Background(), nil, runIn{Changed: "HEAD"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchSelecting, gomutant.StretchInspecting("closure signpost over 1 prior record(s)")})
 	found := false
 	for _, r := range out.Residue {
 		if strings.Contains(r.Reason, "oracle closure of 1 stale finding(s) - re-measure by symbol: example.com/fixture/lib.Weak") {

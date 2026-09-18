@@ -109,6 +109,30 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	}
 	document := gomutant.FindingsPathAt(o.dir, o.findingsFile)
 	filter := gomutant.RecordFilter{Label: o.label, Symbol: o.symbol, Run: o.run}
+	// Judging derives freshness against the current tree — the
+	// expensive truth — and a cut loads the tree too; the default path
+	// loads no tree at all: the document's recorded facts answer
+	// without one. The human face carries the cadence from before the
+	// store opens, the loading line, and the walk's stages; the JSON
+	// document is the machine face and stays a document
+	// (REQ-exec-run-status).
+	judge := o.judged()
+	phase, preparation := func(string) {}, func(gomutant.PreparationEvent) {}
+	// Every human line goes through the reporter when one runs: prose
+	// under the cadence, the rows through the epilogue — the cadence
+	// stops and joins before the first row, on every exit.
+	prose := func(line string) error { _, err := fmt.Fprintln(out, line); return err }
+	epilogue := func(render func(io.Writer)) { render(out) }
+	if (judge || o.changed != "") && !o.json {
+		rep := newRunReporter(out, false, 0)
+		defer rep.stop()
+		rep.phase(gomutant.StretchPreparation)
+		rep.startCadence(seams.progressInterval)
+		phase = func(stage string) { rep.phase(gomutant.StretchInspecting(stage)) }
+		preparation = rep.preparation
+		prose = func(line string) error { return rep.flushProse(line + "\n") }
+		epilogue = rep.epilogue
+	}
 	store, err := gomutant.OpenStore(document, o.dir)
 	if err != nil {
 		return err
@@ -132,12 +156,12 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	// face and beside the document on the JSON face, whose output is
 	// the document itself (REQ-result-layers).
 	if line := gomutant.LegacyOverlayLine(store.LegacyEntries()); line != "" {
-		notes := out
 		if o.json {
-			notes = o.errOut
-		}
-		if notes != nil {
-			fmt.Fprintln(notes, line)
+			if o.errOut != nil {
+				fmt.Fprintln(o.errOut, line)
+			}
+		} else if err := prose(line); err != nil {
+			return err
 		}
 	}
 	// Zero rows is an answer: after the tail — the attestation record
@@ -156,9 +180,11 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 			}
 			return renderFindingsJSON(out, []findingView{})
 		}
-		fmt.Fprintln(out, "no findings")
-		renderDocumentTail(out, tail)
-		fmt.Fprintln(out, note)
+		epilogue(func(w io.Writer) {
+			fmt.Fprintln(w, "no findings")
+			renderDocumentTail(w, tail)
+			fmt.Fprintln(w, note)
+		})
 		return nil
 	}
 	if len(all) == 0 {
@@ -168,26 +194,11 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 	if len(matched) == 0 {
 		return noRows(0)
 	}
-	judge := o.judged()
 	var tree *gomutant.Tree
-	phase, stop := func(string) {}, func() {}
 	// The changed-ref cut places survivor positions through the tree
 	// without judging anything (REQ-result-inspection).
 	if judge || o.changed != "" {
-		// Judging derives freshness against the current tree — the
-		// expensive truth. The default path loads no tree at all: the
-		// document's recorded facts answer without one.
-		// The human face carries the loading line and the cadence; the
-		// JSON document is the machine face and stays a document.
-		if !o.json {
-			rep := newRunReporter(out, false, 0)
-			defer rep.stop()
-			stop = rep.stop
-			rep.phase("loading")
-			rep.startCadence(seams.progressInterval)
-			rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
-			phase = rep.phase
-		}
+		preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 		tree, err = gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 		if err != nil {
 			return err
@@ -205,9 +216,6 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		cut = selected.Cut
 	}
 	views, inspection, err := inspectFindings(ctx, tree, store, matched, findingFilters{state: o.state, judge: judge, cut: cut}, phase)
-	// The rows render through the reporter's epilogue when one runs:
-	// the cadence stops and joins before the first row.
-	stop()
 	if err != nil {
 		return err
 	}
@@ -221,12 +229,14 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		// precedent below reads it.
 		return renderFindingsJSON(out, views)
 	}
-	if !o.detail {
-		renderFindingSummaries(out, views, inspection, judge, cut != nil)
-	} else {
-		renderFindingViews(out, views, inspection)
-	}
-	renderDocumentTail(out, tail)
+	epilogue(func(w io.Writer) {
+		if !o.detail {
+			renderFindingSummaries(w, views, inspection, judge, cut != nil)
+		} else {
+			renderFindingViews(w, views, inspection)
+		}
+		renderDocumentTail(w, tail)
+	})
 	return nil
 }
 

@@ -2698,7 +2698,7 @@ func TestRunExtensionDivergenceStampsAndAttributes(t *testing.T) {
 			t.Fatalf("capped oracle evidence unverifiable at capture: %+v", oracle)
 		}
 	}
-	inspection, ierr := tr.InspectFinding(context.Background(), capped[0])
+	inspection, ierr := tr.InspectFinding(context.Background(), capped[0], nil)
 	if ierr != nil || inspection.State != FindingCurrent {
 		t.Fatalf("capped inspection = %+v, %v\noracle evidence: %+v", inspection, ierr, capped[0].OracleEvidence)
 	}

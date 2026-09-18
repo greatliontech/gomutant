@@ -31,15 +31,17 @@ func newPruneCommand() *cobra.Command {
 }
 
 func pruneCommand(ctx context.Context, o pruneOptions, out io.Writer) error {
+	// The cadence starts before the store: its open is preparation the
+	// line names (REQ-exec-run-status).
+	out = &syncWriter{w: out}
+	rep := newRunReporter(out, false, 0)
+	defer rep.stop()
+	rep.phase(gomutant.StretchPreparation)
+	rep.startCadence(seams.progressInterval)
 	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err
 	}
-	out = &syncWriter{w: out}
-	rep := newRunReporter(out, false, 0)
-	defer rep.stop()
-	rep.phase("loading")
-	rep.startCadence(seams.progressInterval)
 	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {
@@ -98,15 +100,17 @@ func retargetCommand(ctx context.Context, o retargetOptions, out io.Writer) erro
 	if err := gomutant.ValidateRetargetPair(o.from, o.to); err != nil {
 		return err
 	}
+	// The cadence starts before the store: its open is preparation the
+	// line names (REQ-exec-run-status).
+	out = &syncWriter{w: out}
+	rep := newRunReporter(out, false, 0)
+	defer rep.stop()
+	rep.phase(gomutant.StretchPreparation)
+	rep.startCadence(seams.progressInterval)
 	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(o.dir, o.findingsFile), o.dir)
 	if err != nil {
 		return err
 	}
-	out = &syncWriter{w: out}
-	rep := newRunReporter(out, false, 0)
-	defer rep.stop()
-	rep.phase("loading")
-	rep.startCadence(seams.progressInterval)
 	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading})
 	tree, err := gomutant.LoadContextSelection(ctx, o.dir, selectionOf(o.tags, o.toolchain))
 	if err != nil {

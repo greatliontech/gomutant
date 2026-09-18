@@ -18,7 +18,7 @@ var productionSeams = seams
 // in production than under test.
 func TestCommandSeamsDefaultToProduction(t *testing.T) {
 	d := productionSeams
-	if d.afterFinalReplacement != nil {
+	if d.afterFinalReplacement != nil || d.stretchObserver != nil {
 		t.Fatal("an observer is installed by default")
 	}
 	if d.progressInterval != gomutant.ProgressCadence || d.sigtermDrainDeadline != 5*time.Second || d.postCommitRenderBound != gomutant.PostCommitRenderBound {

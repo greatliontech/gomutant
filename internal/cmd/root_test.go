@@ -202,12 +202,21 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if err := os.WriteFile(targetsPath, []byte(`{"targets":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	labels := observeStretches(t)
 	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, targetsFile: targetsPath, output: io.Discard}); err != nil {
 		t.Fatal(err)
 	}
 	retained, err := loadFindings(dir, path)
 	if err != nil || len(retained) != 1 {
 		t.Fatalf("scoped zero-target run pruned findings: %+v, %v", retained, err)
+	}
+	// A scoped selection of nothing reconciles nothing and names no
+	// reconcile; the whole-tree one below names its stretch as the
+	// structured face does (REQ-exec-run-status).
+	for _, label := range labels() {
+		if label == gomutant.StretchReconciling {
+			t.Fatalf("a scoped zero-target run named the reconcile; recorded %q", labels())
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -222,6 +231,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, output: &output}); err != nil {
 		t.Fatal(err)
 	}
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchSelecting, gomutant.StretchReconciling})
 	if !strings.Contains(output.String(), "no targets: the tree has no mutation targets\nsummary   0 targets: 0 measured, 0 cached, 0 skipped; 0 generated, 0 killed, 0 survived, 0 discarded; 0 attested, 0 open\n") {
 		t.Fatalf("empty whole-tree output = %q", output.String())
 	}
