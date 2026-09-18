@@ -24,7 +24,7 @@ func AcquireCampaignLock(path string) (release func(), err error) {
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		return nil, err
 	}
-	ensureLockIgnore(filepath.Dir(lockPath))
+	EnsureStoreIgnore(filepath.Dir(lockPath))
 	release, holder, err := acquireFlock(context.Background(), lockPath, 1)
 	if errors.Is(err, errFlockHeld) {
 		if holder != "" {

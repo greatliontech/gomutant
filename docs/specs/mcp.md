@@ -95,8 +95,10 @@ default findings document it serves (`.gomutant/mcp.log` under the
 server's directory, whatever a call's own `findings` names; appended
 across sessions; moved to `mcp.log.1`, one generation kept, by any write
 that would carry it past one megabyte, within a session as between them)
-carries the protocol layer's own server lines and a final `exit` line
-naming the class — `cancelled` (the serve context had ended when the
+— a machine-local file: minted into the tool-owned directory's ignore
+as the lock files are, and among a run's own writes, never measurement
+residue — carries the protocol layer's own server lines and a final
+`exit` line naming the class — `cancelled` (the serve context had ended when the
 serve returned, whatever the protocol layer answered first: a host that
 closes the transport and signals together races the two, and the
 recorded fact is the context's), `host-closed` (a clean return under a

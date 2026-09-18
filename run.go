@@ -71,8 +71,6 @@ type runOptions struct {
 	bounds engine.OracleBounds
 }
 
-// advisoryLeash is the bound an advisory probe of g runs under
-// (groupLeash when the run installed it, the run-wide bound otherwise).
 // unscheduled is the run's options with the schedule withheld: the
 // serial re-scores (the confirmation's fallback, the audit's full run)
 // execute the candidate's whole oracle scope, because a scheduled
@@ -83,6 +81,8 @@ func (o runOptions) unscheduled() runOptions {
 	return o
 }
 
+// advisoryLeash is the bound an advisory probe of g runs under
+// (groupLeash when the run installed it, the run-wide bound otherwise).
 func (o runOptions) advisoryLeash(g group) time.Duration {
 	if o.groupLeash != nil {
 		return o.groupLeash(g)
@@ -997,12 +997,6 @@ func sequenceKey(values []string) string {
 	return key.String()
 }
 
-// Run mutates each target and executes its oracle per mutant, fanning
-// mutant runs across a worker pool (REQ-exec-oracle-run). Prior findings
-// are served only when every target and oracle evidence record, operator,
-// oracle-timeout and budget pins hold, unless forced (REQ-result-stale). A run that
-// cannot attribute an outcome aborts without findings
-// (REQ-core-attributed-kills).
 // probeOracleInstability attributes unverifiable runtime evidence under
 // a package-derived oracle by probing each oracle test alone: a test
 // whose solo baseline run produces unverifiable evidence is the
@@ -1516,16 +1510,6 @@ func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts runOp
 	return outcome, killer, memoryDecided, state, incompleteReason, narrowedSurvivor && outcome == engine.MutantSurvived, degradeNone, nil
 }
 
-// newSurvivor is the ONE survivor-row constructor: every assembly path
-// — fresh, served splice, grown delta, extend suffix, drift re-measure,
-// and the two carry-prior sites — builds its rows here, deciding the
-// flip question at the call (REQ-exec-survivor-evidence). flips is the
-// window's confirmation-flip map for candidates that EXECUTED this run
-// (nil at carry-prior sites, whose candidates did not run and cannot
-// have flipped): a withdrawn window kill marks the row flipped-kill
-// with its killer named. A helper applied post-hoc was tried first and
-// silently missed two of the assembly paths in consecutive review
-// rounds — construction is where omission becomes uncompilable.
 // windowScores is one window's verdict-bearing measurement for one
 // target: outcomes, their killers, and the serial-confirmation flips,
 // indexed by candidate. The three travel as one value because every
@@ -1610,6 +1594,16 @@ func carrySurvivor(candidate engine.Candidate, prior Survivor) Survivor {
 	return Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution, WithdrawnKiller: prior.WithdrawnKiller}
 }
 
+// newSurvivor is the ONE survivor-row constructor: every assembly path
+// — fresh, served splice, grown delta, extend suffix, drift re-measure,
+// and the two carry-prior sites — builds its rows here, deciding the
+// flip question at the call (REQ-exec-survivor-evidence). flips is the
+// window's confirmation-flip map for candidates that EXECUTED this run
+// (nil at carry-prior sites, whose candidates did not run and cannot
+// have flipped): a withdrawn window kill marks the row flipped-kill
+// with its killer named. A helper applied post-hoc was tried first and
+// silently missed two of the assembly paths in consecutive review
+// rounds — construction is where omission becomes uncompilable.
 func newSurvivor(candidate engine.Candidate, execution string, flips map[int]string, mi int, narrowed bool) Survivor {
 	row := Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution}
 	if narrowed && execution != "unstable-oracle" {
@@ -1905,6 +1899,12 @@ func preflightBracketPaths(ctx context.Context, treeDir string, paths []string) 
 	return nil
 }
 
+// Run mutates each target and executes its oracle per mutant, fanning
+// mutant runs across a worker pool (REQ-exec-oracle-run). Prior findings
+// are served only when every target and oracle evidence record, operator,
+// oracle-timeout and budget pins hold, unless forced (REQ-result-stale). A run that
+// cannot attribute an outcome aborts without findings
+// (REQ-core-attributed-kills).
 func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Finding, error) {
 	// The run counts itself: the tallies are installed on the caller's
 	// callbacks and delivered on every exit once measurement began, and
@@ -1975,7 +1975,12 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// run: a wide drift refuses many targets against the same tree
 	// state, and the naming needs the residue set, not a per-target
 	// re-listing.
-	residue := sync.OnceValue(func() string { return measurementResidue(ctx, repository, runStart, opts.OwnWrites) })
+	// The store's own paths join the caller's declared writes in a copy:
+	// opts.OwnWrites itself stays the caller's declaration — its presence
+	// marks a findings-producing run for the baseline bank below.
+	residue := sync.OnceValue(func() string {
+		return measurementResidue(ctx, repository, runStart, append(append([]string(nil), opts.OwnWrites...), StoreOwnPaths(t.dir)...))
+	})
 	// driftedMu guards drifted: the preparation goroutine's cached-serve
 	// refusal and the aggregation loop's refusals append concurrently
 	// (the pipeline runs preparation ahead of execution).
@@ -6143,17 +6148,6 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 	return union, rec, nil
 }
 
-// moduleRelInputs recovers a manifest's tree-local input paths in
-// tree-relative slash form regardless of the manifest's stored form:
-// recorded findings persist relative-form entries while engine
-// observations are absolutized before they leave the engine, and naming
-// must read both. Every naming site recovers against the one tree root
-// so the sets it compares share a base (a workspace member's inputs
-// carry the member prefix on both sides). Relativization tries the root
-// as given and symlink-resolved - whichever form the recorded entries
-// carry. Best-effort - ok reports whether the manifest decoded; a
-// decodable manifest with no tree-local entries returns an empty set,
-// which is a statement, not an absence.
 // evidenceBase is the directory a subject's recorded manifest is
 // anchored at: the tree root, or — for a record from before evidence
 // anchored at the tree — the member module base it carries
@@ -6213,6 +6207,17 @@ func resolveThroughAncestor(p string) (string, bool) {
 	}
 }
 
+// moduleRelInputs recovers a manifest's tree-local input paths in
+// tree-relative slash form regardless of the manifest's stored form:
+// recorded findings persist relative-form entries while engine
+// observations are absolutized before they leave the engine, and naming
+// must read both. Every naming site recovers against the one tree root
+// so the sets it compares share a base (a workspace member's inputs
+// carry the member prefix on both sides). Relativization tries the root
+// as given and symlink-resolved - whichever form the recorded entries
+// carry. Best-effort - ok reports whether the manifest decoded; a
+// decodable manifest with no tree-local entries returns an empty set,
+// which is a statement, not an absence.
 func moduleRelInputs(encoded, treeDir string) (paths []string, ok bool) {
 	abs, err := runtimeinput.Paths(encoded, treeDir)
 	if err != nil {

@@ -163,7 +163,7 @@ func (e *ExitError) MCPExitCode() int { return 2 }
 // ExitLogPath is the exit log's home: beside the findings document the
 // server serves, appended across sessions (REQ-mcp-exit-log).
 func (s *Server) ExitLogPath() string {
-	return filepath.Join(filepath.Dir(gomutant.FindingsPathAt(s.dir, "")), "mcp.log")
+	return gomutant.ExitLogPaths(s.dir)[0]
 }
 
 // runOn is Run over any transport — the in-memory one in tests — and
@@ -241,37 +241,43 @@ var exitLogNotice io.Writer = os.Stderr
 // exitLogNotice.
 func (s *Server) exitLogger() (*slog.Logger, func()) {
 	path := s.ExitLogPath()
-	f, err := openRotatingFile(path, exitLogMaxBytes)
+	f, err := openRotatingFile(path, gomutant.ExitLogPaths(s.dir)[1], exitLogMaxBytes)
 	if err != nil {
 		fmt.Fprintf(exitLogNotice, "gomutant mcp: exit log %s unwritable (%v); serving without it\n", path, err)
 		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}
 	}
+	// The log is a machine-local file beside the document: minted into
+	// the store's ignore as soon as its directory stands, as the locks
+	// are — a read-only session takes no lock and would otherwise leave
+	// it unignored.
+	gomutant.EnsureStoreIgnore(filepath.Dir(path))
 	return slog.New(slog.NewTextHandler(f, nil)), func() { _ = f.Close() }
 }
 
 // rotatingFile is the exit log's writer: append-only, bounded at every
-// write — a write that would carry the file past the bound first moves
-// it to `<name>.1`, one generation kept — so one long session is
-// bounded exactly as many short ones are. A single write larger than
-// the bound lands whole in a fresh file. The size is this writer's
-// view: two servers appending to one document's log each count their
-// own bytes, so the file may pass the bound by the other's lines and
-// one may move the file the other is appending to — a misplaced line,
-// never a wrong class. A reopen that fails leaves the writer empty
-// until the next write reopens.
+// write — a write that would carry the file past the bound first moves it
+// to its kept generation (rotated, named at construction) — so one long
+// session is bounded exactly as many short ones are. A single write
+// larger than the bound lands whole in a fresh file. The size is this
+// writer's view: two servers appending to one document's log each count
+// their own bytes, so the file may pass the bound by the other's lines
+// and one may move the file the other is appending to — a misplaced line,
+// never a wrong class. A reopen that fails leaves the writer empty until
+// the next write reopens.
 type rotatingFile struct {
-	path string
-	max  int64
-	mu   sync.Mutex
-	f    *os.File
-	size int64
+	path    string
+	rotated string
+	max     int64
+	mu      sync.Mutex
+	f       *os.File
+	size    int64
 }
 
-func openRotatingFile(path string, max int64) (*rotatingFile, error) {
+func openRotatingFile(path, rotated string, max int64) (*rotatingFile, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	r := &rotatingFile{path: path, max: max}
+	r := &rotatingFile{path: path, rotated: rotated, max: max}
 	if err := r.open(); err != nil {
 		return nil, err
 	}
@@ -297,7 +303,7 @@ func (r *rotatingFile) Write(p []byte) (int, error) {
 	defer r.mu.Unlock()
 	if r.f != nil && r.size > 0 && r.size+int64(len(p)) > r.max {
 		_ = r.f.Close()
-		_ = os.Rename(r.path, r.path+".1")
+		_ = os.Rename(r.path, r.rotated)
 		r.f, r.size = nil, 0
 	}
 	if r.f == nil {

@@ -263,7 +263,8 @@ run naming the test that must notice.
 **when:** use mcp as the server entry point for an MCP client;
 selection (tags, toolchain) is per-call on the served tools, while
 vouches bind at the server. Every session leaves `.gomutant/mcp.log`
-beside the findings document: the protocol layer's lines and a final
+beside the findings document (a machine-local file the store's minted
+ignore covers): the protocol layer's lines and a final
 `exit` line naming the class (host-closed, cancelled, transport,
 panic) with the cause, the calls answered, and the uptime — plus the
 serve's own error as `serve-error` where the class discarded it — and a

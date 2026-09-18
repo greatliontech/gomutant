@@ -25,7 +25,7 @@ func acquireDocumentLock(ctx context.Context, path string) (release func(), err 
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		return nil, err
 	}
-	ensureLockIgnore(filepath.Dir(lockPath))
+	EnsureStoreIgnore(filepath.Dir(lockPath))
 	release, holder, err := acquireFlock(ctx, lockPath, 50)
 	if errors.Is(err, errFlockHeld) {
 		if holder != "" {

@@ -444,7 +444,9 @@ second row) — a mutant of filesystem-writing code (or its
 oracle) can create files inside the tree during measurement, and the refusal
 then reads as the run's own residue rather than operator error, self-resolving
 once the residue is removed. The caller's declared own writes — its findings
-document and locks — are the harness's, never measurement residue.
+document and locks — and the store's own paths under the tree root, which the
+run adds itself (the server's exit log and the minted ignore), are the
+harness's, never measurement residue.
 A repository HEAD move is not a refusal class of its own: the capture commit a
 finding carries is read at stamp time — after the dirty judgment, so the pair
 is atomic under this requirement's own precondition, where the only legal

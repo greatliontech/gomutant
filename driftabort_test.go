@@ -387,6 +387,23 @@ func TestRunDriftNamesMeasurementResidue(t *testing.T) {
 			if err := os.WriteFile(libPath, []byte(moved), 0o644); err != nil {
 				t.Error(err)
 			}
+			// A server session appending its exit log mid-measurement,
+			// beside a consumer's ignore minted before the log's names
+			// existed (so git lists both the log and the ignore as
+			// untracked), is the harness's own write, which the run
+			// names on its own.
+			// Planted by literal name, never through the function under
+			// test, so the source and the run's append are both probeable.
+			store := filepath.Join(dir, ".gomutant")
+			if err := os.MkdirAll(store, 0o755); err != nil {
+				t.Error(err)
+			}
+			if err := os.WriteFile(filepath.Join(store, "mcp.log"), []byte("time=now msg=server session connected\n"), 0o644); err != nil {
+				t.Error(err)
+			}
+			if err := os.WriteFile(filepath.Join(store, ".gitignore"), []byte("*.campaign\n*.lock\n"), 0o644); err != nil {
+				t.Error(err)
+			}
 			if err := os.WriteFile(residue, []byte("mutant wrote this"), 0o644); err != nil {
 				t.Error(err)
 			}
@@ -408,5 +425,12 @@ func TestRunDriftNamesMeasurementResidue(t *testing.T) {
 	}
 	if strings.Contains(reason, "own-findings.json") {
 		t.Fatalf("the run's own declared write attributed as residue: %q", reason)
+	}
+	// A belt beside the names: with the store's paths unexcluded they sort
+	// before lib/residue.db and displace it from the line, so the
+	// residue.db assertion above already discriminates; this one holds
+	// whatever the rendering's order.
+	if strings.Contains(reason, ExitLogName) || strings.Contains(reason, ".gitignore") || strings.Contains(reason, "more)") {
+		t.Fatalf("the store's own paths attributed as measurement residue: %q", reason)
 	}
 }

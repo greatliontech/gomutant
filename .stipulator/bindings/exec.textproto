@@ -353,8 +353,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-quiescence"
-  content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
-  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
+  content_hash: "3ab07281bf4bdb5dc11211a89826ef3273b8215e77837513c51bb8b175a47bd4"
+  source_hash: "d7a7230190dc58e607062475a49e5969d238bb68d3d97175b1e73f9b1e747ad5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunSkipsBrokenTargetLocally"
   role: BINDING_ROLE_TESTS
@@ -363,8 +363,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-quiescence"
-  content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
-  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
+  content_hash: "3ab07281bf4bdb5dc11211a89826ef3273b8215e77837513c51bb8b175a47bd4"
+  source_hash: "d7a7230190dc58e607062475a49e5969d238bb68d3d97175b1e73f9b1e747ad5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunSkipsFailingBaselineTargetLocally"
   role: BINDING_ROLE_TESTS
@@ -1243,8 +1243,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-quiescence"
-  content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
-  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
+  content_hash: "3ab07281bf4bdb5dc11211a89826ef3273b8215e77837513c51bb8b175a47bd4"
+  source_hash: "d7a7230190dc58e607062475a49e5969d238bb68d3d97175b1e73f9b1e747ad5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestMethodProbesRefuseMovedDeclaringFile"
   role: BINDING_ROLE_TESTS
@@ -1253,8 +1253,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-quiescence"
-  content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
-  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
+  content_hash: "3ab07281bf4bdb5dc11211a89826ef3273b8215e77837513c51bb8b175a47bd4"
+  source_hash: "d7a7230190dc58e607062475a49e5969d238bb68d3d97175b1e73f9b1e747ad5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestMethodProbesRefuseContentDriftedDeclaringFile"
   role: BINDING_ROLE_TESTS
@@ -1263,8 +1263,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-quiescence"
-  content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
-  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
+  content_hash: "3ab07281bf4bdb5dc11211a89826ef3273b8215e77837513c51bb8b175a47bd4"
+  source_hash: "d7a7230190dc58e607062475a49e5969d238bb68d3d97175b1e73f9b1e747ad5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunRefusesShapedTargetOnSourceDrift"
   role: BINDING_ROLE_TESTS
@@ -1273,8 +1273,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-quiescence"
-  content_hash: "bbaf1acfa6b5564688bf58ad6d56b43751b109018d9310e2527214e8ec715625"
-  source_hash: "861cdf4e090cb85cdae3a2432174a7decbd838e01e1453c9b5509c7719b1aad8"
+  content_hash: "3ab07281bf4bdb5dc11211a89826ef3273b8215e77837513c51bb8b175a47bd4"
+  source_hash: "d7a7230190dc58e607062475a49e5969d238bb68d3d97175b1e73f9b1e747ad5"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunSkipsTargetWhenSourceDriftsAfterLoad"
   role: BINDING_ROLE_TESTS
@@ -2599,4 +2599,14 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestToolDiscoverRefusesTheSelectionBeforeTheSurface"
   role: BINDING_ROLE_TESTS
   shape_hash: "316976b22ed46b5f9a20805b442849ec8bf4cd69a9e1e2cd5c6df14780b2bb63"
+}
+
+bindings {
+  requirement_id: "REQ-exec-quiescence"
+  content_hash: "3ab07281bf4bdb5dc11211a89826ef3273b8215e77837513c51bb8b175a47bd4"
+  source_hash: "d7a7230190dc58e607062475a49e5969d238bb68d3d97175b1e73f9b1e747ad5"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunDriftNamesMeasurementResidue"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7b7077a9cb165a693aa4dff28f4511f69770c6000ece09b0801c1a4a9ed36088"
 }

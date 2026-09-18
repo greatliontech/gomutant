@@ -341,7 +341,7 @@ func TestExitLogRotatesAndDegrades(t *testing.T) {
 	// Within one session: eight writes of a quarter of the bound each
 	// rotate once, at the fifth — both generations exactly the bound.
 	path := filepath.Join(t.TempDir(), "mcp.log")
-	w, err := openRotatingFile(path, 128)
+	w, err := openRotatingFile(path, path+".1", 128)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,4 +375,29 @@ func TestExitLogRotatesAndDegrades(t *testing.T) {
 		t.Fatalf("notice = %q", notice.String())
 	}
 	var _ io.Writer = exitLogNotice
+}
+
+// Opening the exit log mints the store's ignore first, so a read-only
+// session — one that takes no lock — leaves no unignored file behind
+// for an add-everything staging loop to commit (REQ-mcp-exit-log).
+func TestExitLogIsMintedIntoTheStoreIgnore(t *testing.T) {
+	s := serverAt(t)
+	_, closeLog := s.exitLogger()
+	closeLog()
+	ignore := filepath.Join(filepath.Dir(s.ExitLogPath()), ".gitignore")
+	content, err := os.ReadFile(ignore)
+	if err != nil || !strings.Contains(string(content), gomutant.ExitLogName+"\n") || !strings.Contains(string(content), gomutant.ExitLogRotatedName+"\n") {
+		t.Fatalf("store ignore after the log opened = %q, %v; want the exit log and its generation covered", content, err)
+	}
+	// A consumer's ignore minted before the log existed — the lock
+	// patterns alone — gains the log's names once at the next session.
+	if err := os.WriteFile(ignore, []byte("*.campaign\n*.lock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, closeLog = s.exitLogger()
+	closeLog()
+	content, err = os.ReadFile(ignore)
+	if err != nil || strings.Count(string(content), gomutant.ExitLogName+"\n") != 1 || strings.Count(string(content), gomutant.ExitLogRotatedName+"\n") != 1 || strings.Count(string(content), "*.lock\n") != 1 {
+		t.Fatalf("upgraded store ignore = %q, %v; want the log's names appended once", content, err)
+	}
 }
