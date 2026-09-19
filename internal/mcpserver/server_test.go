@@ -1166,6 +1166,42 @@ func TestMCPBuilds(t *testing.T) {
 	}
 }
 
+// TestTreeStateKeyFollowsTheLoaderEnvironment pins the key's
+// environment half: it is the go env snapshot under the loader's own
+// environment — a GOFLAGS the loader would honour moves the key (the
+// reload that re-runs the provenance guard follows), while an ambient
+// GOWORK naming a workspace the loader never uses (engine.GoEnv pins
+// the tree's own or off) leaves it unchanged (REQ-exec-provenance).
+// The second arm discriminates through GOWORK staying in the
+// snapshot's identity — the one key an ambient workspace moves.
+func TestTreeStateKeyFollowsTheLoaderEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns go env")
+	}
+	s := serverAt(t)
+	ctx := context.Background()
+	before, err := treeStateKeyContext(ctx, s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOFLAGS", "-tags=keyprobe")
+	flagged, err := treeStateKeyContext(ctx, s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flagged == before {
+		t.Fatal("a GOFLAGS the loader honours left the tree key unchanged")
+	}
+	t.Setenv("GOWORK", filepath.Join(t.TempDir(), "elsewhere.work"))
+	ambient, err := treeStateKeyContext(ctx, s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ambient != flagged {
+		t.Fatal("an ambient workspace the loader never uses moved the tree key")
+	}
+}
+
 // TestServerReusesLoadedTreeUntilSourceChanges pins the tree cache's one safe
 // reuse: byte-identical loader inputs. A non-loader file never invalidates,
 // and any source edit must reload rather than serve the stale tree.

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/greatliontech/gofresh"
@@ -22,36 +21,16 @@ import (
 // selection's toolchain skews). A seam for the skew tests; the
 // production sampler always execs.
 var goVersionSampler = func(ctx context.Context, dir string, env []string) (string, error) {
-	cmd := goVersionCmd(ctx, dir, env)
-	out, err := cmd.Output()
+	// gofresh's own sample under the plain spawn (no process
+	// containment: the sampler is a metadata read, not an oracle
+	// process); its refusal names go's own cause — an unknown or
+	// undownloadable toolchain — never a bare exit status, since the
+	// sampler can be the first consumer of a declared directive.
+	sampled, err := gotool.SampleGoVersion(ctx, dir, env)
 	if err != nil {
-		// The sampler can be the first consumer of a declared
-		// toolchain directive: its refusal names go's own cause (an
-		// unknown or undownloadable toolchain), never a bare exit
-		// status.
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
-			return "", fmt.Errorf("gomutant: sample toolchain version: %w: %s", err, strings.TrimSpace(string(exit.Stderr)))
-		}
 		return "", fmt.Errorf("gomutant: sample toolchain version: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-// goVersionCmd is the sampler's pure construction, split so the
-// Dir/Env wiring is unit-testable UNDER the whole-function test seam
-// (a seam-swapped sampler never exercises it, and a healthy host's
-// `go env GOVERSION` is invariant under both — nothing else could
-// notice a dropped env).
-func goVersionCmd(ctx context.Context, dir string, env []string) *exec.Cmd {
-	// A plain command, not commandContext: the sampler is a metadata
-	// read, not an oracle process — the oracle constructor's process
-	// containment (job objects on windows, where its wrapper type does
-	// not even satisfy this signature) has no business here.
-	cmd := exec.CommandContext(ctx, "go", "env", "GOVERSION")
-	cmd.Dir = dir
-	cmd.Env = env
-	return cmd
+	return sampled, nil
 }
 
 // SwapGoVersionSamplerForTest replaces the sampler and returns the

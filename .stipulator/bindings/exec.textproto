@@ -2912,16 +2912,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-exec-provenance"
-  content_hash: "4b0b3a3535fd3a2c108dc0164d40ebfacb29b1b635903247710cd5f9054986d5"
-  source_hash: "89f67a3b766bc5cb1510da5607196dd9944c0b359be95603297a77e8bb323652"
-  backend: "go"
-  symbol: "github.com/greatliontech/gomutant/internal/engine.TestGoVersionCmdWiresDirAndEnv"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "eb19f8ca34c948ccdecb015b2edca692fb58ef80fc036038ddd0aa4bd6591066"
-}
-
-bindings {
   requirement_id: "REQ-exec-preparation"
   content_hash: "e4325451feef56ccbcb8482f0f4a8c21b8cb5967548642934a51fd08184278c7"
   source_hash: "1fb1650e007854b20342ee8772539b3a9e3abd77e183efb2085ae92f423b2cdc"
@@ -2989,4 +2979,34 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestTreeStateKeyRefusesOutOfTreeLoaderInputs"
   role: BINDING_ROLE_TESTS
   shape_hash: "e23f128cc37e3c57a6ad956215da0ca8e42e0399450743c8f46f5d3fa265ebf3"
+}
+
+bindings {
+  requirement_id: "REQ-exec-provenance"
+  content_hash: "4b0b3a3535fd3a2c108dc0164d40ebfacb29b1b635903247710cd5f9054986d5"
+  source_hash: "89f67a3b766bc5cb1510da5607196dd9944c0b359be95603297a77e8bb323652"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestGoVersionSamplerIsTheEnginesUnderThePlainSpawn"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d34c9033d567d8ef5446717971a3ce83b6244b3f479975e52b0f7253598d350e"
+}
+
+bindings {
+  requirement_id: "REQ-exec-provenance"
+  content_hash: "4b0b3a3535fd3a2c108dc0164d40ebfacb29b1b635903247710cd5f9054986d5"
+  source_hash: "89f67a3b766bc5cb1510da5607196dd9944c0b359be95603297a77e8bb323652"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestTreeStateKeyFollowsTheLoaderEnvironment"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "280587438bdc9f07d019932e59e51dcc88bb467d7b31bb54f66a6c1e570fbe27"
+}
+
+bindings {
+  requirement_id: "REQ-exec-tree-root"
+  content_hash: "bd2e9875750ce1bef1137b8d1e3ce0b5e6f6c873f125fbc3654d7cede87e984e"
+  source_hash: "f2ad5a95cf1927b59ddbcd26db21b0655f29abde37c6589852416e23bf79e359"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestLoadCanonicalizesTheTreeRoot"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fafaa58a3a97206abf4f3282ea40d619bcbd9d1275b57360189d9700948f257b"
 }

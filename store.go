@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -138,14 +139,13 @@ type judgedRecord struct {
 // user cache directory keyed by the resolved tree — shared by the
 // findings overlay and the baseline bank so every machine-local
 // artifact of one tree lives under one key. It returns the resolved
-// absolute module dir alongside.
+// canonical module dir alongside, refusing a root that does not resolve.
 func machineLocalDir(moduleDir string) (abs, dir string, err error) {
-	abs, err = filepath.Abs(moduleDir)
+	abs, err = gotool.CanonicalDir(moduleDir)
 	if err != nil {
-		return "", "", err
-	}
-	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
-		abs = resolved
+		// A fail-safe: every caller has the root's own refusal ahead of
+		// this resolution, so a root CheckTreeRoot admitted resolves.
+		return "", "", fmt.Errorf("gomutant: resolve tree root %s: %w", moduleDir, err)
 	}
 	cache, err := os.UserCacheDir()
 	if err != nil {
@@ -165,6 +165,14 @@ const overlayEntryCeiling = 64 << 20
 // OpenStore opens the two-layer store for the findings document at path
 // inside the module rooted at moduleDir.
 func OpenStore(path, moduleDir string) (*Store, error) {
+	// The tree root's own refusal first: a store-opening verb reaches
+	// the store before any load, and the root's existence precedes every
+	// read in it (REQ-exec-preparation) — a second stat on the verbs
+	// whose preparation already asked, deliberately, for the five that
+	// have no preparation stage.
+	if err := CheckTreeRoot(moduleDir); err != nil {
+		return nil, err
+	}
 	abs, machineDir, err := machineLocalDir(moduleDir)
 	if err != nil {
 		return nil, err

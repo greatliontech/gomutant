@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,12 +9,13 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/greatliontech/gofresh/gotool"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/contextio"
+	"github.com/greatliontech/gomutant/internal/engine"
 	"golang.org/x/mod/modfile"
 )
 
@@ -34,8 +34,9 @@ var errNoCoherentSignal = errors.New("mcpserver: tree state has no coherent in-t
 // environment. The user edits source between tool calls, so the cache key is
 // a content hash over the in-tree file classes plus the toolchain's reported
 // version; a hit means those bytes are identical and the reloaded Tree would
-// be equal. The remaining inputs are stable by construction: the process
-// environment is fixed for the server's lifetime, and the module cache is
+// be equal. The remaining inputs are stable by construction: the loader's
+// environment (engine.GoEnv over the server process's, fixed for its
+// lifetime) enters the key through the snapshot, and the module cache is
 // content-addressed and pinned by the hashed go.sum files. Two inputs escape
 // the fingerprint and therefore disable caching entirely: a filesystem
 // replace directive pointing outside the tree, and cgo (system headers feed
@@ -108,29 +109,25 @@ func (s *Server) loadTreeContext(ctx context.Context, sel gomutant.Selection) (*
 // reload, while a missed input would serve a stale tree.
 func treeStateKeyContext(ctx context.Context, dir string) (string, error) {
 	hash := sha256.New()
-	// The go env output covers persistent GOENV-file state (go env -w GOFLAGS,
-	// GOOS, GOEXPERIMENT, toolchain selection) that changes what the loader
-	// observes without touching the tree or the process environment. Volatile
-	// and dir-derived lines are dropped: GOGCCFLAGS embeds a fresh temporary
-	// directory per invocation, and GOMOD/GOWORK restate paths whose contents
-	// the walk below hashes directly.
-	goEnv := exec.CommandContext(ctx, "go", "env")
-	goEnv.Dir = dir
-	envState, err := goEnv.Output()
+	// The go env snapshot covers persistent GOENV-file state (go env -w
+	// GOFLAGS, GOOS, GOEXPERIMENT, toolchain selection) that changes what
+	// the loader observes without touching the tree, taken under the
+	// loader's own environment (engine.GoEnv: the workspace pinned to
+	// this tree's, the driver off) — never the ambient one, whose parent
+	// go.work could select a toolchain the loader never used. The
+	// snapshot's identity leaves out GOGCCFLAGS (a fresh temporary per
+	// invocation); GOMOD and GOWORK restate paths whose contents the walk
+	// below hashes directly — kept, an over-invalidation at worst.
+	// GOVERSION stays in the fingerprint and is LOAD-BEARING for the
+	// provenance guard (REQ-exec-provenance): a cache hit skips the
+	// load-time skew check, so a toolchain move must change this key and
+	// force the reload that re-runs it.
+	snapshot, err := gotool.TakeEnvSnapshot(ctx, dir, engine.GoEnv(dir))
 	if err != nil {
 		return "", err
 	}
-	for _, line := range bytes.Split(envState, []byte{'\n'}) {
-		if bytes.HasPrefix(line, []byte("GOGCCFLAGS=")) || bytes.HasPrefix(line, []byte("GOMOD=")) || bytes.HasPrefix(line, []byte("GOWORK=")) {
-			continue
-		}
-		// GOVERSION stays in the fingerprint and is LOAD-BEARING for
-		// the provenance guard (REQ-exec-provenance): a cache hit
-		// skips the load-time skew check, so a toolchain move must
-		// change this key and force the reload that re-runs it.
-		hash.Write(line)
-		hash.Write([]byte{'\n'})
-	}
+	hash.Write([]byte(snapshot.Identity()))
+	hash.Write([]byte{'\n'})
 	err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err

@@ -21,6 +21,7 @@ import (
 
 	"github.com/greatliontech/glob"
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -408,29 +409,42 @@ func LoadContext(ctx context.Context, dir string) (*Tree, error) {
 // toolchain directive); the zero value selects nothing.
 type Selection = engine.Selection
 
+// rootCoordinate is the one coordinate the load and a guard name for a
+// tree root: the canonical one where the root resolves
+// (gotool.CanonicalDir — two spellings of one directory, a symlinked
+// checkout, a `..` through a link, are one coordinate), else the
+// spelling made absolute — a fail-safe for the exported guards invoked
+// directly, ahead of a caller's own root refusal: every preparation and
+// verb in this module refuses the root before asking a guard.
+func rootCoordinate(dir string) string {
+	if canonical, err := gotool.CanonicalDir(dir); err == nil {
+		return canonical
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
 // CheckToolchainProvenance runs the load-time toolchain guard
 // standalone (REQ-exec-provenance) — for verbs that mutate state
 // before any tree load would fire it. The directory resolves exactly
-// as the load's does, so the two guards name one path.
+// as the load's does (rootCoordinate), so the guard and the load name
+// one path.
 func CheckToolchainProvenance(ctx context.Context, dir string, sel Selection) error {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
-	}
-	return engine.CheckToolchainProvenance(ctx, abs, sel)
+	return engine.CheckToolchainProvenance(ctx, rootCoordinate(dir), sel)
 }
 
 // CheckHarnessEnvironment is the load ladder's input-decidable arm —
 // the OS environment's own refusals (a package driver, an environment
 // the exec form cannot express) and a GODEBUG that silences the
 // harness's build-fail events — for a verb's preparation stage, before
-// any state persists (REQ-exec-preparation).
+// any state persists (REQ-exec-preparation). Its coordinate is the
+// load's by construction and unobservable: the arm's inputs are the OS
+// environment and the composed GODEBUG, and the composition reads the
+// directory only to find its go.work.
 func CheckHarnessEnvironment(dir string, sel Selection) error {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
-	}
-	return engine.CheckHarnessEnvironment(abs, sel)
+	return engine.CheckHarnessEnvironment(rootCoordinate(dir), sel)
 }
 
 // LoadContextSelection is LoadContext under a declared build selection:
@@ -445,18 +459,21 @@ func LoadContextSelection(ctx context.Context, dir string, sel Selection) (*Tree
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return nil, fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
-	}
-	// The root proven a directory, then the repository's standing vouch
-	// set — one home, the tree root's file — read at the load's head,
-	// whole or refused, before any package loads: a verb with no
-	// preparation stage pays no load for a refusal decidable here, and
-	// no engine reads a file of its own (REQ-exec-preparation).
-	if err := CheckTreeRoot(abs); err != nil {
+	// One coordinate for the tree root — gofresh's own, the one its
+	// engines canonicalize their roots by, so two spellings of one tree
+	// (a symlinked checkout, a relative path) are one tree to the
+	// evidence root, the machine-local store, and every record; a root
+	// that does not resolve is refused as the root, before anything in
+	// it is read.
+	if err := CheckTreeRoot(dir); err != nil {
 		return nil, err
 	}
+	abs := rootCoordinate(dir)
+	// The repository's standing vouch set — one home, the tree root's
+	// file — read at the load's head, whole or refused, before any
+	// package loads: a verb with no preparation stage pays no load for a
+	// refusal decidable here, and no engine reads a file of its own
+	// (REQ-exec-preparation).
 	fileVouches, err := StandingVouches(abs)
 	if err != nil {
 		return nil, err

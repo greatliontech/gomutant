@@ -41,3 +41,4 @@ is deleted (git holds history).
 | [windows-process-fact-arms-unexecuted](windows-process-fact-arms-unexecuted.md) | windows process facts (killed flag, job kills, timeout attribution) are compile-checked only; two attribution defects survived to review state walks | when a windows runner enters the CI matrix |
 | [freshness-proofs-stall-on-large-record-sets](freshness-proofs-stall-on-large-record-sets.md) | a delta `run` over a ~300-record document spends its whole budget in freshness proofs (union over up to 1608 subjects, ~8 GiB) and never measures | awaiting triage |
 | [mcpserver-witnesses-unbound](mcpserver-witnesses-unbound.md) | eighteen MCP server tests pin served behaviour no requirement binds | cross-tool train chunk 219 |
+| [enumeration-lag-gate-unstated](enumeration-lag-gate-unstated.md) | the derived-enumeration lag gate and its effective-configuration source have no clause; three witnesses bind to nothing | cross-tool train chunk 209 |

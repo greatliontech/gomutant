@@ -119,27 +119,19 @@ func TestCheckToolchainProvenanceSharesTheGuard(t *testing.T) {
 	}
 }
 
-// The production sampler's construction wires the target dir and the
-// selection-applied env onto the exec — the wiring a whole-function
-// seam can never exercise (a healthy host's `go env GOVERSION` is
-// invariant under both).
-func TestGoVersionCmdWiresDirAndEnv(t *testing.T) {
-	env := []string{"GOTOOLCHAIN=go1.26.5", "HOME=/x"}
-	cmd := goVersionCmd(context.Background(), "some/target", env)
-	if cmd.Dir != "some/target" {
-		t.Fatalf("cmd.Dir = %q, want the target directory", cmd.Dir)
+// The production sampler is gofresh's own under the plain spawn: a
+// refusal carries gomutant's prefix over go's own cause, and the
+// sample is the trimmed GOVERSION. The dir half — the sample runs in
+// the target module's directory — is gofresh's contract, pinned there
+// (gotool's TestSampleGoVersionRunsInTheModuleDirectory); this pin
+// witnesses the env half through an undownloadable directive.
+func TestGoVersionSamplerIsTheEnginesUnderThePlainSpawn(t *testing.T) {
+	sampled, err := goVersionSampler(context.Background(), "testdata/fixturemod", GoEnv("testdata/fixturemod"))
+	if err != nil || !strings.HasPrefix(sampled, "go") || strings.ContainsAny(sampled, " \n") {
+		t.Fatalf("sample = %q, %v; want the trimmed GOVERSION", sampled, err)
 	}
-	found := false
-	for _, kv := range cmd.Env {
-		if kv == "GOTOOLCHAIN=go1.26.5" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("cmd.Env lacks the declared directive: %v", cmd.Env)
-	}
-	if got := strings.Join(cmd.Args, " "); got != "go env GOVERSION" {
-		t.Fatalf("cmd args = %q", got)
+	if _, err := goVersionSampler(context.Background(), "testdata/fixturemod", SetEnvKey(GoEnv("testdata/fixturemod"), "GOTOOLCHAIN", "go0.0.0-nosuch")); err == nil || !strings.HasPrefix(err.Error(), "gomutant: sample toolchain version: ") {
+		t.Fatalf("an undownloadable directive = %v; want gomutant's prefix over go's cause", err)
 	}
 }
 

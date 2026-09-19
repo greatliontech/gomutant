@@ -2,19 +2,19 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // VerifyTestEnumerationContext proves the derived test enumeration fresh
@@ -131,36 +131,23 @@ func (t *Tree) buildMatchContext(ctx context.Context, dir string) (build.Context
 		return m, nil
 	}
 	t.derivedMu.Unlock()
-	cmd := exec.CommandContext(ctx, "go", "env", "-json", "GOOS", "GOARCH", "CGO_ENABLED", "GOFLAGS", "GOVERSION")
-	cmd.Dir = dir
-	cmd.Env = t.env
-	out, err := cmd.Output()
+	snapshot, err := gotool.TakeEnvSnapshot(ctx, dir, t.env)
 	if err != nil {
 		return build.Context{}, fmt.Errorf("resolve effective build configuration: %w", err)
 	}
-	var values struct {
-		GOOS       string
-		GOARCH     string
-		CGOEnabled string `json:"CGO_ENABLED"`
-		GOFLAGS    string
-		GOVERSION  string
-	}
-	if err := json.Unmarshal(out, &values); err != nil {
-		return build.Context{}, fmt.Errorf("resolve effective build configuration: %w", err)
-	}
 	matcher := build.Default
-	matcher.GOOS = values.GOOS
-	matcher.GOARCH = values.GOARCH
-	matcher.CgoEnabled = values.CGOEnabled == "1"
+	matcher.GOOS = snapshot.Value("GOOS")
+	matcher.GOARCH = snapshot.Value("GOARCH")
+	matcher.CgoEnabled = snapshot.Value("CGO_ENABLED") == "1"
 	matcher.BuildTags = nil
-	for _, flag := range strings.Fields(values.GOFLAGS) {
+	for _, flag := range strings.Fields(snapshot.Value("GOFLAGS")) {
 		// GOFLAGS accepts single- and double-dash forms, and a repeated
 		// -tags is last-wins, exactly as the go command resolves it.
 		if tags, ok := strings.CutPrefix(strings.TrimLeft(flag, "-"), "tags="); ok {
 			matcher.BuildTags = strings.Split(tags, ",")
 		}
 	}
-	if tags := releaseTags(values.GOVERSION); tags != nil {
+	if tags := releaseTags(snapshot.Value("GOVERSION")); tags != nil {
 		// Release tags follow the tree's toolchain, not the one that
 		// compiled this binary: a //go:build go1.N constraint must be
 		// evaluated against the go that builds the test binary. ToolTags

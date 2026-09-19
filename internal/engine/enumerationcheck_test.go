@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -154,10 +155,24 @@ func TestVerifyTestEnumerationHonorsEffectiveBuildTags(t *testing.T) {
 }
 
 // TestBuildMatchContextResolvesEffectiveConfig pins the matcher derivation:
-// a repeated -tags is last-wins exactly as the go command resolves it, and
-// release tags follow the tree's toolchain version.
+// a repeated -tags is last-wins exactly as the go command resolves it,
+// release tags follow the tree's toolchain version, and the platform and
+// cgo settings are the tree's effective ones — read from the one env
+// snapshot, never the host defaults.
 func TestBuildMatchContextResolvesEffectiveConfig(t *testing.T) {
 	t.Setenv("GOFLAGS", "-tags=first --tags=second,third")
+	// A platform no host's defaults equal, so the assertions below read
+	// the snapshot and never build.Default.
+	goos, goarch := "freebsd", "arm64"
+	if runtime.GOOS == goos {
+		goos = "openbsd"
+	}
+	if runtime.GOARCH == goarch {
+		goarch = "amd64"
+	}
+	t.Setenv("GOOS", goos)
+	t.Setenv("GOARCH", goarch)
+	t.Setenv("CGO_ENABLED", "1")
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/cfg\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -178,5 +193,8 @@ func TestBuildMatchContextResolvesEffectiveConfig(t *testing.T) {
 	}
 	if len(matcher.ReleaseTags) < 26 || matcher.ReleaseTags[0] != "go1.1" {
 		t.Fatalf("release tags = %v, want the toolchain-derived ladder", matcher.ReleaseTags)
+	}
+	if matcher.GOOS != goos || matcher.GOARCH != goarch || !matcher.CgoEnabled {
+		t.Fatalf("platform = %s/%s cgo=%v, want the effective %s/%s with cgo on", matcher.GOOS, matcher.GOARCH, matcher.CgoEnabled, goos, goarch)
 	}
 }

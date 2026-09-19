@@ -943,6 +943,13 @@ boundary falls for it); an invocation's vouch declarations extend it and never
 remove from it, and no analysis engine reads a vouch file of its own, so a
 workspace member's file is never a second home.
 
+**REQ-exec-tree-root** (behavior): A tree root MUST be one coordinate: every
+spelling naming one directory — a symlinked checkout, a relative path, a `..`
+through a link — resolves to the same absolute symlink-resolved path, and the
+load, every standalone guard, the machine-local store key, and the evidence root
+name that coordinate; a root that does not resolve is refused as the root
+(REQ-exec-preparation's tree-root refusal).
+
 **REQ-exec-plan-only** (behavior): A plan-only run MUST perform the full
 deterministic preparation sequence — every refusal REQ-exec-preparation
 places before the first load included — and deliver every target decision
