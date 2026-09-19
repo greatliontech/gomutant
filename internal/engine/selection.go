@@ -41,30 +41,13 @@ func (s Selection) applyEnv(env []string) ([]string, error) {
 	if s.Toolchain != "" && !validToolchain(s.Toolchain) {
 		return nil, fmt.Errorf("gomutant: toolchain %q is not a valid GOTOOLCHAIN directive", s.Toolchain)
 	}
-	out := make([]string, 0, len(env)+2)
-	var goflags string
-	seenFlags := false
-	for _, entry := range env {
-		name, value, _ := strings.Cut(entry, "=")
-		// Case-insensitive name matching follows the Windows
-		// environment convention, exactly as GoEnv treats GOWORK.
-		switch {
-		case strings.EqualFold(name, "GOFLAGS"):
-			goflags, seenFlags = value, true
-		case strings.EqualFold(name, "GOTOOLCHAIN") && s.Toolchain != "":
-			// Replaced below.
-		default:
-			out = append(out, entry)
-		}
-	}
+	out := slices.Clone(env)
 	if s.Toolchain != "" {
-		out = append(out, "GOTOOLCHAIN="+s.Toolchain)
+		out = SetEnvKey(out, "GOTOOLCHAIN", s.Toolchain)
 	}
 	if len(s.Tags) > 0 {
-		goflags = replaceTagsFlag(goflags, strings.Join(s.CanonicalTags(), ","))
-		out = append(out, "GOFLAGS="+goflags)
-	} else if seenFlags {
-		out = append(out, "GOFLAGS="+goflags)
+		goflags, _ := LookupEnvKey(env, "GOFLAGS")
+		out = SetEnvKey(out, "GOFLAGS", replaceTagsFlag(goflags, strings.Join(s.CanonicalTags(), ",")))
 	}
 	return out, nil
 }

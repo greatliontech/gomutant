@@ -350,23 +350,20 @@ func parseGoVersion(version string) (major, minor int, ok bool) {
 // the tree's own go.work when it has one, explicitly off otherwise. The go
 // command discovers workspace files by walking UP, so an enclosing
 // repository's workspace would otherwise leak into fixture trees that are
-// not its members and refuse their "./..." patterns.
+// not its members and refuse their "./..." patterns. The package loader's
+// driver is pinned off too: a GOPACKAGESDRIVER in the ambient environment
+// would hand every load to a program of the operator's, and what it
+// answers is no longer what the go command lists.
 func GoEnv(dir string) []string {
-	env := make([]string, 0, len(os.Environ())+1)
-	for _, entry := range os.Environ() {
-		name, _, _ := strings.Cut(entry, "=")
-		if !strings.EqualFold(name, "GOWORK") {
-			env = append(env, entry)
-		}
-	}
 	work := filepath.Join(dir, "go.work")
 	if _, err := os.Stat(work); err == nil {
 		if abs, aerr := filepath.Abs(work); aerr == nil {
 			work = abs
 		}
-		return append(env, "GOWORK="+work)
+	} else {
+		work = "off"
 	}
-	return append(env, "GOWORK=off")
+	return SetEnvKey(SetEnvKey(os.Environ(), "GOWORK", work), "GOPACKAGESDRIVER", "off")
 }
 
 // GoEnv returns the environment used by this tree's package loads and test

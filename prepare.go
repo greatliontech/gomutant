@@ -160,12 +160,14 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 	if request.Changed, err = in.Targets.readChanged(ctx); err != nil {
 		return nil, err
 	}
-	// The load ladder's environment arm is decidable from the root and
-	// the selection alone: a GODEBUG that silences the harness's
-	// build-fail events refuses here, before the lock, and again at the
-	// load's head by construction (REQ-exec-provenance). The arm reads
-	// the selection-applied environment the load reads — the term the
-	// spec names, not a live dependence: no selection sets GODEBUG; the
+	// The load ladder's environment arm is decidable from the OS
+	// environment, the root, and the selection alone — no process
+	// spawned: the ambient refusals (a package driver, an environment
+	// the exec form cannot express) and a GODEBUG that silences the
+	// harness's build-fail events refuse here, before the lock, and
+	// again at the load's head by construction (REQ-exec-provenance).
+	// The GODEBUG arm reads the selection-applied environment the load
+	// reads — the term the spec names: no selection sets GODEBUG; the
 	// selection's own shape refused above, with the declarations.
 	if err := CheckHarnessEnvironment(in.ModuleDir, in.Selection); err != nil {
 		return nil, err

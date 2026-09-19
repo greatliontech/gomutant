@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -537,16 +538,10 @@ func copyTreeForShaped(ctx context.Context, src, dst string) error {
 // the scratch copy; everything else — toolchain, caches, the delivered
 // width — stays shared, so scratch runs reuse the build cache.
 func rebaseScratchEnv(env []string, realRoot, scratch string) []string {
-	out := make([]string, 0, len(env))
-	for _, entry := range env {
-		name, value, _ := strings.Cut(entry, "=")
-		if strings.EqualFold(name, "GOWORK") && value != "off" && value != "" {
-			if rel, err := filepath.Rel(realRoot, value); err == nil && !strings.HasPrefix(rel, "..") {
-				out = append(out, "GOWORK="+filepath.Join(scratch, rel))
-				continue
-			}
+	if value, ok := engine.LookupEnvKey(env, "GOWORK"); ok && value != "off" && value != "" {
+		if rel, err := filepath.Rel(realRoot, value); err == nil && !strings.HasPrefix(rel, "..") {
+			return engine.SetEnvKey(env, "GOWORK", filepath.Join(scratch, rel))
 		}
-		out = append(out, entry)
 	}
-	return out
+	return slices.Clone(env)
 }

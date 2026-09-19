@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 
 	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // goVersionSampler reports the version of the `go` that will serve a
@@ -56,8 +57,9 @@ func goVersionCmd(ctx context.Context, dir string, env []string) *exec.Cmd {
 // SwapGoVersionSamplerForTest replaces the sampler and returns the
 // restore — the skew paths are unreachable under a healthy real
 // toolchain, so their tests inject the sample. NOT parallel-safe:
-// the seam is package state, and no test in this module runs
-// t.Parallel(); a test that starts must not.
+// the seam is package state, the ladder reads the OS environment on
+// every load, and tests set an ambient driver process-wide, so no
+// test in this module runs t.Parallel(); a test that starts must not.
 func SwapGoVersionSamplerForTest(f func(context.Context, string, []string) (string, error)) (restore func()) {
 	prior := goVersionSampler
 	goVersionSampler = f
@@ -94,31 +96,65 @@ func CheckToolchainProvenance(ctx context.Context, dir string, sel Selection) er
 }
 
 // CheckHarnessEnvironment is the ladder's environment arm alone,
-// decidable from the tree root and the selection with no process
-// spawned: every verb's preparation stage fires it before the lock
-// (REQ-exec-preparation), and the load's ladder fires it again by
-// construction.
+// decidable from the OS environment, the tree root, and the selection
+// with no process spawned: every verb's preparation stage fires it
+// before the lock (REQ-exec-preparation), and the load's ladder fires
+// it again by construction.
 func CheckHarnessEnvironment(dir string, sel Selection) error {
 	env, err := sel.applyEnv(GoEnv(dir))
 	if err != nil {
 		return err
 	}
+	return environmentArms(env)
+}
+
+// environmentArms is the ladder's environment arm in its two halves,
+// the one composition every entry reads — the preparation stage and
+// the ladder's head alike — so a half added to one cannot miss the
+// other: the OS environment's own refusals first, then the composed
+// environment's GODEBUG.
+func environmentArms(env []string) error {
+	if err := ambientEnvironmentRefused(os.Environ()); err != nil {
+		return err
+	}
 	return harnessEventsSilenced(env)
 }
 
+// ambientEnvironmentRefused is the environment arm's read of the OS
+// environment itself, before any composition: a package driver
+// (GOPACKAGESDRIVER other than off) would hand every load to a
+// program of the operator's, never the go command's listing — GoEnv
+// pins it off for every load and spawn, so the operator hears here
+// that the driver is not honoured rather than measuring a source
+// model they did not ask for; and an environment the exec key=value
+// form cannot express — a duplicate key under the platform's rule, a
+// malformed entry, a NUL byte — is what the declared producer
+// environment refuses, named here in the operator's own words rather
+// than by gofresh at the first engine (REQ-exec-preparation).
+func ambientEnvironmentRefused(env []string) error {
+	if _, err := gotool.NormalizeEnv(env); err != nil {
+		return fmt.Errorf("gomutant: ambient environment: %w", err)
+	}
+	if driver, ok := LookupEnvKey(env, "GOPACKAGESDRIVER"); ok && driver != "" && driver != "off" {
+		return fmt.Errorf("gomutant: GOPACKAGESDRIVER=%q is unsupported because freshness analysis requires Go package loading: the loader would answer from that program, never the go command's listing", driver)
+	}
+	return nil
+}
+
 // toolchainGuard is the load's one toolchain ladder, three arms in
-// order: the environment arm (a GODEBUG that silences the harness's
-// build-fail events — input-decidable, so first), the skew provenance
-// over the sampled toolchain, then the build-events floor over the
-// same sample — returning the sample; the load and the pre-write
-// check read this one function, so the two cannot drift
+// order: the environment arm (environmentArms — the OS environment's
+// own refusals, then the composed environment's GODEBUG that silences
+// the harness's build-fail events; no process spawned, so first), the
+// skew provenance over the sampled toolchain, then the build-events
+// floor over the same sample — returning the sample; the load and the
+// pre-write check read this one function, so the two cannot drift
 // (they did: the check once ran the skew half alone).
 func toolchainGuard(ctx context.Context, dir string, env []string) (string, error) {
-	// Its inputs alone decide the environment arm, so it runs before
-	// the sampler's own process (the stage question rides
-	// REQ-exec-provenance's ladder; REQ-exec-preparation's inventory
-	// holds no toolchain refusal).
-	if err := harnessEventsSilenced(env); err != nil {
+	// The environment arm spawns no process, so it runs before the
+	// sampler's own (the stage question rides REQ-exec-provenance's
+	// ladder; REQ-exec-preparation's inventory holds no toolchain
+	// refusal).
+	if err := environmentArms(env); err != nil {
 		return "", err
 	}
 	sampled, err := toolchainProvenance(ctx, dir, env)
@@ -148,16 +184,10 @@ func toolchainGuard(ctx context.Context, dir string, env []string) (string, erro
 // sibling in the one ladder: both name the event the classifier
 // reads.
 func harnessEventsSilenced(env []string) error {
-	foldCase := runtime.GOOS == "windows"
-	// The spawn hands the go tool one GODEBUG — the last entry — and
-	// the tool reads the last pair of that one value.
-	value := ""
-	for _, entry := range env {
-		key, v, _ := strings.Cut(entry, "=")
-		if key == "GODEBUG" || foldCase && strings.EqualFold(key, "GODEBUG") {
-			value = v
-		}
-	}
+	// The spawn hands the go tool one GODEBUG — the last entry under
+	// the platform's key rule — and the tool reads the last pair of
+	// that one value.
+	value, _ := LookupEnvKey(env, "GODEBUG")
 	setting := ""
 	for _, pair := range strings.Split(value, ",") {
 		if name, v, ok := strings.Cut(pair, "="); ok && name == "gotestjsonbuildtext" {

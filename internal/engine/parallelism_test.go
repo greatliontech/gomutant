@@ -34,10 +34,10 @@ func TestOracleParallelismWidth(t *testing.T) {
 }
 
 // The cap rides the oracle environment as GOMAXPROCS and only ever
-// narrows: an uninstalled cap and an already-narrower environment both
-// leave the env untouched, while a wider or malformed ambient value is
-// overridden by the appended entry, which wins os/exec's duplicate-key
-// resolution (REQ-exec-oracle-parallelism).
+// narrows: an uninstalled cap leaves the env untouched, an
+// already-narrower value is kept as the one composed entry, and a
+// wider or malformed ambient value is replaced by the cap — the key
+// once in every case (REQ-exec-oracle-parallelism).
 func TestOracleCPUEnv(t *testing.T) {
 	if env := oracleCPUEnv([]string{"A=1"}, 0); len(env) != 1 {
 		t.Fatalf("unbounded width touched the env: %v", env)
@@ -55,6 +55,8 @@ func TestOracleCPUEnv(t *testing.T) {
 		{name: "nonpositive ambient replaced", env: []string{"GOMAXPROCS=0"}, want: []string{"GOMAXPROCS=4"}},
 		{name: "wider duplicates collapse to one", env: []string{"GOMAXPROCS=2", "GOMAXPROCS=64"}, want: []string{"GOMAXPROCS=4"}},
 		{name: "narrower duplicates collapse to their effective value", env: []string{"A=1", "GOMAXPROCS=64", "GOMAXPROCS=2"}, want: []string{"A=1", "GOMAXPROCS=2"}},
+		{name: "narrower ambient composed once at the end", env: []string{"A=1", "GOMAXPROCS=2", "B=2"}, want: []string{"A=1", "B=2", "GOMAXPROCS=2"}},
+		{name: "a bare entry names nothing", env: []string{"GOMAXPROCS=2", "GOMAXPROCS"}, want: []string{"GOMAXPROCS", "GOMAXPROCS=2"}},
 	} {
 		got := oracleCPUEnv(test.env, 4)
 		if test.want == nil {
@@ -88,23 +90,25 @@ func TestOracleCPUEnv(t *testing.T) {
 func countKey(env []string, key string) int {
 	n := 0
 	for _, entry := range env {
-		if k, _, _ := strings.Cut(entry, "="); k == key {
+		if k, _, ok := strings.Cut(entry, "="); ok && k == key {
 			n++
 		}
 	}
 	return n
 }
 
-// On Windows the ambient lookup folds key case - a lowercase
-// gomaxprocs entry is the same variable there, and missing it would
-// append a wider entry that case-insensitive dedup lets win; Unix keys
-// never fold (REQ-exec-oracle-parallelism).
+// The ambient lookup reads the key under the host platform's rule - a
+// lowercase gomaxprocs entry is the same variable on Windows, where
+// missing it would append a wider entry that case-insensitive dedup
+// lets win, and another variable on Unix (REQ-exec-oracle-parallelism).
 func TestEnvGOMAXPROCSKeyCase(t *testing.T) {
 	env := []string{"gomaxprocs=2"}
-	if v, ok := envGOMAXPROCSFold(env, true); !ok || v != 2 {
-		t.Fatalf("folded lookup = %d/%v, want 2/true", v, ok)
-	}
-	if _, ok := envGOMAXPROCSFold(env, false); ok {
+	v, ok := envGOMAXPROCS(env)
+	if runtime.GOOS == "windows" {
+		if !ok || v != 2 {
+			t.Fatalf("folded lookup = %d/%v, want 2/true", v, ok)
+		}
+	} else if ok {
 		t.Fatal("case-sensitive lookup matched a lowercase key")
 	}
 }
@@ -143,10 +147,11 @@ func TestMergePreservesWidthReadingEvidence(t *testing.T) {
 func TestOracleIngestEnvCarriesInnerParallelismCap(t *testing.T) {
 	four := OracleBounds{Width: 4}
 	frame := runtimeinput.ProducerFrame{PkgDir: "/pkg"}
+	// The mirror replaces the ambient working directory — never a
+	// second PWD entry — and carries the effective width, each once.
 	env := oracleIngestEnv([]string{"A=1", "PWD=/elsewhere"}, frame, four)
-	joined := strings.Join(env, " ")
-	if !strings.Contains(joined, "PWD=/pkg") || !strings.Contains(joined, "GOMAXPROCS=4") {
-		t.Fatalf("mirror = %v, want PWD pinned and the effective GOMAXPROCS", env)
+	if !slices.Equal(env, []string{"A=1", "PWD=/pkg", "GOMAXPROCS=4"}) {
+		t.Fatalf("mirror = %v, want PWD pinned in place of the ambient one and the effective GOMAXPROCS", env)
 	}
 	if refused := oracleIngestEnv([]string{"A=1"}, runtimeinput.ProducerFrame{}, four); !strings.Contains(strings.Join(refused, " "), "GOMAXPROCS=4") {
 		t.Fatalf("refused-frame mirror = %v, want the effective GOMAXPROCS", refused)

@@ -48,6 +48,22 @@ func TestPrepareCampaignRefusesASilencedHarnessBeforeTheLock(t *testing.T) {
 	}
 }
 
+// The OS environment's own refusals are the preparation stage's, before
+// the lock and any load: an ambient package driver refuses by name with
+// the campaign lock never created.
+func TestPrepareCampaignRefusesAnAmbientDriverBeforeTheLock(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GOPACKAGESDRIVER", "/usr/bin/gopackagesdriver")
+	path := filepath.Join(dir, ".gomutant", "findings.json")
+	_, err := PrepareCampaign(context.Background(), CampaignInputs{FindingsPath: path, ModuleDir: dir})
+	if err == nil || !strings.Contains(err.Error(), "GOPACKAGESDRIVER") {
+		t.Fatalf("preparation under an ambient driver = %v, want the driver refused by name", err)
+	}
+	if _, err := os.Stat(path + ".campaign"); !os.IsNotExist(err) {
+		t.Fatalf("a refused preparation left the campaign lock: %v", err)
+	}
+}
+
 // The selection's shape is a preparation refusal through the same
 // composition the harness arm reads: a malformed tag refuses before
 // the lock.

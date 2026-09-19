@@ -542,136 +542,143 @@ runs:N per-run verdicts are reproducible; the ephemeral surface carries
 no statement channel — the campaign surface owns prerequisite
 statements.
 
-**REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant — a
-caller-supplied replacement of one or more existing source files, given whole,
-as sequential exact-match edits to one file, or as an atomic batch of
-file-scoped exact-match edits applied to the files' current
-content, exercised through one build overlay against a named oracle test, the tree never touched — for the manual
-mutations the operator set cannot generate (generated-data drift, resolver
-seams, caller mappings). An edit that matches nothing, or matches more than
-once — match starts counted overlapping, so a self-overlapping pattern with
-two valid starts is ambiguous even when its non-overlapping count is one — is
-refused rather than guessed: a mutation applied somewhere the
-caller did not mean is a measurement of the wrong mutant. The run refuses
-inputs the build would silently ignore before any process launches: a test
-package that is neither a loaded package import path nor a package directory
-spelled the way `go test` spells one — `.` or a `./`-prefixed path, resolved
-against the invocation's tree root, so a module-local caller need not spell the
-full import path per probe (a flag-shaped value would otherwise change the
-invocation being measured; a directory escaping the tree or holding no loaded
-package refuses); a run pattern that selects
-none of the package's tests, fuzz targets, or examples (nothing could
-attribute the mutant); a replacement of a file
-the loaded build does not compile — a build-constraint-excluded source or a
-non-Go file — whose mutation could never be exercised and would report a
-false survivor; and a replacement of a file outside the named test
-package's linked dependency set (the import paths `go test` compiles into
-that binary) — a compiled-elsewhere file the oracle never links overlays
-cleanly and every test passes, even a syntax error going unnoticed, so no
-verdict exists to render: the refusal names the fact and the repair (an
-oracle that links the edited package) instead of reporting a false
-survivor, and an unparseable edit of such a file refuses on this ground
-first, before any build could diagnose it (a linked set the derivation
-cannot resolve leaves this gate standing down: a closure that does not
-build refuses at the baseline probe with the compiler's own diagnostic,
-as reported by the harness's own build-failure event, never inferred from
-output text a test could forge — this requirement's canonical framing).
-A load whose selection-applied environment silences that event
-(GODEBUG's gotestjsonbuildtext=1 as the go command resolves it; a
-bisect-suffixed value is refused whether or not the bisect fires on a
-given stack — the refusal does not decide that) refuses in every campaign's
-preparation (REQ-exec-preparation), at the head of the load's
-toolchain ladder before anything loads, and at the pre-write check
-(REQ-exec-provenance); the floor, needing the sample, refuses at the
-load and the pre-write check alone. Before the build, the imports a
+**REQ-exec-ephemeral** (behavior): gomutant MUST run an ephemeral mutant
+— a caller-supplied replacement of one or more existing source files,
+given whole, as sequential exact-match edits to one file, or as an
+atomic batch of file-scoped exact-match edits applied to the files'
+current content, exercised through one build overlay against a named
+oracle test, the tree never touched — for the manual mutations the
+operator set cannot generate (generated-data drift, resolver seams,
+caller mappings). An edit that matches nothing, or matches more than
+once — match starts counted overlapping, so a self-overlapping pattern
+with two valid starts is ambiguous even when its non-overlapping count
+is one — is refused rather than guessed: a mutation applied somewhere
+the caller did not mean is a measurement of the wrong mutant. The run
+refuses inputs the build would silently ignore before any process
+launches: a test package that is neither a loaded package import path
+nor a package directory spelled the way `go test` spells one — `.` or a
+`./`-prefixed path, resolved against the invocation's tree root, so a
+module-local caller need not spell the full import path per probe (a
+flag-shaped value would otherwise change the invocation being measured;
+a directory escaping the tree or holding no loaded package refuses); a
+run pattern that selects none of the package's tests, fuzz targets, or
+examples (nothing could attribute the mutant); a replacement of a file
+the loaded build does not compile — a build-constraint-excluded source
+or a non-Go file — whose mutation could never be exercised and would
+report a false survivor; and a replacement of a file outside the named
+test package's linked dependency set (the import paths `go test`
+compiles into that binary) — a compiled-elsewhere file the oracle never
+links overlays cleanly and every test passes, even a syntax error going
+unnoticed, so no verdict exists to render: the refusal names the fact
+and the repair (an oracle that links the edited package) instead of
+reporting a false survivor, and an unparseable edit of such a file
+refuses on this ground first, before any build could diagnose it (a
+linked set the derivation cannot resolve leaves this gate standing down:
+a closure that does not build refuses at the baseline probe with the
+compiler's own diagnostic, as reported by the harness's own
+build-failure event, never inferred from output text a test could forge
+— this requirement's canonical framing). A load whose selection-applied
+environment silences that event (GODEBUG's gotestjsonbuildtext=1 as the
+go command resolves it; a bisect-suffixed value is refused whether or
+not the bisect fires on a given stack — the refusal does not decide
+that) refuses in every campaign's preparation (REQ-exec-preparation), at
+the head of the load's toolchain ladder before anything loads, and at
+the pre-write check (REQ-exec-provenance); the floor, needing the
+sample, refuses at the load and the pre-write check alone. An ambient
+environment naming a package driver (GOPACKAGESDRIVER other than off —
+the loader would answer from a program of the operator's, never the go
+command's listing) or one the exec key=value form cannot express — a
+duplicate key, a malformed entry, a NUL byte, which the declared
+producer environment refuses — refuses at the same three sites — the
+preparation stage, the head of the load's ladder, the pre-write check —
+decidable from the OS environment alone. Before the build, the imports a
 replacement no longer references are pruned — an import whose bound name
 is known (an alias, or the declared name the loaded package imports it
-under) and that no selector in the mutant uses; blank and dot imports and
-an import of unknown name stay — because a probe declares no import
+under) and that no selector in the mutant uses; blank and dot imports
+and an import of unknown name stay — because a probe declares no import
 intent, so pruning cannot change the mutant's meaning where a deletion
 probe would otherwise strand its guard's imports and be unwritable; the
 result names every pruned import, and the edit digest stays the caller's
 own spelling. The cli batch is the `{"edits": […]}` object or the bare
-array of edits, one batch either way, any other shape refused naming both
-forms. A compiler signal death or panic under the baseline or a mutant
-run is the toolchain's, not the mutant's: retried once, and recurring
-reported as the crash it is — never as a mutant that does not compile
-and never as a verdict. Before running the mutant gomutant probes the named
-test on the unmutated tree: a `-run` matching zero tests cannot attribute any
-outcome, and a test already failing clean would fail against the mutant too
-and read as a fabricated kill — the flattering direction
-REQ-core-attributed-kills refuses — so either probe result refuses the run
-rather than scoring it, the failing-baseline refusal naming the failing
-tests (a reported failure, or a run the process never closed) and
-carrying their own output — what the oracle saw, so a baseline
-disagreeing with the caller's plain run is diagnosable from the
-refusal. Without an explicit oracle timeout the mutant budget is DERIVED
-from that baseline: the baseline run is itself a
-measurement of the oracle's cost on this tree under this load, so it
+array of edits, one batch either way, any other shape refused naming
+both forms. A compiler signal death or panic under the baseline or a
+mutant run is the toolchain's, not the mutant's: retried once, and
+recurring reported as the crash it is — never as a mutant that does not
+compile and never as a verdict. Before running the mutant gomutant
+probes the named test on the unmutated tree: a `-run` matching zero
+tests cannot attribute any outcome, and a test already failing clean
+would fail against the mutant too and read as a fabricated kill — the
+flattering direction REQ-core-attributed-kills refuses — so either probe
+result refuses the run rather than scoring it, the failing-baseline
+refusal naming the failing tests (a reported failure, or a run the
+process never closed) and carrying their own output — what the oracle
+saw, so a baseline disagreeing with the caller's plain run is
+diagnosable from the refusal. Without an explicit oracle timeout the
+mutant budget is DERIVED from that baseline: the baseline run is itself
+a measurement of the oracle's cost on this tree under this load, so it
 executes under a generous measurement leash and the mutant budget
 follows as a multiple with a floor — instead of a fixed knob that dies
-at baseline on a loaded host and idles through most of itself on a
-quiet one. The measurement can understate the mutant run's cost — a
-warm-cache baseline pays no compile while the mutant run always
-recompiles the mutated package inside its bound — so the floor is
-never below the fixed default the derivation replaced: that relation
-is contract; the particular multiple and leash values are incidental.
-An explicit timeout remains the
-caller's override; the result reports the effective budget, the
-measured baseline, and the memory ceiling the probe's oracle processes
-ran under (0 spelled as unlimited, never elided — an uncapped run and
-an absent field must not share one encoding) either way; and a refusal
-or timeout kill under a
-derived bound names that bound's true provenance (the leash, the
-derived budget, or a command deadline that undercut them) rather than
-the oracle knob that never governed it. The honest-naming duty
-attaches to refusals and kills; the advisory coverage probe's bound
-expiry — and a replacement whose profile entry the probe could not
-soundly attribute — is the recorded probe-failure posture (exercise
-state unknown for the files concerned, named as unknown, the label
-absent), never a named refusal and never a vouch. A manual mutant that fails to build, and a baseline
-probe whose test package fails to build, each refuse with the compiler's own
-diagnostic in the message — manual probes are interactive evidence gathering,
-so the caller repairs the edit from the compiler's reason, never from a
-guess. The result reports whether the named test killed the
-mutant and the attributed failing test; it is evidence for the caller to act
-on, never persisted to a finding record (REQ-result-record). A plain
-survivor over a replacement file no baseline-covered block touches - the
-file is linked into the oracle's binary (an unlinked replacement refuses at
+at baseline on a loaded host and idles through most of itself on a quiet
+one. The measurement can understate the mutant run's cost — a warm-cache
+baseline pays no compile while the mutant run always recompiles the
+mutated package inside its bound — so the floor is never below the fixed
+default the derivation replaced: that relation is contract; the
+particular multiple and leash values are incidental. An explicit timeout
+remains the caller's override; the result reports the effective budget,
+the measured baseline, and the memory ceiling the probe's oracle
+processes ran under (0 spelled as unlimited, never elided — an uncapped
+run and an absent field must not share one encoding) either way; and a
+refusal or timeout kill under a derived bound names that bound's true
+provenance (the leash, the derived budget, or a command deadline that
+undercut them) rather than the oracle knob that never governed it. The
+honest-naming duty attaches to refusals and kills; the advisory coverage
+probe's bound expiry — and a replacement whose profile entry the probe
+could not soundly attribute — is the recorded probe-failure posture
+(exercise state unknown for the files concerned, named as unknown, the
+label absent), never a named refusal and never a vouch. A manual mutant
+that fails to build, and a baseline probe whose test package fails to
+build, each refuse with the compiler's own diagnostic in the message —
+manual probes are interactive evidence gathering, so the caller repairs
+the edit from the compiler's reason, never from a guess. The result
+reports whether the named test killed the mutant and the attributed
+failing test; it is evidence for the caller to act on, never persisted
+to a finding record (REQ-result-record). A plain survivor over a
+replacement file no baseline-covered block touches - the file is linked
+into the oracle's binary (an unlinked replacement refuses at
 validation), yet the probed run never reached it - is no verdict at all
 and is refused naming the files and the repair: killed=false over an
 unexercised replacement would assert what the classification exists to
-deny, the shape of a guard that observes the tree (a source-reading test,
-a `go list`-based check) and so sees the unmutated sources, whose honest
-probe mutates the guard's own input, which does link into the binary; the
-mixed killed-some-runs outcome keeps the files as an advisory (some run
-reached them); the classification comes from one baseline coverage probe
-run only when the verdict is not a kill, never covers a mutated test file
-(the coverage instruments the code under test), and is absent when the
-probe fails - a probe failure never fails a sound measurement. A mutated
-test file is admitted and named in the result: its verdict is about the
-test - whether the edited part was load-bearing for the named run - never
-about the code under test (where a campaign never targets a test file, the
-ephemeral probe may: the campaign measures the code's coverage, the probe
-answers the caller's one question, which may be about the oracle itself). A kill
-additionally carries its interactive evidence in the result — a bounded
-excerpt of the killing test's own output anchored at its end, where Go
-emits the failure block, with the dropped earlier remainder counted (a
-head would bury the failure reason under run banners); a timeout
-verdict's text naming the governing oracle-timeout option in both its
-spellings (`oracle_timeout_sec` / `--oracle-timeout`); or a
-package-scope crash's bounded text — so acting on a kill requires no
-parallel re-run of the oracle. A caller may demand `runs:N` (bounded; each
-run is a full oracle process): the mutant runs N times against the
-once-probed baseline, the result lists every run's verdict in order with
-the kill count, and the killed verdict means every run killed — N
-consecutive kills split a deterministic kill from a property generator's
-draw luck, and a mixed outcome reads as neither killed nor plain survival.
-A baseline probe exceeding the oracle timeout refuses with an error naming
-the governing oracle-timeout option in both its spellings. Interference
-confirmation is a campaign discipline: an ephemeral probe is a single process
-with no sibling mutants, and its advisory result carries no confirmation
-pass.
+deny, the shape of a guard that observes the tree (a source-reading
+test, a `go list`-based check) and so sees the unmutated sources, whose
+honest probe mutates the guard's own input, which does link into the
+binary; the mixed killed-some-runs outcome keeps the files as an
+advisory (some run reached them); the classification comes from one
+baseline coverage probe run only when the verdict is not a kill, never
+covers a mutated test file (the coverage instruments the code under
+test), and is absent when the probe fails - a probe failure never fails
+a sound measurement. A mutated test file is admitted and named in the
+result: its verdict is about the test - whether the edited part was
+load-bearing for the named run - never about the code under test (where
+a campaign never targets a test file, the ephemeral probe may: the
+campaign measures the code's coverage, the probe answers the caller's
+one question, which may be about the oracle itself). A kill additionally
+carries its interactive evidence in the result — a bounded excerpt of
+the killing test's own output anchored at its end, where Go emits the
+failure block, with the dropped earlier remainder counted (a head would
+bury the failure reason under run banners); a timeout verdict's text
+naming the governing oracle-timeout option in both its spellings
+(`oracle_timeout_sec` / `--oracle-timeout`); or a package-scope crash's
+bounded text — so acting on a kill requires no parallel re-run of the
+oracle. A caller may demand `runs:N` (bounded; each run is a full oracle
+process): the mutant runs N times against the once-probed baseline, the
+result lists every run's verdict in order with the kill count, and the
+killed verdict means every run killed — N consecutive kills split a
+deterministic kill from a property generator's draw luck, and a mixed
+outcome reads as neither killed nor plain survival. A baseline probe
+exceeding the oracle timeout refuses with an error naming the governing
+oracle-timeout option in both its spellings. Interference confirmation
+is a campaign discipline: an ephemeral probe is a single process with no
+sibling mutants, and its advisory result carries no confirmation pass.
 
 Each atomic batch entry carries a canonical tree-relative slash path, a
 non-empty old string, and its replacement. Every path resolves to an existing
@@ -905,27 +912,27 @@ nothing and cuts nothing.
 Open survivors remain
 advisory and do not change successful exit semantics.
 
-**REQ-exec-preparation** (behavior): Every verb MUST fire each refusal
-its inputs alone decide — the bounds' signs, the run count, the target
-sources' exclusivity and the targets document's parse (a path's content
-or an inline document, read and parsed as the request's own input), a
-declaration's shape (scratch namespaces,
-vouches, a retarget pair, an attestation's reasoning, the build
-selection's tags and toolchain), the tree root's existence and then a
-changed ref's surface (the git seam's read, in the root just proven to
-exist), the harness environment (the load ladder's input-decidable arm, a GODEBUG that
-silences the build-fail events), the bracket paths' shape and presence,
-the exemptions document, the findings document (unreadable, or a version
-this binary does not read), and last the campaign lock — before its
-first tree load, so a refused verb pays nothing it could have refused
-earlier. The lock comes last because its acquisition persists state (the
-document's directory, the lock file) that a refusal after it would
-strand. The loaded set decides a second stage, before the first oracle
-process: a bracket path absent or unhashable under a measured module, a
-run pattern selecting none of the named package's tests, and — under a
-staged run — a target input outside the repository, each refuses before
-any proof or probe. The preparation is one stage per verb, in one order,
-the same on both faces.
+**REQ-exec-preparation** (behavior): Every verb MUST fire each refusal its
+inputs and the process environment alone decide — the bounds' signs, the run
+count, the target sources' exclusivity and the targets document's parse (a
+path's content or an inline document, read and parsed as the request's own
+input), a declaration's shape (scratch namespaces, vouches, a retarget pair, an
+attestation's reasoning, the build selection's tags and toolchain), the tree
+root's existence and then a changed ref's surface (the git seam's read, in the
+root just proven to exist), the harness environment (the load ladder's
+input-decidable arm: the ambient environment's own refusals — a package driver,
+an environment the exec key=value form cannot express — read from the OS
+environment alone, then a GODEBUG that silences the build-fail events), the
+bracket paths' shape and presence, the exemptions document, the findings
+document (unreadable, or a version this binary does not read), and last the
+campaign lock — before its first tree load, so a refused verb pays nothing it
+could have refused earlier. The lock comes last because its acquisition persists
+state (the document's directory, the lock file) that a refusal after it would
+strand. The loaded set decides a second stage, before the first oracle process:
+a bracket path absent or unhashable under a measured module, a run pattern
+selecting none of the named package's tests, and — under a staged run — a target
+input outside the repository, each refuses before any proof or probe. The
+preparation is one stage per verb, in one order, the same on both faces.
 
 **REQ-exec-plan-only** (behavior): A plan-only run MUST perform the full
 deterministic preparation sequence — every refusal REQ-exec-preparation
@@ -987,7 +994,9 @@ use, never the tool's own cwd default. A verb that mutates state before
 any load (attestation writes the findings document first) runs the same
 check before its write on both faces — the load's whole toolchain
 ladder, the skew refusal, the build-events floor below go1.24, and the
-refusal of an environment that silences those events (GODEBUG's
+refusal of an environment that names a package driver, cannot be
+expressed in the exec key=value form (a duplicate key, a malformed
+entry, a NUL byte), or silences those events (GODEBUG's
 gotestjsonbuildtext=1 as the go command resolves it — its last entry,
 its last pair, a bisect suffix stripped — read from the OS environment
 alone) alike: a skewed, floor-refused, or silenced binary never writes,
@@ -1236,38 +1245,48 @@ environment already carrying a narrower width keeps it. Without the cap
 every job spawns a full-width toolchain tree — jobs × NumCPU runnable
 threads, quadratic in cores at the default job count — starving the
 host and its neighbor processes. The bound is each run's own: a run
-beside another in one process — a probe beside a campaign, two
-probes — caps its trees at its own job count, so the host carries the
-sum of the runs' widths exactly as it would carry two gomutant
-processes, never one run's width rewritten by another's — with no
-headroom halving of the memory clause's kind: a width is a scheduling
-bound the host absorbs by time-slicing, a ceiling is a budget the host
-cannot. Oracle trees additionally run at low scheduling priority where
-the host provides one, so a saturated campaign yields to interactive
-work. The width and priority are scheduling bounds, never measurement
-pins — pinning a host-geometry-derived value would machine-localize
-every finding — but
-the injected width is part of the observed oracle environment: the
-observation ingest mirror carries the effective GOMAXPROCS, so an
-oracle that observably reads it records the value it actually saw as
-runtime-input evidence, and exactly those width-sensitive findings
-re-measure when the width moves. Every environment the evidence is
-judged against — merge-time re-evaluation, serve-side revalidation,
-and the analysis engines' declared producer environment — is that
-same evidence environment: a raw-environment stand-in would read a
-width-reading oracle's records as moved, silently degrading merges
-and re-measuring serves forever, or serve stale where an ambient
-value matches a record the process never reproduced. Standalone
-inspection judges under the inspecting process's own width — a
-run-time knob no inspection can know — so a width-reading finding may
+beside another in one process — a probe beside a campaign, two probes —
+caps its trees at its own job count, so the host carries the sum of the
+runs' widths exactly as it would carry two gomutant processes, never
+one run's width rewritten by another's — with no headroom halving of
+the memory clause's kind: a width is a scheduling bound the host
+absorbs by time-slicing, a ceiling is a budget the host cannot. Oracle
+trees additionally run at low scheduling priority where the host
+provides one, so a saturated campaign yields to interactive work. The
+width and priority are scheduling bounds, never measurement pins —
+pinning a host-geometry-derived value would machine-localize every
+finding — but the injected width is part of the observed oracle
+environment: the observation ingest mirror carries the effective
+GOMAXPROCS, so an oracle that observably reads it records the value it
+actually saw as runtime-input evidence, and exactly those
+width-sensitive findings re-measure when the width moves. Every
+environment the evidence is judged against — merge-time re-evaluation,
+serve-side revalidation, and the analysis engines' declared producer
+environment — is that same evidence environment: a raw-environment
+stand-in would read a width-reading oracle's records as moved, silently
+degrading merges and re-measuring serves forever, or serve stale where
+an ambient value matches a record the process never reproduced.
+Standalone inspection judges under the inspecting process's own width —
+a run-time knob no inspection can know — so a width-reading finding may
 inspect as changed yet serve on the next same-jobs run; the
 divergence's direction is a spurious re-measure report, never a
-spurious serve. Every other verdict path sees the
-width and priority only through the wall-clock oracle timeout, exactly
-as host speed and ambient load do — variance the reuse evidence
-already deliberately does not pin (a finding measured on a slower or
-busier host serves unchanged), with the attribution noise arm owning a
-baseline that dies beside its mutant under contention.
+spurious serve. Every other verdict path sees the width and priority
+only through the wall-clock oracle timeout, exactly as host speed and
+ambient load do — variance the reuse evidence already deliberately does
+not pin (a finding measured on a slower or busier host serves
+unchanged), with the attribution noise arm owning a baseline that dies
+beside its mutant under contention.
+
+**REQ-exec-spawn-environment** (behavior): Every key gomutant composes
+onto a spawn environment — the width, the memory ceiling, the oracle's
+scratch temp directory, the workspace, the toolchain selection and the
+tags' flags, the loader's driver, the ingest mirror's working directory
+— MUST replace the ambient entry under the host platform's key rule
+(folded on Windows, exact elsewhere), so a composed environment carries
+each key once whatever the ambient environment carried and the declared
+producer environment never refuses a duplicate; the ambient
+environment's own duplicates are refused at preparation, never composed
+around.
 
 (The go tool's package-build parallelism follows the delivered
 GOMAXPROCS — `-p` defaults to it — so the environment single-sources

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,11 @@ func TestOracleMemoryEnv(t *testing.T) {
 	env := oracleMemoryEnv([]string{"A=1"}, 1000)
 	if len(env) != 2 || env[1] != "GOMEMLIMIT=900" {
 		t.Fatalf("soft ceiling = %v, want GOMEMLIMIT=900 appended", env)
+	}
+	// An ambient ceiling is replaced, never duplicated: the producer
+	// environment gofresh records refuses a duplicate key.
+	if env := oracleMemoryEnv([]string{"GOMEMLIMIT=5", "A=1"}, 1000); !slices.Equal(env, []string{"A=1", "GOMEMLIMIT=900"}) {
+		t.Fatalf("ambient ceiling = %v, want it replaced by the one soft ceiling", env)
 	}
 }
 
@@ -235,5 +241,19 @@ func TestOracleMemoryCeilingReachesTheBaselineProbe(t *testing.T) {
 	}
 	if out != MutantDiscarded || killer != "" || !strings.Contains(incomplete, "baseline probe failed alongside the mutant") {
 		t.Fatalf("unbounded arm = %v (killer %q, incomplete %q), want a noise discard from the failing sentinel", out, killer, incomplete)
+	}
+}
+
+// The oracle's scratch temp directory replaces the ambient TMPDIR —
+// never a second entry — under the one key rule
+// (REQ-exec-spawn-environment).
+func TestOracleScratchReplacesTheAmbientTemp(t *testing.T) {
+	env, dir, _, remove, err := oracleScratch([]string{"TMPDIR=/ambient", "A=1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remove()
+	if !slices.Equal(env, []string{"A=1", "TMPDIR=" + dir}) {
+		t.Fatalf("scratch env = %v, want the ambient TMPDIR replaced by %s", env, dir)
 	}
 }

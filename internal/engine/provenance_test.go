@@ -219,3 +219,45 @@ func TestHarnessEventsSilencedReadsTheEffectiveSetting(t *testing.T) {
 		}
 	}
 }
+
+// TestAmbientEnvironmentRefusals pins the environment arm's read of
+// the OS environment itself: a live package driver is refused by name
+// (off and empty are not a driver), an environment the exec key=value
+// form cannot express — a duplicate key, a malformed entry, a NUL
+// byte — is refused in the operator's words, and the arm precedes the
+// composed environment's own on the preparation entry and heads the
+// load's ladder the pre-write check reads (REQ-exec-preparation,
+// REQ-exec-provenance).
+func TestAmbientEnvironmentRefusals(t *testing.T) {
+	for _, row := range []struct {
+		env     []string
+		refused string
+	}{
+		{nil, ""},
+		{[]string{"GOPACKAGESDRIVER=off", "A=1"}, ""},
+		{[]string{"GOPACKAGESDRIVER="}, ""},
+		{[]string{"GOPACKAGESDRIVER=/usr/bin/gopackagesdriver"}, `GOPACKAGESDRIVER="/usr/bin/gopackagesdriver" is unsupported`},
+		{[]string{"A=1", "B=2", "A=3"}, `duplicate key "A"`},
+		{[]string{"A=1", "NOEQUALS"}, "malformed"},
+		{[]string{"A=1\x00b"}, "NUL"},
+	} {
+		err := ambientEnvironmentRefused(row.env)
+		if (err != nil) != (row.refused != "") || err != nil && !strings.Contains(err.Error(), row.refused) {
+			t.Fatalf("%q refused = %v, want %q", row.env, err, row.refused)
+		}
+	}
+	t.Setenv("GOPACKAGESDRIVER", "/usr/bin/gopackagesdriver")
+	if err := CheckHarnessEnvironment("testdata/fixturemod", Selection{}); err == nil || !strings.Contains(err.Error(), "GOPACKAGESDRIVER") {
+		t.Fatalf("the preparation entry under an ambient driver = %v, want the driver refused by name", err)
+	}
+	if err := CheckToolchainProvenance(context.Background(), "testdata/fixturemod", Selection{}); err == nil || !strings.Contains(err.Error(), "GOPACKAGESDRIVER") {
+		t.Fatalf("the pre-write check under an ambient driver = %v, want the ladder's head refusing", err)
+	}
+	// The OS environment's own refusals precede the composed
+	// environment's: under both faults the driver is named, never the
+	// silenced harness.
+	t.Setenv("GODEBUG", "gotestjsonbuildtext=1")
+	if err := CheckHarnessEnvironment("testdata/fixturemod", Selection{}); err == nil || !strings.Contains(err.Error(), "GOPACKAGESDRIVER") || strings.Contains(err.Error(), "gotestjsonbuildtext") {
+		t.Fatalf("both faults = %v, want the ambient half's refusal first", err)
+	}
+}

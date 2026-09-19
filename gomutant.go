@@ -383,9 +383,10 @@ func CheckToolchainProvenance(ctx context.Context, dir string, sel Selection) er
 }
 
 // CheckHarnessEnvironment is the load ladder's input-decidable arm —
-// a GODEBUG that silences the harness's build-fail events refuses —
-// for a verb's preparation stage, before any state persists
-// (REQ-exec-preparation).
+// the OS environment's own refusals (a package driver, an environment
+// the exec form cannot express) and a GODEBUG that silences the
+// harness's build-fail events — for a verb's preparation stage, before
+// any state persists (REQ-exec-preparation).
 func CheckHarnessEnvironment(dir string, sel Selection) error {
 	abs, err := filepath.Abs(dir)
 	if err != nil {

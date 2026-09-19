@@ -1,10 +1,7 @@
 package engine
 
 import (
-	"fmt"
-	"runtime"
 	"strconv"
-	"strings"
 )
 
 // OracleEvidenceEnv is the environment oracle evidence digests under:
@@ -48,9 +45,10 @@ func oracleEnv(env []string, bounds OracleBounds) []string {
 // duplicate key, so a run under an exported wider GOMAXPROCS (an
 // operator's shell, or a gomutant oracle measuring a gomutant run)
 // would otherwise skip every target as evidence-unavailable. An
-// ambient narrower value is kept — but as ONE entry: an operator's
+// ambient narrower value is kept as ONE entry: an operator's
 // duplicated narrower entries collapse to their effective (last)
-// value, so the recorded env carries the key once whichever side wins.
+// value, so the recorded env carries the key once whichever side wins
+// (SetEnvKey's one rule).
 func oracleCPUEnv(env []string, width int) []string {
 	if width <= 0 {
 		return env
@@ -59,49 +57,19 @@ func oracleCPUEnv(env []string, width int) []string {
 	if ambient, ok := envGOMAXPROCS(env); ok && ambient <= width {
 		effective = ambient
 	}
-	foldCase := runtime.GOOS == "windows"
-	out := make([]string, 0, len(env)+1)
-	seen := 0
-	for _, entry := range env {
-		key, _, _ := strings.Cut(entry, "=")
-		if key == "GOMAXPROCS" || foldCase && strings.EqualFold(key, "GOMAXPROCS") {
-			seen++
-			continue
-		}
-		out = append(out, entry)
-	}
-	if seen == 1 && effective != width {
-		// One well-formed narrower entry: the env is already in its
-		// one-key form; hand it back untouched.
-		return env
-	}
-	return append(out, fmt.Sprintf("GOMAXPROCS=%d", effective))
+	return SetEnvKey(env, "GOMAXPROCS", strconv.Itoa(effective))
 }
 
 // envGOMAXPROCS reports the environment's effective GOMAXPROCS - the
-// last entry, when well-formed and positive, matching os/exec's
-// duplicate-key semantics. A malformed last entry reports absent, so
-// the cap replaces it.
+// last entry naming the key under the platform's rule (a lowercase
+// gomaxprocs is the same variable on Windows, another one on Unix),
+// when well-formed and positive. A malformed effective entry reports
+// absent, so the cap replaces it.
 func envGOMAXPROCS(env []string) (int, bool) {
-	return envGOMAXPROCSFold(env, runtime.GOOS == "windows")
-}
-
-// envGOMAXPROCSFold is envGOMAXPROCS with the key-case rule explicit:
-// Windows environment lookups are case-insensitive, so a lowercase
-// gomaxprocs entry is the same variable there and must count as the
-// effective ambient value - missing it would append a wider entry that
-// os/exec's case-insensitive dedup lets win, widening the operator's
-// bound. Unix keys are case-sensitive and fold nothing.
-func envGOMAXPROCSFold(env []string, foldCase bool) (int, bool) {
-	value, found := 0, false
-	for _, entry := range env {
-		key, rest, ok := strings.Cut(entry, "=")
-		if !ok || key != "GOMAXPROCS" && !(foldCase && strings.EqualFold(key, "GOMAXPROCS")) {
-			continue
-		}
-		n, err := strconv.Atoi(rest)
-		found = err == nil && n > 0
-		value = n
+	value, ok := LookupEnvKey(env, "GOMAXPROCS")
+	if !ok {
+		return 0, false
 	}
-	return value, found
+	n, err := strconv.Atoi(value)
+	return n, err == nil && n > 0
 }

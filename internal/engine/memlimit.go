@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"fmt"
+	"strconv"
 )
 
 // memoryFloorBytes keeps the derived default above what a large test
@@ -38,5 +38,5 @@ func oracleMemoryEnv(env []string, limit int64) []string {
 		return env
 	}
 	soft := limit - limit/10
-	return append(append([]string(nil), env...), fmt.Sprintf("GOMEMLIMIT=%d", soft))
+	return SetEnvKey(env, "GOMEMLIMIT", strconv.FormatInt(soft, 10))
 }

@@ -733,17 +733,16 @@ func captureOracleFrame(ctx context.Context, treeRoot, packageDir string, bracke
 // serve stale verdicts to width-sensitive oracles across jobs changes
 // (REQ-exec-oracle-parallelism). Applying the same composer the spawn
 // used reproduces the spawn's exact narrowing decision.
+// The working-directory pin is gofresh's own rule for a go command
+// under a directory (gotool.EnvForCommand's PWD derivation), composed
+// here by the one key rule rather than read from it: that form
+// normalizes and sorts the environment, which would move the mirror
+// away from the spawn's exact composition.
 func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame, bounds OracleBounds) []string {
 	if frame.PkgDir == "" {
 		return oracleCPUEnv(env, bounds.Width)
 	}
-	out := make([]string, 0, len(env)+1)
-	for _, entry := range env {
-		if !strings.HasPrefix(entry, "PWD=") {
-			out = append(out, entry)
-		}
-	}
-	return oracleCPUEnv(append(out, "PWD="+frame.PkgDir), bounds.Width)
+	return oracleCPUEnv(SetEnvKey(env, "PWD", frame.PkgDir), bounds.Width)
 }
 
 // oracleBookkeepingPaths are the tree-relative tool-bookkeeping
@@ -1487,7 +1486,7 @@ func oracleScratch(env []string) ([]string, string, func(), func(), error) {
 		restoreModes()
 		os.RemoveAll(dir)
 	}
-	return append(append([]string(nil), env...), "TMPDIR="+dir), dir, sweep, remove, nil
+	return SetEnvKey(env, "TMPDIR", dir), dir, sweep, remove, nil
 }
 
 // errOracleBudgetExceeded is the oracle bound's own timeout cause: a
