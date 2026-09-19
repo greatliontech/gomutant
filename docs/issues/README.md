@@ -44,3 +44,4 @@ is deleted (git holds history).
 | [knob-terse-clause-per-face](knob-terse-clause-per-face.md) | one knob line serves both faces, so a clause naming the other face reaches each face carrying the other's prose | cross-tool train chunk 184 |
 | [root-coordinate-one-spelling](root-coordinate-one-spelling.md) | root-side sites still resolve paths with their own Abs/EvalSymlinks pairs beside the load's one coordinate | cross-tool train chunk 220 |
 | [enumeration-lag-gate-unstated](enumeration-lag-gate-unstated.md) | the derived-enumeration lag gate and its effective-configuration source have no clause; three witnesses bind to nothing | cross-tool train chunk 209 |
+| [explain-has-no-cli-face](explain-has-no-cli-face.md) | `explain` — why a record is machine-local, what each survivor wants — is served over MCP alone; from a shell or a CI log the only route to the answer is the overlay JSON by hand | awaiting triage |
