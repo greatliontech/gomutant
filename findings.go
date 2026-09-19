@@ -77,11 +77,12 @@ type SubjectEvidence struct {
 	DynamicStateStrategy string `json:"dynamicStateStrategy,omitempty"`
 	// ClosureStrategy records the closure identity derivation the
 	// closure hashes were folded under (gofresh's ClosureStrategy):
-	// recorded beside them and no pin — the hashes are self-describing
-	// to the evidence check, and a consumer that one day keys a judgment
-	// to a closure hash compares within one recorded derivation and
-	// bridges a derivation change or a pre-field record (empty) rather
-	// than reading it as source motion (REQ-result-record's
+	// recorded beside them and no pin itself — the hashes are
+	// self-describing to the evidence check, and the attestation gate
+	// reads them as the pins they are: a derivation change moves them
+	// (a shaped disposition sheds, an unshaped one carries with the
+	// move named), and a pre-field record (empty) has an unknown
+	// derivation, never a moved one (REQ-result-record's
 	// subject-evidence term).
 	ClosureStrategy string `json:"closureStrategy,omitempty"`
 	// ModuleBase is the tree-relative slash base a record's manifest is

@@ -528,6 +528,7 @@ func TestReporterLineClassesStayPureUnderJSONL(t *testing.T) {
 		{"contradiction", gomutant.AttestationContradiction{Symbol: "p.F", Position: "f.go:1:1", Operator: "op", Killer: "T", Reason: "r"}},
 		{"attestation-shed", gomutant.AttestationShed{Symbol: "p.F", Position: "f.go:1:1", Operator: "op", Reason: "r"}},
 		{"attestation-carried", gomutant.AttestationCarry{Symbol: "p.F", Position: "f.go:1:1", Operator: "op"}},
+		{"attestation-carried", gomutant.AttestationCarry{Symbol: "p.G", Position: "g.go:1:1", Operator: "op", Derivation: "a@1 -> a@2"}},
 		{"property", gomutant.PropertyOracleNote{Package: "p", Runtime: "rapid", Note: "n"}},
 	}
 	var out bytes.Buffer
@@ -543,6 +544,11 @@ func TestReporterLineClassesStayPureUnderJSONL(t *testing.T) {
 		}
 		kind, _ := env["event"].(string)
 		kinds[kind] = true
+		// The structured face carries the carry's derivation move as its
+		// own field, never folded into prose.
+		if kind == "attestation-carried" && env["Symbol"] == "p.G" && env["Derivation"] != "a@1 -> a@2" {
+			t.Fatalf("the derivation move did not ride the structured line: %q", line)
+		}
 	}
 	for _, c := range classes {
 		if !kinds[c.kind] {

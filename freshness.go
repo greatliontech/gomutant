@@ -763,7 +763,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 	if evidence.RuntimeUnverifiable {
 		return FindingInspection{State: FindingUnverifiable, Reason: evidence.RuntimeReason, Channel: PostureRuntimeInputs}, nil
 	}
-	state, err := runtimeinput.CurrentEnvContext(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
+	state, err := runtimeinput.Current(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
 	if err != nil || !state.OK {
 		if ctx.Err() != nil {
 			return FindingInspection{}, ctx.Err()
@@ -801,7 +801,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 // just that one did (REQ-result-inspection). Attribution is
 // best-effort: an unwalkable manifest keeps the generic reason.
 func movedInputSuffix(ctx context.Context, encoded, moduleDir string, env []string) string {
-	moved, err := runtimeinput.MovedInputsContext(ctx, encoded, moduleDir, env)
+	moved, err := runtimeinput.MovedInputs(ctx, encoded, moduleDir, env)
 	if err != nil || len(moved) == 0 {
 		return ""
 	}
@@ -1227,10 +1227,12 @@ func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
 	// post-upgrade measure must not shed its dispositions over it.
 	evidence.ModuleBase = ""
 	// ClosureStrategy is recorded beside the closure hashes and no pin
-	// (the hashes are self-describing to the evidence check): the same
-	// first-post-upgrade rule as ModuleBase's, and a derivation change
-	// is not a moved measurement (REQ-result-record's subject-evidence
-	// term).
+	// itself (the hashes are self-describing to the evidence check):
+	// the same first-post-upgrade rule as ModuleBase's. A derivation
+	// change moves the hashes, which are pins — the shaped gate sheds,
+	// the domain gate carries with the derivation named — because two
+	// hashes folded by different derivations say nothing about each
+	// other's source (REQ-result-record's subject-evidence term).
 	evidence.ClosureStrategy = ""
 	return evidence
 }
@@ -1506,6 +1508,10 @@ type runtimeMemoResult struct {
 func newRuntimeMemo(current func(context.Context, string, string, []string) (runtimeinput.State, error)) *runtimeMemo {
 	return &runtimeMemo{current: current, results: map[runtimeMemoKey]*runtimeMemoResult{}}
 }
+
+// newCurrentRuntimeMemo is the memo over gofresh's live re-evaluation,
+// the one every production caller installs.
+func newCurrentRuntimeMemo() *runtimeMemo { return newRuntimeMemo(runtimeinput.Current) }
 
 func (m *runtimeMemo) once(ctx context.Context, manifest, moduleDir string, env []string) (runtimeinput.State, error) {
 	key := runtimeMemoKey{manifest: manifest, moduleDir: moduleDir, environment: sequenceKey(env)}
@@ -1831,7 +1837,7 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 		}
 		return evidence
 	}
-	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
+	memo := newCurrentRuntimeMemo()
 	ok, err := evidencePairsValid(ctx, []evidencePair{{subject: target, evidence: refreshed(target, prior.TargetEvidence), accept: acceptValidVerdict}}, memo.once)
 	if err != nil || !ok {
 		return nil, nil, false, err
@@ -1903,7 +1909,7 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 }
 
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (bool, error) {
-	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, timeoutDerived, memoryPin, regime, runtimeinput.CurrentEnvContext)
+	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, timeoutDerived, memoryPin, regime, runtimeinput.Current)
 }
 
 func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
@@ -1960,7 +1966,7 @@ func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*
 		}
 		pairs = append(pairs, evidencePair{subject: subject, evidence: evidence, accept: acceptValidVerdict})
 	}
-	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
+	memo := newCurrentRuntimeMemo()
 	ok, err := evidencePairsValid(ctx, pairs, memo.once)
 	if err != nil || !ok {
 		return ok, err
@@ -2001,7 +2007,7 @@ func (u *portableUnion) at(moduleDir string) (runtimeinput.Observation, error) {
 	if obs, ok := u.byModule[moduleDir]; ok {
 		return obs, nil
 	}
-	obs, err := runtimeinput.RelativeEnv(u.absolute, moduleDir, u.env)
+	obs, err := runtimeinput.Relative(u.absolute, moduleDir, u.env)
 	if err != nil {
 		return runtimeinput.Observation{}, err
 	}

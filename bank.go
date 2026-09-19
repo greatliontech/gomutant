@@ -21,7 +21,7 @@ import (
 // is sound by construction: the banked oracle-subject evidence rows
 // re-verify against the current views through the same
 // evidencePairsValid discipline finding serves use, and the banked
-// observation re-enters ONLY through runtimeinput.AdoptEnv, which
+// observation re-enters ONLY through runtimeinput.Adopt, which
 // re-evaluates every recorded identity against disk and refuses on
 // any disagreement, the adopted digest then compared against the
 // banked one — a failed adoption or digest mismatch falls back to a
@@ -352,7 +352,7 @@ func bankPinsHold(ctx context.Context, rows []SubjectEvidence, views []*subjectV
 		}
 		pairs = append(pairs, evidencePair{subject: v, evidence: r, accept: acceptValidVerdict})
 	}
-	memo := newRuntimeMemo(runtimeinput.CurrentEnvContext)
+	memo := newCurrentRuntimeMemo()
 	ok, err := evidencePairsValid(ctx, pairs, memo.once)
 	if err != nil || !ok {
 		return ok, err

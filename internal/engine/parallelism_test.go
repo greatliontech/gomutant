@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
 
 // The per-tree width is host width over the job count, floored at one
@@ -122,7 +123,7 @@ func TestMergePreservesWidthReadingEvidence(t *testing.T) {
 			env = append(env, kv)
 		}
 	}
-	obs, err := runtimeinput.FromTestLogEnv([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env, bounds.Width), runtimeinput.WithCompletedProcess("width"), runtimeinput.WithBracket(testBracket(t, root)))
+	obs, err := runtimeinput.FromTestLog([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env, bounds.Width), runtimeinput.WithCompletedProcess("width"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}

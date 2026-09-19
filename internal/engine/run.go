@@ -790,7 +790,7 @@ func CompilerCrashed(diagnostic string) bool {
 // A producer runs it once before the first spawn so nothing a spawn
 // would seal on passes preparation (REQ-exec-observation).
 func PreflightBracket(ctx context.Context, treeRoot string, bracketPaths []string) error {
-	bracket, err := runtimeinput.CaptureBracketContext(ctx, treeRoot, bracketPaths,
+	bracket, err := runtimeinput.CaptureBracket(ctx, treeRoot, bracketPaths,
 		runtimeinput.WithBracketExcludedPaths(append([]string{".git"}, oracleBookkeepingPaths...)...))
 	if err != nil {
 		return err
@@ -870,7 +870,7 @@ func absoluteRuntimeEvidenceContext(ctx context.Context, observation runtimeinpu
 	if _, err := runtimeinput.CompletedState(observation); err != nil {
 		return runtimeinput.Observation{}, err
 	}
-	absolute, err := runtimeinput.AbsoluteEnv(observation, moduleDir, env)
+	absolute, err := runtimeinput.Absolute(observation, moduleDir, env)
 	if cancelErr := ctx.Err(); cancelErr != nil {
 		return runtimeinput.Observation{}, cancelErr
 	}
@@ -880,7 +880,7 @@ func absoluteRuntimeEvidenceContext(ctx context.Context, observation runtimeinpu
 	if !observation.OK || observation.Manifest == "" || observation.Digest == "" {
 		return runtimeinput.Observation{}, err
 	}
-	incomplete, incompleteErr := runtimeinput.IncompleteEnv(moduleDir, observationProcess("absolute"), "runtime input observation could not be finalized for reuse: "+err.Error(), env)
+	incomplete, incompleteErr := runtimeinput.Incomplete(moduleDir, observationProcess("absolute"), "runtime input observation could not be finalized for reuse: "+err.Error(), env)
 	if incompleteErr != nil {
 		return runtimeinput.Observation{}, incompleteErr
 	}
@@ -888,7 +888,7 @@ func absoluteRuntimeEvidenceContext(ctx context.Context, observation runtimeinpu
 }
 
 func absoluteNonReusableRuntimeEvidence(ctx context.Context, incomplete runtimeinput.Observation, moduleDir string, env []string) (runtimeinput.Observation, error) {
-	absolute, err := runtimeinput.AbsoluteEnv(incomplete, moduleDir, env)
+	absolute, err := runtimeinput.Absolute(incomplete, moduleDir, env)
 	if cancelErr := ctx.Err(); cancelErr != nil {
 		return runtimeinput.Observation{}, cancelErr
 	}
@@ -898,11 +898,11 @@ func absoluteNonReusableRuntimeEvidence(ctx context.Context, incomplete runtimei
 	// Once movement is proven, reuse is forbidden. If a preserved path moves
 	// again during conversion, retain the reason without requiring that path
 	// to stabilize merely to publish the fresh mutation outcome.
-	incomplete, incompleteErr := runtimeinput.IncompleteEnv(moduleDir, observationProcess("absolute"), "runtime input observation could not be finalized for reuse: "+err.Error(), env)
+	incomplete, incompleteErr := runtimeinput.Incomplete(moduleDir, observationProcess("absolute"), "runtime input observation could not be finalized for reuse: "+err.Error(), env)
 	if incompleteErr != nil {
 		return runtimeinput.Observation{}, incompleteErr
 	}
-	absolute, err = runtimeinput.AbsoluteEnv(incomplete, moduleDir, env)
+	absolute, err = runtimeinput.Absolute(incomplete, moduleDir, env)
 	if cancelErr := ctx.Err(); cancelErr != nil {
 		return runtimeinput.Observation{}, cancelErr
 	}
@@ -926,14 +926,14 @@ func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string,
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.Observation{}, err
 	}
-	state, err := runtimeinput.MergeEnv(root, env, states...)
+	state, err := runtimeinput.Merge(root, env, states...)
 	if cancelErr := ctx.Err(); cancelErr != nil {
 		return runtimeinput.Observation{}, cancelErr
 	}
 	if err == nil {
 		return state, nil
 	}
-	result, incompleteErr := runtimeinput.IncompleteEnv(root, observationProcess("merge"), "runtime input observations could not be merged for reuse: "+err.Error(), env)
+	result, incompleteErr := runtimeinput.Incomplete(root, observationProcess("merge"), "runtime input observations could not be merged for reuse: "+err.Error(), env)
 	if incompleteErr != nil {
 		return runtimeinput.Observation{}, incompleteErr
 	}
@@ -944,7 +944,7 @@ func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string,
 		if input.Manifest == "" {
 			continue
 		}
-		merged, mergeErr := runtimeinput.MergeEnv(root, env, result, input)
+		merged, mergeErr := runtimeinput.Merge(root, env, result, input)
 		if err := ctx.Err(); err != nil {
 			return runtimeinput.Observation{}, err
 		}
@@ -956,7 +956,7 @@ func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string,
 }
 
 func addRuntimeEvidenceReasonContext(ctx context.Context, root string, env []string, state runtimeinput.Observation, reason string) (runtimeinput.Observation, error) {
-	incomplete, err := runtimeinput.IncompleteEnv(root, observationProcess("disagreement"), reason, env)
+	incomplete, err := runtimeinput.Incomplete(root, observationProcess("disagreement"), reason, env)
 	if err != nil {
 		return runtimeinput.Observation{}, err
 	}
@@ -1005,14 +1005,14 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 	if !first.OK {
 		return ran, passed, nil, "", first, err
 	}
-	empty, err := runtimeinput.MergeEnv(dir, env)
+	empty, err := runtimeinput.Merge(dir, env)
 	if err != nil {
 		return 0, false, nil, "", runtimeinput.Observation{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return 0, false, nil, "", runtimeinput.Observation{}, err
 	}
-	empty, err = runtimeinput.AbsoluteEnv(empty, dir, env)
+	empty, err = runtimeinput.Absolute(empty, dir, env)
 	if err != nil {
 		return 0, false, nil, "", runtimeinput.Observation{}, err
 	}

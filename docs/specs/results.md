@@ -11,32 +11,32 @@ freshness evidence.
 
 **subject evidence** (term): gomutant-owned persisted data for one target or
 oracle subject: its identity, maximal Gofresh source-closure hash, its
-package's test-variant compartment hash, code-result
-toolchain and build-configuration guards, attributable observation-completeness
-assertion, complete per-subject observability proof data, attributable purity
-assertion, the recorded dynamic-state vouches (the caller acceptances that
-discharged shared-dynamic-state culprits reachable from the subject at
-capture — audit riding the evidence, never a serve input: verdicts derive
-from the current engine's own vouch set, so a withdrawn vouch resurfaces
-its culprit without any comparison here, and like labels the record is
-correlation metadata excluded from the attestation-pin comparison — a
-vouch-set change alone never sheds a disposition whose every measured
-pin still holds), the recorded package-process discharges (the
-binary-scoped reachability judgment's attestation-borne acceptances,
-gofresh's PackageProcessDischarges — the same audit class as the
-vouches, excluded from the attestation-pin comparison on the same
-ground: verdicts re-derive from the current engine, so a mode change
-resurfaces the culprit without any comparison here), the recorded
-dynamic-state strategy (a MEASURED pin, the observation strategy's
-structural twin: a strategy move or a pre-field record re-measures at
-the evidence check), the recorded closure-identity strategy (gofresh's
-derivation of the closure hashes — RECORDED beside them and no pin: the
-hashes are self-describing to the evidence check, and a consumer that
-one day keys a judgment to a closure hash compares within one recorded
-derivation and bridges a derivation change or a pre-field record rather
-than reading it as source motion), and the completed processes'
-merged runtime-input manifest, digest,
-and explicit unverifiable disposition.
+package's test-variant compartment hash, code-result toolchain and
+build-configuration guards, attributable observation-completeness assertion,
+complete per-subject observability proof data, attributable purity assertion,
+the recorded dynamic-state vouches (the caller acceptances that discharged
+shared-dynamic-state culprits reachable from the subject at capture — audit
+riding the evidence, never a serve input: verdicts derive from the current
+engine's own vouch set, so a withdrawn vouch resurfaces its culprit without any
+comparison here, and like labels the record is correlation metadata excluded
+from the attestation-pin comparison — a vouch-set change alone never sheds a
+disposition whose every measured pin still holds), the recorded package-process
+discharges (the binary-scoped reachability judgment's attestation-borne
+acceptances, gofresh's PackageProcessDischarges — the same audit class as the
+vouches, excluded from the attestation-pin comparison on the same ground:
+verdicts re-derive from the current engine, so a mode change resurfaces the
+culprit without any comparison here), the recorded dynamic-state strategy (a
+MEASURED pin, the observation strategy's structural twin: a strategy move or a
+pre-field record re-measures at the evidence check), the recorded
+closure-identity strategy (gofresh's derivation of the closure hashes —
+RECORDED beside them and no pin itself: the hashes are self-describing to the
+evidence check, and the attestation gate reads them as the pins they are — a
+derivation change moves them, so a shaped disposition sheds under the full pin
+gate and an unshaped one carries under the domain gate with the move named,
+because two hashes folded by different derivations say nothing about each
+other's source; a pre-field record's derivation is unknown, never a move), and
+the completed processes' merged runtime-input manifest, digest, and explicit
+unverifiable disposition.
 
 **candidate evidence** (term): the per-candidate runtime-evidence disposition: a
 candidate measured by a process that could not prove its log complete carries an

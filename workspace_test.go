@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
 
 // workspaceFixture builds a committed go.work workspace: a root module
@@ -347,7 +348,7 @@ func TestApplySplicedUnionAnchorsAWorkspaceMemberAtTheTree(t *testing.T) {
 	}
 	member := filepath.Join(root, "tools")
 	env := tree.eng.GoEnv()
-	rel, err := runtimeinput.FromTestLogEnv([]byte("open ../shared/fixture.txt\n"), root, member, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, root)))
+	rel, err := runtimeinput.FromTestLog([]byte("open ../shared/fixture.txt\n"), root, member, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +356,7 @@ func TestApplySplicedUnionAnchorsAWorkspaceMemberAtTheTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	union, err := runtimeinput.AbsoluteEnv(rel, root, env)
+	union, err := runtimeinput.Absolute(rel, root, env)
 	if err != nil {
 		t.Fatal(err)
 	}

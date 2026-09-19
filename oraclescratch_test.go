@@ -93,7 +93,7 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 	// after finalization would record content digests of files the
 	// sweep deletes, evidence that reads moved forever
 	// (REQ-exec-oracle-scratch-order).
-	state, err := runtimeinput.CurrentEnvContext(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
+	state, err := runtimeinput.Current(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
 	if err != nil || !state.OK {
 		t.Fatalf("post-sweep revalidation = %+v, %v", state, err)
 	}
@@ -147,7 +147,7 @@ func TestTempTouchingOracleFinalizesVerifiable(t *testing.T) {
 	}
 	// The evidence is reuse-ready: it revalidates against the current
 	// tree after the scratch sweep.
-	state, err := runtimeinput.CurrentEnvContext(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
+	state, err := runtimeinput.Current(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
 	if err != nil || !state.OK || state.Unverifiable {
 		t.Fatalf("post-run revalidation = %+v, %v", state, err)
 	}

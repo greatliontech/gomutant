@@ -1620,3 +1620,43 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "0027d1422912d8a68e8d7f19101b948fddced654c4cd3d6f2fd3a440fa34376d"
 }
+
+bindings {
+  requirement_id: "REQ-result-inspection"
+  content_hash: "0b774cd9c73d4b587320e1add01e7811d448b01f478411d6c3d026be7f89b8ba"
+  source_hash: "62e49b8ff25360d8fbfad43f8b1c9594390c3442439893b72c5778336d901631"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestVouchedTreeJudgesInspectionUnderTheSet"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fde070494d689344f800062b596f2d1d82115a9e16d01221ec7166cfa928b532"
+}
+
+bindings {
+  requirement_id: "REQ-result-record"
+  content_hash: "55babcc8c304e11649fe57da3bca35bfb942432fa6467f797a625d6d67245f8f"
+  source_hash: "e54a8201f161e04585928924a37520e1497bebd0ec457aa8e28010a5cb43a2fb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSubjectEvidenceCarriesDynamicStateVouches"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7fc10fc71bb1de11f6d0fcb10fd1dbce52d73d6fb9a254a9274b2e1908cb8c89"
+}
+
+bindings {
+  requirement_id: "REQ-result-record"
+  content_hash: "55babcc8c304e11649fe57da3bca35bfb942432fa6467f797a625d6d67245f8f"
+  source_hash: "e54a8201f161e04585928924a37520e1497bebd0ec457aa8e28010a5cb43a2fb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRunRecordsPackageProcessDischarges"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7986b1fd37251eb6068d6b7a626fb5da9b2ded8609d8c1433202b52388e3b3c1"
+}
+
+bindings {
+  requirement_id: "REQ-result-record"
+  content_hash: "55babcc8c304e11649fe57da3bca35bfb942432fa6467f797a625d6d67245f8f"
+  source_hash: "e54a8201f161e04585928924a37520e1497bebd0ec457aa8e28010a5cb43a2fb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestPackageProcessAttestablePairing"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9c2c45908d2c74c4d930c42477211ec178c4adcba198e89cd30ad747c1d792d2"
+}

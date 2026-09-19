@@ -196,11 +196,11 @@ func TestRunNarrowsSurvivorsToCoveringTests(t *testing.T) {
 				}
 			} else {
 				out, killer, incomplete, md = engine.MutantKilled, realKiller, "", true
-				bracket, ferr := runtimeinput.CaptureBracket(moduleDir, bracketPaths)
+				bracket, ferr := runtimeinput.CaptureBracket(ctx, moduleDir, bracketPaths)
 				if ferr != nil {
 					return out, killer, md, state, incomplete, diag, ferr
 				}
-				forced, ferr := runtimeinput.FromTestLogEnv([]byte("# test log\ngetenv "+auditObservationEnv+"\n"), moduleDir, packageDir, env, runtimeinput.WithCompletedProcess("audit-observation-process"), runtimeinput.WithBracket(bracket))
+				forced, ferr := runtimeinput.FromTestLog([]byte("# test log\ngetenv "+auditObservationEnv+"\n"), moduleDir, packageDir, env, runtimeinput.WithCompletedProcess("audit-observation-process"), runtimeinput.WithBracket(bracket))
 				if ferr != nil {
 					return out, killer, md, state, incomplete, diag, ferr
 				}

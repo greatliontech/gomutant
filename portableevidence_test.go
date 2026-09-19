@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -35,7 +36,7 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 
 	// The recorded evidence: a module-relative manifest anchored at the
 	// SUB module — the persisted portable form this era writes.
-	recorded, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), subDir, subDir, env, runtimeinput.WithCompletedProcess("recorded"), runtimeinput.WithBracket(testBracket(t, subDir)))
+	recorded, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), subDir, subDir, env, runtimeinput.WithCompletedProcess("recorded"), runtimeinput.WithBracket(bracketfixture.Capture(t, subDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,11 +48,11 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 
 	// The fresh union at the tree root, already absolute (the engine's
 	// in-memory form).
-	fresh, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, env, runtimeinput.WithCompletedProcess("fresh"), runtimeinput.WithBracket(testBracket(t, tree.dir)))
+	fresh, err := runtimeinput.FromTestLog(nil, tree.dir, tree.dir, env, runtimeinput.WithCompletedProcess("fresh"), runtimeinput.WithBracket(bracketfixture.Capture(t, tree.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fresh, err = runtimeinput.AbsoluteEnv(fresh, tree.dir, env)
+	fresh, err = runtimeinput.Absolute(fresh, tree.dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func TestApplySplicedUnionAcceptsRelativeEraRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := tree.eng.GoEnv()
-	rel, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, root)))
+	rel, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestApplySplicedUnionAcceptsRelativeEraRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The in-memory union is the absolute form of the SAME content.
-	union, err := runtimeinput.AbsoluteEnv(rel, root, env)
+	union, err := runtimeinput.Absolute(rel, root, env)
 	if err != nil {
 		t.Fatal(err)
 	}

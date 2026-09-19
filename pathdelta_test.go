@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -26,7 +27,7 @@ func TestManifestPathDeltaNamesTheMoverBestEffort(t *testing.T) {
 	}
 	observe := func(log string) (string, string) {
 		t.Helper()
-		obs, err := runtimeinput.FromTestLog([]byte(log), root, root, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, root)))
+		obs, err := runtimeinput.FromTestLog([]byte(log), root, root, os.Environ(), runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +38,7 @@ func TestManifestPathDeltaNamesTheMoverBestEffort(t *testing.T) {
 		// The engine absolutizes every observation before it leaves; a
 		// recorded finding keeps the relative form. Naming must read
 		// both, so each case pins both forms.
-		absObs, err := runtimeinput.Absolute(obs, root)
+		absObs, err := runtimeinput.Absolute(obs, root, os.Environ())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,11 +103,11 @@ func TestApplySplicedUnionNamesDivergingInputs(t *testing.T) {
 	env := tree.eng.GoEnv()
 	observe := func(log string) (runtimeinput.Observation, string) {
 		t.Helper()
-		obs, err := runtimeinput.FromTestLogEnv([]byte(log), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, root)))
+		obs, err := runtimeinput.FromTestLog([]byte(log), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		abs, err := runtimeinput.AbsoluteEnv(obs, root, env)
+		abs, err := runtimeinput.Absolute(obs, root, env)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +120,7 @@ func TestApplySplicedUnionNamesDivergingInputs(t *testing.T) {
 	union, _ := observe("open shared.txt\n")
 	// Production evidence is absolutized before it is recorded; the
 	// naming must survive that form.
-	absUnion, err := runtimeinput.AbsoluteEnv(union, root, env)
+	absUnion, err := runtimeinput.Absolute(union, root, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,13 +230,13 @@ func TestEmitOracleGuidanceNamesMutantOnlyInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := tree.eng.GoEnv()
-	obs, err := runtimeinput.FromTestLogEnv([]byte("open shared.txt\nopen moved.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(testBracket(t, root)))
+	obs, err := runtimeinput.FromTestLog([]byte("open shared.txt\nopen moved.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Production finding evidence is absolutized; the wiring must
 	// recover the module-relative form from it.
-	abs, err := runtimeinput.AbsoluteEnv(obs, root, env)
+	abs, err := runtimeinput.Absolute(obs, root, env)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1090,11 +1090,34 @@ type AttestationCarry struct {
 	Position string
 	Operator string
 	Reason   string
+	// Derivation names a closure-derivation move between the prior
+	// record and the current measurement ("<prior> -> <current>"),
+	// empty when the derivation held or the prior record predates the
+	// field: when named, the moved pins are the closure hashes the new
+	// derivation folded, not a source move.
+	Derivation string
 }
 
-// Text is the carry's one rendering on every face.
+// Text is the carry's one rendering on every face; a derivation move
+// is named, so the reader knows the pins moved under a new closure
+// derivation rather than a source edit.
 func (c AttestationCarry) Text() string {
-	return c.Symbol + " " + c.Position + " " + c.Operator + " - measurement pins moved; the mutated source is unchanged and the mutant survived re-execution"
+	text := c.Symbol + " " + c.Position + " " + c.Operator + " - measurement pins moved; the mutated source is unchanged and the mutant survived re-execution"
+	if c.Derivation != "" {
+		text += " (closure derivation " + c.Derivation + ")"
+	}
+	return text
+}
+
+// derivationMove names a closure-derivation change between a prior
+// record and the current measurement ("<prior> -> <current>"), or
+// nothing when it held — or when the prior record predates the field:
+// an unrecorded derivation is unknown, never a move.
+func derivationMove(prior, current SubjectEvidence) string {
+	if prior.ClosureStrategy == "" || prior.ClosureStrategy == current.ClosureStrategy {
+		return ""
+	}
+	return prior.ClosureStrategy + " -> " + current.ClosureStrategy
 }
 
 // AttestationContradiction reports one attested survivor a drift serve's
@@ -2587,7 +2610,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 						return "", ctx.Err()
 					}
 					if herr == nil && held {
-						adopted, aerr := runtimeinput.AdoptEnv(banked.Manifest, t.dir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
+						adopted, aerr := runtimeinput.Adopt(banked.Manifest, t.dir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
 						if aerr == nil && adopted.Digest == banked.Digest {
 							reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0], Banked: true})
 							raw := time.Duration(banked.RawMillis) * time.Millisecond
@@ -4373,7 +4396,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				if !sameAttestationPins(*rec, *f) && opts.AttestationCarried != nil {
 					for _, attestation := range kept {
 						opts.AttestationCarried(AttestationCarry{
-							Symbol: f.Symbol, Position: attestation.Position,
+							Symbol: f.Symbol, Position: attestation.Position, Derivation: derivationMove(rec.TargetEvidence, f.TargetEvidence),
 							Operator: attestation.Operator, Reason: attestation.Reason,
 						})
 					}
@@ -4929,7 +4952,7 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 	// because its children were ingested under it; a raw-env merge
 	// would read a width-reading oracle's records as moved and degrade
 	// the union (REQ-exec-oracle-parallelism).
-	state, err := runtimeinput.MergeEnv(root, env, states...)
+	state, err := runtimeinput.Merge(root, env, states...)
 	if cancelErr := ctx.Err(); cancelErr != nil {
 		return runtimeinput.Observation{}, cancelErr
 	}
@@ -4948,7 +4971,7 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 			break
 		}
 	}
-	result, incompleteErr := runtimeinput.IncompleteEnv(root, process, reason, env)
+	result, incompleteErr := runtimeinput.Incomplete(root, process, reason, env)
 	if incompleteErr != nil {
 		return runtimeinput.Observation{}, incompleteErr
 	}
@@ -4959,7 +4982,7 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 		if input.Manifest == "" {
 			continue
 		}
-		merged, mergeErr := runtimeinput.MergeEnv(root, env, result, input)
+		merged, mergeErr := runtimeinput.Merge(root, env, result, input)
 		if err := ctx.Err(); err != nil {
 			return runtimeinput.Observation{}, err
 		}
@@ -5248,7 +5271,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 			// forced with the evidence mismatch as its own named cause,
 			// never laundered through the git judgment as a
 			// path-shaped fact.
-			state, serr := runtimeinput.CurrentEnvContext(ctx, evidence.RuntimeInputs, base, viewEnvs[evidence.Symbol])
+			state, serr := runtimeinput.Current(ctx, evidence.RuntimeInputs, base, viewEnvs[evidence.Symbol])
 			if serr != nil || !state.OK ||
 				state.Unverifiable != evidence.RuntimeUnverifiable || state.Reason != evidence.RuntimeReason ||
 				state.Digest != evidence.RuntimeDigest {
@@ -5910,7 +5933,7 @@ func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding,
 	// adopting under a raw env would read a width-reading record as
 	// moved and stamp the extension non-reusable
 	// (REQ-exec-oracle-parallelism).
-	adopted, adoptErr := runtimeinput.AdoptEnv(rec.TargetEvidence.RuntimeInputs, moduleDir, fmt.Sprintf("gomutant-extend-%d", findingObservationSequence.Add(1)), env)
+	adopted, adoptErr := runtimeinput.Adopt(rec.TargetEvidence.RuntimeInputs, moduleDir, fmt.Sprintf("gomutant-extend-%d", findingObservationSequence.Add(1)), env)
 	if adoptErr != nil {
 		if err := ctx.Err(); err != nil {
 			return runtimeinput.Observation{}, err
@@ -5922,7 +5945,7 @@ func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding,
 	// the adopted record converts before it re-enters
 	// (REQ-inputs-absolute-identities). An absolute-era record converts
 	// as the identity map.
-	adopted, adoptErr = runtimeinput.AbsoluteEnv(adopted, moduleDir, env)
+	adopted, adoptErr = runtimeinput.Absolute(adopted, moduleDir, env)
 	if adoptErr != nil {
 		if err := ctx.Err(); err != nil {
 			return runtimeinput.Observation{}, err
@@ -6075,7 +6098,7 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 		if delta := manifestPathDelta(rec.TargetEvidence.RuntimeInputs, state.Manifest, t.dir); len(delta) > 0 {
 			divergedReason += "; diverging inputs: " + cappedNameList(delta, "inputs")
 		}
-		incomplete, incompleteErr := runtimeinput.IncompleteEnv(t.dir, fmt.Sprintf("gomutant-splice-%d", findingObservationSequence.Add(1)), divergedReason, env)
+		incomplete, incompleteErr := runtimeinput.Incomplete(t.dir, fmt.Sprintf("gomutant-splice-%d", findingObservationSequence.Add(1)), divergedReason, env)
 		if incompleteErr != nil {
 			return runtimeinput.Observation{}, Finding{}, incompleteErr
 		}

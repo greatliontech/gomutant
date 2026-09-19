@@ -9,5 +9,11 @@ prose. The move is one row type per disposition on the wire beside
 the sentence the CLI prints, a BREAKING wire change on the run tool's
 response.
 
+Since 246.A a carry names a closure-derivation move ("(closure
+derivation <prior> -> <current>)") — a machine-relevant discriminator
+between pins moved under a new derivation and a source move — so a
+structured reader must parse it out of the prose today; the CLI's
+--json face carries it as its own field.
+
 Lands: user decision (a breaking change to the structured face's
 run response).

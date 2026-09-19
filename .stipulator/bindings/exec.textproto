@@ -2770,3 +2770,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "54e422eecee967423218c61640a630c356742dde3ae28d5ca9282d94e44739c2"
 }
+
+bindings {
+  requirement_id: "REQ-exec-preparation"
+  content_hash: "3aa09fb7e32fbba6201cb12cc35e9855af6839f8f47671a2f6d143dda47b047d"
+  source_hash: "16d3b8d96632256b0e909c91c952a886f9b5503d947999a3c85f2482de8ff4f2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestParseDynamicStateVouches"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "577c14a33215883d6b859e89af45e92ca62792b10c8fb4f50ce95699720e235e"
+}

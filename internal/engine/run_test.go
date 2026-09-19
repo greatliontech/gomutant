@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -608,18 +609,6 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	}
 }
 
-// testBracket captures an observation bracket over the whole root, so
-// direct testlog constructions satisfy the completed-observation
-// contract exactly as the engine's pre-spawn capture does.
-func testBracket(t *testing.T, root string) runtimeinput.Bracket {
-	t.Helper()
-	b, err := runtimeinput.CaptureBracket(root, []string{"."})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
 func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 	root := t.TempDir()
 	stable := filepath.Join(root, "stable")
@@ -631,11 +620,11 @@ func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"), runtimeinput.WithBracket(testBracket(t, root)))
+	stableState, err := runtimeinput.FromTestLog([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(testBracket(t, root)))
+	movingState, err := runtimeinput.FromTestLog([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -662,7 +651,7 @@ func TestAbsoluteRuntimeEvidenceDropsMovedUnsealedInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("absolute"), runtimeinput.WithBracket(testBracket(t, root)))
+	state, err := runtimeinput.FromTestLog([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("absolute"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +688,7 @@ func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := runtimeinput.FromTestLogEnv([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(testBracket(t, root)))
+	state, err := runtimeinput.FromTestLog([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}

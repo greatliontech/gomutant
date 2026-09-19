@@ -50,7 +50,16 @@ every retargeted record on the next measure — motion provably unable to
 bear on the mutant's meaning, the over-shedding the middle gate exists
 to avoid. The gate stays body hash + operator set. The groundwork
 landed: SubjectEvidence records the closure identity's derivation
-(`closureStrategy`), so the day the identity is subject-scoped the gate
-compares within one derivation and bridges a derivation change.
+(`closureStrategy`) beside the hashes. It does not yet bridge a
+derivation change: the shaped gate compares the full pin view, closure
+hashes included, and a derivation move (gofresh's canonical member form
+@1 → @2 at the v0.102.0 bump) moves those hashes with no source byte
+changed — a shaped disposition sheds and re-attests, an unshaped one
+carries under the domain gate with the derivation named on the carry
+report. Bridging — dropping the two incomparable hashes from the pin
+view when the derivations differ — would carry a disposition over a
+real source edit made in the same window as the bump, which the gate
+cannot tell apart; whether that risk is acceptable for the re-attest
+cost it saves is the design question this issue's chunk opens with.
 
 Lands: cross-tool train chunk 175 (a design chunk opening with the user)

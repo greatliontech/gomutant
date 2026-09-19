@@ -150,3 +150,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "3611cac5957ab5485efcf5ae77adb284e06d545b8f9ac2ba2d748af44affe321"
 }
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "1dfc1de477a26517a8171e1156a728aef5ac468d91e1f4c2e8270ab113462e79"
+  source_hash: "4bdc8b44d8a2e12603cb917c8ec18617f32d09286111878374c561ea41be31f1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestAttestationCarryNamesADerivationMove"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a1ddd70923f3a4bc4fc11579c760a5dd9df11ba0392b5bddcd8ac6ec1fcc3254"
+}
+
+bindings {
+  requirement_id: "REQ-attest-survivor"
+  content_hash: "1dfc1de477a26517a8171e1156a728aef5ac468d91e1f4c2e8270ab113462e79"
+  source_hash: "4bdc8b44d8a2e12603cb917c8ec18617f32d09286111878374c561ea41be31f1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestAttestationPinsIgnoreRecordedVouches"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2cf77a2919fd2a1170a49bdcf93833a89394a1dd9540a374901058990b78d357"
+}

@@ -20,6 +20,7 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/windowcost"
 )
@@ -1244,11 +1245,11 @@ func TestMergeFindingObservationsMakesMovementNonReusable(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	stableState, err := runtimeinput.FromTestLogEnv([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"), runtimeinput.WithBracket(testBracket(t, root)))
+	stableState, err := runtimeinput.FromTestLog([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	movingState, err := runtimeinput.FromTestLogEnv([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(testBracket(t, root)))
+	movingState, err := runtimeinput.FromTestLog([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2146,15 +2147,15 @@ func TestCompletedObservationUnionIsCandidateGranular(t *testing.T) {
 	root := t.TempDir()
 	env := os.Environ()
 	ctx := context.Background()
-	completedBaseline, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(testBracket(t, root)))
+	completedBaseline, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	completedCandidate, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("candidate"), runtimeinput.WithBracket(testBracket(t, root)))
+	completedCandidate, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("candidate"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	incompleteCandidate, err := runtimeinput.IncompleteEnv(root, "incomplete-candidate", "mutant test process panicked before observation finalization", env)
+	incompleteCandidate, err := runtimeinput.Incomplete(root, "incomplete-candidate", "mutant test process panicked before observation finalization", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2179,7 +2180,7 @@ func TestCompletedObservationUnionIsCandidateGranular(t *testing.T) {
 		t.Fatalf("candidate evidence = %+v, want %+v", evidence, want)
 	}
 
-	incompleteBaseline, err := runtimeinput.IncompleteEnv(root, "incomplete-baseline", "baseline test process produced no runtime-input log", env)
+	incompleteBaseline, err := runtimeinput.Incomplete(root, "incomplete-baseline", "baseline test process produced no runtime-input log", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2886,7 +2887,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	}
 	env := os.Environ()
 	ctx := context.Background()
-	recorded, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(testBracket(t, root)))
+	recorded, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2908,7 +2909,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 		t.Fatalf("equal union rewrote pinned evidence: %+v", same.TargetEvidence)
 	}
 
-	fresh, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(testBracket(t, root)))
+	fresh, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3663,11 +3664,11 @@ func TestProofAbortErrorKeepsCancellationClass(t *testing.T) {
 func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *testing.T) {
 	root := t.TempDir()
 	env := os.Environ()
-	first, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("first"), runtimeinput.WithBracket(testBracket(t, root)))
+	first, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("first"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("second"), runtimeinput.WithBracket(testBracket(t, root)))
+	second, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("second"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3686,7 +3687,7 @@ func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *tes
 		t.Fatal("identical manifests were not shared after interning")
 	}
 	// A distinct manifest keeps its own backing and its own content.
-	incomplete, err := runtimeinput.IncompleteEnv(root, "third", "distinct content", env)
+	incomplete, err := runtimeinput.Incomplete(root, "third", "distinct content", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4189,7 +4190,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	}
 	env := os.Environ()
 	ctx := context.Background()
-	recorded, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("prior"), runtimeinput.WithBracket(testBracket(t, root)))
+	recorded, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("prior"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4202,7 +4203,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 
 	// The suffix read a subset of the recorded pins: the fold restores the
 	// persisted union exactly and the evidence stays untouched.
-	subset, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(testBracket(t, root)))
+	subset, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4222,7 +4223,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	// The suffix read an input the record never pinned: the fold diverges
 	// and every subject's evidence is stamped non-reusable.
 	sparse := SubjectEvidence{Symbol: "example.com/empty.Gone"}
-	sparseRecorded, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("prior"), runtimeinput.WithBracket(testBracket(t, root)))
+	sparseRecorded, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("prior"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4233,7 +4234,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	sparse.RuntimeInputs = sparseState.Manifest
 	sparse.RuntimeDigest = sparseState.Digest
 	sparseRec := Finding{TargetEvidence: sparse, OracleEvidence: []SubjectEvidence{sparse}}
-	grew, err := runtimeinput.FromTestLogEnv([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(testBracket(t, root)))
+	grew, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4256,7 +4257,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "data.txt"), []byte("moved"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	unadoptable, err := runtimeinput.FromTestLogEnv([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(testBracket(t, root)))
+	unadoptable, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}

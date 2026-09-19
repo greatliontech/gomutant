@@ -102,7 +102,7 @@ func TestCount(t *testing.T) {
 	ctx := context.Background()
 
 	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":1}`))
-	current, err := runtimeinput.CurrentEnv(emptyManifest, dir, os.Environ())
+	current, err := runtimeinput.Current(ctx, emptyManifest, dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,9 +459,14 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 }
 
 // The recorded closure-identity derivation is audit data beside the
-// closure hashes, never a pin: a record grown the field on its first
-// post-upgrade measure — or a derivation change — must not shed its
-// dispositions over it (REQ-result-record's subject-evidence term).
+// closure hashes, never a pin itself: a record grown the field on its
+// first post-upgrade measure keeps its dispositions. The closure
+// hashes ARE pins, and a derivation change moves them — such a record
+// sheds under the full pin gate (a shaped disposition re-attests; an
+// unshaped one carries under the domain gate, reported with the
+// derivation named) — because two hashes folded by different
+// derivations say nothing about each other's source
+// (REQ-result-record's subject-evidence term).
 //
 //gofresh:pure
 func TestAttestationPinsIgnoreRecordedClosureStrategy(t *testing.T) {
@@ -477,7 +482,15 @@ func TestAttestationPinsIgnoreRecordedClosureStrategy(t *testing.T) {
 	rederived := stamped
 	rederived.TargetEvidence.ClosureStrategy = "gofresh/closure@2 gofresh/canonical-member@1 gofresh/variant-parse@1"
 	if !sameAttestationPins(stamped, rederived) {
-		t.Fatal("a closure derivation change alone shed attestation pins")
+		t.Fatal("the strategy field alone shed attestation pins")
+	}
+	// A real derivation change moves the hash with the strategy: the
+	// pins differ, and a shaped disposition sheds rather than ride a
+	// hash the new derivation cannot compare.
+	moved := rederived
+	moved.TargetEvidence.MaximalClosure = "h2"
+	if sameAttestationPins(stamped, moved) {
+		t.Fatal("a moved closure hash under a new derivation held the attestation pins")
 	}
 }
 

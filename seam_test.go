@@ -13,6 +13,7 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -257,7 +258,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		views.bySymbol["example.com/fixture/lib.TestAdd"],
 		views.bySymbol["example.com/fixture/lib.TestWeak"],
 	}
-	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("finding"), runtimeinput.WithBracket(testBracket(t, tree.dir)))
+	state, err := runtimeinput.FromTestLog(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("finding"), runtimeinput.WithBracket(bracketfixture.Capture(t, tree.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +300,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	workspaceViews := observedSubjectViews(t, workspace, []string{"example.com/ws.Root", "example.com/ws/sub.TestNested"})
 	workspaceTarget := workspaceViews.bySymbol["example.com/ws.Root"]
 	workspaceOracle := []*subjectView{workspaceViews.bySymbol["example.com/ws/sub.TestNested"]}
-	workspaceState, err := runtimeinput.FromTestLogEnv(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv(), runtimeinput.WithCompletedProcess("workspace"), runtimeinput.WithBracket(testBracket(t, workspace.dir)))
+	workspaceState, err := runtimeinput.FromTestLog(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv(), runtimeinput.WithCompletedProcess("workspace"), runtimeinput.WithBracket(bracketfixture.Capture(t, workspace.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +330,7 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 	tree := fixtureTree(t)
 	views := observedSubjectViews(t, tree, []string{"example.com/fixture/lib.Add"})
 	target := views.bySymbol["example.com/fixture/lib.Add"]
-	state, err := runtimeinput.FromTestLogEnv(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("cancellation"), runtimeinput.WithBracket(testBracket(t, tree.dir)))
+	state, err := runtimeinput.FromTestLog(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("cancellation"), runtimeinput.WithBracket(bracketfixture.Capture(t, tree.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +485,7 @@ func TestSiblingTestAdditionStalesRecordAsTestVariants(t *testing.T) {
 		t.Fatal(err)
 	}
 	inspection, err = edited.InspectFinding(context.Background(), f, nil)
-	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, "test variants") {
+	if err != nil || inspection.State != FindingStale || !strings.Contains(inspection.Reason, gofresh.ReasonTestVariants) {
 		t.Fatalf("sibling-test inspection = %+v, %v; want stale with the discriminating reason", inspection, err)
 	}
 }
@@ -647,7 +648,7 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLogEnv(nil, moduleDir, packageDir, tr.eng.GoEnv(), runtimeinput.WithCompletedProcess("inspection"), runtimeinput.WithBracket(testBracket(t, moduleDir)))
+	state, err := runtimeinput.FromTestLog(nil, moduleDir, packageDir, tr.eng.GoEnv(), runtimeinput.WithCompletedProcess("inspection"), runtimeinput.WithBracket(bracketfixture.Capture(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -784,11 +785,11 @@ func TestIncompleteObservationCannotBeFresh(t *testing.T) {
 	}
 	tr := fixtureTree(t)
 	view := observedSubjectViews(t, tr, []string{"example.com/fixture/lib.Add"}).bySymbol["example.com/fixture/lib.Add"]
-	state, err := runtimeinput.Incomplete(view.moduleDir, "timed-out-test", "test process timed out")
+	state, err := runtimeinput.Incomplete(view.moduleDir, "timed-out-test", "test process timed out", tr.eng.GoEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err = runtimeinput.Absolute(state, view.moduleDir)
+	state, err = runtimeinput.Absolute(state, view.moduleDir, tr.eng.GoEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -799,7 +800,7 @@ func TestIncompleteObservationCannotBeFresh(t *testing.T) {
 	holds := func(evidence SubjectEvidence) (bool, error) {
 		return evidencePairsValid(context.Background(),
 			[]evidencePair{{subject: view, evidence: evidence, accept: acceptValidVerdict}},
-			runtimeinput.CurrentEnvContext)
+			runtimeinput.Current)
 	}
 	if valid, err := holds(evidence); err != nil || valid {
 		t.Fatalf("incomplete evidence valid = %v, err = %v", valid, err)
