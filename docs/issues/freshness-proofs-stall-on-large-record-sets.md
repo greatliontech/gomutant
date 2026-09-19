@@ -1,6 +1,6 @@
 # Delta campaigns stall in freshness proofs on a large record set
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 257 (the freshness-proof bound, directly after the bump chunks 246/250/253; triaged at 246.1)
 
 A `run` over a tree whose findings document holds a few hundred
 records never reaches measurement: preparation spends its whole
