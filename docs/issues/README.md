@@ -42,4 +42,5 @@ is deleted (git holds history).
 | [freshness-proofs-stall-on-large-record-sets](freshness-proofs-stall-on-large-record-sets.md) | a delta `run` over a ~300-record document spends its whole budget in freshness proofs (union over up to 1608 subjects, ~8 GiB) and never measures | awaiting triage |
 | [mcpserver-witnesses-unbound](mcpserver-witnesses-unbound.md) | eighteen MCP server tests pin served behaviour no requirement binds | cross-tool train chunk 219 |
 | [knob-terse-clause-per-face](knob-terse-clause-per-face.md) | one knob line serves both faces, so a clause naming the other face reaches each face carrying the other's prose | cross-tool train chunk 184 |
+| [root-coordinate-one-spelling](root-coordinate-one-spelling.md) | root-side sites still resolve paths with their own Abs/EvalSymlinks pairs beside the load's one coordinate | cross-tool train chunk 220 |
 | [enumeration-lag-gate-unstated](enumeration-lag-gate-unstated.md) | the derived-enumeration lag gate and its effective-configuration source have no clause; three witnesses bind to nothing | cross-tool train chunk 209 |
