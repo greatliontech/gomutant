@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/gitfixture"
@@ -1113,11 +1114,12 @@ func TestDiscoverSchemaExplainsOracleReferences(t *testing.T) {
 			}
 		}
 	}
-	for _, typeOf := range []reflect.Type{reflect.TypeOf(runIn{}), reflect.TypeOf(discoverIn{})} {
-		field, ok := typeOf.FieldByName("Symbols")
-		description := field.Tag.Get("jsonschema")
-		if !ok || !strings.Contains(description, "** as a complete component crosses slash components") || !strings.Contains(description, "**/*emitConditions*") {
-			t.Errorf("%s.Symbols schema lacks corrective globstar guidance: %q", typeOf.Name(), description)
+	// The served symbols description — the document's terse clause —
+	// carries the corrective globstar guidance on both tools.
+	for _, tool := range []*mcp.Tool{knobbedTool[runIn]("run"), knobbedTool[discoverIn]("discover")} {
+		description := tool.InputSchema.(*jsonschema.Schema).Properties["symbols"].Description
+		if !strings.Contains(description, "** as a complete component crosses slash components") || !strings.Contains(description, "**/*emitConditions*") {
+			t.Errorf("%s symbols schema lacks corrective globstar guidance: %q", tool.Name, description)
 		}
 	}
 }

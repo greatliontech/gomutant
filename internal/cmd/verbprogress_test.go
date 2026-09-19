@@ -203,6 +203,11 @@ func TestProgressLineYieldsToTheTalliesAtTheFirstDecision(t *testing.T) {
 	if !strings.Contains(out.String(), "targets committed") || strings.Contains(out.String(), gomutant.StretchSelecting) {
 		t.Fatalf("progress after a decision = %q; want the tallies", out.String())
 	}
+	// The cadence flag's usage names the line's own tallies, so the
+	// document's words and the reporter's line move together.
+	if usage := newRunCommand().Flags().Lookup("progress-interval").Usage; !strings.Contains(usage, "targets committed") {
+		t.Fatalf("run --progress-interval usage %q never names the tallies line", usage)
+	}
 	// A later target's preparation (the pipelined run's baseline probe)
 	// never takes the line back from the tallies.
 	rep.preparation(gomutant.PreparationEvent{Stage: gomutant.PreparationBaseline, Symbol: "p.G", Package: "example.com/p"})

@@ -449,43 +449,16 @@ func (s *Server) mcpWith(logger *slog.Logger, served *atomic.Int64) *mcp.Server 
 			return next(ctx, method, req)
 		}
 	})
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "run",
-		Description: guidanceDescription("run"),
-	}, s.toolRun)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "discover",
-		Description: guidanceDescription("discover"),
-	}, s.toolDiscover)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "findings",
-		Description: guidanceDescription("findings"),
-	}, s.toolFindings)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "explain",
-		Description: guidanceDescription("explain"),
-	}, s.toolExplain)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "attest_survivor",
-		Description: guidanceDescription("attest_survivor"),
-	}, s.toolAttest)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "prune",
-		Description: guidanceDescription("prune"),
-	}, s.toolPrune)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "retarget",
-		Description: guidanceDescription("retarget"),
-	}, s.toolRetarget)
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "ephemeral",
-		Description: guidanceDescription("ephemeral"),
-	}, s.toolEphemeral)
+	mcp.AddTool(srv, knobbedTool[runIn]("run"), s.toolRun)
+	mcp.AddTool(srv, knobbedTool[discoverIn]("discover"), s.toolDiscover)
+	mcp.AddTool(srv, knobbedTool[findingsIn]("findings"), s.toolFindings)
+	mcp.AddTool(srv, knobbedTool[explainIn]("explain"), s.toolExplain)
+	mcp.AddTool(srv, knobbedTool[attestIn]("attest_survivor"), s.toolAttest)
+	mcp.AddTool(srv, knobbedTool[pruneIn]("prune"), s.toolPrune)
+	mcp.AddTool(srv, knobbedTool[retargetIn]("retarget"), s.toolRetarget)
+	mcp.AddTool(srv, knobbedTool[ephemeralIn]("ephemeral"), s.toolEphemeral)
 	// guidance serves embedded content and touches no tree state.
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "guidance",
-		Description: guidanceDescription("guidance"),
-	}, s.toolGuidance)
+	mcp.AddTool(srv, knobbedTool[guidanceIn]("guidance"), s.toolGuidance)
 	return srv
 }
 
@@ -782,8 +755,8 @@ func localPath(name, p string) error {
 // construction (a //go:build-gated oracle measures exactly as an
 // untagged one).
 type selectionIn struct {
-	Tags      []string `json:"tags,omitempty" jsonschema:"build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one"`
-	Toolchain string   `json:"toolchain,omitempty" jsonschema:"GOTOOLCHAIN directive for this call's selection (e.g. go1.26.5); rides the toolchain measurement pin, so a different selection re-measures rather than serving across"`
+	Tags      []string `json:"tags,omitempty"`
+	Toolchain string   `json:"toolchain,omitempty"`
 }
 
 // judged reports whether any judged-question input was given: the
@@ -800,21 +773,21 @@ func (s selectionIn) selection() gomutant.Selection {
 
 type runIn struct {
 	selectionIn
-	TargetsPath       string   `json:"targets_path,omitempty" jsonschema:"path to a gomutant targets document; overrides discovery"`
-	TargetsJSON       string   `json:"targets_json,omitempty" jsonschema:"an inline targets document, same formats as targets_path"`
-	Changed           string   `json:"changed,omitempty" jsonschema:"target only symbols whose bodies differ from this git ref (requires git)"`
-	Budget            int      `json:"budget,omitempty" jsonschema:"candidates per symbol; 0 means exhaustive"`
-	TimeoutSec        *int     `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before the final findings commit after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
-	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of each oracle process in seconds; 0 derives each oracle group's budget from its measured baseline (an explicit value is the uniform override)"`
-	Jobs              int      `json:"jobs,omitempty" jsonschema:"concurrent mutant runs; 0 means half the CPUs"`
-	BracketPaths      []string `json:"bracket_paths,omitempty" jsonschema:"external surfaces the oracle legitimately reads (tree-relative paths resolved against the tree root, or absolute files or directories; a path escaping the tree or under a tool-excluded directory is refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run"`
-	ScratchNamespaces []string `json:"scratch_namespaces,omitempty" jsonschema:"in-tree run-scratch namespaces DIR:PATTERN (DIR tree-relative, resolved against the tree root, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any load. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness (RemoveAll before MkdirAll) and expect permission-mangled residue from mutated code"`
-	OracleMemoryMiB   *int64   `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling per oracle process tree in MiB: absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host"`
-	Staged            bool     `json:"staged,omitempty" jsonschema:"measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target, and an input outside the repository refuses it at preparation, before any probe"`
-	Force             bool     `json:"force,omitempty" jsonschema:"re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force"`
-	Findings          string   `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json), read and updated"`
-	Packages          []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
-	Symbols           []string `json:"symbols,omitempty" jsonschema:"complete fully qualified symbol glob filters; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*; alternatives"`
+	TargetsPath       string   `json:"targets_path,omitempty"`
+	TargetsJSON       string   `json:"targets_json,omitempty"`
+	Changed           string   `json:"changed,omitempty"`
+	Budget            int      `json:"budget,omitempty"`
+	TimeoutSec        *int     `json:"timeout_sec,omitempty"`
+	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty"`
+	Jobs              int      `json:"jobs,omitempty"`
+	BracketPaths      []string `json:"bracket_paths,omitempty"`
+	ScratchNamespaces []string `json:"scratch_namespaces,omitempty"`
+	OracleMemoryMiB   *int64   `json:"oracle_memory_mib,omitempty"`
+	Staged            bool     `json:"staged,omitempty"`
+	Force             bool     `json:"force,omitempty"`
+	Findings          string   `json:"findings,omitempty"`
+	Packages          []string `json:"packages,omitempty"`
+	Symbols           []string `json:"symbols,omitempty"`
 }
 
 type findingOut struct {
@@ -1367,12 +1340,12 @@ func driftError(drift error, sheds []string) error {
 
 type discoverIn struct {
 	selectionIn
-	TargetsPath string   `json:"targets_path,omitempty" jsonschema:"path to a targets document; overrides discovery"`
-	TargetsJSON string   `json:"targets_json,omitempty" jsonschema:"inline targets document; overrides discovery"`
-	Changed     string   `json:"changed,omitempty" jsonschema:"changed-scope vs this git ref; empty means the whole tree"`
-	Packages    []string `json:"packages,omitempty" jsonschema:"complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives"`
-	Symbols     []string `json:"symbols,omitempty" jsonschema:"complete fully qualified symbol glob filters; * stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*; alternatives"`
-	Detail      bool     `json:"detail,omitempty" jsonschema:"return every target, oracle-set, and residue row; default caps each list at 50 with the remainder counted"`
+	TargetsPath string   `json:"targets_path,omitempty"`
+	TargetsJSON string   `json:"targets_json,omitempty"`
+	Changed     string   `json:"changed,omitempty"`
+	Packages    []string `json:"packages,omitempty"`
+	Symbols     []string `json:"symbols,omitempty"`
+	Detail      bool     `json:"detail,omitempty"`
 }
 
 type discoverTarget struct {
@@ -1490,14 +1463,14 @@ func compactTargetDescriptions(descriptions []gomutant.TargetDescription) ([]dis
 
 type findingsIn struct {
 	selectionIn
-	Label    string `json:"label,omitempty" jsonschema:"show only findings carrying this label"`
-	State    string `json:"state,omitempty" jsonschema:"show only findings in this judged state: current, stale, unverifiable, or detached (implies judge=true)"`
-	Judge    bool   `json:"judge,omitempty" jsonschema:"re-derive each record's freshness state against the current tree - minutes-class on large documents; a state filter or a tags/toolchain selection implies it; the default reports recorded facts with state 'recorded' and loads no tree"`
-	Symbol   string `json:"symbol,omitempty" jsonschema:"show only the finding for this mutated symbol"`
-	Changed  string `json:"changed,omitempty" jsonschema:"cut every record's open survivors against this git ref's delta: survivors on lines added since the ref are listed (deltaOpen) and counted distinctly; loads the tree to place positions, derives no freshness"`
-	Run      string `json:"run,omitempty" jsonschema:"show only the records this run last measured - the identity the run tool's summary reports and stamps on every record it measures"`
-	Detail   bool   `json:"detail,omitempty" jsonschema:"full rows - operator tables, open survivors, attested dispositions, candidate evidence; the default is the bounded summary (one row per record: symbol, state, layer, open and attested counts)"`
-	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+	Label    string `json:"label,omitempty"`
+	State    string `json:"state,omitempty"`
+	Judge    bool   `json:"judge,omitempty"`
+	Symbol   string `json:"symbol,omitempty"`
+	Changed  string `json:"changed,omitempty"`
+	Run      string `json:"run,omitempty"`
+	Detail   bool   `json:"detail,omitempty"`
+	Findings string `json:"findings,omitempty"`
 }
 
 // findingSummary is the bounded default row: enough to triage - what
@@ -1700,9 +1673,9 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 
 type explainIn struct {
 	selectionIn
-	Symbol   string `json:"symbol,omitempty" jsonschema:"the mutated symbol to explain; empty explains the whole document's promotion state"`
-	Label    string `json:"label,omitempty" jsonschema:"with no symbol, restrict the promotion triage to findings carrying this label"`
-	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+	Symbol   string `json:"symbol,omitempty"`
+	Label    string `json:"label,omitempty"`
+	Findings string `json:"findings,omitempty"`
 }
 
 type explainedSurvivor struct {
@@ -1861,11 +1834,11 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 
 type attestIn struct {
 	selectionIn
-	Symbol   string `json:"symbol" jsonschema:"the mutated symbol"`
-	Position string `json:"position" jsonschema:"the survivor's position (file.go:line:col), as reported"`
-	Operator string `json:"operator" jsonschema:"the survivor's operator, as reported"`
-	Reason   string `json:"reason" jsonschema:"why the mutant is equivalent"`
-	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+	Symbol   string `json:"symbol"`
+	Position string `json:"position"`
+	Operator string `json:"operator"`
+	Reason   string `json:"reason"`
+	Findings string `json:"findings,omitempty"`
 }
 
 // attestedEcho restates a recorded disposition in structured fields —
@@ -1953,8 +1926,8 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 
 type pruneIn struct {
 	selectionIn
-	Check    bool   `json:"check,omitempty" jsonschema:"preview the removals without touching the document"`
-	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+	Check    bool   `json:"check,omitempty"`
+	Findings string `json:"findings,omitempty"`
 }
 
 type prunedOut struct {
@@ -1997,10 +1970,10 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 
 type retargetIn struct {
 	selectionIn
-	From     string `json:"from" jsonschema:"old symbol prefix: a package pair renames a package (a dot-terminated pass covers its own symbols, a slash-terminated pass its subpackages); a symbol pair renames within its package, segment for segment"`
-	To       string `json:"to" jsonschema:"new symbol prefix, terminated like from"`
-	Check    bool   `json:"check,omitempty" jsonschema:"preview the rewrites without touching the document"`
-	Findings string `json:"findings,omitempty" jsonschema:"findings document path (default .gomutant/findings.json)"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Check    bool   `json:"check,omitempty"`
+	Findings string `json:"findings,omitempty"`
 }
 
 type retargetOut struct {
@@ -2049,19 +2022,19 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 
 type ephemeralIn struct {
 	selectionIn
-	File             string               `json:"file,omitempty" jsonschema:"tree-relative source file for replacement or edits; omit for batch_edits"`
-	Replacement      string               `json:"replacement,omitempty" jsonschema:"the whole replacement source; give exactly one mutation form"`
-	Edits            []gomutant.Edit      `json:"edits,omitempty" jsonschema:"exact-match edits applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file"`
-	BatchEdits       []gomutant.BatchEdit `json:"batch_edits,omitempty" jsonschema:"atomic file-scoped exact-match edits; every match resolves against the original file snapshot"`
-	TestPkg          string               `json:"test_pkg" jsonschema:"package whose named test decides the kill: an import path, or a package directory spelled like go test does (. or ./x) resolved against the tree root"`
-	Run              string               `json:"run" jsonschema:"-run pattern naming the deciding test"`
-	TimeoutSec       *int                 `json:"timeout_sec,omitempty" jsonschema:"cancel tool work before attributed result completion after this many seconds; omitted means 300, and an explicit 0 means unlimited"`
-	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty" jsonschema:"maximum duration of the baseline and mutant oracle processes in seconds; 0 derives the budget from the measured baseline (an explicit value is the override); the advisory coverage probe shares the baseline measurement leash either way; the result reports the effective budget"`
-	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty" jsonschema:"memory ceiling for the probe's oracle process tree in MiB: absent or 0 derives RAM/2 floored at 1 GiB for this probe, -1 disables for this probe; the probe's bounds are its own, a run in flight keeps its"`
-	Runs             int                  `json:"runs,omitempty" jsonschema:"run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed - N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result"`
-	Reattest         bool                 `json:"reattest,omitempty" jsonschema:"with attest: replace an existing attestation of the same mutant instead of refusing"`
-	Attest           string               `json:"attest,omitempty" jsonschema:"record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document; refused when the probe killed, was mixed, or could not establish that it reached the edit (a never-reached plain survivor is refused by the probe itself)"`
-	Findings         string               `json:"findings,omitempty" jsonschema:"findings document path whose sibling ephemeral-attestation record attest writes and a surviving probe is matched against (default .gomutant/findings.json)"`
+	File             string               `json:"file,omitempty"`
+	Replacement      string               `json:"replacement,omitempty"`
+	Edits            []gomutant.Edit      `json:"edits,omitempty"`
+	BatchEdits       []gomutant.BatchEdit `json:"batch_edits,omitempty"`
+	TestPkg          string               `json:"test_pkg"`
+	Run              string               `json:"run"`
+	TimeoutSec       *int                 `json:"timeout_sec,omitempty"`
+	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty"`
+	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty"`
+	Runs             int                  `json:"runs,omitempty"`
+	Reattest         bool                 `json:"reattest,omitempty"`
+	Attest           string               `json:"attest,omitempty"`
+	Findings         string               `json:"findings,omitempty"`
 }
 
 // ephemeralOut is the probe result plus the attestation confirmation
@@ -2211,7 +2184,7 @@ func guidanceDescription(verb string) string {
 
 // guidanceIn asks for one verb's section or, empty, the decision map.
 type guidanceIn struct {
-	Verb string `json:"verb,omitempty" jsonschema:"the verb to describe; empty serves the decision map"`
+	Verb string `json:"verb,omitempty"`
 }
 
 // toolGuidance serves the embedded guidance document

@@ -158,9 +158,18 @@ tool and schema property, and every visible leaf command and local
 flag, documented exactly, both directions — cobra's help and
 completion plumbing is surface plumbing outside the judgment. The
 document's knob prose is the authoritative superset; per-parameter
-schema and flag usage strings stay terse wire detail, and a schema
-or usage string contradicting the document is a defect of whichever
-is wrong.
+schema descriptions and flag usage strings are the document's
+rendering — each knob's terse clause (gofresh's knob projection: the
+prose up to its first semicolon outside parentheses, whitespace and a
+trailing period trimmed) in the face's usage grammar (the CLI's usage
+drops the clause's code spans, which pflag would print as the flag's
+value name, and its default parentheticals, which cobra prints itself;
+the schema description is the clause verbatim), set at registration
+and never a second literal beside the document — so a served string
+cannot contradict the document, and the coverage judgment compares
+the rendered text, never the names alone. The long help of a CLI verb
+with knobs names the guidance command as the served path to their
+whole prose.
 
 **REQ-mcp-findings-doc** (behavior): The server MUST maintain the same
 findings document the CLI maintains — a measuring tool merges fresh findings

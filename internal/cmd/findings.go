@@ -70,19 +70,19 @@ func newFindingsCommand() *cobra.Command {
 		return findingsCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()
-	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
-	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to read")
-	f.StringVar(&o.label, "label", "", "show only findings carrying this label")
+	f.StringVar(&o.dir, "dir", ".", "")
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "")
+	f.StringVar(&o.label, "label", "", "")
 	selectionFlags(f, &o.tags, &o.toolchain)
-	f.StringVar(&o.state, "state", "", "show only findings in this judged state: current, stale, unverifiable, or detached (implies --judge)")
-	f.BoolVar(&o.judge, "judge", false, "re-derive each record's freshness state against the current tree - minutes-class on large documents; the default reports recorded facts with state 'recorded'")
-	f.StringVar(&o.symbol, "symbol", "", "show only the finding for this mutated symbol")
-	f.StringVar(&o.changed, "changed", "", "cut every record's open survivors against this git ref's delta: survivors on lines added since the ref are listed and counted distinctly (loads the tree; no freshness derived)")
-	f.StringVar(&o.run, "run", "", "show only the records this run last measured (the identity a run prints first and stamps on every record it measures)")
-	f.BoolVar(&o.detail, "detail", false, "full rows - operator tables, survivors, dispositions, candidate evidence; the default is one summary row per record")
-	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); inspection judges under the same acceptances the run used (implies --judge)")
-	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable findings")
-	return cmd
+	f.StringVar(&o.state, "state", "", "")
+	f.BoolVar(&o.judge, "judge", false, "")
+	f.StringVar(&o.symbol, "symbol", "", "")
+	f.StringVar(&o.changed, "changed", "", "")
+	f.StringVar(&o.run, "run", "", "")
+	f.BoolVar(&o.detail, "detail", false, "")
+	f.StringArrayVar(&o.vouches, "vouch", nil, "")
+	f.BoolVar(&o.json, "json", false, "")
+	return knobbedFlags(cmd, "findings")
 }
 
 func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) error {

@@ -3,11 +3,13 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -73,14 +75,29 @@ func TestGuidanceCoversTheWireSurface(t *testing.T) {
 			t.Fatalf("%s: %v", tool.Name, err)
 		}
 		var schema struct {
-			Properties map[string]json.RawMessage `json:"properties"`
+			Properties map[string]struct {
+				Description string `json:"description"`
+			} `json:"properties"`
 		}
 		if err := json.Unmarshal(raw, &schema); err != nil {
 			t.Fatalf("%s: %v", tool.Name, err)
 		}
 		var params []string
-		for name := range schema.Properties {
+		for name, prop := range schema.Properties {
 			params = append(params, name)
+			// Every served description is the document's rendering — the
+			// knob's terse clause — never a second literal.
+			k, err := doc.Knob("mcp", tool.Name, name)
+			if err != nil {
+				t.Errorf("%s.%s: %v", tool.Name, name, err)
+				continue
+			}
+			if prop.Description != k.Clause() {
+				t.Errorf("%s.%s description diverged from the document's rendering:\nwire %q\ndoc  %q", tool.Name, name, prop.Description, k.Clause())
+			}
+			if tool.Name == "run" && name == "budget" && prop.Description != "candidates per symbol (0 means exhaustive)" {
+				t.Errorf("run.budget description = %q, want the literal terse clause", prop.Description)
+			}
 		}
 		registered[tool.Name] = params
 		want, err := doc.Description("mcp", tool.Name)
@@ -134,4 +151,18 @@ func TestGuidanceToolServesTheDocument(t *testing.T) {
 	if got := guidanceText(t, res); !strings.Contains(got, "decision map") {
 		t.Fatalf("unknown-verb error teaches nothing: %q", got)
 	}
+}
+
+// A schema property the document does not carry refuses the tool's
+// construction: the served set cannot outgrow the document silently
+// (REQ-mcp-guidance).
+func TestKnobSchemaRefusesAnUndocumentedProperty(t *testing.T) {
+	schema := &jsonschema.Schema{Type: "object", Properties: map[string]*jsonschema.Schema{"nonesuch": {Type: "string"}}}
+	defer func() {
+		r := recover()
+		if r == nil || !strings.Contains(fmt.Sprint(r), "nonesuch") {
+			t.Fatalf("knobSchema over an undocumented property: recovered %v, want a refusal naming nonesuch", r)
+		}
+	}()
+	knobSchema("run", schema)
 }

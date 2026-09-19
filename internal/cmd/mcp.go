@@ -20,7 +20,7 @@ func newMCPCommand() *cobra.Command {
 		}
 		return mcpserver.New(dir, opts...).Run(cmd.Context())
 	}}
-	cmd.Flags().StringVar(&dir, "dir", ".", "tree root (module or workspace)")
-	cmd.Flags().StringArrayVar(&vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; every tool call's analysis judges under the server's set - a per-server input because the loaded tree is shared across calls")
-	return cmd
+	cmd.Flags().StringVar(&dir, "dir", ".", "")
+	cmd.Flags().StringArrayVar(&vouches, "vouch", nil, "")
+	return knobbedFlags(cmd, "mcp")
 }

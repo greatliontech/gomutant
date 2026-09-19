@@ -5,21 +5,21 @@
 ### run
 **does:** Measure mutants and update the findings document.
 **knobs:**
-- `targets_path` (mcp, cli as `targets`) — path to a targets document (gomutant's or a producer's export); overrides discovery; parsed at preparation, before the lock and any load.
-- `targets_json` (mcp) — an inline targets document, same formats as targets_path; parsed at preparation, before the lock and any load.
-- `changed` (mcp, cli) — target only symbols whose bodies differ from this git ref (requires git). At most one target source: two of targets_path, targets_json, and changed refuse together, naming them, before any load.
-- `budget` (mcp, cli) — candidates per symbol; 0 means exhaustive.
-- `timeout_sec` (mcp, cli as `timeout`) — cancel work before the final findings commit; on mcp omitted means 300 seconds and an explicit 0 unlimited, on the cli a duration defaulting to unlimited.
-- `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of each oracle process; 0 (the default on both faces) derives each oracle group's budget from its measured baseline — an explicit value is the uniform override, and the record pins the loosest bound any verdict ran under.
+- `targets_path` (mcp, cli as `targets`) — path to a targets document (gomutant's or a producer's export), one target source at most; overrides discovery; parsed at preparation, before the lock and any load.
+- `targets_json` (mcp) — an inline targets document (same formats as targets_path), one target source at most; parsed at preparation, before the lock and any load.
+- `changed` (mcp, cli) — target only symbols whose bodies differ from this git ref (requires git), one target source at most — a targets document, inline targets, or changed; two refuse together, naming them, before any load.
+- `budget` (mcp, cli) — candidates per symbol (0 means exhaustive).
+- `timeout_sec` (mcp, cli as `timeout`) — cancel work before the final findings commit (on mcp omitted means 300 seconds and an explicit 0 unlimited; on the cli a duration, 0 and the default unlimited).
+- `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of each oracle process (0, the default on both faces, derives each oracle group's budget from its measured baseline); an explicit value is the uniform override, and the record pins the loosest bound any verdict ran under.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling per oracle process tree in MiB (GOMEMLIMIT plus a hard data-segment cap): absent or 0 derives RAM/(2 x jobs) floored at 1 GiB, -1 disables; a runaway-allocation mutant dies on its own ceiling as an ordinary kill instead of OOMing the host.
-- `jobs` (mcp, cli) — concurrent mutant runs; 0 means half the CPUs.
+- `jobs` (mcp, cli) — concurrent mutant runs (0 means half the CPUs).
 - `bracket_paths` (mcp, cli as `bracket-path`) — external surfaces the oracle legitimately reads (tree-relative paths resolved against the tree root, or absolute files or directories; a path escaping the tree or under a tool-excluded directory is refused); extends each spawn's observation bracket, carrying the caller's assertion the surface is mutation-free for the run.
 - `scratch_namespaces` (mcp, cli as `scratch-namespace`) — in-tree run-scratch namespaces DIR:PATTERN (DIR tree-relative, resolved against the tree root, PATTERN a single-component os.MkdirTemp-style name pattern): oracle scratch minted and removed inside a namespace stops recording per-run missing-arm noise, forfeiting exactly the appearance-pin of absence-probes the pattern matches; malformed declarations refuse before any load. Killed mutants never run test cleanup, so scratch helpers must enforce their own freshness and expect permission-mangled residue.
-- `staged` (mcp, cli) — measure the git index snapshot: staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target (stage or stash it), and an input outside the repository refuses it at preparation, before any probe (measure unstaged).
+- `staged` (mcp, cli) — measure the git index snapshot (staged-but-uncommitted content counts clean and the finding records the index tree identity; unstaged drift over a measured target's inputs refuses that target — stage or stash it — and an input outside the repository refuses it at preparation, before any probe); otherwise measure unstaged.
 - `force` (mcp, cli) — re-measure even targets whose prior finding still covers the request; the pin spans the mutated symbol's body, every oracle test's source closure, and the observed runtime inputs (toolchain, build configuration, and the other measurement pins are always compared too), so new or changed oracle tests re-measure without force.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json), read and updated.
-- `packages` (mcp, cli as `package`) — complete package import-path glob filters; * stays within one slash component and ** as a complete component crosses components; alternatives.
-- `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters, for example **/*emitConditions*; alternatives.
+- `packages` (mcp, cli as `package`) — complete package import-path glob filters (* stays within one slash component and ** as a complete component crosses slash components); alternatives.
+- `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters (* stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*); alternatives.
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one. Under a declared selection (`tags`, `toolchain`) the summary states the coverage bound — the targets the selection's leg discovers but no oracle reaches, listed by symbol, capped with the remainder counted — and a whole-tree run records it in the findings document per selection (an empty bound clears the row; a scoped run records none); a stood-down derivation is a resolution failure named per package, never this bound.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection (e.g. go1.26.5); rides the toolchain measurement pin, so a different selection re-measures rather than serving across.
 - `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence. The repository's reviewed standing set is the `vouches` file at the tree root (one IMPORT-PATH:VARIABLE per line, `#` comments; the tree reads it at the load and a verb's preparation refuses a malformed line before any load; no engine reads a file of its own); the flags extend that set for one invocation and never remove from it. On mcp vouches are per-server (gomutant mcp --vouch), not per-call.
@@ -65,11 +65,11 @@ first when the target decision set is in doubt.
 ### discover
 **does:** Inspect effective mutation targets without measuring.
 **knobs:**
-- `targets_path` (mcp, cli as `targets`) — path to a targets document; overrides discovery; parsed at preparation, before any load.
-- `targets_json` (mcp) — inline targets document; overrides discovery; parsed at preparation, before any load.
-- `changed` (mcp, cli) — changed-scope vs this git ref; empty means the whole tree. At most one target source, as on run.
-- `packages` (mcp, cli as `package`) — complete package import-path glob filters; alternatives.
-- `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters; alternatives.
+- `targets_path` (mcp, cli as `targets`) — path to a targets document, one target source at most; overrides discovery; parsed at preparation, before any load.
+- `targets_json` (mcp) — inline targets document, one target source at most; overrides discovery; parsed at preparation, before any load.
+- `changed` (mcp, cli) — changed-scope vs this git ref (empty means the whole tree), one target source at most, as on run.
+- `packages` (mcp, cli as `package`) — complete package import-path glob filters (* stays within one slash component and ** as a complete component crosses slash components); alternatives.
+- `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters (* stays within one slash component and ** as a complete component crosses slash components, for example **/*emitConditions*); alternatives.
 - `detail` (mcp) — return every target, oracle-set, and residue row; the default caps each list at 50 with the remainder counted.
 - `json` (cli) — render deterministic machine-readable targets.
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
@@ -98,7 +98,7 @@ oracleSet integer referencing oracleSets[].id.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection (implies judge).
 - `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), extending the tree root's `vouches` file; inspection judges under the same acceptances the run used (implies judge). On mcp vouches are per-server.
 - `json` (cli) — render deterministic machine-readable findings.
-- `dir` (cli) — tree root the default document anchors at.
+- `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use findings to triage without running anything — the document's stated coverage bounds per declared selection ride every inspection after the rows (the human face's tail; `coverageBounds` on mcp, rows and rosters capped with the remainders counted; the JSON face carries rows alone, the document on disk being the machine face for the table), the population a tagged measurement did not cover, never a silent zero — recorded
 facts by default, cheap at any document size; layer is repo
 (portable, committed) or local (machine-local overlay, with the
@@ -137,7 +137,7 @@ document is unexpectedly empty.
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
 - `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), extending the tree root's `vouches` file; the posture is judged under these acceptances.
-- `dir` (cli) — tree root the default document anchors at.
+- `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use attestation only after judging a survivor genuinely
 equivalent — refused unless the mutant is among the finding's
 current survivors (the provenance guards judge under this call's
@@ -154,9 +154,9 @@ the equivalence argument as the reason.
 **knobs:**
 - `check` (mcp, cli) — preview the removals without touching the document.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
-- `tags` (mcp, cli as `tag`) — build tags for this call's selection — HERE the selection decides which records are deleted: a symbol gated behind a tag resolves only under it, so pruning under the wrong selection classifies its records detached and removes them.
+- `tags` (mcp, cli as `tag`) — build tags for this call's selection — here the selection decides which records are deleted: a symbol gated behind a tag resolves only under it, so pruning under the wrong selection classifies its records detached and removes them.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection; the same deletion predicate applies.
-- `dir` (cli) — tree root the default document anchors at.
+- `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use prune after a refactor for the terminal records no
 re-measure can revive — resolution under THIS call's selection is
 the deletion predicate, so run it under the selection the records
@@ -175,9 +175,9 @@ records.
 - `to` (mcp, cli) — new symbol prefix, terminated like from.
 - `check` (mcp, cli) — preview the rewrites without touching the document.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
-- `tags` (mcp, cli as `tag`) — build tags for this call's selection — each rewritten target must resolve UNDER it, so a tag-gated symbol retargets only under its tag; the wrong selection refuses the batch.
+- `tags` (mcp, cli as `tag`) — build tags for this call's selection — each rewritten target must resolve under it, so a tag-gated symbol retargets only under its tag; the wrong selection refuses the batch.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection; the same resolution predicate applies.
-- `dir` (cli) — tree root the default document anchors at.
+- `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use retarget after a rename — records whose symbol-bearing
 fields carry the from prefix rewrite, surviving attestations follow
 their mutants by position, operator, and site, never symbol text,
@@ -196,12 +196,12 @@ to=example.com/new. after a package rename, then for real.
 - `batch_edits` (mcp, cli as `batch`) — atomic file-scoped exact-match edits ({file, old_string, new_string}; on the cli a JSON file holding `{"edits":[…]}` or the bare array `[…]`, or - for stdin); every match resolves against the original file snapshot. Inline on mcp; a JSON path or - for stdin on the cli.
 - `test_pkg` (mcp, cli as `test-pkg`) — package whose named test decides the kill: an import path, or a package directory spelled like go test does (`.` or `./x`) resolved against the tree root.
 - `run` (mcp, cli) — -run pattern naming the deciding test.
-- `timeout_sec` (mcp, cli as `timeout`) — cancel work before attributed result completion; on mcp omitted means 300 seconds and an explicit 0 unlimited, on the cli a duration defaulting to unlimited.
-- `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of the baseline and mutant oracle processes; 0 (the default on both faces) derives the budget from the measured baseline — an explicit value is the override, and the result reports the effective budget and the measured baseline. The advisory coverage probe (an instrumented whole-closure rebuild) shares the derive-mode baseline's measurement leash in both modes.
+- `timeout_sec` (mcp, cli as `timeout`) — cancel work before attributed result completion (on mcp omitted means 300 seconds and an explicit 0 unlimited; on the cli a duration, 0 and the default unlimited).
+- `oracle_timeout_sec` (mcp, cli as `oracle-timeout`) — maximum duration of the baseline and mutant oracle processes (0, the default on both faces, derives the budget from the measured baseline); an explicit value is the override, and the result reports the effective budget and the measured baseline. The advisory coverage probe (an instrumented whole-closure rebuild) shares the derive-mode baseline's measurement leash in both modes.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling for the probe's oracle process tree in MiB: absent or 0 derives the lone tree's default (RAM/2 floored at 1 GiB — the run's RAM/(2 × jobs) at one job), -1 disables; the result reports the ceiling the probe ran under (`oracleMemoryBytes`, 0 = unlimited). The probe's bounds are its own: a run in flight and a sibling probe each spawn under theirs.
-- `runs` (mcp, cli) — run the mutant this many times against the once-probed baseline (1-10, default 1): killed means every run killed — N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result.
-- `progress-interval` (cli) — cadence of the progress line naming the phase in flight and the elapsed time; 0 disables.
-- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document (`ephemeral-attestations.json`); a blank reasoning refuses before any load or probe; refused after the probe when it killed, was mixed, or could not establish that it reached the edit (a never-reached plain survivor is refused by the probe itself).
+- `runs` (mcp, cli) — run the mutant this many times, 1-10 (default 1), against the once-probed baseline: killed means every run killed — N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result.
+- `progress-interval` (cli) — cadence of the progress line naming the stretch in flight (preparing, then prepare loading, prepare baseline, prepare mutant-run, prepare coverage) and the elapsed time; 0 disables.
+- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document, `ephemeral-attestations.json` (a blank reasoning refuses before any load or probe; a probe that killed, was mixed, or could not establish that it reached the edit refuses after it); a never-reached plain survivor is refused by the probe itself.
 - `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes and a surviving probe is matched against (default .gomutant/findings.json); an attested survivor's verdict names its attestation instead of a bare SURVIVED.
 - `reattest` (mcp, cli) — with `attest`: replace an existing attestation of the same mutant instead of refusing (default false).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.

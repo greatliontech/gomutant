@@ -23,15 +23,15 @@ func newAttestCommand() *cobra.Command {
 		return attestCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()
-	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
+	f.StringVar(&o.dir, "dir", ".", "")
 	selectionFlags(f, &o.tags, &o.toolchain)
-	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to update")
-	f.StringVar(&o.symbol, "symbol", "", "the mutated symbol")
-	f.StringVar(&o.position, "position", "", "the survivor's position (file:line:col)")
-	f.StringVar(&o.operator, "operator", "", "the survivor's operator")
-	f.StringVar(&o.reason, "reason", "", "why the mutant is equivalent")
-	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), extending the tree root's `vouches` file; the posture is judged under the same acceptances the run used")
-	return cmd
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "")
+	f.StringVar(&o.symbol, "symbol", "", "")
+	f.StringVar(&o.position, "position", "", "")
+	f.StringVar(&o.operator, "operator", "", "")
+	f.StringVar(&o.reason, "reason", "", "")
+	f.StringArrayVar(&o.vouches, "vouch", nil, "")
+	return knobbedFlags(cmd, "attest")
 }
 
 func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {

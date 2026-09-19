@@ -23,11 +23,11 @@ func newPruneCommand() *cobra.Command {
 		return pruneCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()
-	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
-	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to update")
-	f.BoolVar(&o.check, "check", false, "preview the removals without touching the document")
+	f.StringVar(&o.dir, "dir", ".", "")
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "")
+	f.BoolVar(&o.check, "check", false, "")
 	selectionFlags(f, &o.tags, &o.toolchain)
-	return cmd
+	return knobbedFlags(cmd, "prune")
 }
 
 func pruneCommand(ctx context.Context, o pruneOptions, out io.Writer) error {
@@ -85,13 +85,13 @@ func newRetargetCommand() *cobra.Command {
 		return retargetCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()
-	f.StringVar(&o.dir, "dir", ".", "tree root the default document anchors at")
-	f.StringVar(&o.findingsFile, "findings", defaultFindings, "findings document to update")
-	f.StringVar(&o.from, "from", "", "old symbol prefix: a package pair renames a package (a dot-terminated pass covers its own symbols, a slash-terminated pass its subpackages); a symbol pair renames within its package, segment for segment")
-	f.StringVar(&o.to, "to", "", "new symbol prefix, terminated like --from")
-	f.BoolVar(&o.check, "check", false, "preview the rewrites without touching the document")
+	f.StringVar(&o.dir, "dir", ".", "")
+	f.StringVar(&o.findingsFile, "findings", defaultFindings, "")
+	f.StringVar(&o.from, "from", "", "")
+	f.StringVar(&o.to, "to", "", "")
+	f.BoolVar(&o.check, "check", false, "")
 	selectionFlags(f, &o.tags, &o.toolchain)
-	return cmd
+	return knobbedFlags(cmd, "retarget")
 }
 
 func retargetCommand(ctx context.Context, o retargetOptions, out io.Writer) error {

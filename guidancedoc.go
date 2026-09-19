@@ -31,3 +31,16 @@ func Guidance() *guidance.Document { return embeddedGuidance.Must() }
 // once; a malformed document is a build-time defect every consumer
 // surfaces loudly.
 func GuidanceDocument() (*guidance.Document, error) { return embeddedGuidance.Document() }
+
+// KnobClause is the served text of one knob under a face's spelling:
+// the document's terse clause (gofresh's knob projection). A knob the
+// document does not carry is a build defect — the coverage judgments
+// name it — so the read refuses loudly at the face's construction
+// rather than serving an empty description (REQ-mcp-guidance).
+func KnobClause(face, verb, name string) string {
+	k, err := Guidance().Knob(face, verb, name)
+	if err != nil {
+		panic("gomutant: guidance knob: " + err.Error())
+	}
+	return k.Clause()
+}

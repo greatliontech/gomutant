@@ -33,14 +33,14 @@ func newDiscoverCommand() *cobra.Command {
 		return discoverCommand(cmd.Context(), o)
 	}}
 	f := cmd.Flags()
-	f.StringVar(&o.dir, "dir", ".", "tree root (module or workspace)")
-	f.StringVar(&o.changed, "changed", "", "inspect symbols whose bodies differ from this git ref; exclusive with --targets")
-	f.StringVar(&o.targetsFile, "targets", "", "JSON targets document; overrides discovery, exclusive with --changed")
-	f.BoolVar(&o.json, "json", false, "render deterministic machine-readable targets")
-	f.StringArrayVar(&o.packages, "package", nil, "package import-path glob; repeatable")
-	f.StringArrayVar(&o.symbols, "symbol", nil, "fully qualified symbol glob; repeatable")
+	f.StringVar(&o.dir, "dir", ".", "")
+	f.StringVar(&o.changed, "changed", "", "")
+	f.StringVar(&o.targetsFile, "targets", "", "")
+	f.BoolVar(&o.json, "json", false, "")
+	f.StringArrayVar(&o.packages, "package", nil, "")
+	f.StringArrayVar(&o.symbols, "symbol", nil, "")
 	selectionFlags(f, &o.tags, &o.toolchain)
-	return cmd
+	return knobbedFlags(cmd, "discover")
 }
 
 func discoverCommand(ctx context.Context, o discoverOptions) error {

@@ -110,10 +110,10 @@ func (r *runReporter) interrupted(cause string) {
 }
 
 // progressIntervalFlag registers a verb's cadence flag: one name and one
-// default (the shared cadence) on every verb that exposes it, the usage
-// the verb's own.
-func progressIntervalFlag(f *pflag.FlagSet, into *time.Duration, usage string) {
-	f.DurationVar(into, "progress-interval", gomutant.ProgressCadence, usage)
+// default (the shared cadence) on every verb that exposes it; the usage
+// is the document's rendering, set at the verb's construction.
+func progressIntervalFlag(f *pflag.FlagSet, into *time.Duration) {
+	f.DurationVar(into, "progress-interval", gomutant.ProgressCadence, "")
 }
 
 func newRunReporter(out io.Writer, jsonl bool, selected int) *runReporter {
