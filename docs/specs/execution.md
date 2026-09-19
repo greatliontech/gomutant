@@ -916,23 +916,32 @@ advisory and do not change successful exit semantics.
 inputs and the process environment alone decide — the bounds' signs, the run
 count, the target sources' exclusivity and the targets document's parse (a
 path's content or an inline document, read and parsed as the request's own
-input), a declaration's shape (scratch namespaces, vouches, a retarget pair, an
-attestation's reasoning, the build selection's tags and toolchain), the tree
-root's existence and then a changed ref's surface (the git seam's read, in the
-root just proven to exist), the harness environment (the load ladder's
-input-decidable arm: the ambient environment's own refusals — a package driver,
-an environment the exec key=value form cannot express — read from the OS
-environment alone, then a GODEBUG that silences the build-fail events), the
-bracket paths' shape and presence, the exemptions document, the findings
-document (unreadable, or a version this binary does not read), and last the
-campaign lock — before its first tree load, so a refused verb pays nothing it
-could have refused earlier. The lock comes last because its acquisition persists
-state (the document's directory, the lock file) that a refusal after it would
-strand. The loaded set decides a second stage, before the first oracle process:
-a bracket path absent or unhashable under a measured module, a run pattern
-selecting none of the named package's tests, and — under a staged run — a target
-input outside the repository, each refuses before any proof or probe. The
-preparation is one stage per verb, in one order, the same on both faces.
+input), a declaration's shape (scratch namespaces, vouch declarations, a
+retarget pair, an attestation's reasoning, the build selection's tags and
+toolchain), the tree root's existence, then the standing vouch set's shape and a
+changed ref's surface (the git seam's read, both in the root just proven to
+exist), the harness environment (the load ladder's input-decidable arm: the
+ambient environment's own refusals — a package driver, an environment the exec
+key=value form cannot express — read from the OS environment alone, then a
+GODEBUG that silences the build-fail events), the bracket paths' shape and
+presence, the exemptions document, the findings document (unreadable, or a
+version this binary does not read), and last the campaign lock — before its
+first tree load, so a refused verb pays nothing it could have refused earlier.
+The lock comes last because its acquisition persists state (the document's
+directory, the lock file) that a refusal after it would strand. The loaded set
+decides a second stage, before the first oracle process: a bracket path absent
+or unhashable under a measured module, a run pattern selecting none of the named
+package's tests, and — under a staged run — a target input outside the
+repository, each refuses before any proof or probe. The preparation is one stage
+per verb, in one order, the same on both faces. The reviewed standing vouch set
+is the tree root's `vouches` file — one IMPORT-PATH:VARIABLE per line, `#`
+comments and blank lines ignored, an absent file the empty set — read whole or
+refused (an unreadable file, a malformed line); the load reads the set at its
+head, before any package loads, so a verb with no preparation stage pays no load
+for a refusal decidable there (its first tree load is where the enumeration's
+boundary falls for it); an invocation's vouch declarations extend it and never
+remove from it, and no analysis engine reads a vouch file of its own, so a
+workspace member's file is never a second home.
 
 **REQ-exec-plan-only** (behavior): A plan-only run MUST perform the full
 deterministic preparation sequence — every refusal REQ-exec-preparation

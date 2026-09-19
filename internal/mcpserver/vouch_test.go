@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -34,5 +36,17 @@ func TestServerInstallsVouchesOnLoadedTrees(t *testing.T) {
 	}
 	if New(s.dir, WithDynamicStateVouches(want...)).vouches[0] != want[0] {
 		t.Fatal("construction option did not install the set")
+	}
+	// The standing set is a load input: a root `vouches` file written
+	// between calls reloads the tree, never serving the stale set.
+	if err := os.WriteFile(filepath.Join(s.dir, "vouches"), []byte("b.example/dep:Standing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := s.loadTreeContext(context.Background(), gomutant.Selection{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.DynamicStateVouches(); !reflect.DeepEqual(got, []string{"a.example/dep.Var", "b.example/dep.Standing"}) {
+		t.Fatalf("tree vouches after the file was written = %v, want the file's set joined", got)
 	}
 }

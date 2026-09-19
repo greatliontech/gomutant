@@ -30,7 +30,7 @@ func newAttestCommand() *cobra.Command {
 	f.StringVar(&o.position, "position", "", "the survivor's position (file:line:col)")
 	f.StringVar(&o.operator, "operator", "", "the survivor's operator")
 	f.StringVar(&o.reason, "reason", "", "why the mutant is equivalent")
-	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); the posture is judged under the same acceptances the run used")
+	f.StringArrayVar(&o.vouches, "vouch", nil, "dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), extending the tree root's `vouches` file; the posture is judged under the same acceptances the run used")
 	return cmd
 }
 
@@ -48,6 +48,14 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// the write, as every declaration's shape is (REQ-exec-preparation).
 	vouches, err := gomutant.ParseDynamicStateVouches(o.vouches)
 	if err != nil {
+		return err
+	}
+	// The root's existence, then the standing vouch set's shape read in
+	// it — the preparation order every verb keeps (REQ-exec-preparation).
+	if err := gomutant.CheckTreeRoot(o.dir); err != nil {
+		return err
+	}
+	if _, err := gomutant.StandingVouches(o.dir); err != nil {
 		return err
 	}
 	// Provenance BEFORE the write: attest mutates the findings

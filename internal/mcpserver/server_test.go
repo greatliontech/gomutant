@@ -1601,6 +1601,23 @@ func TestToolAttestRefusesTheLoadLadderBeforeWriting(t *testing.T) {
 	}
 }
 
+// The standing vouch set's shape refuses the attestation before the
+// write on the MCP face as on the CLI: a malformed root `vouches` file
+// leaves the document untouched (REQ-exec-preparation).
+func TestToolAttestRefusesAMalformedVouchesFileBeforeWriting(t *testing.T) {
+	s, path, before := seededSurvivorServer(t)
+	if err := os.WriteFile(filepath.Join(s.dir, "vouches"), []byte("oops\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := s.toolAttest(context.Background(), nil, attestIn{Symbol: "example.com/empty.Old", Position: "p.go:1:1", Operator: "zero return", Reason: "r"})
+	if err == nil || !strings.Contains(err.Error(), "vouches") {
+		t.Fatalf("attest over a malformed vouches file: %v, %+v; want the file refused", err, out)
+	}
+	if after, err := os.ReadFile(path); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("a refused attest changed the document: %v", err)
+	}
+}
+
 // The pre-write ladder on the MCP face carries every arm, the sampled
 // ones included: a skewed ambient toolchain refuses the attestation
 // with the document untouched (REQ-exec-provenance).

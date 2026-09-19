@@ -168,13 +168,10 @@ func treeStateKeyContext(ctx context.Context, dir string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func loaderInputFile(name string) bool {
-	switch name {
-	case "go.mod", "go.sum", "go.work", "go.work.sum", "modules.txt":
-		return true
-	}
-	return strings.HasSuffix(name, ".go")
-}
+// loaderInputFile is the tree's own list of its load's inputs — one
+// list, so an input the load gains (the standing vouch set) cannot be
+// missed here and serve a stale tree.
+func loaderInputFile(name string) bool { return gomutant.TreeLoadInput(name) }
 
 // rejectUnfingerprintableInput refuses caching when a hashed file pulls
 // loader inputs from outside the tree: a filesystem replace directive whose

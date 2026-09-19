@@ -131,14 +131,18 @@ type subjectEngines struct {
 
 func (t *Tree) newSubjectEngines(event func(phase, pkg, detail string), packageProcess bool, width int) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env, width), width: width, vouches: t.vouches, event: event, packageProcess: packageProcess, treeDir: t.dir, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env, width), width: width, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	if engine, ok := e.byDir[dir]; ok {
 		return engine, nil
 	}
-	opts := []gofresh.Option{gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir)}
+	// The engine reads no vouch file of its own: the tree root's file
+	// is the one home, read at the load and installed below as part of
+	// the effective set — a workspace member's own file is never a
+	// second home (REQ-exec-preparation).
+	opts := []gofresh.Option{gofresh.WithoutRepositoryVouches(), gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir)}
 	if e.packageProcess {
 		opts = append(opts, gofresh.WithPackageProcessExecution())
 	}

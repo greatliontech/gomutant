@@ -100,7 +100,12 @@ func PrepareSelection(ctx context.Context, root string, sources []string, in Tar
 	if err := sel.Validate(); err != nil {
 		return request, err
 	}
-	if err := treeRootExists(root); err != nil {
+	if err := CheckTreeRoot(root); err != nil {
+		return request, err
+	}
+	// The standing vouch set's shape, read from the root just proven to
+	// exist, before the ref's surface and the load.
+	if _, err := StandingVouches(root); err != nil {
 		return request, err
 	}
 	request.Changed, err = in.readChanged(ctx)

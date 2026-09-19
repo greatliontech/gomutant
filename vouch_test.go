@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -170,6 +171,18 @@ func TestCount(t *testing.T) {
 	vouchedReason := inspect(culprit)
 	if strings.Contains(vouchedReason, culprit) {
 		t.Fatalf("vouched inspection still names the culprit: %q", vouchedReason)
+	}
+	// The same acceptance standing in the tree root's file — no
+	// declaration — lifts the refusal too: the file's set reaches every
+	// engine the tree constructs.
+	if err := os.WriteFile(filepath.Join(dir, "vouches"), []byte(m[1]+":"+m[3]+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if fileReason := inspect(); strings.Contains(fileReason, culprit) {
+		t.Fatalf("the root file's vouch did not reach inspection: %q", fileReason)
+	}
+	if err := os.Remove(filepath.Join(dir, "vouches")); err != nil {
+		t.Fatal(err)
 	}
 
 	// The recorded discharge is never a serve input: evidence captured
@@ -639,5 +652,86 @@ func TestRunRecordsPackageProcessDischarges(t *testing.T) {
 	}
 	if got := bySymbol["example.com/ppd.Gated"].TargetEvidence.PackageProcessDischarges; got != "" {
 		t.Fatalf("mixed run: the cross target recorded discharges %q", got)
+	}
+}
+
+// TestTreeReadsTheRootVouchesFile pins the standing vouch set's one
+// home: the tree root's `vouches` file is read at the load into the
+// effective set, an invocation's declarations extend it (sorted,
+// deduplicated), a malformed line refuses the load naming the file,
+// and a workspace member's own file is never read
+// (REQ-exec-preparation).
+func TestTreeReadsTheRootVouchesFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads temporary modules")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":  "module example.com/v\n\ngo 1.26\n",
+		"v.go":    "package v\n\nfunc V() int { return 1 }\n",
+		"vouches": "# reviewed\n\nexample.com/dep:Registry\nexample.com/dep:Registry\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tree.DynamicStateVouches(); !slices.Equal(got, []string{"example.com/dep.Registry"}) {
+		t.Fatalf("file set = %v, want the root file's one identity", got)
+	}
+	tree.SetDynamicStateVouches("example.com/other.Thing", "example.com/dep.Registry")
+	if got := tree.DynamicStateVouches(); !slices.Equal(got, []string{"example.com/dep.Registry", "example.com/other.Thing"}) {
+		t.Fatalf("effective set = %v, want the file extended by the declarations, once each", got)
+	}
+	tree.SetDynamicStateVouches()
+	if got := tree.DynamicStateVouches(); !slices.Equal(got, []string{"example.com/dep.Registry"}) {
+		t.Fatalf("declarations withdrawn = %v, want the file's set standing", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vouches"), []byte("not a vouch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "vouches") {
+		t.Fatalf("a malformed root file loaded: %v", err)
+	}
+	// The refusal precedes the package load: a root whose module file
+	// the go command refuses names the vouch file, never the load's own
+	// failure.
+	broken := t.TempDir()
+	for name, content := range map[string]string{"go.mod": "module\n", "vouches": "not a vouch\n"} {
+		if err := os.WriteFile(filepath.Join(broken, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Load(broken); err == nil || !strings.Contains(err.Error(), "vouches") {
+		t.Fatalf("a malformed file behind a refused module = %v, want the file refused at the load's head", err)
+	}
+	// And the root is proven a directory before the file is read in it:
+	// a file as the root is refused as such, never as "<file>/vouches".
+	if _, err := Load(filepath.Join(broken, "go.mod")); err == nil || !strings.Contains(err.Error(), "is not a directory") || strings.Contains(err.Error(), "vouches") {
+		t.Fatalf("a file as the tree root = %v, want the not-a-directory refusal", err)
+	}
+
+	root, _, _ := workspaceFixture(t)
+	// A member's own file is never read: neither into the tree's set
+	// nor by the member's engine — a malformed one refuses nothing.
+	if err := os.WriteFile(filepath.Join(root, "tools", "vouches"), []byte("not a vouch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "vouches"), []byte("example.com/root:Standing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := workspace.DynamicStateVouches(); !slices.Equal(got, []string{"example.com/root.Standing"}) {
+		t.Fatalf("workspace set = %v, want the root's file alone — a member's file is never read", got)
+	}
+	if _, err := workspace.newSubjectEngines(nil, false, 1).engineFor(filepath.Join(root, "tools")); err != nil {
+		t.Fatalf("the member's engine read the member's own file: %v", err)
 	}
 }

@@ -48,6 +48,38 @@ func TestPrepareCampaignRefusesASilencedHarnessBeforeTheLock(t *testing.T) {
 	}
 }
 
+// The standing vouch set's shape is a declaration's: a malformed root
+// `vouches` file refuses before the lock and any load, the campaign
+// lock never created.
+func TestPrepareCampaignRefusesAMalformedVouchesFileBeforeTheLock(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "vouches"), []byte("oops\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".gomutant", "findings.json")
+	_, err := PrepareCampaign(context.Background(), CampaignInputs{FindingsPath: path, ModuleDir: dir})
+	if err == nil || !strings.Contains(err.Error(), "vouches") {
+		t.Fatalf("preparation over a malformed vouches file = %v, want the file refused", err)
+	}
+	if _, err := os.Stat(path + ".campaign"); !os.IsNotExist(err) {
+		t.Fatalf("a refused preparation left the campaign lock: %v", err)
+	}
+	// The lockless preparation (discovery, inspection) refuses the same
+	// shape, in the root just proven to exist and before the ref's
+	// surface is read.
+	read := false
+	reader := func(context.Context) (*ChangedSelection, error) {
+		read = true
+		return &ChangedSelection{Ref: func(string) ([]byte, bool) { return nil, false }}, nil
+	}
+	if _, err := PrepareSelection(context.Background(), dir, nil, TargetInputs{Changed: reader}, Selection{}, nil, nil); err == nil || !strings.Contains(err.Error(), "vouches") || read {
+		t.Fatalf("selection preparation over a malformed vouches file = %v (ref read %v), want the file refused before the surface", err, read)
+	}
+	if _, err := PrepareCampaign(context.Background(), CampaignInputs{FindingsPath: path, ModuleDir: dir, Targets: TargetInputs{Changed: reader}}); err == nil || read {
+		t.Fatalf("campaign preparation read the ref's surface past a malformed vouches file: %v (read %v)", err, read)
+	}
+}
+
 // The OS environment's own refusals are the preparation stage's, before
 // the lock and any load: an ambient package driver refuses by name with
 // the campaign lock never created.

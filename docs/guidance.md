@@ -22,7 +22,7 @@
 - `symbols` (mcp, cli as `symbol`) — complete fully qualified symbol glob filters, for example **/*emitConditions*; alternatives.
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection (replaces any ambient GOFLAGS -tags); a go:build-gated symbol or oracle under the tags measures exactly as an untagged one. Under a declared selection (`tags`, `toolchain`) the summary states the coverage bound — the targets the selection's leg discovers but no oracle reaches, listed by symbol, capped with the remainder counted — and a whole-tree run records it in the findings document per selection (an empty bound clears the row; a scoped run records none); a stood-down derivation is a resolution failure named per package, never this bound.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection (e.g. go1.26.5); rides the toolchain measurement pin, so a different selection re-measures rather than serving across.
-- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence. The repository's reviewed standing set is the `vouches` file at the tree root (one IMPORT-PATH:VARIABLE per line, `#` comments; the engine reads it itself, a malformed line refusing the load); the flags extend that set for one invocation and never remove from it. On mcp vouches are per-server (gomutant mcp --vouch), not per-call.
+- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): a version-pinned dependency variable accepted as stable after initialization; discharges exactly that variable's shared-dynamic-state downgrade, recorded on the evidence. The repository's reviewed standing set is the `vouches` file at the tree root (one IMPORT-PATH:VARIABLE per line, `#` comments; the tree reads it at the load and a verb's preparation refuses a malformed line before any load; no engine reads a file of its own); the flags extend that set for one invocation and never remove from it. On mcp vouches are per-server (gomutant mcp --vouch), not per-call.
 - `json` (cli) — structured output as JSON lines: every progress event, decision, result row, and summary as one JSON object per line — the CLI's machine-readable face; the human rendering is suppressed.
 - `progress-interval` (cli) — cadence of the cumulative progress line (targets committed, candidates, kills, elapsed); 0 disables.
 - `plan` (cli) — preflight only: run the full preparation sequence and print every target decision — cached, skipped with reason, or measure with candidate count — then stop before baseline probes and mutant execution, persisting nothing; precondition holes surface before any budget is spent.
@@ -136,7 +136,7 @@ document is unexpectedly empty.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
-- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable); the posture is judged under these acceptances.
+- `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), extending the tree root's `vouches` file; the posture is judged under these acceptances.
 - `dir` (cli) — tree root the default document anchors at.
 **when:** use attestation only after judging a survivor genuinely
 equivalent — refused unless the mutant is among the finding's

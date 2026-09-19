@@ -153,7 +153,13 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 	// The tree root is an input too: a root that is not a directory
 	// refuses here, before the lock — whose directory creation would
 	// otherwise conjure an empty tree for the load to find.
-	if err := treeRootExists(in.ModuleDir); err != nil {
+	if err := CheckTreeRoot(in.ModuleDir); err != nil {
+		return nil, err
+	}
+	// The standing vouch set's shape, read from the root just proven to
+	// exist: refused here, before the lock and the load; the load reads
+	// the set (REQ-exec-preparation).
+	if _, err := StandingVouches(in.ModuleDir); err != nil {
 		return nil, err
 	}
 	// The ref's surface is read in the root just proven to exist.
@@ -269,8 +275,11 @@ func ValidateRetargetPair(from, to string) error {
 	return nil
 }
 
-// treeRootExists refuses a tree root that is not a directory.
-func treeRootExists(root string) error {
+// CheckTreeRoot refuses a tree root that is not a directory — the
+// refusal every preparation fires before reading anything in the root
+// (REQ-exec-preparation); a verb wiring its own preparation, and the
+// load's own head, read it first too.
+func CheckTreeRoot(root string) error {
 	info, err := os.Stat(root)
 	if err != nil {
 		return fmt.Errorf("gomutant: tree root %s: %w", root, err)

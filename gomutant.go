@@ -15,12 +15,12 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/greatliontech/glob"
+	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -216,14 +216,14 @@ func (t *Tree) DescribeTargets(ctx context.Context, targets []Target) ([]TargetD
 			return nil, err
 		}
 		oracle = append([]string{}, oracle...)
-		sort.Strings(oracle)
+		slices.Sort(oracle)
 		if len(oracle) != 0 {
 			if err := t.eng.ValidateOracleContext(ctx, oracle); err != nil {
 				return nil, fmt.Errorf("target %s: %w", target.Symbol, err)
 			}
 		}
 		labels := append([]string(nil), target.Labels...)
-		sort.Strings(labels)
+		slices.Sort(labels)
 		description := TargetDescription{
 			Symbol: target.Symbol, Oracle: oracle, Labels: labels,
 			OracleExplicit: target.OracleExplicit || len(target.Oracle) != 0,
@@ -256,7 +256,7 @@ func (t *Tree) DescribeTargets(ctx context.Context, targets []Target) ([]TargetD
 		}
 		descriptions = append(descriptions, description)
 	}
-	sort.Slice(descriptions, func(i, j int) bool { return descriptions[i].Symbol < descriptions[j].Symbol })
+	slices.SortFunc(descriptions, func(a, b TargetDescription) int { return strings.Compare(a.Symbol, b.Symbol) })
 	return descriptions, ctx.Err()
 }
 
@@ -274,11 +274,16 @@ type Tree struct {
 	// selection is the run's declared build selection the tree loaded
 	// under: the leg a coverage bound names (REQ-result-unreached-bound).
 	selection Selection
-	// vouches is the caller's reviewed dynamic-state vouch set in
-	// gofresh's canonical "<import path>.<Variable>" form, installed on
-	// every analysis engine the tree constructs so run verdicts,
-	// findings inspection, and explain judge under the same
-	// acceptances.
+	// fileVouches is the repository's reviewed standing vouch set: the
+	// tree root's `vouches` file read at the load, in gofresh's
+	// canonical "<import path>.<Variable>" form.
+	fileVouches []string
+	// vouches is the invocation's own declarations extending the
+	// standing set; the union is installed on every analysis engine the
+	// tree constructs (the engines read no file of their own: a
+	// workspace member's file is never a second home), so run verdicts,
+	// findings inspection, and explain judge under the same acceptances
+	// (REQ-exec-preparation).
 	vouches []string
 }
 
@@ -293,10 +298,54 @@ func (t *Tree) SetDynamicStateVouches(identities ...string) {
 	t.vouches = append([]string(nil), identities...)
 }
 
-// DynamicStateVouches reports the installed vouch set — introspection
-// for callers auditing which acceptances the tree judges under.
+// effectiveVouches is the standing file set extended by the installed
+// declarations, sorted and deduplicated: the one set every engine
+// judges under.
+func (t *Tree) effectiveVouches() []string {
+	union := append(append([]string(nil), t.fileVouches...), t.vouches...)
+	slices.Sort(union)
+	return slices.Compact(union)
+}
+
+// DynamicStateVouches reports the effective vouch set — the tree
+// root's file extended by the installed declarations — introspection
+// for callers auditing which acceptances the tree judges under; it is
+// never an input to SetDynamicStateVouches, which installs declarations
+// alone (the file's set stands on its own).
 func (t *Tree) DynamicStateVouches() []string {
-	return append([]string(nil), t.vouches...)
+	return t.effectiveVouches()
+}
+
+// StandingVouches is the repository's reviewed standing vouch set: the
+// tree root's `vouches` file in gofresh's grammar — one
+// IMPORT-PATH:VARIABLE per line, `#` comments and blank lines ignored,
+// an absent file the empty set — read whole or refused (an unreadable
+// file, a malformed line). A verb's preparation fires the refusal in
+// the root just proven to exist, before the first load; a verb that
+// loads with no preparation stage meets it at the load's head, before
+// any package loads; the load reads the set (REQ-exec-preparation).
+func StandingVouches(root string) ([]string, error) {
+	vouches, err := gofresh.ReadVouchFile(filepath.Join(root, gofresh.RepositoryVouchFile))
+	if err != nil {
+		return nil, fmt.Errorf("gomutant: %w", err)
+	}
+	return vouches, nil
+}
+
+// TreeLoadInput reports whether a file of the given name is one whose
+// bytes the tree's load reads directly — the module and workspace
+// files, Go sources, and the standing vouch set; non-Go build inputs
+// (assembly, cgo, embedded files) are not listed — the one list a cache
+// keying a loaded tree must hash, so a missed input never serves a
+// stale tree. The name matches anywhere in the tree: a workspace
+// member's own vouch file, which the load never reads, still keys the
+// cache — an over-invalidation, never a stale serve.
+func TreeLoadInput(name string) bool {
+	switch name {
+	case "go.mod", "go.sum", "go.work", "go.work.sum", "modules.txt", gofresh.RepositoryVouchFile:
+		return true
+	}
+	return strings.HasSuffix(name, ".go")
 }
 
 // ParseScratchNamespaces parses DIR:PATTERN scratch-namespace
@@ -321,37 +370,26 @@ func ParseScratchNamespaces(entries []string) ([]runtimeinput.ScratchNamespace, 
 }
 
 // ParseDynamicStateVouches parses caller vouch entries of the form
-// "<import path>:<Variable>" — the colon cannot appear in an import
-// path, so the pair is unambiguous and a bare package never parses as
-// a vouch — into gofresh's canonical identities, refusing control or
-// space characters (unmatchable, and they collide config surfaces) and
-// a variable that is not one Go identifier.
+// IMPORT-PATH:VARIABLE into gofresh's canonical identities —
+// each entry by gofresh's own grammar (gofresh.ParseVouchEntry: the
+// colon cannot appear in an import path, so the pair is unambiguous
+// and a bare package never parses as a vouch; control or space
+// characters and a variable that is not one Go identifier refuse) —
+// deduplicated and sorted.
 func ParseDynamicStateVouches(entries []string) ([]string, error) {
 	var identities []string
 	seen := map[string]bool{}
 	for _, entry := range entries {
-		pkg, name, ok := strings.Cut(entry, ":")
-		if !ok || pkg == "" || name == "" {
-			return nil, fmt.Errorf("gomutant: vouch %q is not <import path>:<Variable>", entry)
+		identity, err := gofresh.ParseVouchEntry(entry)
+		if err != nil {
+			return nil, fmt.Errorf("gomutant: %w", err)
 		}
-		for _, r := range pkg {
-			if r <= ' ' || r == 0x7f || unicode.IsControl(r) {
-				return nil, fmt.Errorf("gomutant: vouch package %q carries a control or space character", pkg)
-			}
-		}
-		for i, r := range name {
-			letter := unicode.IsLetter(r) || r == '_'
-			if (i == 0 && !letter) || (i > 0 && !letter && !unicode.IsDigit(r)) {
-				return nil, fmt.Errorf("gomutant: vouch variable %q is not one Go identifier", name)
-			}
-		}
-		identity := pkg + "." + name
 		if !seen[identity] {
 			seen[identity] = true
 			identities = append(identities, identity)
 		}
 	}
-	sort.Strings(identities)
+	slices.Sort(identities)
 	return identities, nil
 }
 
@@ -411,11 +449,23 @@ func LoadContextSelection(ctx context.Context, dir string, sel Selection) (*Tree
 	if err != nil {
 		return nil, fmt.Errorf("gomutant: resolve tree root %s: %w", dir, err)
 	}
+	// The root proven a directory, then the repository's standing vouch
+	// set — one home, the tree root's file — read at the load's head,
+	// whole or refused, before any package loads: a verb with no
+	// preparation stage pays no load for a refusal decidable here, and
+	// no engine reads a file of its own (REQ-exec-preparation).
+	if err := CheckTreeRoot(abs); err != nil {
+		return nil, err
+	}
+	fileVouches, err := StandingVouches(abs)
+	if err != nil {
+		return nil, err
+	}
 	e, err := engine.LoadContextSelection(ctx, abs, sel)
 	if err != nil {
 		return nil, err
 	}
-	return &Tree{eng: e, dir: abs, selection: sel}, nil
+	return &Tree{eng: e, dir: abs, selection: sel, fileVouches: fileVouches}, nil
 }
 
 // Selection is the declared build selection the tree loaded under.
@@ -571,7 +621,7 @@ func (t *Tree) OracleClosureSignpostContext(ctx context.Context, residue []Resid
 	if len(closed) == 0 {
 		return residue, nil
 	}
-	sort.Strings(closed)
+	slices.Sort(closed)
 	signpost := fmt.Sprintf("; oracle closure of %d stale finding(s) - re-measure by symbol: %s", len(closed), cappedNameList(closed, "symbols"))
 	out := append([]Residue(nil), residue...)
 	for i := range out {
@@ -761,11 +811,11 @@ func pkgRuns(oracle []string) []pkgRun {
 	for p := range names {
 		pkgs = append(pkgs, p)
 	}
-	sort.Strings(pkgs)
+	slices.Sort(pkgs)
 	out := make([]pkgRun, 0, len(pkgs))
 	for _, p := range pkgs {
 		fns := names[p]
-		sort.Strings(fns)
+		slices.Sort(fns)
 		out = append(out, pkgRun{pkg: p, runRegex: testRunRegex(fns)})
 	}
 	return out

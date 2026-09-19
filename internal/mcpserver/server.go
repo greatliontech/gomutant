@@ -1896,6 +1896,14 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	if err := gomutant.ValidateAttestationReason(in.Reason); err != nil {
 		return nil, out, err
 	}
+	// The root's existence and the standing vouch set's shape refuse
+	// before the write, as on the CLI (REQ-exec-preparation).
+	if err := gomutant.CheckTreeRoot(s.dir); err != nil {
+		return nil, out, err
+	}
+	if _, err := gomutant.StandingVouches(s.dir); err != nil {
+		return nil, out, err
+	}
 	// The load ladder BEFORE the write, as the CLI runs it: attest
 	// mutates the findings document first, and a binary the ladder
 	// refuses — skewed, below the build-events floor, or under a
