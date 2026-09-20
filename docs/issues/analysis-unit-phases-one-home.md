@@ -16,5 +16,5 @@ The one home is the producer's: gofresh exports the classification
 it; until then the bump checklist re-walks gofresh's emitters against the
 list.
 
-Lands: gomutant's bump behind gofresh 265/266 (the gofresh release that
+Lands: cross-tool train chunk 278 — gomutant's bump behind gofresh 265/266 (the gofresh release that
 exports the predicate — a rider on 265, the gotool/second-half release).
