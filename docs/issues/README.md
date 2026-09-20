@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [prune-reports-a-local-removal-it-does-not-persist](prune-reports-a-local-removal-it-does-not-persist.md) | prune reports a machine-local record removed, leaves it in the overlay and re-emits the unchanged repo document whole; the overlay is also a second document a rename must follow | awaiting triage |
 | [retarget-drops-a-record-then-refuses-the-rerun](retarget-drops-a-record-then-refuses-the-rerun.md) | a package retarget reported 25 records rewritten and wrote 24, dropping a record whose symbol resolves under the new prefix with a moved body; the identical rerun refuses whole naming it as a collision | awaiting triage |
 | [retarget-rewrites-the-whole-document](retarget-rewrites-the-whole-document.md) | a prefix retarget over 21 of 290 records re-emitted the runtime-inputs table in a new order and changed 144 records' evidence digests for a pure path rename; whether those records stay fresh is the triage question | awaiting triage |
 | [package-crash-kill-omits-the-panic](package-crash-kill-omits-the-panic.md) | an ephemeral kill attributed as a package-scope failure carries only the package's FAIL line, not the panic that killed the binary | awaiting triage |
