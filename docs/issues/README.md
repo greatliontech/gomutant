@@ -6,6 +6,8 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [retarget-rewrites-the-whole-document](retarget-rewrites-the-whole-document.md) | a prefix retarget over 21 of 290 records re-emitted the runtime-inputs table in a new order and changed 144 records' evidence digests for a pure path rename; whether those records stay fresh is the triage question | awaiting triage |
+| [package-crash-kill-omits-the-panic](package-crash-kill-omits-the-panic.md) | an ephemeral kill attributed as a package-scope failure carries only the package's FAIL line, not the panic that killed the binary | awaiting triage |
 | [divergence-reason-stamped-on-every-evidence-subject](divergence-reason-stamped-on-every-evidence-subject.md) | the post-splice divergence arm copies one target-side runtime reason onto every evidence subject beside their untouched manifests | cross-tool train chunk 258 |
 | [attest-has-no-replace-or-withdraw](attest-has-no-replace-or-withdraw.md) | `attest` refuses a second attestation of the same survivor and nothing withdraws one; a narrowed equivalence reason has no home on the record (the ephemeral face has `--reattest`, the findings face does not) | cross-tool train chunk 256 |
 | [engine-run-scoped-oracle-value](engine-run-scoped-oracle-value.md) | fourteen engine spawn signatures thread a run-constant bounds value beside env/flags/brackets/namespaces; one engine-side run value would collapse them | cross-tool train chunk 214 |
