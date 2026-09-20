@@ -89,4 +89,4 @@ new status service, transport extension, or evidence relaxation is prescribed.
 The related `mcp-liveness-cancellation-witness.md` concerns transport lifecycle;
 it does not provide the missing campaign observability or preflight surface.
 
-Lands: cross-tool train chunk 207
+Lands: cross-tool train chunk 233 (chartered from this report at 207's open)

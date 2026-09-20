@@ -25,4 +25,4 @@ identify the writer, then isolate (mutable-fixture users copy to
 TempDir, or the fixture becomes provably read-only per package).
 
 Lands: when the instrumented refusal names the writer (next
-occurrence under a gofresh bump past v0.92.0).
+occurrence under any gofresh bump).
