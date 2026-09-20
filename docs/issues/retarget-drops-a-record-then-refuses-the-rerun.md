@@ -52,3 +52,14 @@ a textual rewrite of the old prefix to the new across the committed
 document is identical, every table reference expanded, to the tool's
 output for each of the 283 records it kept, and holds the 284th;
 that document is what the consumer committed.
+
+A second gap the same rename shows, with no data lost: the
+runtime-inputs table's entries are base64 documents naming absolute
+paths under the old package directory (a rapid failure-file path
+under `internal/trust/testdata/`), and the retarget — the tool's or
+the textual one — rewrites symbol strings only, so every evidence row
+over the moved package keeps a runtime-input reference to a path that
+cannot exist. The judge reads the records stale for other reasons
+today, so nothing observes it; a retarget that follows the package
+directory into the runtime inputs, or a judgement that names the
+moved path as its reason, would close it.
