@@ -1,6 +1,6 @@
 # An ephemeral batch edit with an empty replacement survives as the baseline
 
-Lands: awaiting triage
+Lands: a reproduction on a committed tree — the batch, the tree's revision, and the ephemeral verdict — since the reported tree (ocifs's `pullPolicyUnset` guard and `TestNewStoreRefusesUnnamedPullPolicy`) is on no branch of the repository, and a fixture of the reported shape (a String switch arm deleted with an empty replacement, the error-message test) is killed by both spellings under gomutant 58e0f41-era binaries
 
 A batch edit whose `new_string` is empty — the natural spelling of
 "delete the guard whole", which the ephemeral guidance itself
