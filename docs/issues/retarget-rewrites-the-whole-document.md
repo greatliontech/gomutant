@@ -11,7 +11,8 @@ byte-identical), so no closure's content changed; only the symbol
 identities under the old prefix did.
 
 Field report (greatliontech/pb, findings document version 12, 290
-records, gomutant v0.57.11-0.20260918171351-46d0768fd594):
+records, the gomutant build installed before 9881159 — its exact
+revision unrecorded, at or before a570775):
 
 ```
 gomutant retarget \

@@ -11,8 +11,8 @@ sees a kill and not what died. A test-attributed kill carries the
 killing test's bounded output head; the package-crash arm would
 serve the same purpose by carrying the panic's head.
 
-Field report (greatliontech/gitprov at e51aee8, gomutant
-v0.57.11-0.20260918171351-46d0768fd594, reproduced on
+Field report (greatliontech/gitprov at e51aee8, first seen on the
+build installed before 9881159, reproduced on
 v0.57.11-0.20260920055743-9881159d78c3):
 
 ```
