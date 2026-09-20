@@ -63,3 +63,15 @@ cannot exist. The judge reads the records stale for other reasons
 today, so nothing observes it; a retarget that follows the package
 directory into the runtime inputs, or a judgement that names the
 moved path as its reason, would close it.
+
+A third gap, seen on the next rename (a package `modfetch` moved to
+`source/fetch`, a package `httpspolicy` folded into `source` with its
+members renamed): the compartment ledger's declaration and file
+records keep the old package and file names — 178 declaration
+records under the dead names, seven file records for the old test
+file, the old member names for four renamed tests — and the tool's
+own retarget leaves them exactly so, as a replay over the committed
+document shows. The ledger is the measured tree's, so the records
+are true history; but a reader of the document finds a package that
+no longer exists named as the home of live declarations, with
+nothing marking the rename.
