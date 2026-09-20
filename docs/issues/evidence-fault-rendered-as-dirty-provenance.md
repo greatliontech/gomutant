@@ -1,6 +1,6 @@
 # An evidence-walk fault is stamped and rendered as dirty worktree provenance
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 258
 
 Field report (greatliontech/pb, gomutant
 v0.57.11-0.20260919151557-ee9616fd4b7b, gofresh v0.102.0): a

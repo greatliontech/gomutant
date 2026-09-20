@@ -1,6 +1,6 @@
 # explain has no CLI face
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 258
 
 `explain` answers why — a symbol's full machine-local clause list
 and its per-survivor prescriptions, or the whole document's
