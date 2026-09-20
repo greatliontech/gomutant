@@ -111,6 +111,9 @@ func TestStretchVocabularyIsOneSetOfNames(t *testing.T) {
 		{StretchPreparing(PreparationEvent{Stage: PreparationBaseline, Symbol: "p.TestX"}), "prepare baseline"},
 		{StretchPreparing(PreparationEvent{Stage: PreparationMutantRun, Symbol: "p.TestX", Package: "p"}), "prepare mutant-run"},
 		{StretchPreparing(PreparationEvent{Stage: PreparationCoverage}), "prepare coverage"},
+		{StretchPreparing(PreparationEvent{Stage: PreparationViews, Subjects: 486, Packages: 37}), "prepare views"},
+		{StretchPreparing(PreparationEvent{Stage: PreparationProofs, Subjects: 486, Packages: 37}), "prepare proofs"},
+		{StretchAnalysis(AnalysisEvent{Phase: "prove", Package: "p", Index: 1, Total: 2}), "analysis proving oracle closure freshness (gofresh hash proof) p (1/2)"},
 	}
 	seen := map[string]bool{}
 	for _, row := range want {

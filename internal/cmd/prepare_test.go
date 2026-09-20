@@ -54,6 +54,7 @@ func TestRunRefusesItsInputsBeforeAnyLoad(t *testing.T) {
 	}
 	refuses("negative budget", runOptions{budget: -1}, "budget must be non-negative")
 	refuses("negative oracle timeout", runOptions{oracleTimeout: -time.Second}, "oracle timeout must")
+	refuses("negative analysis budget", runOptions{analysisBudget: -time.Second}, "analysis budget must")
 	refuses("targets and changed", runOptions{targetsFile: doc, changed: "HEAD"}, "--targets and --changed were given")
 	refuses("inline targets document", runOptions{targetsFile: "{\"targets\":[]}"}, "looks like an inline JSON document")
 	refuses("malformed scratch namespace", runOptions{scratchNamespaces: []string{"no-colon"}}, "scratch")

@@ -610,7 +610,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	for _, event := range out.Preparation {
 		stages = append(stages, string(event.Stage))
 	}
-	if got, want := strings.Join(stages, ","), "loading,resolving,freshness,mutants,baseline"; got != want {
+	if got, want := strings.Join(stages, ","), "loading,resolving,freshness,views,proofs,mutants,baseline"; got != want {
 		t.Fatalf("run preparation = %s, want %s: %+v", got, want, out.Preparation)
 	}
 	if _, err := os.Stat(filepath.Join(s.dir, gomutant.DefaultFindingsPath)); err != nil {
@@ -732,7 +732,7 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	for _, event := range out2.Preparation {
 		stages = append(stages, string(event.Stage))
 	}
-	if got, want := strings.Join(stages, ","), "loading,resolving,freshness"; got != want {
+	if got, want := strings.Join(stages, ","), "loading,resolving,freshness,views"; got != want {
 		t.Fatalf("cached preparation = %s, want %s: %+v", got, want, out2.Preparation)
 	}
 

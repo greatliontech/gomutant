@@ -11,3 +11,13 @@ func TestValue(t *testing.T) {
 		t.Fatal("wrong value")
 	}
 }
+
+func TestMixed(t *testing.T) {
+	got := Mixed(2)
+	if got == 0 {
+		panic("zero mutant")
+	}
+	if got != 3 {
+		t.Fatal("wrong value")
+	}
+}

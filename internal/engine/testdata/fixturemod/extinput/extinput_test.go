@@ -12,4 +12,7 @@ func TestFlag(t *testing.T) {
 	if Flag(true) != 1 || Flag(false) != 2 {
 		t.Fatal("flag")
 	}
+	if Loose(1) != 1 {
+		t.Fatal("loose")
+	}
 }

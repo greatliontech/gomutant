@@ -2,7 +2,10 @@ package gomutant
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+
+	"github.com/greatliontech/gofresh"
 )
 
 // The run's four advisory grammars — decisions, execution events,
@@ -152,22 +155,49 @@ func StretchInspecting(stage string) string { return "inspecting prior findings:
 // the structured face's notification — never the stretch's name.
 func StretchPreparing(e PreparationEvent) string { return "prepare " + string(e.Stage) }
 
-// AnalysisEvent is a payload-bearing analysis event from the freshness
-// engine, as Options.AnalysisEvent delivers it: the engine's phase,
-// the package, and the detail.
+// AnalysisEvent is one freshness-analysis event from the engine, as
+// Options.AnalysisEvent delivers it: the engine's phase, the package for
+// a per-package phase, the unit's position among the pass's units when
+// the engine knows it (Index/Total, 1-based; zero when unknown), the
+// memo class a "served" summary names with Index its package count,
+// and the detail of a payload-bearing diagnostic. The position is what
+// lets a reader tell a pass proving its third package of forty from
+// one stalled on its first (REQ-exec-run-status).
 type AnalysisEvent struct {
-	Phase   string
-	Package string
-	Detail  string
+	Phase   string `json:"phase"`
+	Package string `json:"package,omitempty"`
+	Index   int    `json:"index,omitempty"`
+	Total   int    `json:"total,omitempty"`
+	Served  string `json:"served,omitempty"`
+	Detail  string `json:"detail,omitempty"`
 }
 
-// analysisEventSink adapts the caller's event callback to the engine's
-// three-string seam; nil stays nil.
-func analysisEventSink(fn func(AnalysisEvent)) func(phase, pkg, detail string) {
-	if fn == nil {
-		return nil
+// analysisUnitPhases are the engine's per-unit work phases — the ones
+// that name a stretch in flight when they arrive. The other phases are
+// facts about an operation (a served summary, a cancellation, a budget
+// cut) or diagnostics, reported when known, never work in flight.
+var analysisUnitPhases = map[string]bool{
+	"list": true, "typecheck": true, "load": true, "hash": true,
+	"observe": true, "runtime": true, "prove": true,
+}
+
+// Stretch names the stretch a keep-alive announces — the pass's unit
+// with its position, under the analysis lead — and reports false for
+// an event that names no stretch: a fact about an operation or a
+// payload-bearing diagnostic (REQ-exec-run-status). Both faces' cadence
+// surfaces read this one classification.
+func (a AnalysisEvent) Stretch() (string, bool) {
+	if a.Detail != "" || !analysisUnitPhases[a.Phase] {
+		return "", false
 	}
-	return func(phase, pkg, detail string) { fn(AnalysisEvent{Phase: phase, Package: pkg, Detail: detail}) }
+	return StretchAnalysis(a), true
+}
+
+// analysisEventOf is the one projection of the engine's progress event
+// onto the run's: every field the engine carries, nothing folded, so a
+// consumer subscribing to the class reads what the engine said.
+func analysisEventOf(p gofresh.Progress) AnalysisEvent {
+	return AnalysisEvent{Phase: p.Phase, Package: p.Package, Index: p.Index, Total: p.Total, Served: p.Served, Detail: p.Detail}
 }
 
 // analysisVocabulary maps the engine's internal phase names to the
@@ -176,22 +206,49 @@ func analysisEventSink(fn func(AnalysisEvent)) func(phase, pkg, detail string) {
 // engine vocabulary stays visible rather than silently renamed.
 var analysisVocabulary = map[string]string{
 	"analysis-unavailable": "attributed reachability unavailable for",
+	"budget-exhausted":     "freshness-proof pass cut by the analysis budget",
+	"cancelled":            "freshness analysis cancelled",
+	"list":                 "listing package dependencies (gofresh analysis)",
+	"typecheck":            "type-checking package graphs (gofresh analysis)",
 	"load":                 "loading package graphs (gofresh analysis)",
+	"hash":                 "folding package closures (gofresh analysis)",
 	"observe":              "observing oracle runtime inputs (freshness evidence)",
 	"runtime":              "validating runtime-input evidence (oracle freshness)",
 	"prove":                "proving oracle closure freshness (gofresh hash proof)",
+	"served":               "served from the persistent memo",
 	"baseline-output":      "oracle baseline output for",
 }
 
 // Head renders the event's phase in the operator vocabulary with its
-// package: the line's head, before any detail.
+// package and, when the engine knows it, the unit's position among the
+// pass's units — "(3/40)" — or, for a served summary, the memo class
+// and the count of packages it served: the line's head, before any
+// detail.
 func (a AnalysisEvent) Head() string {
 	phrase := a.Phase
 	if v, ok := analysisVocabulary[a.Phase]; ok {
 		phrase = v
 	}
-	return strings.TrimSpace(phrase + " " + a.Package)
+	if a.Phase == "served" && a.Served != "" {
+		return phrase + ": " + a.Served + " for " + countNoun(a.Index, "package")
+	}
+	head := strings.TrimSpace(phrase + " " + a.Package)
+	switch {
+	case a.Total > 0 && a.Index > 0:
+		head += " (" + strconv.Itoa(a.Index) + "/" + strconv.Itoa(a.Total) + ")"
+	case a.Total > 0:
+		// A pass that knows its unit count but not the position — the
+		// typed load names its pattern count.
+		head += " (of " + strconv.Itoa(a.Total) + ")"
+	}
+	return head
 }
+
+// StretchAnalysis names a freshness-analysis keep-alive's stretch — the
+// event's head under the analysis lead, the position included — so a
+// face's cadence line or heartbeat says which unit of which pass the
+// process is on (REQ-exec-run-status).
+func StretchAnalysis(e AnalysisEvent) string { return "analysis " + e.Head() }
 
 // Text renders the event as one line: the head, then the detail after
 // an em dash when there is one. A face rendering a many-line detail

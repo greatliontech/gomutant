@@ -39,6 +39,7 @@ func TestRunToolRefusesItsInputsBeforeAnyLoad(t *testing.T) {
 		}
 	}
 	refuses("negative budget", runIn{Budget: -1}, "budget must be non-negative")
+	refuses("negative analysis budget", runIn{AnalysisBudgetSec: -1}, "analysis_budget_sec is outside the supported duration range")
 	refuses("targets and changed", runIn{TargetsPath: doc, Changed: "HEAD"}, "targets_path and changed were given")
 	refuses("inline targets and changed", runIn{TargetsJSON: "[]", Changed: "HEAD"}, "targets_json and changed were given")
 	refuses("two targets documents", runIn{TargetsPath: doc, TargetsJSON: "[]"}, "targets_path and targets_json were given")

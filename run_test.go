@@ -790,6 +790,8 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 	wantPreparation := []PreparationEvent{
 		{Stage: PreparationResolving, Symbol: target.Symbol},
 		{Stage: PreparationFreshness, Symbol: target.Symbol},
+		{Stage: PreparationViews, Subjects: 2, Packages: 1},
+		{Stage: PreparationProofs, Subjects: 2, Packages: 1},
 		{Stage: PreparationMutants, Symbol: target.Symbol},
 		{Stage: PreparationBaseline, Symbol: target.Symbol, Package: "example.com/fixture/lib"},
 		{Stage: PreparationOracleBudget, Symbol: target.Symbol, Package: "example.com/fixture/lib"},
@@ -805,7 +807,7 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 			firstPreparation[i].OracleBudget = ""
 		}
 	}
-	if !slices.Equal(firstPreparation, wantPreparation) || !slices.Equal(firstStatus.timeline, []string{"prepare", "prepare", "prepare", "prepare", "prepare", "decision"}) {
+	if !slices.Equal(firstPreparation, wantPreparation) || !slices.Equal(firstStatus.timeline, []string{"prepare", "prepare", "prepare", "prepare", "prepare", "prepare", "prepare", "decision"}) {
 		t.Fatalf("first status = preparation %+v, timeline %v", firstStatus.preparation, firstStatus.timeline)
 	}
 	_, cachedStatus, err := collect(context.Background(), Options{Budget: 1, Prior: first, Jobs: 1})
@@ -813,7 +815,9 @@ func TestRunDecisionsAndCancellation(t *testing.T) {
 		!strings.Contains(cachedStatus.decisions[0].Reason, "served: body, oracle closure, and runtime inputs unchanged") {
 		t.Fatalf("cached status = %+v, %v; want the served reason naming the held pins", cachedStatus, err)
 	}
-	if want := wantPreparation[:2]; !slices.Equal(cachedStatus.preparation, want) || !slices.Equal(cachedStatus.timeline, []string{"prepare", "prepare", "decision"}) {
+	// A served run prices its decision-view build and never its proofs:
+	// nothing needs a proof, so no union is built (REQ-exec-run-status).
+	if want := wantPreparation[:3]; !slices.Equal(cachedStatus.preparation, want) || !slices.Equal(cachedStatus.timeline, []string{"prepare", "prepare", "prepare", "decision"}) {
 		t.Fatalf("cached preparation = %+v, timeline %v", cachedStatus.preparation, cachedStatus.timeline)
 	}
 	_, forcedStatus, err := collect(context.Background(), Options{Budget: 1, Prior: first, Force: true, Jobs: 4})
@@ -898,6 +902,8 @@ func TestRunCancellationAtMutantPreparation(t *testing.T) {
 	want := []PreparationEvent{
 		{Stage: PreparationResolving, Symbol: "example.com/fixture/lib.Add"},
 		{Stage: PreparationFreshness, Symbol: "example.com/fixture/lib.Add"},
+		{Stage: PreparationViews, Subjects: 2, Packages: 1},
+		{Stage: PreparationProofs, Subjects: 2, Packages: 1},
 		{Stage: PreparationMutants, Symbol: "example.com/fixture/lib.Add"},
 	}
 	if !errors.Is(err, context.Canceled) || findings != nil || len(decisions) != 0 || !slices.Equal(preparation, want) {
@@ -1118,6 +1124,10 @@ func TestRunReportsSharedBaselineOnce(t *testing.T) {
 		{Stage: PreparationFreshness, Symbol: targets[0].Symbol},
 		{Stage: PreparationResolving, Symbol: targets[1].Symbol},
 		{Stage: PreparationFreshness, Symbol: targets[1].Symbol},
+		// The passes are priced over distinct subjects: the shared
+		// oracle is one subject of three.
+		{Stage: PreparationViews, Subjects: 3, Packages: 1},
+		{Stage: PreparationProofs, Subjects: 3, Packages: 1},
 		{Stage: PreparationMutants, Symbol: targets[0].Symbol},
 		{Stage: PreparationBaseline, Symbol: targets[0].Symbol, Package: "example.com/fixture/lib"},
 		// The shared group's budget derives exactly once, with its one

@@ -157,7 +157,19 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
 	}
-	tr := fixtureTree(t)
+	// The test plants a file inside the oracle package, so it runs over
+	// a copy of the fixture module: the committed fixture is read in
+	// place by other packages' tests running beside this one, and a
+	// file appearing and vanishing there moves their observation
+	// brackets mid-run.
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS("testdata/fixturemod")); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mutants, err := tr.Mutants("example.com/fixture/lib.Add", 1)
 	if err != nil || len(mutants) != 1 {
 		t.Fatalf("Mutants: %v, count %d", err, len(mutants))
@@ -172,9 +184,8 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 	if err := os.WriteFile(input, []byte("A"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(input) })
 	t.Setenv("GOMUTANT_MOVING_INPUT", input)
-	outcome, killer, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", mutants[0],
+	outcome, killer, _, state, incomplete, _, err := RunMutantObserved(context.Background(), dir, mutants[0],
 		[]string{"example.com/fixture/lib"}, "^TestMovingInput$", 60*time.Second, nil, moduleDir, packageDir, nil, nil, OracleBounds{})
 	if err != nil {
 		t.Fatal(err)

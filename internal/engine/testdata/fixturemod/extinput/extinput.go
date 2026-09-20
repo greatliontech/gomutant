@@ -10,3 +10,12 @@ func Flag(on bool) int {
 	}
 	return 2
 }
+
+// Loose keeps survivors under TestFlag: its branch is never exercised,
+// so a record of it re-measures survivors under the I/O-reading oracle.
+func Loose(n int) int {
+	if n > 10 {
+		return n - 1
+	}
+	return n
+}

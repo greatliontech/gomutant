@@ -249,11 +249,11 @@ func TestToolRunCancelledBeforeMeasurementCarriesTheAnalysisPayloads(t *testing.
 // five, and counts the remainder from the run's total — never from the
 // capped inline list — with a package-less phase spelled bare.
 func TestAnalysisRidingAbortCountsFromTheTotal(t *testing.T) {
-	var events []analysisOut
+	var events []gomutant.AnalysisEvent
 	for i := 0; i < envelope.rows; i++ {
-		events = append(events, analysisOut{Phase: "baseline-output", Package: "p", Detail: "TestX:\nsecond line"})
+		events = append(events, gomutant.AnalysisEvent{Phase: "baseline-output", Package: "p", Detail: "TestX:\nsecond line"})
 	}
-	events[0] = analysisOut{Phase: "toolchain-unaudited", Detail: "go1.99 unlisted\nmore"}
+	events[0] = gomutant.AnalysisEvent{Phase: "toolchain-unaudited", Detail: "go1.99 unlisted\nmore"}
 	err := analysisRidingAbort(errors.New("aborted"), events, 200)
 	want := "aborted; analysis payloads seen before this abort: toolchain-unaudited: go1.99 unlisted; baseline-output p: TestX:; baseline-output p: TestX:; baseline-output p: TestX:; baseline-output p: TestX: (+195 more)"
 	if err == nil || err.Error() != want {

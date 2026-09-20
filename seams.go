@@ -89,6 +89,13 @@ type runSeams struct {
 	// capture-time fault routes (a tree moving between a strict build's
 	// construction and its proof capture).
 	observedUnion func(symbols []string)
+	// validateProducers stands in for a view set's producer validation
+	// — a test hands the run the engine's own analysis-unavailable
+	// verdict, which no fixture reaches deterministically once the
+	// capture's proofs persist for the validation to serve, and pins
+	// the unverifiable stamp against the refusal every other verdict
+	// earns.
+	validateProducers func(ctx context.Context, views *subjectViewSet) error
 	// inspectionSupplementaryView observes the supplementary view build
 	// for symbols a caller-supplied prebuilt set does not cover — the
 	// event that proves the run's stale-reason enrichment reuses the

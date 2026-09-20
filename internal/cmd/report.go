@@ -60,6 +60,16 @@ type runReporter struct {
 	// decided marks the first decision: from then on the tallies are the
 	// cadence line, whatever stretch a later preparation event names.
 	decided atomic.Bool
+	// lastSequence is the instant of the run sequence's latest event (a
+	// preparation event, a decision, a commit); analysis names the
+	// freshness-analysis stretch the engine last announced and when. A
+	// stretch announced after the sequence's latest event is in flight
+	// as far as the run has said — the tallies line names it with its
+	// age, so a long proof pass is never a silent line of unchanged
+	// tallies (REQ-exec-run-status). Guarded by mu.
+	lastSequence    time.Time
+	analysisStretch string
+	analysisAt      time.Time
 }
 
 // phase names the stretch now in flight for the cadence line; the
@@ -88,7 +98,26 @@ func (r *runReporter) phaseInFlight() string {
 // label with it (REQ-exec-run-status).
 func (r *runReporter) preparation(event gomutant.PreparationEvent) {
 	r.phase(gomutant.StretchPreparing(event))
+	r.mu.Lock()
+	r.lastSequence = r.now()
+	r.mu.Unlock()
 	r.line("prepare", event, func(w io.Writer) { renderPreparation(w, event) })
+}
+
+// analysis primes the cadence line with a freshness-analysis keep-alive's
+// stretch — the pass's unit and position, in the one vocabulary the
+// structured face's heartbeat reads (REQ-exec-run-status); an event
+// naming no stretch (a fact about an operation, a diagnostic) leaves
+// the line where it was.
+func (r *runReporter) analysis(event gomutant.AnalysisEvent) {
+	label, ok := event.Stretch()
+	if !ok {
+		return
+	}
+	r.phase(label)
+	r.mu.Lock()
+	r.analysisStretch, r.analysisAt = label, r.now()
+	r.mu.Unlock()
 }
 
 // epilogue renders a verb's result rows: the cadence stops and joins
@@ -185,6 +214,7 @@ func (r *runReporter) setSelected(n int) {
 func (r *runReporter) decision(d gomutant.RunDecision) {
 	r.decided.Store(true)
 	r.mu.Lock()
+	r.lastSequence = r.now()
 	switch d.Action {
 	case "cached":
 		r.served++
@@ -250,6 +280,7 @@ func (r *runReporter) selectionNote(targetCount int) string {
 // evidence the exit summary may claim.
 func (r *runReporter) bankedFinding(f gomutant.Finding) {
 	r.mu.Lock()
+	r.lastSequence = r.now()
 	r.committed++
 	r.bankedKilled += f.Killed
 	r.bankedOpen += len(f.Open())
@@ -266,6 +297,12 @@ type progressPayload struct {
 	Killed          int    `json:"killed"`
 	Open            int    `json:"open"`
 	Elapsed         string `json:"elapsed"`
+	// Analysis names the freshness-analysis stretch the engine announced
+	// after the run sequence's latest event — the unit in flight as far
+	// as the run has said — and AnalysisAge how long ago; absent when
+	// the sequence moved on since.
+	Analysis    string `json:"analysis,omitempty"`
+	AnalysisAge string `json:"analysisAge,omitempty"`
 	// EstRemaining extrapolates the measured execution pace (first
 	// completion tick to the latest) over the remaining prepared
 	// candidates — advisory, absent until at least one candidate
@@ -291,7 +328,25 @@ func (r *runReporter) progressSnapshot() progressPayload {
 		Killed: r.bankedKilled, Open: r.bankedOpen,
 		Elapsed:      time.Since(r.start).Round(time.Second).String(),
 		EstRemaining: r.estRemainingLocked(),
+		Analysis:     r.analysisInFlightLocked(),
+		AnalysisAge:  r.analysisAgeLocked(),
 	}
+}
+
+// analysisInFlightLocked is the analysis stretch announced after the
+// run sequence's latest event, else empty. Caller holds r.mu.
+func (r *runReporter) analysisInFlightLocked() string {
+	if r.analysisStretch == "" || !r.analysisAt.After(r.lastSequence) {
+		return ""
+	}
+	return r.analysisStretch
+}
+
+func (r *runReporter) analysisAgeLocked() string {
+	if r.analysisInFlightLocked() == "" {
+		return ""
+	}
+	return r.now().Sub(r.analysisAt).Round(time.Second).String()
 }
 
 // estRemainingLocked extrapolates the measured execution pace over
@@ -326,6 +381,9 @@ func (r *runReporter) progressLine() {
 			p.CandidatesDone, p.CandidatesTotal, p.Killed, p.Open, p.Elapsed)
 		if p.EstRemaining != "" {
 			line += ", est ~" + p.EstRemaining + " remaining (pace)"
+		}
+		if p.Analysis != "" {
+			line += ", " + p.Analysis + " (" + p.AnalysisAge + " ago)"
 		}
 		fmt.Fprintln(w, line)
 	})

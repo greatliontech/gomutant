@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	iofs "io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -185,6 +186,16 @@ type Options struct {
 	// marking the derived posture (REQ-exec-oracle-run's derived
 	// campaign budget).
 	OracleTimeout time.Duration
+	// AnalysisBudget bounds each freshness-proof pass's precise analysis
+	// by wall clock — the observed union's proof capture and every
+	// producer validation (REQ-exec-analysis-budget): a subject the
+	// budget left unproven lands an unavailable observation proof
+	// naming the budget, the target's measurement stands (a subject
+	// whose reuse rests on the proof re-executes before reuse), and
+	// the run never stalls in a proof pass; a validation the budget cut stamps the finding's evidence
+	// unverifiable instead of refusing the target. Zero, the default,
+	// is unbounded; negative is refused before the load.
+	AnalysisBudget time.Duration
 	// SoftStop, when non-nil and closed, interrupts the campaign
 	// GRACEFULLY: no further mutants are admitted, in-flight mutants
 	// finish and their kills confirm serially, and each fresh-measure
@@ -400,8 +411,18 @@ const (
 	PreparationLoading   PreparationStage = "loading"
 	PreparationResolving PreparationStage = "resolving"
 	PreparationFreshness PreparationStage = "freshness"
-	PreparationMutants   PreparationStage = "mutants"
-	PreparationBaseline  PreparationStage = "baseline"
+	// PreparationViews prices a mode's decision-view build before it is
+	// paid — the distinct subjects requested and the packages they
+	// span — and PreparationProofs prices the mode's observed union the
+	// same way before its proof pass, over the subjects that hold a
+	// decision view (a requested subject that faulted out of the build
+	// is in the first count and not the second); a reader sees the cost
+	// of the run's longest silent stretches before entering them
+	// (REQ-exec-run-status).
+	PreparationViews    PreparationStage = "views"
+	PreparationProofs   PreparationStage = "proofs"
+	PreparationMutants  PreparationStage = "mutants"
+	PreparationBaseline PreparationStage = "baseline"
 	// PreparationOracleBudget reports an oracle group's derived budget
 	// the moment its passing baseline measures it (REQ-exec-oracle-run's
 	// derived campaign budget) — the campaign face's parity with the
@@ -520,11 +541,29 @@ type PreparationEvent struct {
 	// the observation re-entered through adoption
 	// (REQ-result-baseline-bank).
 	Banked bool `json:"banked,omitempty"`
+	// Subjects and Packages price a pass on PreparationViews and
+	// PreparationProofs events: the subjects the pass covers and the
+	// distinct packages they span.
+	Subjects int `json:"subjects,omitempty"`
+	Packages int `json:"packages,omitempty"`
+}
+
+// pricedPass builds a pass-pricing event over the symbols the pass
+// covers: the distinct subjects (an oracle shared by two targets is one
+// subject of the pass) and their distinct packages.
+func pricedPass(stage PreparationStage, symbols []string) PreparationEvent {
+	subjects, packages := map[string]bool{}, map[string]bool{}
+	for _, symbol := range symbols {
+		subjects[symbol] = true
+		packages[symbolPackage(symbol)] = true
+	}
+	return PreparationEvent{Stage: stage, Subjects: len(subjects), Packages: len(packages)}
 }
 
 // Text renders the event as both faces print it after their own
 // prefix: the stage, then the symbol, package, and oracle budget it
-// carries, and "(banked)" for a baseline served from the bank.
+// carries, "(banked)" for a baseline served from the bank, and a
+// priced pass's subjects and packages.
 func (e PreparationEvent) Text() string {
 	parts := []string{string(e.Stage)}
 	for _, part := range []string{e.Symbol, e.Package, e.OracleBudget} {
@@ -534,6 +573,9 @@ func (e PreparationEvent) Text() string {
 	}
 	if e.Banked {
 		parts = append(parts, "(banked)")
+	}
+	if e.Subjects > 0 {
+		parts = append(parts, countNoun(e.Subjects, "subject")+" over "+countNoun(e.Packages, "package"))
 	}
 	return strings.Join(parts, " ")
 }
@@ -1957,7 +1999,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	} else if err := validateRunID(opts.RunID); err != nil {
 		return nil, err
 	}
-	if err := validateRunBounds(opts.Budget, opts.OracleTimeout); err != nil {
+	if err := validateRunBounds(opts.Budget, opts.OracleTimeout, opts.AnalysisBudget); err != nil {
 		return nil, err
 	}
 	if opts.PlanOnly {
@@ -2329,7 +2371,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		mv, ok := modes[attested]
 		if !ok {
 			mv = &modeViews{
-				engines:        t.newSubjectEngines(analysisEventSink(opts.AnalysisEvent), attested, opts.bounds.Width),
+				engines:        t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds.Width, opts.AnalysisBudget),
 				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width},
 				viewFaults:     map[string]error{},
 				producerUnion:  &observedViewSet{&subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width}},
@@ -2350,6 +2392,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if len(mv.symbols) == 0 {
 			return nil
 		}
+		reportPreparation(opts.Progress, pricedPass(PreparationViews, mv.symbols))
 		var err error
 		mv.views, mv.viewFaults, err = t.buildSubjectViews(ctx, mv.symbols, preparation.packageContext, mv.engines)
 		if err != nil {
@@ -2424,6 +2467,10 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if opts.proofAttempt != nil {
 			opts.proofAttempt("", 1)
 		}
+		// The union is priced before it is paid: the subjects with a
+		// decision view — the proof pass's exact population — and the
+		// packages they span (REQ-exec-run-status).
+		reportPreparation(opts.Progress, pricedPass(PreparationProofs, slices.Collect(maps.Keys(mv.views.bySymbol))))
 		probeGate.RLock()
 		defer probeGate.RUnlock()
 		var err error
@@ -2432,7 +2479,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// the union's faults are the proof captures' alone.
 		mv.producerUnion, mv.producerFaults, err = mv.views.observed(ctx)
 		if err != nil {
-			return fmt.Errorf("freshness proofs (union over %d subjects): %w", len(mv.symbols), err)
+			return fmt.Errorf("freshness proofs (union over %d subjects): %w", len(mv.views.bySymbol), err)
 		}
 		return nil
 	}
@@ -3424,6 +3471,11 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// at stamp time, so only content drift refuses
 		// (REQ-exec-quiescence).
 		if err := eachMode(func(mv *modeViews) error {
+			// The plan re-establishes no proof — it pays no observed
+			// union, so its decision views validate their base facts
+			// alone — and the analysis budget cannot cut it: the
+			// campaign's passes are the budget's whole reach
+			// (REQ-exec-analysis-budget).
 			return mv.views.validateProducers(ctx)
 		}); err != nil {
 			if ctx.Err() != nil {
@@ -4095,18 +4147,33 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
 				}
-				stampExemptions(&spliced, opts.Exemptions)
 				// The aggregated work item's retained observations are dead past
 				// this point; releasing them per item keeps the run's peak at the
 				// in-flight items rather than the whole campaign.
 				observations[wi] = nil
-				if err := w.producer.validateProducers(ctx); err != nil {
+				if unavailable, err := producerValidation(ctx, w.producer); err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
 					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
+				} else if unavailable != "" {
+					stampUnverifiable(&spliced, unavailable)
+					// The splice bucketed its survivors before this
+					// record-wide stamp: under it, uncovered by an
+					// exemption, every survivor's advisory bucket
+					// re-derives as a fresh measure's would
+					// (REQ-exec-survivor-evidence).
+					if unstableForBuckets(&spliced, opts.Exemptions) {
+						if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
+							return err
+						}
+					}
 				}
+				// The exemption record is derived after every unverifiable stamp
+				// the record can carry, never before one (the exemptions'
+				// derived-state rule).
+				stampExemptions(&spliced, opts.Exemptions)
 				// Served prefix + re-executed candidates both validated
 				// against the current tree; provenance recomputes like a
 				// fresh measure's (REQ-result-stale, REQ-result-layers).
@@ -4141,15 +4208,30 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
 				}
-				stampExemptions(&spliced, opts.Exemptions)
 				observations[wi] = nil
-				if err := w.producer.validateProducers(ctx); err != nil {
+				if unavailable, err := producerValidation(ctx, w.producer); err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
 					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
+				} else if unavailable != "" {
+					stampUnverifiable(&spliced, unavailable)
+					// The splice bucketed its survivors before this
+					// record-wide stamp; under it — uncovered by an
+					// exemption — every survivor's advisory bucket
+					// re-derives as a fresh measure's would, so no survivor
+					// commits without one (REQ-exec-survivor-evidence).
+					if unstableForBuckets(&spliced, opts.Exemptions) {
+						if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
+							return err
+						}
+					}
 				}
+				// The exemption record is derived after every unverifiable stamp
+				// the record can carry, never before one (the exemptions'
+				// derived-state rule).
+				stampExemptions(&spliced, opts.Exemptions)
 				// The drifted record carries the current tree's evidence — the
 				// gate proved the retained movement is the attributable
 				// compartment delta — so provenance is recomputed like a fresh
@@ -4208,22 +4290,38 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
 				}
-				stampExemptions(&extended, opts.Exemptions)
 				// Same release as the served branch: the splice is computed, the
 				// per-candidate observations are dead.
 				observations[wi] = nil
-				if err := w.producer.validateProducers(ctx); err != nil {
+				if unavailable, err := producerValidation(ctx, w.producer); err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
 					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 					continue
+				} else if unavailable != "" {
+					stampUnverifiable(&extended, unavailable)
+					// The record-wide stamp re-derives every survivor's
+					// advisory bucket, the prefix's included: unlike the
+					// suffix-local divergence stamp the splice classifies
+					// itself, this one is the whole record's
+					// (REQ-exec-survivor-evidence).
+					if unstableForBuckets(&extended, opts.Exemptions) {
+						if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, 0); err != nil {
+							return err
+						}
+					}
 				}
+				// The exemption record is derived after every unverifiable stamp
+				// the record can carry, never before one (the exemptions'
+				// derived-state rule).
+				stampExemptions(&extended, opts.Exemptions)
 				// Advisory execution buckets: a verifiable extension's suffix
 				// survivors earn theirs from the current probe like any measured
 				// run's, while carried prefix survivors keep their recorded
 				// buckets verbatim; a divergence-stamped extension's suffix
-				// survivors were already classified unstable by the splice.
+				// survivors were already classified unstable by the splice, and
+				// a validation-stamped record's every survivor above.
 				if !unstableForBuckets(&extended, opts.Exemptions) {
 					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
 						return err
@@ -4306,12 +4404,14 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				f.OracleEvidence = oracleEvidence
 				f.CompartmentLedger = compartmentLedgerFromView(w.currentLedger)
 			}
-			if err := w.producer.validateProducers(ctx); err != nil {
+			if unavailable, err := producerValidation(ctx, w.producer); err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
 				refuseTarget(targets[w.target].Symbol, err.Error()+residue())
 				continue
+			} else if unavailable != "" {
+				stampUnverifiable(f, unavailable)
 			}
 			if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, w.shapedFiles, f); err != nil {
 				return err
@@ -5403,10 +5503,7 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 	rec.TargetEvidence = spliced.targetEvidence
 	rec.OracleEvidence = spliced.oracleEvidence
 	if diverged {
-		rec.TargetEvidence.RuntimeUnverifiable, rec.TargetEvidence.RuntimeReason = true, divergenceReason
-		for i := range rec.OracleEvidence {
-			rec.OracleEvidence[i].RuntimeUnverifiable, rec.OracleEvidence[i].RuntimeReason = true, divergenceReason
-		}
+		stampUnverifiable(&rec, divergenceReason)
 	}
 	driftedFinding, shed, err := driftFindingCounts(ctx, rec, w.candidates, w.driftRemeasure, scores, spliced.fresh, exemptions, memoryPin, oracleBudget, budgetDerived)
 	return driftedFinding, spliced.union, shed, err

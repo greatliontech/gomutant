@@ -19,7 +19,7 @@ import (
 
 func observedSubjectViews(t *testing.T, tree *Tree, symbols []string) *subjectViewSet {
 	t.Helper()
-	views, err := tree.newStrictObservedViews(context.Background(), symbols, tree.eng.PackageContextContext, tree.newSubjectEngines(nil, false, 0))
+	views, err := tree.newStrictObservedViews(context.Background(), symbols, tree.eng.PackageContextContext, tree.newSubjectEngines(nil, false, 0, 0))
 	if err != nil {
 		t.Fatal(err)
 	}

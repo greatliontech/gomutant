@@ -11,3 +11,14 @@ package candlocal
 func Value(a int) int {
 	return a + 1
 }
+
+// Mixed is Value with a branch TestMixed never exercises: its zero-return
+// mutant is candidate-local exactly as Value's, and the branch's mutants
+// survive, so a record of it serves with survivors to bucket beside the
+// re-executed candidate.
+func Mixed(a int) int {
+	if a > 1000 {
+		return a - 1
+	}
+	return a + 1
+}

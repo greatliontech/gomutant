@@ -25,11 +25,11 @@ func TestObservedUnionSharesTheDecisionViews(t *testing.T) {
 	ctx := context.Background()
 	symbols := []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd", "example.com/fixture/counting.Value"}
 	var observes atomic.Int64
-	engines := tr.newSubjectEngines(func(phase, _, _ string) {
-		if phase == "observe" {
+	engines := tr.newSubjectEngines(func(e AnalysisEvent) {
+		if e.Phase == "observe" {
 			observes.Add(1)
 		}
-	}, false, 0)
+	}, false, 0, 0)
 	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, engines)
 	if err != nil || len(faults) != 0 {
 		t.Fatalf("decision build: %v %v", faults, err)
@@ -161,7 +161,7 @@ func TestObservedUnionRoutesACaptureFaultToTheModulesSymbols(t *testing.T) {
 	}
 	ctx := context.Background()
 	symbols := []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}
-	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0))
+	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0, 0))
 	if err != nil || len(faults) != 0 {
 		t.Fatalf("decision build: %v %v", faults, err)
 	}
@@ -226,7 +226,7 @@ func TestStrictObservedBuildPromotesACaptureFault(t *testing.T) {
 		}
 	}
 	defer func() { seams.observedUnion = prior }()
-	union, err := tr.newStrictObservedViews(context.Background(), []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0))
+	union, err := tr.newStrictObservedViews(context.Background(), []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0, 0))
 	if err == nil {
 		t.Fatalf("strict observed build over a tree that moved at the proof capture returned a union of %d symbols, want the capture fault", len(union.bySymbol))
 	}
@@ -248,7 +248,7 @@ func TestStrictObservedBuildPromotesACaptureFault(t *testing.T) {
 func TestSupplementaryViewsCarryThePrebuiltSetsWidth(t *testing.T) {
 	tr := fixtureTree(t)
 	ctx := context.Background()
-	set, faults, err := tr.buildSubjectViews(ctx, []string{"example.com/fixture/lib.Add"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 3))
+	set, faults, err := tr.buildSubjectViews(ctx, []string{"example.com/fixture/lib.Add"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 3, 0))
 	if err != nil || len(faults) != 0 {
 		t.Fatalf("build: %v %v", faults, err)
 	}

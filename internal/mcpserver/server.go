@@ -568,14 +568,6 @@ type contradictionOut struct {
 	Reason   string `json:"reason"`
 }
 
-// analysisOut is one payload-bearing analysis event kept inline: the
-// phase, the package it speaks for, and its payload under its own key.
-type analysisOut struct {
-	Phase   string `json:"phase"`
-	Package string `json:"package,omitempty"`
-	Detail  string `json:"detail"`
-}
-
 // appendGuidance folds a per-target attribution into its oracle set's
 // aggregated entry, keyed by the suggestion and unstable set.
 func appendGuidance(entries *[]guidanceOut, g gomutant.OracleGuidance) {
@@ -641,6 +633,12 @@ func (r runStreams) decision(decision gomutant.RunDecision) {
 // from the run's callback serialization by the library's own contract,
 // so it serializes itself.
 func (r runStreams) analysis(event gomutant.AnalysisEvent) {
+	if label, ok := event.Stretch(); ok {
+		// A keep-alive names the heartbeat's stretch — the pass's unit
+		// and position, in the CLI cadence line's words; a fact about
+		// an operation or a diagnostic leaves the label where it was.
+		r.stretch(label)
+	}
 	if r.notify != nil {
 		if event.Detail != "" {
 			r.analysisMu.Lock()
@@ -657,7 +655,7 @@ func (r runStreams) analysis(event gomutant.AnalysisEvent) {
 	defer r.analysisMu.Unlock()
 	r.out.AnalysisCount++
 	var kept bool
-	if r.out.AnalysisEvents, kept = appendCapped(r.out.AnalysisEvents, envelope.rows, analysisOut{Phase: event.Phase, Package: event.Package, Detail: event.Detail}); !kept {
+	if r.out.AnalysisEvents, kept = appendCapped(r.out.AnalysisEvents, envelope.rows, event); !kept {
 		r.out.OmittedAnalysisEvents++
 	}
 }
@@ -779,6 +777,7 @@ type runIn struct {
 	Budget            int      `json:"budget,omitempty"`
 	TimeoutSec        *int     `json:"timeout_sec,omitempty"`
 	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty"`
+	AnalysisBudgetSec int      `json:"analysis_budget_sec,omitempty"`
 	Jobs              int      `json:"jobs,omitempty"`
 	BracketPaths      []string `json:"bracket_paths,omitempty"`
 	ScratchNamespaces []string `json:"scratch_namespaces,omitempty"`
@@ -837,7 +836,7 @@ type runOut struct {
 	PreparationCount          int                         `json:"preparationCount"`
 	Decisions                 []gomutant.RunDecision      `json:"decisions,omitempty" jsonschema:"absent when a progress token streamed the decisions; decisionsCount still totals them"`
 	DecisionsCount            int                         `json:"decisionsCount"`
-	AnalysisEvents            []analysisOut               `json:"analysisEvents,omitempty" jsonschema:"payload-bearing freshness-analysis events - a failing baseline's own output, a per-subject analysis-unavailable provenance, an unlisted-toolchain notice - kept inline when no progress token streamed them; capped at the row bound, the remainder counted"`
+	AnalysisEvents            []gomutant.AnalysisEvent    `json:"analysisEvents,omitempty" jsonschema:"payload-bearing freshness-analysis events - a failing baseline's own output, a per-subject analysis-unavailable provenance, an unlisted-toolchain notice - kept inline when no progress token streamed them; capped at the row bound, the remainder counted"`
 	OmittedAnalysisEvents     int                         `json:"omittedAnalysisEvents,omitempty" jsonschema:"analysis events beyond the inline cap - counted, never silent"`
 	AnalysisCount             int                         `json:"analysisCount" jsonschema:"payload-bearing analysis events the run emitted, streamed or inline; analysisEvents carries them inline up to the row bound"`
 	Note                      string                      `json:"note,omitempty" jsonschema:"set when the run measured nothing (names the input that selected zero targets and the next step) or when a whole-tree reconcile dropped records whose targets left the code"`
@@ -967,6 +966,10 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	if err != nil {
 		return err
 	}
+	analysisBudget, err := secondsDuration("analysis_budget_sec", in.AnalysisBudgetSec)
+	if err != nil {
+		return err
+	}
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -992,7 +995,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	inputs := s.targetInputs(in.TargetsPath, in.TargetsJSON, in.Changed)
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: gomutant.FindingsPathAt(s.dir, in.Findings), ModuleDir: s.dir, Selection: in.selection(),
-		Budget: in.Budget, OracleTimeout: oracleTimeout,
+		Budget: in.Budget, OracleTimeout: oracleTimeout, AnalysisBudget: analysisBudget,
 		ScratchNamespaces: in.ScratchNamespaces, BracketPaths: in.BracketPaths,
 		TargetSources: sources, Targets: inputs, Packages: in.Packages, Symbols: in.Symbols, CutChanged: true,
 	})
@@ -1094,6 +1097,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		RunID:             runID,
 		Budget:            in.Budget,
 		OracleTimeout:     oracleTimeout,
+		AnalysisBudget:    analysisBudget,
 		Jobs:              in.Jobs,
 		Force:             in.Force,
 		BracketPaths:      in.BracketPaths,
@@ -1303,7 +1307,7 @@ func ridingAbort(err error, out *runOut) error {
 // own output must reach the reader (REQ-exec-run-status). Exemplars,
 // bounded as the sheds are: each payload's first line, the remainder
 // counted from the run's total, which the inline cap never cuts.
-func analysisRidingAbort(err error, events []analysisOut, total int) error {
+func analysisRidingAbort(err error, events []gomutant.AnalysisEvent, total int) error {
 	if len(events) == 0 {
 		return err
 	}

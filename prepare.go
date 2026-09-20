@@ -26,9 +26,11 @@ type CampaignInputs struct {
 	// persists nothing and must not mint the lock file a killed run
 	// leaves behind.
 	Plan bool
-	// Budget and OracleTimeout are the run's bounds, sign-checked here.
-	Budget        int
-	OracleTimeout time.Duration
+	// Budget, OracleTimeout, and AnalysisBudget are the run's bounds,
+	// sign-checked here.
+	Budget         int
+	OracleTimeout  time.Duration
+	AnalysisBudget time.Duration
 	// ScratchNamespaces, Vouches, and BracketPaths are the caller's
 	// declarations, parsed here so a malformed one refuses before any
 	// load; a bracket path is also proven present and capturable under
@@ -70,11 +72,15 @@ type CampaignPreparation struct {
 	ReleaseCampaign func()
 }
 
-// validateRunBounds refuses a negative budget or oracle timeout — the
-// one check the preparation and the library entry (Tree.Run) share.
-func validateRunBounds(budget int, oracleTimeout time.Duration) error {
+// validateRunBounds refuses a negative budget, oracle timeout, or
+// analysis budget — the one check the preparation and the library entry
+// (Tree.Run) share.
+func validateRunBounds(budget int, oracleTimeout, analysisBudget time.Duration) error {
 	if budget < 0 {
 		return fmt.Errorf("gomutant: budget must be non-negative")
+	}
+	if analysisBudget < 0 {
+		return fmt.Errorf("gomutant: analysis budget must be non-negative")
 	}
 	if oracleTimeout < 0 {
 		return fmt.Errorf("gomutant: oracle timeout must be non-negative")
@@ -125,7 +131,7 @@ func ValidateTargetSources(given []string) error {
 // lock's file outlives its holder by design, so no refusal may follow
 // it. A run that fails any of them pays nothing (REQ-exec-preparation).
 func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparation, error) {
-	if err := validateRunBounds(in.Budget, in.OracleTimeout); err != nil {
+	if err := validateRunBounds(in.Budget, in.OracleTimeout, in.AnalysisBudget); err != nil {
 		return nil, err
 	}
 	if err := ValidateTargetSources(in.TargetSources); err != nil {

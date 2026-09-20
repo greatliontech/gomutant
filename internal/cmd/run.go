@@ -38,7 +38,7 @@ type runOptions struct {
 	toolchain                                string
 	budget, jobs                             int
 	oracleMemoryMiB                          int64
-	timeout, oracleTimeout                   time.Duration
+	timeout, oracleTimeout, analysisBudget   time.Duration
 	force, plan, staged, jsonl               bool
 	progressEvery                            time.Duration
 	bracketPaths, scratchNamespaces, vouches []string
@@ -55,6 +55,7 @@ func newRunCommand() *cobra.Command {
 	f.IntVar(&o.budget, "budget", 0, "")
 	f.DurationVar(&o.timeout, "timeout", 0, "")
 	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "")
+	f.DurationVar(&o.analysisBudget, "analysis-budget", 0, "")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "")
 	f.IntVar(&o.jobs, "jobs", 0, "")
 	f.StringArrayVar(&o.bracketPaths, "bracket-path", nil, "")
@@ -80,6 +81,9 @@ func runCommand(ctx context.Context, o runOptions) error {
 	}
 	if o.oracleTimeout < 0 {
 		return fmt.Errorf("oracle timeout must not be negative")
+	}
+	if o.analysisBudget < 0 {
+		return fmt.Errorf("analysis budget must not be negative")
 	}
 	if o.timeout > 0 {
 		var cancel context.CancelFunc
@@ -131,7 +135,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// root exists — before the lock and the load; a plan renders no cut.
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: docPath, ModuleDir: o.dir, Plan: o.plan, Selection: selectionOf(o.tags, o.toolchain),
-		Budget: o.budget, OracleTimeout: o.oracleTimeout,
+		Budget: o.budget, OracleTimeout: o.oracleTimeout, AnalysisBudget: o.analysisBudget,
 		ScratchNamespaces: o.scratchNamespaces, Vouches: o.vouches, BracketPaths: o.bracketPaths,
 		TargetSources: sources, Targets: targetInputs(o.dir, o.targetsFile, o.changed),
 		Packages: o.packages, Symbols: o.symbols, CutChanged: !o.plan,
@@ -253,7 +257,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		RunID:    runID,
 		SoftStop: softStop,
-		Budget:   o.budget, OracleTimeout: o.oracleTimeout, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
+		Budget:   o.budget, OracleTimeout: o.oracleTimeout, AnalysisBudget: o.analysisBudget, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
 		OwnWrites: gomutant.RunOwnWrites(docPath),
 		PlanOnly:  o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {
@@ -308,24 +312,27 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// and the structured face keeps the package a package with
 		// the payload under its own key.
 		AnalysisEvent: func(event gomutant.AnalysisEvent) {
-			phase, pkg, detail := event.Phase, event.Package, event.Detail
+			// Every keep-alive names the cadence line's stretch, the
+			// throttled ones included: the line reports the latest
+			// unit, the log only every tenth second's.
+			rep.analysis(event)
 			analysisMu.Lock()
 			defer analysisMu.Unlock()
-			if detail == "" {
+			if event.Detail == "" {
 				now := time.Now()
 				if now.Sub(analysisLast) < 10*time.Second {
 					return
 				}
 				analysisLast = now
 				if o.jsonl {
-					rep.emit("analysis", map[string]string{"phase": phase, "package": pkg})
+					rep.emit("analysis", event)
 					return
 				}
 				fmt.Fprintf(out, "analysis  %s\n", event.Head())
 				return
 			}
 			if o.jsonl {
-				rep.emit("analysis", map[string]string{"phase": phase, "package": pkg, "detail": detail})
+				rep.emit("analysis", event)
 				return
 			}
 			renderAnalysis(out, event)

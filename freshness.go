@@ -110,7 +110,7 @@ type subjectEngines struct {
 	// width is the oracle width evidenceEnv carries.
 	width   int
 	vouches []string
-	event   func(phase, pkg, detail string)
+	event   func(AnalysisEvent)
 	// packageProcess carries the package-process attestation
 	// (gofresh WithPackageProcessExecution) for the engines this set
 	// builds, fixed at construction: gomutant runs every oracle as
@@ -126,12 +126,16 @@ type subjectEngines struct {
 	// (subjectView.evidenceDir), so the engine's own revalidation
 	// re-hashes under the same base the record was made under.
 	treeDir string
-	byDir   map[string]*gofresh.Engine
+	// analysisBudget bounds each engine's precise-analysis pass — the
+	// observed union's proof capture and every producer validation
+	// (REQ-exec-analysis-budget); zero is unbounded.
+	analysisBudget time.Duration
+	byDir          map[string]*gofresh.Engine
 }
 
-func (t *Tree) newSubjectEngines(event func(phase, pkg, detail string), packageProcess bool, width int) *subjectEngines {
+func (t *Tree) newSubjectEngines(event func(AnalysisEvent), packageProcess bool, width int, analysisBudget time.Duration) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env, width), width: width, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env, width), width: width, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, analysisBudget: analysisBudget, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
@@ -149,13 +153,16 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	if len(e.vouches) > 0 {
 		opts = append(opts, gofresh.WithDynamicStateVouches(e.vouches...))
 	}
+	if e.analysisBudget > 0 {
+		opts = append(opts, gofresh.WithAnalysisBudget(e.analysisBudget))
+	}
 	if event := e.event; event != nil {
 		// One channel end to end, mirroring gofresh's Progress: the
 		// keep-alive/diagnostic split (throttle the former, never the
 		// latter) is the consumer's, keyed on detail emptiness — a
 		// routing layer here would reintroduce a droppable leg.
 		opts = append(opts, gofresh.WithProgress(func(p gofresh.Progress) {
-			event(p.Phase, p.Package, p.Detail)
+			event(analysisEventOf(p))
 		}))
 	}
 	engine, err := gofresh.New(opts...)
@@ -245,7 +252,7 @@ func findingPackageProcessAttestable(f Finding) bool {
 // for a standalone inspection, which judges under the inspecting
 // process's own width (REQ-exec-oracle-parallelism).
 func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packageProcess bool, width int) (*subjectViewSet, error) {
-	return t.newStrictSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess, width))
+	return t.newStrictSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess, width, 0))
 }
 
 // buildSubjectViews is the ONE view-set build: symbols resolve and
@@ -642,18 +649,67 @@ func (s *observedViewSet) forTarget(target string, oracle []string, faults map[s
 	return narrowed, nil
 }
 
+// validateProducers validates every producer module of the set. An
+// analysis-unavailable verdict is held, never returned at once: the
+// engine's guarantee that the verdict follows every other check is per
+// VIEW, and the set spans modules — a sibling module's drift must still
+// refuse, so the walk runs to the end and any other failure wins
+// (REQ-exec-analysis-budget).
 func (s *subjectViewSet) validateProducers(ctx context.Context) error {
+	var unavailable error
 	for _, module := range s.modules {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if module.producer {
-			if err := module.validate(ctx); err != nil {
-				return err
+		if !module.producer {
+			continue
+		}
+		err := module.validate(ctx)
+		switch {
+		case err == nil:
+		case errors.Is(err, gofresh.ErrAnalysisUnavailable):
+			if unavailable == nil {
+				unavailable = err
 			}
+		default:
+			return err
 		}
 	}
-	return nil
+	return unavailable
+}
+
+// producerValidation runs the producer validation and separates the one
+// verdict that refuses nothing: an observation proof the current
+// analysis could not re-establish (gofresh.ErrAnalysisUnavailable — an
+// exhausted analysis budget or a failed load; the engine reports it only
+// once every other check of the view passed, the closing runtime-input
+// comparison included, and validateProducers holds it across the set's
+// modules the same way) leaves the target's outcomes standing under
+// unverifiable evidence naming the cause, never reusable
+// (REQ-exec-analysis-budget); every other failure is the target's
+// refusal, as is any failure under the run's own cancellation.
+func producerValidation(ctx context.Context, views *subjectViewSet) (unavailable string, err error) {
+	if seams.validateProducers != nil {
+		err = seams.validateProducers(ctx, views)
+	} else {
+		err = views.validateProducers(ctx)
+	}
+	if err != nil && ctx.Err() == nil && errors.Is(err, gofresh.ErrAnalysisUnavailable) {
+		return err.Error(), nil
+	}
+	return "", err
+}
+
+// stampUnverifiable marks a finding's target and every oracle evidence
+// unverifiable under one reason: the evidence a finding carries as a
+// whole — a divergence between its observations, a proof its validation
+// could not re-establish — refuses reuse of the whole record
+// (REQ-exec-observation).
+func stampUnverifiable(f *Finding, reason string) {
+	f.TargetEvidence.RuntimeUnverifiable, f.TargetEvidence.RuntimeReason = true, reason
+	for i := range f.OracleEvidence {
+		f.OracleEvidence[i].RuntimeUnverifiable, f.OracleEvidence[i].RuntimeReason = true, reason
+	}
 }
 
 // acceptValidVerdict is the one matching predicate: only a plainly valid
@@ -912,7 +968,7 @@ func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress
 		// Fault-tolerant: a subject the build cannot serve stays out of
 		// the set, and the record reading it builds its own view — the
 		// per-record judgment's own path, failing that record alone.
-		views, _, err := t.buildSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess, 0))
+		views, _, err := t.buildSubjectViews(ctx, symbols, t.eng.PackageContextContext, t.newSubjectEngines(nil, packageProcess, 0, 0))
 		if err != nil {
 			return nil, nil, err
 		}

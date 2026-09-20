@@ -315,6 +315,34 @@ proof evidence captured after the observed process. A launched candidate process
 contributes its completed or incomplete observation even when compilation rejection
 classifies the candidate as discarded rather than measured.
 
+**REQ-exec-analysis-budget** (behavior): A campaign's freshness-proof passes —
+the observed union's proof capture and every producer validation — MUST run
+under the caller's analysis budget when one is given (0, the default, is
+unbounded; a negative budget is refused before the load): the budget bounds
+each pass's precise analysis by wall clock and never cancels the run. The
+bound is per pass: a run of N measured targets pays the union's pass and up
+to N validation passes, each entitled to the whole budget, and a pass's
+bracket construction ahead of its analysis lies outside the bound. A
+subject the budget left unproven carries an unavailable observation proof
+whose reason names the budget (the engine's own reason, the record's stored
+observation reason), the target's measurement stands, and a subject whose
+reuse rests on the proof — an I/O-dependent closure whose completed
+observation the proof would have vouched for — re-executes before reuse,
+since an unavailable proof is never a positive one (a provably pure subject
+serves as it would have); the pass reports the cut once on the analysis
+channel with the count it left unproven. A producer validation
+whose proof re-establishment the analysis could not complete — the engine's
+analysis-unavailable verdict, an exhausted budget or a failed load alike,
+reported only once every other check of the view passed, the runtime-input
+comparison closing the proof pass included, and held across the set's modules
+so a sibling module's drift still refuses — stamps the finding's target and
+oracle evidence unverifiable under that reason instead of refusing the target,
+after which the record's exemptions are derived; every other validation failure
+remains the target's refusal (a plan pays no proof pass, so no budget reaches
+its validation). The bound degrades evidence
+to unverifiable, never to served: no path admits an unavailable proof as
+reuse evidence.
+
 **REQ-exec-survivor-evidence** (behavior): A measured finding's survivors MUST
 carry execution evidence bucketing why each lived: `never-executed` when no
 executed block of the oracle's baseline coverage intersects the mutated
@@ -707,15 +735,24 @@ aborts rather than scoring.
 face and, when a token listens, its MCP face; the CLI face keeps a
 cadenced progress line naming the stretch in flight — the load, an
 ephemeral probe's phase, a judged record — until the first decision,
-after which the line carries the served, skipped, and committed tallies,
-and the structured face's progress record carries the phase and elapsed
-time before that point and the tallies after; the MCP heartbeat names
+after which the line carries the served, skipped, and committed tallies
+and, when a freshness-analysis keep-alive named a unit after the
+sequence's latest event — a preparation event, a decision, a commit —
+that unit's stretch with its age; a keep-alive names a stretch only for
+the engine's per-unit phases, never for a fact about an operation (a
+served summary, a cancellation, a budget cut) or a diagnostic — so a
+proof pass in flight is never a line of unchanged tallies — and the
+structured face's progress record carries the phase and elapsed
+time before that point and the tallies, with the same stretch and age,
+after; the MCP heartbeat names
 the same stretch in the same words — the stretch in flight is named
 from one vocabulary both faces read: the preparation before the load, a
 preparation event's stage under one lead (the load's own event
 included), the target selection, the inspection of prior findings at
 the record walk's stage, the zero-target reconcile, the final merge,
-the response's rendering, and the execution stretches — so a reader of
+the response's rendering, the execution stretches, and a
+freshness-analysis keep-alive's unit with its position among the pass's
+units — so a reader of
 either face reads the other's words); the ephemeral verb reports
 `baseline` before its probe, `mutant-run` before each run, and
 `coverage` before its advisory probe, on both faces; a window's
@@ -728,14 +765,22 @@ estimate class keeps) — before its first batch, and reports the batches
 paid after each, before the window's `estimate`; the shared runner
 reports `resolving` before each target's target and oracle resolution,
 `freshness` before constructing and checking that target's subject
-views, `mutants` before enumerating a target that requires measurement,
+views, `views` before each present mode's decision-view build and
+`proofs` before that mode's observed union's proof pass — each PRICING
+the pass it precedes with the distinct subjects it covers and the
+distinct packages they span (the requested subjects for the build, the
+subjects holding a decision view for the union), so the run's two
+longest stretches are named and sized before they are paid — `mutants` before enumerating a target that requires measurement,
 and `baseline` before each package-scoped oracle group actually probed
 rather than reused within the run — a group served from the
 machine-local measurement bank instead of probed reports the same
 `baseline` event MARKED banked (a cross-run serve must never be silent),
 rendered distinguishably on the CLI and carried as a field on the
 structured faces. Resolution and freshness events follow target order
-before module-batched view construction; subsequent mutant and baseline
+before module-batched view construction; the views events follow them,
+one per mode present, cross-package first; a mode's proofs event
+precedes the mutants event of the first target needing that mode's
+proof; subsequent mutant and baseline
 events follow target order, with baseline events in canonical
 package-group order. Worker count cannot affect the sequence's content
 or order. Preparation is pipelined with execution: once a target's
@@ -769,7 +814,10 @@ joins, not rendering: dedup is a CLI concern. Advisory
 freshness-analysis events may accompany the deterministic sequence; they
 are diagnostic, carry no ordering or completion guarantee, and never
 enter a decision or finding. The class carries an optional payload:
-detail-free events are keep-alives a consumer may throttle, while a
+detail-free events are keep-alives a consumer may throttle — each
+carrying the unit's position among its pass's units when the engine
+knows it, and a served summary its memo class and package count, kept
+as their own fields on every structured face — while a
 payload-bearing event (the per-subject analysis-unavailable provenance,
 the unlisted-toolchain notice, a failing baseline's own output — a
 reported failure or a result drifting between its discovery and
