@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [divergence-reason-stamped-on-every-evidence-subject](divergence-reason-stamped-on-every-evidence-subject.md) | the post-splice divergence arm copies one target-side runtime reason onto every evidence subject beside their untouched manifests | cross-tool train chunk 258 |
 | [attest-has-no-replace-or-withdraw](attest-has-no-replace-or-withdraw.md) | `attest` refuses a second attestation of the same survivor and nothing withdraws one; a narrowed equivalence reason has no home on the record (the ephemeral face has `--reattest`, the findings face does not) | cross-tool train chunk 256 |
 | [engine-run-scoped-oracle-value](engine-run-scoped-oracle-value.md) | fourteen engine spawn signatures thread a run-constant bounds value beside env/flags/brackets/namespaces; one engine-side run value would collapse them | cross-tool train chunk 214 |
 | [ephemeral-empty-replacement-survives-as-baseline](ephemeral-empty-replacement-survives-as-baseline.md) | an ephemeral batch edit with an empty `new_string` is accepted and reported `SURVIVED` under a file the edit never touched; the same deletion spelled as a comment line kills — a false survivor | a reproduction on a committed tree (the reported tree is on no branch; a same-shape fixture is killed by both spellings) |
