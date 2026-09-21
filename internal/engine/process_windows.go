@@ -11,6 +11,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"golang.org/x/sys/windows"
 )
 
@@ -26,8 +27,26 @@ type jobCommand struct {
 	cancelled bool
 }
 
-func commandContext(ctx context.Context, name string, args ...string) *jobCommand {
-	cmd := exec.CommandContext(ctx, name, args...)
+// oracleCommand prepares an oracle's go command under the policy's
+// plain runner with the tree's hook — the derived directory and
+// environment, observeGoCommand as on every arm — and installs the job
+// object over it: on Windows the job IS the oracle's containment (the
+// tree ends with the job, below-normal priority rides it, and the
+// wrapper's cancelled flag is the kill's one source of truth), so
+// gofresh's Windows arm, a taskkill beneath the job's own termination,
+// is deliberately not applied.
+func oracleCommand(ctx context.Context, dir string, env []string, args ...string) (*jobCommand, error) {
+	cmd, err := gotool.Runner{Prepare: observeGoCommand}.Command(ctx, dir, env, args...)
+	if err != nil {
+		return nil, err
+	}
+	return jobCommandOver(ctx, cmd), nil
+}
+
+// jobCommandOver wraps a prepared, unstarted command in the job-object
+// shape: the process starts suspended in its own group, is assigned to
+// the job, then resumed (Run).
+func jobCommandOver(ctx context.Context, cmd *exec.Cmd) *jobCommand {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err == nil {

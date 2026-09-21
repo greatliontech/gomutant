@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/greatliontech/gofresh/gotool"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -122,7 +121,7 @@ func treeStateKeyContext(ctx context.Context, dir string) (string, error) {
 	// provenance guard (REQ-exec-provenance): a cache hit skips the
 	// load-time skew check, so a toolchain move must change this key and
 	// force the reload that re-runs it.
-	snapshot, err := gotool.TakeEnvSnapshot(ctx, dir, engine.GoEnv(dir))
+	snapshot, err := engine.GoRunner().TakeEnvSnapshot(ctx, dir, engine.GoEnv(dir))
 	if err != nil {
 		return "", err
 	}

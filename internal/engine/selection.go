@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // Selection is a run's declared build selection: build tags and a
@@ -43,11 +45,11 @@ func (s Selection) applyEnv(env []string) ([]string, error) {
 	}
 	out := slices.Clone(env)
 	if s.Toolchain != "" {
-		out = SetEnvKey(out, "GOTOOLCHAIN", s.Toolchain)
+		out = gotool.SetEnv(out, "GOTOOLCHAIN", s.Toolchain)
 	}
 	if len(s.Tags) > 0 {
-		goflags, _ := LookupEnvKey(env, "GOFLAGS")
-		out = SetEnvKey(out, "GOFLAGS", replaceTagsFlag(goflags, strings.Join(s.CanonicalTags(), ",")))
+		goflags, _ := gotool.LookupEnv(env, "GOFLAGS")
+		out = gotool.SetEnv(out, "GOFLAGS", replaceTagsFlag(goflags, strings.Join(s.CanonicalTags(), ",")))
 	}
 	return out, nil
 }

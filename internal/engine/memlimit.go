@@ -2,6 +2,8 @@ package engine
 
 import (
 	"strconv"
+
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // memoryFloorBytes keeps the derived default above what a large test
@@ -27,7 +29,7 @@ func DefaultOracleMemoryLimit(jobs int) int64 {
 	return limit
 }
 
-// oracleMemoryEnv appends the soft ceiling to an oracle environment:
+// oracleMemoryEnv composes the soft ceiling onto an oracle environment:
 // GOMEMLIMIT at ~90% of the hard cap, so a legitimately large oracle
 // collects garbage against the ceiling instead of dying on it, while a
 // runaway allocation still meets the hard cap
@@ -38,5 +40,5 @@ func oracleMemoryEnv(env []string, limit int64) []string {
 		return env
 	}
 	soft := limit - limit/10
-	return SetEnvKey(env, "GOMEMLIMIT", strconv.FormatInt(soft, 10))
+	return gotool.SetEnv(env, "GOMEMLIMIT", strconv.FormatInt(soft, 10))
 }

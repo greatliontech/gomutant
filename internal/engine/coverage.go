@@ -183,14 +183,15 @@ func CoveredPositions(ctx context.Context, dir, testPkg, runRegex, coverPkg stri
 	args := goTestArgs(timeout, tail...)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := commandContext(runCtx, "go", args...)
-	cmd.Dir = dir
 	scratchEnv, _, _, removeScratch, err := oracleScratch(env)
 	if err != nil {
 		return Coverage{}, err
 	}
 	defer removeScratch()
-	cmd.Env = oracleEnv(scratchEnv, bounds)
+	cmd, err := oracleCommand(runCtx, dir, oracleEnv(scratchEnv, bounds), args...)
+	if err != nil {
+		return Coverage{}, err
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

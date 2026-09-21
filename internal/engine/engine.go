@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/tools/go/packages"
@@ -363,7 +364,7 @@ func GoEnv(dir string) []string {
 	} else {
 		work = "off"
 	}
-	return SetEnvKey(SetEnvKey(os.Environ(), "GOWORK", work), "GOPACKAGESDRIVER", "off")
+	return gotool.SetEnv(gotool.SetEnv(os.Environ(), "GOWORK", work), "GOPACKAGESDRIVER", "off")
 }
 
 // GoEnv returns the environment used by this tree's package loads and test

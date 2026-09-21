@@ -10,8 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-
-	"github.com/greatliontech/gofresh/gotool"
 )
 
 // buildSet indexes the loaded build once: package import paths and the
@@ -83,7 +81,18 @@ func (t *Tree) LinkedTestPackagesContext(ctx context.Context, testPkg string) (m
 	// The lock is not held across the exec: concurrent probes on one
 	// Tree (the MCP server) derive in parallel, and a racing duplicate
 	// derivation costs one redundant go list, never a wrong set.
-	out, err := gotool.Run(ctx, t.dir, t.env, "list", "-deps", "-test", "-f", "{{.ImportPath}}", testPkg)
+	out, err := goRunner.Run(ctx, t.dir, t.env, "list", "-deps", "-test", "-f", "{{.ImportPath}}", testPkg)
+	if errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
+		// The listing answered and exited; a descendant held the pipe
+		// past the policy's wait delay (a go wrapper's housekeeping
+		// child). The answer serves (REQ-exec-go-command-runner): the
+		// runner hands the output beside this error only when the
+		// process itself succeeded, and a successful listing of a
+		// package names at least that package — an empty answer is not
+		// a state this arm can meet, so no emptiness guard stands
+		// between it and a fail-open empty set.
+		err = nil
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

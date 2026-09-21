@@ -1,0 +1,8 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.Gap
+
+requirement_id: "REQ-exec-go-command-runner"
+reason: "the environment snapshots (enumerationcheck, the served tree-state key) and the ingest's roots probe read a cleanly exited command's answer through Gofresh's TakeEnvSnapshot and roots probe, which discard the answer Run salvages beside ErrWaitDelay; the listing and the sample serve it"
+content_hash: "408d5e8d6c815182ffe7de76238d076267a2c8b2b1c3ac53eed990e6346ad003"
+source_hash: "5e90492ad8f7093e5e3ef4b75d8390af00af7a4cb325949b27448dca89881d7f"
+lands { manual { condition: "gofresh 279 lands the salvage at TakeEnvSnapshot and the roots probe and the bump behind it reads the served answers" } }

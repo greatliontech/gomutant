@@ -13,8 +13,6 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/greatliontech/gofresh/gotool"
 )
 
 // VerifyTestEnumerationContext proves the derived test enumeration fresh
@@ -131,7 +129,7 @@ func (t *Tree) buildMatchContext(ctx context.Context, dir string) (build.Context
 		return m, nil
 	}
 	t.derivedMu.Unlock()
-	snapshot, err := gotool.TakeEnvSnapshot(ctx, dir, t.env)
+	snapshot, err := goRunner.TakeEnvSnapshot(ctx, dir, t.env)
 	if err != nil {
 		return build.Context{}, fmt.Errorf("resolve effective build configuration: %w", err)
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/contextio"
 )
@@ -522,9 +523,10 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	if capture {
 		oracleFrame = captureOracleFrame(ctx, dir, packageDir, bracketPaths)
 	}
-	cmd := commandContext(runCtx, "go", args...)
-	cmd.Dir = dir
-	cmd.Env = oracleEnv(scratchEnv, bounds)
+	cmd, err := oracleCommand(runCtx, dir, oracleEnv(scratchEnv, bounds), args...)
+	if err != nil {
+		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+	}
 	// The sink, when given, receives the mutant run's raw -json stream -
 	// the evidence surface RunMutantEvidenceEnv derives kill output from.
 	stdout := &bytes.Buffer{}
@@ -606,10 +608,9 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	pkg := failedPackage(stdout.Bytes())
 	baseCtx, baseCancel := context.WithTimeout(parent, timeout)
 	defer baseCancel()
-	base := commandContext(baseCtx, "go", baseArgs...)
-	base.Dir = dir
+	baseDir := dir
 	if baselineDir != "" {
-		base.Dir = baselineDir
+		baseDir = baselineDir
 	}
 	effectiveBaselineEnv := env
 	if baselineEnv != nil {
@@ -620,7 +621,10 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
 	defer removeBaseScratch()
-	base.Env = oracleEnv(baseScratchEnv, bounds)
+	base, err := oracleCommand(baseCtx, baseDir, oracleEnv(baseScratchEnv, bounds), baseArgs...)
+	if err != nil {
+		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+	}
 	baseErr := runOracleProcess(base, bounds)
 	// Sweep before finalization - the record captures the swept truth
 	// (see the mutant site). The defer above is the panic backstop;
@@ -732,17 +736,18 @@ func captureOracleFrame(ctx context.Context, treeRoot, packageDir string, bracke
 // recorded as runtime-input evidence - a mirror that hid it would
 // serve stale verdicts to width-sensitive oracles across jobs changes
 // (REQ-exec-oracle-parallelism). Applying the same composer the spawn
-// used reproduces the spawn's exact narrowing decision.
-// The working-directory pin is gofresh's own rule for a go command
-// under a directory (gotool.EnvForCommand's PWD derivation), composed
-// here by the one key rule rather than read from it: that form
-// normalizes and sorts the environment, which would move the mirror
-// away from the spawn's exact composition.
+// used reproduces the spawn's exact narrowing decision. The
+// working-directory pin is composed by the policy's one setter over
+// the package directory the frame names — the test binary's own PWD,
+// which the go tool derives for the binary as gofresh derives it for
+// the go command (gotool.EnvForCommand) — and the facade normalizes
+// the mirror before reading it, so the entry's position carries
+// nothing.
 func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame, bounds OracleBounds) []string {
 	if frame.PkgDir == "" {
 		return oracleCPUEnv(env, bounds.Width)
 	}
-	return oracleCPUEnv(SetEnvKey(env, "PWD", frame.PkgDir), bounds.Width)
+	return oracleCPUEnv(gotool.SetEnv(env, "PWD", frame.PkgDir), bounds.Width)
 }
 
 // oracleBookkeepingPaths are the tree-relative tool-bookkeeping
@@ -847,6 +852,7 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	observation, reason, err := frame.Observe(ctx, path, runtimeinput.ProducerIngest{
 		Identity:          path,
 		Env:               ingestEnv,
+		Runner:            goRunner,
 		IncompleteReason:  incompleteReason,
 		ScratchRoot:       scratchRoot,
 		ExcludedPaths:     oracleBookkeepingPaths,
@@ -1083,9 +1089,10 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if capture {
 		oracleFrame = captureOracleFrame(ctx, dir, packageDir, bracketPaths)
 	}
-	cmd := commandContext(ctx2, "go", args...)
-	cmd.Dir = dir
-	cmd.Env = oracleEnv(scratchEnv, bounds)
+	cmd, err := oracleCommand(ctx2, dir, oracleEnv(scratchEnv, bounds), args...)
+	if err != nil {
+		return probeResult{}, err
+	}
 	// The two streams stay apart, as the mutant path keeps them: the
 	// harness's events ride stdout and the go tool's own lines ride
 	// stderr, and a predicate over the event stream must never meet a
@@ -1486,7 +1493,7 @@ func oracleScratch(env []string) ([]string, string, func(), func(), error) {
 		restoreModes()
 		os.RemoveAll(dir)
 	}
-	return SetEnvKey(env, "TMPDIR", dir), dir, sweep, remove, nil
+	return gotool.SetEnv(env, "TMPDIR", dir), dir, sweep, remove, nil
 }
 
 // errOracleBudgetExceeded is the oracle bound's own timeout cause: a

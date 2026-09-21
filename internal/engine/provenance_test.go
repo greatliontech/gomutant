@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"go/version"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // Every load refuses a frontend older than the toolchain serving it,
@@ -119,19 +123,50 @@ func TestCheckToolchainProvenanceSharesTheGuard(t *testing.T) {
 	}
 }
 
-// The production sampler is gofresh's own under the plain spawn: a
-// refusal carries gomutant's prefix over go's own cause, and the
-// sample is the trimmed GOVERSION. The dir half — the sample runs in
-// the target module's directory — is gofresh's contract, pinned there
-// (gotool's TestSampleGoVersionRunsInTheModuleDirectory); this pin
-// witnesses the env half through an undownloadable directive.
-func TestGoVersionSamplerIsTheEnginesUnderThePlainSpawn(t *testing.T) {
-	sampled, err := goVersionSampler(context.Background(), "testdata/fixturemod", GoEnv("testdata/fixturemod"))
+// The production ladder samples through gofresh's memoized sampler
+// under the tree's runner: the sample is the trimmed GOVERSION (the
+// dir half — the sample runs in the target module's directory — is
+// gofresh's contract, pinned there by gotool's
+// TestSampleGoVersionRunsInTheModuleDirectory; the env half is
+// witnessed through an undownloadable directive, refused in the
+// provenance composite's words over go's own cause), and one ladder's
+// two reads of it — the skew judgment and the build-events floor —
+// spawn ONE process: the memo answers the second (REQ-exec-provenance).
+func TestToolchainLadderSamplesOnceThroughTheMemoizedSampler(t *testing.T) {
+	env := GoEnv("testdata/fixturemod")
+	sampled, err := toolchainGuard(context.Background(), "testdata/fixturemod", env)
 	if err != nil || !strings.HasPrefix(sampled, "go") || strings.ContainsAny(sampled, " \n") {
 		t.Fatalf("sample = %q, %v; want the trimmed GOVERSION", sampled, err)
 	}
-	if _, err := goVersionSampler(context.Background(), "testdata/fixturemod", SetEnvKey(GoEnv("testdata/fixturemod"), "GOTOOLCHAIN", "go0.0.0-nosuch")); err == nil || !strings.HasPrefix(err.Error(), "gomutant: sample toolchain version: ") {
-		t.Fatalf("an undownloadable directive = %v; want gomutant's prefix over go's cause", err)
+	undownloadable := gotool.SetEnv(env, "GOTOOLCHAIN", "go0.0.0-nosuch")
+	if _, err := toolchainGuard(context.Background(), "testdata/fixturemod", undownloadable); err == nil || !strings.Contains(err.Error(), "ambient toolchain unidentifiable") || !strings.Contains(err.Error(), "go0.0.0-nosuch") {
+		t.Fatalf("an undownloadable directive = %v; want the composite's unidentifiable refusal naming go's cause", err)
+	}
+	spawns := 0
+	prior := newToolchainSampler
+	newToolchainSampler = func() gofresh.ToolchainSampler {
+		return &gotool.Sampler{Runner: gotool.Runner{Prepare: func(*exec.Cmd) { spawns++ }}}
+	}
+	defer func() { newToolchainSampler = prior }()
+	if _, err := toolchainGuard(context.Background(), "testdata/fixturemod", env); err != nil {
+		t.Fatal(err)
+	}
+	if spawns != 1 {
+		t.Fatalf("one ladder spawned %d samples, want 1 — the floor reads the memo", spawns)
+	}
+	// The seam memoizes as production does: an injected sampler is
+	// asked once per ladder.
+	asks := 0
+	restore := SwapGoVersionSamplerForTest(func(context.Context, string, []string) (string, error) {
+		asks++
+		return runtime.Version(), nil
+	})
+	defer restore()
+	if _, err := toolchainGuard(context.Background(), "testdata/fixturemod", env); err != nil {
+		t.Fatal(err)
+	}
+	if asks != 1 {
+		t.Fatalf("one ladder asked the injected sampler %d times, want 1", asks)
 	}
 }
 
@@ -154,7 +189,7 @@ func TestCheckToolchainProvenanceCarriesTheBuildEventsFloor(t *testing.T) {
 // gotestjsonbuildtext=1 silences the build-fail event the classifier
 // reads, so the load and the attestation path's standalone check
 // refuse it alike, judged as the go command judges its own setting —
-// the last GODEBUG entry's last pair.
+// the GODEBUG entry's last pair.
 func TestLoadRefusesASilencedHarness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
@@ -195,8 +230,9 @@ func TestHarnessEventsSilencedReadsTheEffectiveSetting(t *testing.T) {
 		{[]string{"GODEBUG=http2client=0,gotestjsonbuildtext=1"}, true},
 		{[]string{"GODEBUG=gotestjsonbuildtext=1,gotestjsonbuildtext=0"}, false},
 		{[]string{"GODEBUG=gotestjsonbuildtext=0,gotestjsonbuildtext=1"}, true},
-		{[]string{"GODEBUG=gotestjsonbuildtext=1", "GODEBUG=http2client=0"}, false},
-		{[]string{"GODEBUG=http2client=0", "GODEBUG=gotestjsonbuildtext=1"}, true},
+		// A duplicated key never reaches the arm: the ladder's ambient
+		// refusal precedes it (TestAmbientEnvironmentRefusals) and the
+		// policy's setter composes each key once.
 		{[]string{"GODEBUGX=gotestjsonbuildtext=1"}, false},
 		// A bisect suffix is stripped before the tool reads the value;
 		// the key is case-folded only where the spawn folds it.

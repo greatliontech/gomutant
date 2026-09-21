@@ -146,7 +146,9 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	// is the one home, read at the load and installed below as part of
 	// the effective set — a workspace member's own file is never a
 	// second home (REQ-exec-preparation).
-	opts := []gofresh.Option{gofresh.WithoutRepositoryVouches(), gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir)}
+	// The engine's own go commands ride the tree's runner — one
+	// process boundary for every go child gomutant owns.
+	opts := []gofresh.Option{gofresh.WithoutRepositoryVouches(), gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir), gofresh.WithGoRunner(engine.GoRunner())}
 	if e.packageProcess {
 		opts = append(opts, gofresh.WithPackageProcessExecution())
 	}

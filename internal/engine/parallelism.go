@@ -2,6 +2,8 @@ package engine
 
 import (
 	"strconv"
+
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // OracleEvidenceEnv is the environment oracle evidence digests under:
@@ -45,10 +47,11 @@ func oracleEnv(env []string, bounds OracleBounds) []string {
 // duplicate key, so a run under an exported wider GOMAXPROCS (an
 // operator's shell, or a gomutant oracle measuring a gomutant run)
 // would otherwise skip every target as evidence-unavailable. An
-// ambient narrower value is kept as ONE entry: an operator's
-// duplicated narrower entries collapse to their effective (last)
-// value, so the recorded env carries the key once whichever side wins
-// (SetEnvKey's one rule).
+// ambient narrower value is kept as ONE entry, composed through the
+// policy's one setter, so the recorded env carries the key once
+// whichever side wins (gotool.SetEnv; a duplicated ambient key is
+// refused at preparation, never composed around —
+// REQ-exec-spawn-environment).
 func oracleCPUEnv(env []string, width int) []string {
 	if width <= 0 {
 		return env
@@ -57,16 +60,16 @@ func oracleCPUEnv(env []string, width int) []string {
 	if ambient, ok := envGOMAXPROCS(env); ok && ambient <= width {
 		effective = ambient
 	}
-	return SetEnvKey(env, "GOMAXPROCS", strconv.Itoa(effective))
+	return gotool.SetEnv(env, "GOMAXPROCS", strconv.Itoa(effective))
 }
 
-// envGOMAXPROCS reports the environment's effective GOMAXPROCS - the
-// last entry naming the key under the platform's rule (a lowercase
-// gomaxprocs is the same variable on Windows, another one on Unix),
-// when well-formed and positive. A malformed effective entry reports
-// absent, so the cap replaces it.
+// envGOMAXPROCS reports the environment's GOMAXPROCS - the entry
+// naming the key under the platform's rule (a lowercase gomaxprocs is
+// the same variable on Windows, another one on Unix), when well-formed
+// and positive. A malformed entry reports absent, so the cap replaces
+// it.
 func envGOMAXPROCS(env []string) (int, bool) {
-	value, ok := LookupEnvKey(env, "GOMAXPROCS")
+	value, ok := gotool.LookupEnv(env, "GOMAXPROCS")
 	if !ok {
 		return 0, false
 	}

@@ -4,32 +4,19 @@ package engine
 
 import (
 	"context"
-	"errors"
-	"os"
 	"os/exec"
-	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
 
 const processExecutionSupported = true
 
-func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return os.ErrProcessDone
-		}
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
-	cmd.WaitDelay = time.Second
-	return cmd
+// oracleCommand prepares an oracle's go command under the tree's
+// runner (goRunner): the policy's directory and environment, and its
+// containment — the child leads its own process group, a cancellation
+// kills the group, the reap bounded by the wait delay.
+func oracleCommand(ctx context.Context, dir string, env []string, args ...string) (*exec.Cmd, error) {
+	return goRunner.Command(ctx, dir, env, args...)
 }
 
 // oracleProcessKilled is the platform-owned fact "the oracle process
@@ -62,8 +49,8 @@ func runOracleProcess(cmd *exec.Cmd, bounds OracleBounds) error {
 		return err
 	}
 	applyMemoryCeiling(cmd, bounds.MemoryBytes)
-	// Setpgid on the SysProcAttr above pins the child's pgid to its own
-	// pid before exec, so the group id is its pid by the time Start
+	// The runner's containment (Setpgid) pins the child's pgid to its
+	// own pid before exec, so the group id is its pid by the time Start
 	// returns.
 	_ = unix.Setpriority(unix.PRIO_PGRP, cmd.Process.Pid, oracleNiceness)
 	return cmd.Wait()

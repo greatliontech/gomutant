@@ -1054,17 +1054,21 @@ unidentifiable is not agreement. The serving toolchain is sampled in the
 TARGET directory under the SELECTION-APPLIED environment — the declared
 toolchain directive honored and stray workspace variables stripped — so
 the witnessed version is the one the run's loads and executions actually
-use, never the tool's own cwd default. A verb that mutates state before
-any load (attestation writes the findings document first) runs the same
-check before its write on both faces — the load's whole toolchain
-ladder, the skew refusal, the build-events floor below go1.24, and the
+use, never the tool's own cwd default — sampled through Gofresh's
+go-command policy (its memoized toolchain sampler under the tree's
+runner, its provenance judgment and refusal words). A verb that mutates
+state before any load (attestation writes the findings document first)
+runs the same check before its write on both faces — the load's whole
+toolchain ladder, the skew refusal, the build-events floor below
+go1.24, and the
 refusal of an environment that names a package driver, cannot be
 expressed in the exec key=value form (a duplicate key, a malformed
 entry, a NUL byte), or silences those events (GODEBUG's
-gotestjsonbuildtext=1 as the go command resolves it — its last entry,
-its last pair, a bisect suffix stripped — read from the OS environment
-alone) alike: a skewed, floor-refused, or silenced binary never writes,
-echoes success, and then fails. The refusal names both toolchains, and
+gotestjsonbuildtext=1 as the go command resolves it — the entry's last
+pair, a bisect suffix stripped; a duplicated key is refused ahead of
+the read — read from the OS environment alone) alike: a skewed,
+floor-refused, or silenced binary never writes, echoes success, and
+then fails. The refusal names both toolchains, and
 on an identified skew their language series and the rebuild direction;
 the unidentifiable refusal names the versions it could not identify.
 
@@ -1345,12 +1349,13 @@ beside its mutant under contention.
 onto a spawn environment — the width, the memory ceiling, the oracle's
 scratch temp directory, the workspace, the toolchain selection and the
 tags' flags, the loader's driver, the ingest mirror's working directory
-— MUST replace the ambient entry under the host platform's key rule
-(folded on Windows, exact elsewhere), so a composed environment carries
-each key once whatever the ambient environment carried and the declared
-producer environment never refuses a duplicate; the ambient
-environment's own duplicates are refused at preparation, never composed
-around.
+— MUST be composed through Gofresh's go-command policy's one setter
+(gotool.SetEnv), which replaces the ambient entry under the host
+platform's key rule (folded on Windows, exact elsewhere), so a composed
+environment carries each key once whatever the ambient environment
+carried and the declared producer environment never refuses a
+duplicate; the ambient environment's own duplicates are refused at
+preparation, never composed around.
 
 (The go tool's package-build parallelism follows the delivered
 GOMAXPROCS — `-p` defaults to it — so the environment single-sources
@@ -1370,3 +1375,19 @@ Mutation execution is supported on Unix and Windows hosts, where gomutant can
 own and terminate a process group or Job Object. Other host operating systems
 are refused during tree loading rather than admitted with weaker descendant
 cleanup semantics.
+
+**REQ-exec-go-command-runner** (behavior): Every `go` command gomutant
+spawns — the oracles and their baseline and coverage probes, the tree's
+listings and environment snapshots, the toolchain sample, the roots probe of
+every observation ingest, and the analysis engines' own — MUST run through
+one runner under Gofresh's go-command policy (the derived directory and
+environment, the policy's spawn refusals); on Unix the runner's containment
+is the process group, killed outright on a bound's expiry or a cancellation
+with no quit grace, and the oracle's resource policy (the memory ceiling, the
+group's niceness) is applied over the prepared command after it starts; on
+Windows the oracle's Job Object is gomutant's own containment over the
+policy's prepared command. The linked-set listing and the toolchain sample
+serve the answer a command wrote before exiting cleanly while a descendant
+held its pipe past the policy's wait delay (the listing whole, the sample its
+first line); the environment snapshots and the roots probe read that answer
+through Gofresh, which discards it today.

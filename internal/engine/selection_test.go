@@ -65,12 +65,13 @@ func TestSelectionRewritesFrozenEnvironment(t *testing.T) {
 	}
 
 	// A declaration without tags composes no GOFLAGS: the ambient
-	// entry stays exactly where and as it was.
+	// entry stays exactly as it was, the composed entry in the
+	// policy's order.
 	env, err = Selection{Toolchain: "go1.26.5"}.applyEnv([]string{"GOFLAGS=-mod=mod", "HOME=/h"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(env, []string{"GOFLAGS=-mod=mod", "HOME=/h", "GOTOOLCHAIN=go1.26.5"}) {
+	if !slices.Equal(env, []string{"GOFLAGS=-mod=mod", "GOTOOLCHAIN=go1.26.5", "HOME=/h"}) {
 		t.Fatalf("toolchain-only declaration = %v, want the ambient flags untouched", env)
 	}
 

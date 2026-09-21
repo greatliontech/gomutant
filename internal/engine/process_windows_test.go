@@ -18,7 +18,7 @@ import (
 func TestCommandContextKillsWindowsJob(t *testing.T) {
 	pidFile := t.TempDir() + `\child.pid`
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := commandContext(ctx, os.Args[0], "-test.run=^TestWindowsJobHelper$")
+	cmd := jobCommandOver(ctx, exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWindowsJobHelper$"))
 	cmd.Env = append(os.Environ(), "GOMUTANT_WINDOWS_JOB_HELPER=parent", "GOMUTANT_WINDOWS_JOB_PIDFILE="+pidFile)
 	runErr := make(chan error, 1)
 	go func() { runErr <- cmd.Run() }()

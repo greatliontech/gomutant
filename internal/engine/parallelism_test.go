@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
@@ -53,8 +54,9 @@ func TestOracleCPUEnv(t *testing.T) {
 		{name: "wider ambient replaced", env: []string{"A=1", "GOMAXPROCS=64", "B=2"}, want: []string{"A=1", "B=2", "GOMAXPROCS=4"}},
 		{name: "malformed ambient replaced", env: []string{"GOMAXPROCS=lots"}, want: []string{"GOMAXPROCS=4"}},
 		{name: "nonpositive ambient replaced", env: []string{"GOMAXPROCS=0"}, want: []string{"GOMAXPROCS=4"}},
-		{name: "wider duplicates collapse to one", env: []string{"GOMAXPROCS=2", "GOMAXPROCS=64"}, want: []string{"GOMAXPROCS=4"}},
-		{name: "narrower duplicates collapse to their effective value", env: []string{"A=1", "GOMAXPROCS=64", "GOMAXPROCS=2"}, want: []string{"A=1", "GOMAXPROCS=2"}},
+		// A duplicated ambient key is refused at preparation
+		// (TestAmbientEnvironmentRefusals), never composed around, so no
+		// row draws one.
 		{name: "narrower ambient composed once at the end", env: []string{"A=1", "GOMAXPROCS=2", "B=2"}, want: []string{"A=1", "B=2", "GOMAXPROCS=2"}},
 		{name: "a bare entry names nothing", env: []string{"GOMAXPROCS=2", "GOMAXPROCS"}, want: []string{"GOMAXPROCS", "GOMAXPROCS=2"}},
 	} {
@@ -82,7 +84,7 @@ func TestOracleCPUEnv(t *testing.T) {
 		if len(lower) != 1 {
 			t.Errorf("windows lowercase ambient not kept: %v", lower)
 		}
-	} else if len(lower) != 2 || lower[1] != "GOMAXPROCS=4" {
+	} else if v, _ := gotool.LookupEnv(lower, "GOMAXPROCS"); len(lower) != 2 || v != "4" || !slices.Contains(lower, "gomaxprocs=2") {
 		t.Errorf("unix lowercase key suppressed the cap: %v", lower)
 	}
 }
@@ -148,9 +150,11 @@ func TestOracleIngestEnvCarriesInnerParallelismCap(t *testing.T) {
 	four := OracleBounds{Width: 4}
 	frame := runtimeinput.ProducerFrame{PkgDir: "/pkg"}
 	// The mirror replaces the ambient working directory — never a
-	// second PWD entry — and carries the effective width, each once.
+	// second PWD entry — and carries the effective width, each once;
+	// the entries sit in the policy's order, which the facade
+	// normalizes away before reading.
 	env := oracleIngestEnv([]string{"A=1", "PWD=/elsewhere"}, frame, four)
-	if !slices.Equal(env, []string{"A=1", "PWD=/pkg", "GOMAXPROCS=4"}) {
+	if !slices.Equal(env, []string{"A=1", "GOMAXPROCS=4", "PWD=/pkg"}) {
 		t.Fatalf("mirror = %v, want PWD pinned in place of the ambient one and the effective GOMAXPROCS", env)
 	}
 	if refused := oracleIngestEnv([]string{"A=1"}, runtimeinput.ProducerFrame{}, four); !strings.Contains(strings.Join(refused, " "), "GOMAXPROCS=4") {

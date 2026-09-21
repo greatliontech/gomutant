@@ -5,15 +5,16 @@ package engine
 import (
 	"context"
 	"os/exec"
-	"time"
 )
 
 const processExecutionSupported = false
 
-func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.WaitDelay = time.Second
-	return cmd
+// oracleCommand prepares the command under the tree's runner; on a
+// host without process-group ownership the runner's containment is
+// the wait delay alone, and execution is refused earlier during tree
+// loading, so this exists for compilation completeness only.
+func oracleCommand(ctx context.Context, dir string, env []string, args ...string) (*exec.Cmd, error) {
+	return goRunner.Command(ctx, dir, env, args...)
 }
 
 // runOracleProcess on hosts without process-group ownership just runs

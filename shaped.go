@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -538,9 +539,9 @@ func copyTreeForShaped(ctx context.Context, src, dst string) error {
 // the scratch copy; everything else — toolchain, caches, the delivered
 // width — stays shared, so scratch runs reuse the build cache.
 func rebaseScratchEnv(env []string, realRoot, scratch string) []string {
-	if value, ok := engine.LookupEnvKey(env, "GOWORK"); ok && value != "off" && value != "" {
+	if value, ok := gotool.LookupEnv(env, "GOWORK"); ok && value != "off" && value != "" {
 		if rel, err := filepath.Rel(realRoot, value); err == nil && !strings.HasPrefix(rel, "..") {
-			return engine.SetEnvKey(env, "GOWORK", filepath.Join(scratch, rel))
+			return gotool.SetEnv(env, "GOWORK", filepath.Join(scratch, rel))
 		}
 	}
 	return slices.Clone(env)
