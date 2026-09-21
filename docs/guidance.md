@@ -191,10 +191,14 @@ to=example.com/new. after a package rename, then for real.
 ### ephemeral
 **does:** Run one manual mutant without persisting.
 **knobs:**
-- `file` (mcp, cli) — tree-relative source file for replacement or edits; omit for batch edits.
+- `file` (mcp, cli) — tree-relative source file for replacement or edits; omitted at the top level for batch edits, where on mcp each batch edit's own `file` field names the file that edit targets.
 - `replacement` (mcp, cli) — the whole replacement source: inline content on mcp, a path to it on the cli.
 - `edits` (mcp) — exact-match edits ({old, new}) applied sequentially — each old must match exactly once in the content the prior edits produced; state the change, not the file.
 - `batch_edits` (mcp, cli as `batch`) — atomic file-scoped exact-match edits ({file, old_string, new_string}; on the cli a JSON file holding `{"edits":[…]}` or the bare array `[…]`, or - for stdin); every match resolves against the original file snapshot. Inline on mcp; a JSON path or - for stdin on the cli.
+- `old_string` (mcp) — a batch edit's exact text to replace, matching exactly once in its file's original snapshot; every edit of the batch resolves against its own file's snapshot, never the content a prior edit produced.
+- `new_string` (mcp) — a batch edit's replacement text at its match; the batch is applied whole or not at all.
+- `old` (mcp) — an edit's exact text to replace, matching exactly once in the content the prior edits produced; state the change, not the file.
+- `new` (mcp) — an edit's replacement text at its match; the content the next edit resolves against.
 - `test_pkg` (mcp, cli as `test-pkg`) — package whose named test decides the kill: an import path, or a package directory spelled like go test does (`.` or `./x`) resolved against the tree root.
 - `run` (mcp, cli) — -run pattern naming the deciding test.
 - `timeout_sec` (mcp, cli as `timeout`) — cancel work before attributed result completion (on mcp omitted means 300 seconds and an explicit 0 unlimited; on the cli a duration, 0 and the default unlimited).

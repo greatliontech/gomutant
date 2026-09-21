@@ -45,34 +45,17 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 				// default-spelling rule by.
 				flags[f.Name] = !zeroDefault(f)
 				// Every usage string is the document's rendering — the
-				// knob's terse clause in pflag's usage grammar (no
-				// code span, since pflag reads the first back-quoted
-				// word as the value name; no default parenthetical,
-				// since cobra prints the default) — never a second
-				// literal.
+				// knob's usage projection, gofresh's grammar for pflag —
+				// never a second literal; the served bytes are judged
+				// against the package's own rendering of the knob, and
+				// the literals below pin the grammar's effect.
 				k, err := doc.Knob("cli", name, f.Name)
 				if err != nil {
 					t.Errorf("%s --%s: %v", name, f.Name, err)
 					return
 				}
-				want := strings.ReplaceAll(k.Clause(), "`", "")
-				if i := strings.Index(want, " (default "); i >= 0 {
-					if j := strings.Index(want[i:], ")"); j >= 0 {
-						want = want[:i] + want[i+j+1:]
-					}
-				}
-				if f.Usage != want {
-					t.Errorf("%s --%s usage diverged from the document's rendering:\ncli %q\ndoc %q", name, f.Name, f.Usage, want)
-				}
-				if strings.Contains(f.Usage, "`") || strings.Contains(f.Usage, "(default ") {
-					t.Errorf("%s --%s usage carries a code span or a default the face prints itself: %q", name, f.Name, f.Usage)
-				}
-				// cobra appends the default of a non-zero flag, so such
-				// a usage never spells one itself, in any wording. Zero
-				// is pflag's per-type notion; a type this table does not
-				// know is checked, never skipped.
-				if !zeroDefault(f) && strings.Contains(strings.ToLower(f.Usage), "default") {
-					t.Errorf("%s --%s usage spells a default cobra prints (%s %q): %q", name, f.Name, f.Value.Type(), f.DefValue, f.Usage)
+				if f.Usage != k.Usage() {
+					t.Errorf("%s --%s usage diverged from the document's rendering:\ncli %q\ndoc %q", name, f.Name, f.Usage, k.Usage())
 				}
 			})
 			registered[name] = flags
@@ -148,7 +131,7 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 			// points nowhere.
 			help, err := doc.Help("cli", name)
 			if err == nil && c.Flags().HasFlags() {
-				help += "\n\n" + knobProsePointer(name)
+				help += "\n\nThe knobs' whole prose: gomutant guidance " + name + "."
 			}
 			if err != nil || c.Long != help {
 				t.Errorf("%q Long diverged from Help (err=%v):\ncli %q\ndoc %q", name, err, c.Long, help)
@@ -206,8 +189,8 @@ func TestKnobbedFlagsRefusesAnUndocumentedFlag(t *testing.T) {
 	cmd.Flags().Bool("nonesuch", false, "")
 	defer func() {
 		r := recover()
-		if r == nil || !strings.Contains(fmt.Sprint(r), "nonesuch") {
-			t.Fatalf("knobbedFlags over an undocumented flag: recovered %v, want a refusal naming nonesuch", r)
+		if fmt.Sprint(r) != `gomutant: guidance: verb "run" documents no knob "nonesuch" on the cli surface` {
+			t.Fatalf("knobbedFlags over an undocumented flag: recovered %v, want the package's refusal naming nonesuch", r)
 		}
 	}()
 	knobbedFlags(cmd, "run")

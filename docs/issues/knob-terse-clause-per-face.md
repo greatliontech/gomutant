@@ -14,4 +14,4 @@ parenthesis naming the other face, or the cross-face prose is accepted
 as the price of one line — a surface-doctrine judgment stipulator's
 issue of the same name puts to the same chunk.
 
-Lands: cross-tool train chunk 278 — gomutant's bump behind gofresh 266 (the guidance face projections; 184 is stipulator's rule chunk)
+Lands: gofresh chunk 184 — the fleet clause rule (retargeted at gomutant's bump behind gofresh 266: adopting gofresh's clause projection changes no served prose, so the per-face question is the rule chunk's)

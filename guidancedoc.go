@@ -32,15 +32,30 @@ func Guidance() *guidance.Document { return embeddedGuidance.Must() }
 // surfaces loudly.
 func GuidanceDocument() (*guidance.Document, error) { return embeddedGuidance.Document() }
 
-// KnobClause is the served text of one knob under a face's spelling:
-// the document's terse clause (gofresh's knob projection). A knob the
-// document does not carry is a build defect — the coverage judgments
-// name it — so the read refuses loudly at the face's construction
-// rather than serving an empty description (REQ-mcp-guidance).
-func KnobClause(face, verb, name string) string {
-	k, err := Guidance().Knob(face, verb, name)
-	if err != nil {
-		panic("gomutant: guidance knob: " + err.Error())
-	}
-	return k.Clause()
+// GuidanceKnob is one knob under a face's spelling, read at the face's
+// construction: a knob the document does not carry is a build defect
+// — the coverage judgments name it — refused loudly by the package
+// ("gomutant: guidance: <cause>") rather than served empty
+// (REQ-mcp-guidance).
+func GuidanceKnob(face, verb, name string) guidance.Knob {
+	return embeddedGuidance.MustKnob(face, verb, name)
+}
+
+// GuidanceRegistration is a verb's registration under a face's
+// spelling — its purpose, help, long rendering, knobs, and the prose
+// pointer — read at the face's construction with the same refusal
+// (REQ-mcp-guidance).
+func GuidanceRegistration(face, verb string) guidance.Registration {
+	return embeddedGuidance.MustRegistration(face, verb)
+}
+
+// DescribeGuidanceSchema describes a served input schema's every
+// property the walk reaches — a nested object's properties and an
+// array's items — with the verb's knob of the property's own name
+// under the mcp spelling, refusing a property the document does not
+// knob; the wire face's coverage judgment enumerates the served
+// schema itself, so the walk's own name list is not read here
+// (REQ-mcp-guidance).
+func DescribeGuidanceSchema(verb string, root guidance.SchemaNode) {
+	embeddedGuidance.MustDescribeSchema("mcp", verb, root)
 }

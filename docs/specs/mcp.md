@@ -149,27 +149,32 @@ surface-table pin).
 embedded guidance document's projections (`docs/guidance.md`, in the
 fleet format gofresh's guidance spec defines): every tool description
 and CLI Short/Long is the document's rendering for that surface and
-spelling, the server instructions are the decision map verbatim, and
-a `guidance` tool (and CLI command, its verb positional) serves a
-verb's full section or, verbless, the decision map — refusing an
-unknown verb with the decision map named as the way to enumerate.
-Both surfaces bind the per-surface coverage judgment: every listed
-tool and schema property, and every visible leaf command and local
-flag, documented exactly, both directions — cobra's help and
+spelling, the server instructions are the decision map verbatim, and a
+`guidance` tool (and CLI command, its verb positional) serves a verb's
+full section or, verbless, the decision map — refusing an unknown verb
+with the decision map named as the way to enumerate. Both surfaces bind
+the per-surface coverage judgment: every listed tool and schema property
+at every depth the schema walk reaches — a nested object's properties
+and an array's items, each a knob of its own name (no served schema
+carries a map-typed or variant shape the walk does not reach — the wire
+coverage judgment refuses one) — and every visible leaf command and
+local flag, documented exactly, both directions — cobra's help and
 completion plumbing is surface plumbing outside the judgment. The
 document's knob prose is the authoritative superset; per-parameter
-schema descriptions and flag usage strings are the document's
-rendering — each knob's terse clause (gofresh's knob projection: the
-prose up to its first semicolon outside parentheses, whitespace and a
-trailing period trimmed) in the face's usage grammar (the CLI's usage
-drops the clause's code spans, which pflag would print as the flag's
-value name, and its default parentheticals, which cobra prints itself;
-the schema description is the clause verbatim), set at registration
-and never a second literal beside the document — so a served string
-cannot contradict the document, and the coverage judgment compares
-the rendered text, never the names alone. The long help of a CLI verb
-with knobs names the guidance command as the served path to their
-whole prose.
+schema descriptions and flag usage strings are gofresh's projections of
+the document — the schema rendering on the wire (each knob's terse
+clause verbatim, at every depth) and the usage rendering on the CLI (the
+clause in pflag's grammar: code spans unquoted, the default
+parenthetical cobra prints itself dropped) — served at construction from
+the registration (a verb's purpose, knobless help, and prose pointer),
+the knob projection (each flag's usage), and the schema rendering (each
+property's description), never a second literal or a grammar of this
+tool's own, so a served string cannot contradict the document and the
+coverage judgment compares the rendered text, never the names alone; a
+knob the document does not carry refuses the face's construction with
+the package's wording. The long help of a CLI verb with knobs carries
+the registration's pointer to the guidance command as the served path to
+their whole prose.
 
 **REQ-mcp-findings-doc** (behavior): The server MUST maintain the same
 findings document the CLI maintains — a measuring tool merges fresh findings

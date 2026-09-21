@@ -2175,17 +2175,6 @@ func mcpOracleMemoryBytes(mib *int64) int64 {
 // the bare guidance call open with.
 func guidanceOrientation() string { return gomutant.Guidance().Orientation() }
 
-// guidanceDescription is a tool's one-line purpose, served from the
-// guidance document under the tool's mcp spelling
-// (REQ-mcp-guidance).
-func guidanceDescription(verb string) string {
-	d, err := gomutant.Guidance().Description("mcp", verb)
-	if err != nil {
-		panic("mcpserver: " + err.Error())
-	}
-	return d
-}
-
 // guidanceIn asks for one verb's section or, empty, the decision map.
 type guidanceIn struct {
 	Verb string `json:"verb,omitempty"`

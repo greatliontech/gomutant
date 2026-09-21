@@ -4,30 +4,54 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/greatliontech/gofresh/guidance"
 	"github.com/greatliontech/gomutant"
 )
 
-// knobbedTool is a tool whose input schema's every property description
-// is the guidance document's knob prose rendered — its terse clause —
-// under the tool's mcp spelling, never a second literal; a knob the
-// document does not carry refuses at construction, so the served set
-// cannot outgrow the document silently (REQ-mcp-guidance).
+// knobbedTool is a tool whose input schema's every property
+// description, at every depth — a nested object's fields and an array
+// item's fields alike — is the guidance document's knob prose
+// rendered (its terse clause) under the tool's mcp spelling, never a
+// second literal, and whose description is the registration's
+// purpose; a property the document does not knob refuses at
+// construction, so the served set cannot outgrow the document silently
+// (REQ-mcp-guidance).
 func knobbedTool[In any](verb string) *mcp.Tool {
 	schema, err := jsonschema.For[In](nil)
 	if err != nil {
 		panic("mcpserver: input schema for " + verb + ": " + err.Error())
 	}
-	knobSchema(verb, schema)
-	return &mcp.Tool{Name: verb, Description: guidanceDescription(verb), InputSchema: schema}
+	gomutant.DescribeGuidanceSchema(verb, schemaNode{schema})
+	return &mcp.Tool{Name: verb, Description: gomutant.GuidanceRegistration("mcp", verb).Description, InputSchema: schema}
 }
 
-// knobSchema renders every top-level property description — the
-// tool's knobs, the names the coverage judgment enumerates. A nested
-// item's fields (an edit's file, old_string, new_string) are not knobs
-// and carry no description of their own: the knob's prose describes
-// the item's shape.
-func knobSchema(verb string, schema *jsonschema.Schema) {
-	for name, prop := range schema.Properties {
-		prop.Description = gomutant.KnobClause("mcp", verb, name)
+// schemaNode adapts a JSON schema to the walk gofresh's guidance
+// package owns: an object's property names and nodes, an array's item
+// schema, the description setter — the two-value answers keep a nil
+// schema pointer out of the interface.
+type schemaNode struct{ s *jsonschema.Schema }
+
+func (n schemaNode) Properties() []string {
+	names := make([]string, 0, len(n.s.Properties))
+	for name := range n.s.Properties {
+		names = append(names, name)
 	}
+	return names
 }
+
+func (n schemaNode) Property(name string) (guidance.SchemaNode, bool) {
+	p, ok := n.s.Properties[name]
+	if !ok || p == nil {
+		return nil, false
+	}
+	return schemaNode{p}, true
+}
+
+func (n schemaNode) Items() (guidance.SchemaNode, bool) {
+	if n.s.Items == nil {
+		return nil, false
+	}
+	return schemaNode{n.s.Items}, true
+}
+
+func (n schemaNode) Describe(text string) { n.s.Description = text }

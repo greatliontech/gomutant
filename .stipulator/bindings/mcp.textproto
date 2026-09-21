@@ -223,8 +223,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-guidance"
-  content_hash: "2bab6f2254eb9ca42153d04f332459c18abd9d5fc35b9ff3ee81fdcbdb7aeb9e"
-  source_hash: "99d76b1deb4d86135e0c918c57cb8a98070a8ca773cee960d3cdef9b6347cec6"
+  content_hash: "5619b0110f09dc14c61be4423df261d6b239e4387b221722a209842231a19f53"
+  source_hash: "0fc7aed558caf638299dc3a266c9a55c79ccfc6e49cc60277163b6a338869187"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestGuidanceCoversTheWireSurface"
   role: BINDING_ROLE_TESTS
@@ -233,8 +233,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-guidance"
-  content_hash: "2bab6f2254eb9ca42153d04f332459c18abd9d5fc35b9ff3ee81fdcbdb7aeb9e"
-  source_hash: "99d76b1deb4d86135e0c918c57cb8a98070a8ca773cee960d3cdef9b6347cec6"
+  content_hash: "5619b0110f09dc14c61be4423df261d6b239e4387b221722a209842231a19f53"
+  source_hash: "0fc7aed558caf638299dc3a266c9a55c79ccfc6e49cc60277163b6a338869187"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestGuidanceToolServesTheDocument"
   role: BINDING_ROLE_TESTS
@@ -243,8 +243,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-guidance"
-  content_hash: "2bab6f2254eb9ca42153d04f332459c18abd9d5fc35b9ff3ee81fdcbdb7aeb9e"
-  source_hash: "99d76b1deb4d86135e0c918c57cb8a98070a8ca773cee960d3cdef9b6347cec6"
+  content_hash: "5619b0110f09dc14c61be4423df261d6b239e4387b221722a209842231a19f53"
+  source_hash: "0fc7aed558caf638299dc3a266c9a55c79ccfc6e49cc60277163b6a338869187"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestGuidanceDocumentParses"
   role: BINDING_ROLE_TESTS
@@ -253,8 +253,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-guidance"
-  content_hash: "2bab6f2254eb9ca42153d04f332459c18abd9d5fc35b9ff3ee81fdcbdb7aeb9e"
-  source_hash: "99d76b1deb4d86135e0c918c57cb8a98070a8ca773cee960d3cdef9b6347cec6"
+  content_hash: "5619b0110f09dc14c61be4423df261d6b239e4387b221722a209842231a19f53"
+  source_hash: "0fc7aed558caf638299dc3a266c9a55c79ccfc6e49cc60277163b6a338869187"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestGuidanceCoversTheCLISurface"
   role: BINDING_ROLE_TESTS
@@ -263,8 +263,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-guidance"
-  content_hash: "2bab6f2254eb9ca42153d04f332459c18abd9d5fc35b9ff3ee81fdcbdb7aeb9e"
-  source_hash: "99d76b1deb4d86135e0c918c57cb8a98070a8ca773cee960d3cdef9b6347cec6"
+  content_hash: "5619b0110f09dc14c61be4423df261d6b239e4387b221722a209842231a19f53"
+  source_hash: "0fc7aed558caf638299dc3a266c9a55c79ccfc6e49cc60277163b6a338869187"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestGuidanceCommandServesTheDocument"
   role: BINDING_ROLE_TESTS
@@ -353,8 +353,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-guidance"
-  content_hash: "2bab6f2254eb9ca42153d04f332459c18abd9d5fc35b9ff3ee81fdcbdb7aeb9e"
-  source_hash: "99d76b1deb4d86135e0c918c57cb8a98070a8ca773cee960d3cdef9b6347cec6"
+  content_hash: "5619b0110f09dc14c61be4423df261d6b239e4387b221722a209842231a19f53"
+  source_hash: "0fc7aed558caf638299dc3a266c9a55c79ccfc6e49cc60277163b6a338869187"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestBatchShapeIsStatedWhereItIsRead"
   role: BINDING_ROLE_TESTS
@@ -823,8 +823,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-guidance"
-  content_hash: "2bab6f2254eb9ca42153d04f332459c18abd9d5fc35b9ff3ee81fdcbdb7aeb9e"
-  source_hash: "99d76b1deb4d86135e0c918c57cb8a98070a8ca773cee960d3cdef9b6347cec6"
+  content_hash: "5619b0110f09dc14c61be4423df261d6b239e4387b221722a209842231a19f53"
+  source_hash: "0fc7aed558caf638299dc3a266c9a55c79ccfc6e49cc60277163b6a338869187"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestKnobbedFlagsRefusesAnUndocumentedFlag"
   role: BINDING_ROLE_TESTS
@@ -833,10 +833,10 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-guidance"
-  content_hash: "2bab6f2254eb9ca42153d04f332459c18abd9d5fc35b9ff3ee81fdcbdb7aeb9e"
-  source_hash: "99d76b1deb4d86135e0c918c57cb8a98070a8ca773cee960d3cdef9b6347cec6"
+  content_hash: "5619b0110f09dc14c61be4423df261d6b239e4387b221722a209842231a19f53"
+  source_hash: "0fc7aed558caf638299dc3a266c9a55c79ccfc6e49cc60277163b6a338869187"
   backend: "go"
-  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestKnobSchemaRefusesAnUndocumentedProperty"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestDescribeGuidanceSchemaRefusesAnUndocumentedProperty"
   role: BINDING_ROLE_TESTS
-  shape_hash: "0a3346871c4923ab5866d689dcecf98f627ddfae1d915b8ea9b0fdc0ab9a3a27"
+  shape_hash: "11f6ac4deef9359845608390317f7dd50ae0cdfa70d06778ebdcc1894aa2c2d8"
 }
