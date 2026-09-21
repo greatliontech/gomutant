@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 // Exemption is one reviewed entry of the committed exemption record
@@ -57,7 +59,7 @@ func LoadExemptions(path string) ([]Exemption, error) {
 	}
 	for i, e := range doc.Exemptions {
 		if carriesAttribution(e.Reason) {
-			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d names a moved-bracket reason with its attribution %q — the attribution is fresh per measurement; name the clause alone", path, i, e.Reason[strings.LastIndex(e.Reason, " ["):])
+			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d names a reason with its attribution %q — the attribution is fresh per measurement; name the clause alone (a refused path itself spelled like an attribution is matched by the clause before it)", path, i, e.Reason[len(reasonClause(e.Reason)):])
 		}
 		if e.Subject == "" || e.Reason == "" || e.Rationale == "" {
 			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d needs subject, reason, and rationale", path, i)
@@ -69,10 +71,11 @@ func LoadExemptions(path string) ([]Exemption, error) {
 // exemptionFor returns the entry accepting (subject, reason) exactly,
 // or nil. Matching is exact on the subject and on the reason's clause:
 // a clause drifting even one byte is a different instability the
-// record never reviewed. The producer may append a bracketed
-// attribution to a clause — which files moved a bracket, and when —
-// that is diagnostic detail, fresh per measurement, which the clause
-// does not include (REQ-result-exemptions).
+// record never reviewed. The producer may append an attribution to a
+// clause — a classification refusal's operation, name, and directory,
+// or the files that moved a bracket, and when — that is diagnostic
+// detail, fresh per measurement, which the clause does not include
+// (REQ-result-exemptions).
 func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
 	clause := reasonClause(reason)
 	for i := range exemptions {
@@ -83,16 +86,30 @@ func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
 	return nil
 }
 
-// movedBracketClause prefixes the one reason the producer attributes:
-// a moved observation bracket, whose trailing " [...]" names the
-// members that moved. Every other reason ends in a path, and a path may
-// legitimately end in a bracketed segment, so the strip is gated on
-// this prefix and touches no other clause.
+// movedBracketClause prefixes the one reason the producer attributes
+// in the bracket form: a moved observation bracket, whose trailing
+// " [...]" names the members that moved. Every other reason ends in a
+// path, and a path may legitimately end in a bracketed segment, so the
+// strip is gated on this prefix and touches no other clause.
 const movedBracketClause = "observation bracket moved: "
 
-// reasonClause is a recorded reason without the producer's trailing
-// bracketed attribution — present only on the moved-bracket clause.
+// reasonClause is a recorded reason without the producer's
+// attribution: the classification refusals' " — <op> …" suffix, split
+// by gofresh's one implementation (runtimeinput.RefusalClause), and
+// the moved-bracket clause's trailing bracketed member list, which
+// gofresh publishes no split for. The exemption record's readers —
+// the match and the dead-acceptance refusal — key on it; the freshness
+// judgments of recorded evidence compare a reason whole, the
+// attribution included, since there the attribution (a recorded
+// path's resolved target) is part of the state being reproduced
+// (REQ-result-layers).
 func reasonClause(reason string) string {
+	return bracketClause(runtimeinput.RefusalClause(reason))
+}
+
+// bracketClause strips the moved-bracket clause's trailing bracketed
+// attribution, present only on that clause.
+func bracketClause(reason string) string {
 	if !strings.HasPrefix(reason, movedBracketClause) || !strings.HasSuffix(reason, "]") {
 		return reason
 	}
@@ -102,9 +119,9 @@ func reasonClause(reason string) string {
 	return reason
 }
 
-// carriesAttribution reports whether an entry's reason is a
-// moved-bracket clause pasted with its attribution: such an entry can
-// never match (the attribution is fresh per measurement), so the record
+// carriesAttribution reports whether an entry's reason is a clause
+// pasted with its attribution, in either form: such an entry can never
+// match (the attribution is fresh per measurement), so the record
 // refuses it rather than holding a dead acceptance.
 func carriesAttribution(reason string) bool {
 	return reasonClause(reason) != reason

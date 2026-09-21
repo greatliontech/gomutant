@@ -32,8 +32,8 @@ func TestParseDynamicStateVouches(t *testing.T) {
 		"a.example/dep", "", ":Var", "a.example/dep:", "a.example/dep:not-ident",
 		"a.example/dep:9lives", "a.example/dep:Var.Sub", "a.example/dep\x01x:Var", "a.example/dep :Var",
 	} {
-		if _, err := ParseDynamicStateVouches([]string{bad}); err == nil {
-			t.Fatalf("malformed vouch %q accepted", bad)
+		if _, err := ParseDynamicStateVouches([]string{bad}); err == nil || !strings.HasPrefix(err.Error(), "gomutant: ") {
+			t.Fatalf("malformed vouch %q: %v; want the tool's own refusal", bad, err)
 		}
 	}
 }

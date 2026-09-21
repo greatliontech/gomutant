@@ -91,6 +91,27 @@ func TestExemptionLiftsUnverifiableClauseExactly(t *testing.T) {
 	if got := reasonClause("plain clause"); got != "plain clause" {
 		t.Fatalf("reasonClause without an attribution = %q", got)
 	}
+	// A classification refusal's attribution — gofresh's " — <op> …"
+	// suffix — is split by gofresh's own implementation; an entry
+	// naming the clause accepts the attributed reason, and the two
+	// forms compose (a moved-bracket reason never carries the other).
+	const classified = `external directory input: /srv/fixtures — open "/srv/fixtures" in "/home/u/repo/pkg"`
+	if got := reasonClause(classified); got != "external directory input: /srv/fixtures" {
+		t.Fatalf("reasonClause over a classification attribution = %q", got)
+	}
+	classifiedFinding := f
+	classifiedFinding.TargetEvidence.RuntimeReason = classified
+	classifiedFinding.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
+	for i := range classifiedFinding.OracleEvidence {
+		classifiedFinding.OracleEvidence[i].RuntimeReason = classified
+	}
+	if ok, reason := Committable(classifiedFinding, dir, []Exemption{{Subject: "example.com/m.TestF", Reason: "external directory input: /srv/fixtures", Rationale: "x"}}); !ok {
+		t.Fatalf("a classification-attributed reason escaped its clause's entry: %s", reason)
+	}
+	// A different clause under the same attribution is another reason.
+	if reasonClause(`external directory input: /srv/other — open "/srv/other" in "/home/u/repo/pkg"`) == reasonClause(classified) {
+		t.Fatal("a different clause read as the same reason")
+	}
 	// Every other clause ends in a path, and a path may end in a
 	// bracketed segment: only the moved-bracket clause is stripped.
 	if bracketed := "external directory input: /srv/fixtures [2026]"; reasonClause(bracketed) != bracketed {
@@ -401,8 +422,17 @@ func TestExemptionRecordRefusesAnAttributedReason(t *testing.T) {
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), "name the clause alone") {
-		t.Fatalf("attributed entry: %v; want the record's refusal", err)
+	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), `attribution " [recently touched: lib/a.go (2026-09-05T10:00:00Z)]" — the attribution is fresh per measurement; name the clause alone`) {
+		t.Fatalf("attributed entry: %v; want the record's refusal naming the attribution", err)
+	}
+	// The classification form's pasted attribution is refused the same
+	// way, naming the attribution.
+	classified := `{"version":1,"exemptions":[{"subject":"example.com/m.TestF","reason":"external directory input: /srv — open \"/srv\" in \"/home/u/repo/pkg\"","rationale":"pasted"}]}`
+	if err := os.WriteFile(path, []byte(classified), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), `attribution " — open \"/srv\" in \"/home/u/repo/pkg\""`) {
+		t.Fatalf("classification-attributed entry: %v; want the record's refusal naming the attribution", err)
 	}
 	plain := `{"version":1,"exemptions":[{"subject":"example.com/m.TestF","reason":"observation bracket moved: lib","rationale":"reviewed"}]}`
 	if err := os.WriteFile(path, []byte(plain), 0o644); err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -51,7 +52,14 @@ func TestAnalysisEventHeadCarriesTheUnitPosition(t *testing.T) {
 // cadence surface reads a finished operation as work in flight
 // (REQ-exec-run-status).
 func TestAnalysisEventStretchIsThePerUnitPhases(t *testing.T) {
-	for _, phase := range []string{"list", "typecheck", "load", "hash", "observe", "runtime", "prove"} {
+	// The set is the engine's — gofresh.UnitPhases, pinned here by its
+	// literal so a phase the engine adds or drops is a conscious move
+	// on this face too.
+	unit := []string{"list", "typecheck", "load", "hash", "observe", "runtime", "prove"}
+	if got := gofresh.UnitPhases(); !reflect.DeepEqual(got, unit) {
+		t.Fatalf("gofresh.UnitPhases() = %v, want %v", got, unit)
+	}
+	for _, phase := range unit {
 		label, ok := (AnalysisEvent{Phase: phase, Package: "p", Index: 1, Total: 2}).Stretch()
 		if !ok || label != StretchAnalysis(AnalysisEvent{Phase: phase, Package: "p", Index: 1, Total: 2}) {
 			t.Errorf("%s: Stretch() = %q, %v; want the analysis stretch", phase, label, ok)

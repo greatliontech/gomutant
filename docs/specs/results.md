@@ -513,12 +513,16 @@ from the record on every decision, so deleting an entry revokes the
 acceptance for every later classification without a stamp rewrite - never a
 silent global switch. Matching is exact on subject and on the reason's
 clause: an instability drifting even one byte is a different instability
-the record never reviewed. The trailing bracketed attribution the
-producer appends to the moved-bracket clause alone — which files moved
-the bracket, and when — is diagnostic detail, fresh per measurement, that
-the clause does not include; an entry naming it could never match, so
-the record refuses it. Every other clause ends in a path and is matched
-whole, a bracketed segment of the path included.
+the record never reviewed. The attribution the producer appends — a
+classification refusal's operation, logged name, and directory after
+its separator, split by Gofresh's one implementation of that split, or
+the moved-bracket clause's trailing bracketed member list, which files
+moved the bracket and when — is diagnostic detail, fresh per
+measurement, that the clause does not include; an entry naming either
+could never match, so the record refuses it (a refused path itself
+spelled like an attribution is matched by the clause before it). Every
+other clause ends in a path and is matched whole, a bracketed segment
+of the path included.
 
 **REQ-result-ephemeral-attest** (behavior): A committed
 ephemeral-equivalence record beside the findings document

@@ -378,19 +378,10 @@ func ParseScratchNamespaces(entries []string) ([]runtimeinput.ScratchNamespace, 
 // characters and a variable that is not one Go identifier refuse) —
 // deduplicated and sorted.
 func ParseDynamicStateVouches(entries []string) ([]string, error) {
-	var identities []string
-	seen := map[string]bool{}
-	for _, entry := range entries {
-		identity, err := gofresh.ParseVouchEntry(entry)
-		if err != nil {
-			return nil, fmt.Errorf("gomutant: %w", err)
-		}
-		if !seen[identity] {
-			seen[identity] = true
-			identities = append(identities, identity)
-		}
+	identities, err := gofresh.ParseVouchEntries(entries)
+	if err != nil {
+		return nil, fmt.Errorf("gomutant: %w", err)
 	}
-	slices.Sort(identities)
 	return identities, nil
 }
 

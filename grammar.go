@@ -172,22 +172,15 @@ type AnalysisEvent struct {
 	Detail  string `json:"detail,omitempty"`
 }
 
-// analysisUnitPhases are the engine's per-unit work phases — the ones
-// that name a stretch in flight when they arrive. The other phases are
-// facts about an operation (a served summary, a cancellation, a budget
-// cut) or diagnostics, reported when known, never work in flight.
-var analysisUnitPhases = map[string]bool{
-	"list": true, "typecheck": true, "load": true, "hash": true,
-	"observe": true, "runtime": true, "prove": true,
-}
-
 // Stretch names the stretch a keep-alive announces — the pass's unit
 // with its position, under the analysis lead — and reports false for
 // an event that names no stretch: a fact about an operation or a
 // payload-bearing diagnostic (REQ-exec-run-status). Both faces' cadence
-// surfaces read this one classification.
+// surfaces read this one classification, and the per-unit phase set is
+// the engine's own (gofresh.UnitPhases, read through Progress.IsUnit):
+// a phase the engine adds names a stretch here without a change.
 func (a AnalysisEvent) Stretch() (string, bool) {
-	if a.Detail != "" || !analysisUnitPhases[a.Phase] {
+	if a.Detail != "" || !(gofresh.Progress{Phase: a.Phase}).IsUnit() {
 		return "", false
 	}
 	return StretchAnalysis(a), true
