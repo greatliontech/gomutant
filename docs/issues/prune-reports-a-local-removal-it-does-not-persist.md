@@ -1,6 +1,6 @@
 # A prune of a machine-local record reports the removal and keeps the record
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 282 (record verbs over both layers)
 
 `prune` over a tree whose one unresolvable record lives in the
 machine-local overlay reports it pruned, leaves it in the overlay,

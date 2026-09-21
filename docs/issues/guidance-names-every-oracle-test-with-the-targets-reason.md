@@ -1,6 +1,6 @@
 # Guidance names every oracle test with the target's unverifiable reason
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 277 (the unverifiable read attributed to the subject whose observation carried it, or named the union's — the reading of Observation.Attribution at 277)
 
 A delta run over pb's check subsystem (gomutant 004ee25) reported
 each target's oracle evidence unstable and, per target, guided:

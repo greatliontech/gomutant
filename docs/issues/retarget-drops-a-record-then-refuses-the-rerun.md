@@ -1,6 +1,6 @@
 # A package retarget drops one record, and the identical rerun refuses whole
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 282 (record verbs over both layers)
 
 A `retarget` over a package rename reported every record rewritten
 and wrote the document one record short; the same command over the

@@ -1,6 +1,6 @@
 # A package-crash kill's output head omits the panic
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 267 (the run's grammars one source on both faces — the package-crash kill carries the panic's bounded head)
 
 An ephemeral probe whose mutant panics outside any test goroutine
 is attributed, per REQ-exec-attribution, as a package-scope failure

@@ -1,6 +1,6 @@
 # The banked line says "the findings document" for records banked machine-local
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 282 (record verbs over both layers — the banked and decision lines name the layer)
 
 A delta run interrupted by the host's memory guard after eighty-eight
 minutes reported: "87 target(s) committed to the findings document

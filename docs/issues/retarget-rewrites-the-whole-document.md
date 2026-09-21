@@ -1,6 +1,6 @@
 # A prefix retarget rewrites most of the findings document
 
-Lands: awaiting triage
+Lands: cross-tool train chunk 282 (record verbs over both layers — stable table emission; the rename's re-digest cost measured at its open)
 
 A `retarget` over a package rename that touched 21 of 290 records
 re-emitted nearly the whole findings document: the runtime-inputs
