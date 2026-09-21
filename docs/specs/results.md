@@ -51,11 +51,20 @@ the run had no runtime exposure to prove complete, and its discard is a pure
 function of the mutant source under the toolchain and build-configuration
 pins; an oracle group that did run contributes its completed observation to
 the union as usual.
-The observation proof is encoded by required `observationAssertion`,
-`observationStrategy`, `observationSubjectPackage`,
-`observationSubjectSymbol`, `observationObservable`, and
-`observationEvidence` fields plus `observationReason` exactly when the proof
-disposition is not observable.
+A subject evidence row is encoded as `symbol`, the fingerprint under
+`fingerprint` in Gofresh's published record form (its overview's
+fingerprint-record clause: the closure hashes, the code guards, the
+observation assertion and nested proof, the assertions, the strategies,
+the manifest and digest, the code-result kind), `moduleBase`,
+`runtimeUnverifiable`, and `runtimeReason`; the fingerprint is absent
+only on the zero row a shaped finding carries. The record form's own
+decoder judges the fingerprint's shape (a key it does not define
+refuses — the record is Gofresh's contract, and a field it grows rides
+a Gofresh release and this document's version); completeness is
+gomutant's: every pin a serving path reads non-empty (the symbol, the
+two closure hashes, the two code guards, the observation assertion and
+proof, the manifest and its digest), unverifiable exactly when a reason
+is recorded, and the proof observable exactly when it carries no reason.
 
 **REQ-result-record** (behavior): A finding record MUST be keyed by the
 mutated symbol and record the available inputs that produced it — target subject evidence,
@@ -202,7 +211,13 @@ equivalence the inputs don't back. A wrongly widened open set costs a
 re-judgment or a spurious caller-policy failure — the safe direction —
 where a wrongly served claim would be the corrupted flattering measurement
 the keystone refuses (REQ-core-attributed-kills). Tolerance governs unknown
-*fields* within an understood document; an unknown document *version* is the
+*fields* of gomutant's own within an understood document; the fingerprint
+embedded in an evidence row is Gofresh's published record, whose key set is
+Gofresh's contract and whose decoder refuses a key it does not define, so a
+fingerprint field Gofresh grows reaches every row and an older reader of
+the same version refuses the document by that key — which is why such
+growth rides a version bump (REQ-result-export), never a tolerated field.
+An unknown document *version* is the
 structural boundary and is rejected per REQ-result-export's version tag —
 a version AHEAD of the reader's range naming the probable cause and the
 signal (a newer gomutant likely wrote the document; a long-lived reader
@@ -634,7 +649,15 @@ list when any candidate carries one, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
 it does not understand; version 12 adds the document-level
 coverage-bounds table (REQ-result-unreached-bound), required present
-(empty, never null) in a document of that version. A list the document requires — a record's
+(empty, never null) in a document of that version; version 13 embeds
+Gofresh's fingerprint record form in every evidence row (a shape an
+older reader cannot re-derive), the flat rows of every version before
+it upgraded on read to the same shape and judged by the same rules,
+spliced in place so every other byte of a row's finding — a duplicated
+key included — still reaches the inline decoder's refusals. The
+embedded record's key set rides the version: a fingerprint field
+Gofresh grows requires a document version bump, since an older reader of the
+same version refuses the row's unknown key rather than tolerating it. A list the document requires — a record's
 oracle evidence and operator summaries, a manual shape's edit list — is
 written present (empty, never null); a list the document omits when
 empty is absent. A subject's evidence may carry a tree-relative module base
@@ -665,7 +688,7 @@ unrepresentable, and a 70 MB field store re-encodes at 3.2 MB with
 every record byte-identical on round-trip. An older reader cannot
 re-inline the tables, so the shape rides the bump (the
 candidate-evidence precedent); versions 4-10 keep reading through the
-inline path, and an expanded interned document (versions 11 and 12)
+inline path, and an expanded interned document (versions 11 to 13)
 re-validates through that same path record by record, so every
 inline-era semantic check
 applies verbatim while the reader's footprint and churn track the

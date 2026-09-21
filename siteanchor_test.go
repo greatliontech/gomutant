@@ -98,7 +98,7 @@ func TestParseFindingsAcceptsVersionFour(t *testing.T) {
 	if !strings.Contains(string(data), current) {
 		t.Fatalf("fixture does not carry the current version:\n%s", data)
 	}
-	old := strings.Replace(string(data), current, "\"version\": 4", 1)
+	old := strings.Replace(string(legacyRows(t, data)), strings.ReplaceAll(current, " ", ""), "\"version\":4", 1)
 	parsed, err := ParseFindings([]byte(old))
 	if err != nil {
 		t.Fatalf("version-4 document refused: %v", err)

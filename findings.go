@@ -15,7 +15,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -25,66 +24,42 @@ import (
 // fingerprint plus the completed processes' merged runtime disposition shared
 // by the finding; a process that could not prove its log complete is excluded
 // here and carried as its candidate's CandidateEvidence instead
-// (REQ-result-record).
+// (REQ-result-record). The fingerprint is gofresh's own — its published
+// record form under `fingerprint`, every field promoted here — beside
+// gomutant's four: the symbol, the module base, and the runtime
+// disposition. The type owns its wire form (the embedded record's
+// encoders are shadowed, never promoted): a row is the five keys, the
+// fingerprint absent only on the zero row a shaped finding carries.
 type SubjectEvidence struct {
-	Symbol         string `json:"symbol"`
-	MaximalClosure string `json:"maximalClosure"`
-	// TestVariantClosure is the subject package's test-variant compartment
-	// hash: the gofresh pin that distinguishes "a sibling test moved" from
-	// every other drift. The killer-drift gate refreshes a target-package
-	// subject's recorded pin to the current one — the refresh its inert
-	// ledger diff licenses — and requires the refreshed evidence plainly
-	// valid; inspection and attribution surface gofresh's stable "test
-	// variants" verdict reason on refusal paths. It is required and never
-	// legitimately empty (gofresh defines a non-empty identity even for a
-	// package with no test files), so a document lacking it is refused at
-	// parse and an in-memory record built without it fails closed to stale.
-	TestVariantClosure        string `json:"testVariantClosure"`
-	Toolchain                 string `json:"toolchain"`
-	BuildConfig               string `json:"buildConfig"`
-	ObservationAssertion      string `json:"observationAssertion"`
-	ObservationStrategy       string `json:"observationStrategy"`
-	ObservationSubjectPackage string `json:"observationSubjectPackage"`
-	ObservationSubjectSymbol  string `json:"observationSubjectSymbol"`
-	ObservationObservable     bool   `json:"observationObservable"`
-	ObservationReason         string `json:"observationReason,omitempty"`
-	ObservationEvidence       string `json:"observationEvidence"`
-	PurityAssertion           string `json:"purityAssertion,omitempty"`
-	// DynamicStateVouches names the caller vouches that discharged
-	// shared-dynamic-state culprits reachable from this subject at
-	// capture (gofresh's sorted comma-joined identities): the
-	// acceptance is auditable in the record, never silent. Audit only —
+	Symbol string
+	// Fingerprint is the recorded gofresh evidence. Its
+	// TestVariantClosure is the subject package's test-variant
+	// compartment hash: the gofresh pin that distinguishes "a sibling
+	// test moved" from every other drift. The killer-drift gate
+	// refreshes a target-package subject's recorded pin to the current
+	// one — the refresh its inert ledger diff licenses — and requires
+	// the refreshed evidence plainly valid; inspection and attribution
+	// surface gofresh's stable "test variants" verdict reason on refusal
+	// paths. It is required and never legitimately empty (gofresh
+	// defines a non-empty identity even for a package with no test
+	// files), so a document lacking it is refused at parse and an
+	// in-memory record built without it fails closed to stale. Its
+	// DynamicStateVouches and PackageProcessDischarges are audit only —
 	// serving derives from the current engine's own vouch set, so a
 	// withdrawn vouch resurfaces its culprit without any comparison
-	// here, and the field rides the current document version (an old
-	// reader dropping it changes no verdict).
-	DynamicStateVouches string `json:"dynamicStateVouches,omitempty"`
-	// PackageProcessDischarges names the package-level variables whose
-	// shared-dynamic-state downgrade the package-process attestation's
-	// binary-scoped reachability judgment discharged for this subject
-	// (gofresh REQ-closure-shared-dynamic-state). An attestation-borne
-	// acceptance riding the evidence — audit metadata exactly as
-	// DynamicStateVouches: excluded from the attestation-pin
-	// comparison (verdicts re-derive from current facts, so serving
-	// soundness never rests on the recorded field).
-	PackageProcessDischarges string `json:"packageProcessDischarges,omitempty"`
-	// DynamicStateStrategy records the shared-dynamic-state derivation
-	// the evidence was computed under (gofresh's structural twin of the
-	// observation strategy): a strategy move — or a record predating
-	// the field — re-measures at the evidence check rather than serving
-	// verdicts under semantics it was not computed by. A measured pin,
-	// never zeroed from the attestation-pin view.
-	DynamicStateStrategy string `json:"dynamicStateStrategy,omitempty"`
-	// ClosureStrategy records the closure identity derivation the
-	// closure hashes were folded under (gofresh's ClosureStrategy):
-	// recorded beside them and no pin itself — the hashes are
-	// self-describing to the evidence check, and the attestation gate
-	// reads them as the pins they are: a derivation change moves them
-	// (a shaped disposition sheds, an unshaped one carries with the
-	// move named), and a pre-field record (empty) has an unknown
-	// derivation, never a moved one (REQ-result-record's
-	// subject-evidence term).
-	ClosureStrategy string `json:"closureStrategy,omitempty"`
+	// here, and the attestation-pin view excludes both. Its
+	// DynamicStateStrategy is a measured pin (a strategy move — or a
+	// record predating the field — re-measures at the evidence check
+	// rather than serving verdicts under semantics it was not computed
+	// by), never zeroed from the attestation-pin view. Its
+	// ClosureStrategy is recorded beside the closure hashes and no pin
+	// itself — the hashes are self-describing to the evidence check, and
+	// the attestation gate reads them as the pins they are: a
+	// derivation change moves them (a shaped disposition sheds, an
+	// unshaped one carries with the move named), and a pre-field record
+	// (empty) has an unknown derivation, never a moved one
+	// (REQ-result-record's subject-evidence term).
+	gofresh.Fingerprint
 	// ModuleBase is the tree-relative slash base a record's manifest is
 	// anchored at when that base is not the tree root: records made
 	// since evidence anchored at the tree carry none (their identities
@@ -93,60 +68,71 @@ type SubjectEvidence struct {
 	// with no views at write time, resolves that subject's manifest
 	// against Join(moduleDir, ModuleBase), as evidenceBase does on the
 	// tree side (REQ-result-layers).
-	ModuleBase          string `json:"moduleBase,omitempty"`
-	RuntimeInputs       string `json:"runtimeInputs"`
-	RuntimeDigest       string `json:"runtimeDigest"`
-	RuntimeUnverifiable bool   `json:"runtimeUnverifiable,omitempty"`
-	RuntimeReason       string `json:"runtimeReason,omitempty"`
+	ModuleBase          string
+	RuntimeUnverifiable bool
+	RuntimeReason       string
+}
+
+// subjectEvidenceWire is the row's wire form: gomutant's four fields and
+// the fingerprint's own record, the latter absent on the zero row.
+type subjectEvidenceWire struct {
+	Symbol              string               `json:"symbol"`
+	Fingerprint         *gofresh.Fingerprint `json:"fingerprint,omitempty"`
+	ModuleBase          string               `json:"moduleBase,omitempty"`
+	RuntimeUnverifiable bool                 `json:"runtimeUnverifiable,omitempty"`
+	RuntimeReason       string               `json:"runtimeReason,omitempty"`
+}
+
+// MarshalJSON encodes the row in its wire form, the fingerprint in
+// gofresh's record form (REQ-result-record).
+func (e SubjectEvidence) MarshalJSON() ([]byte, error) {
+	w := subjectEvidenceWire{Symbol: e.Symbol, ModuleBase: e.ModuleBase, RuntimeUnverifiable: e.RuntimeUnverifiable, RuntimeReason: e.RuntimeReason}
+	if e.Fingerprint != (gofresh.Fingerprint{}) {
+		fp := e.Fingerprint
+		w.Fingerprint = &fp
+	}
+	return json.Marshal(w)
+}
+
+// subjectEvidenceKeys is the row's known key set — the outer shape the
+// parser refuses beyond; the fingerprint's own keys are its decoder's.
+var subjectEvidenceKeys = map[string]bool{"symbol": true, "fingerprint": true, "moduleBase": true, "runtimeUnverifiable": true, "runtimeReason": true}
+
+// UnmarshalJSON decodes the wire form: a duplicated outer key or a
+// null refuses, an unknown outer key is tolerated (REQ-result-tolerant);
+// the fingerprint decodes through gofresh's own decoder, which refuses
+// every shape its record form does not produce — a key the form does
+// not define included, since the record is gofresh's contract and a
+// field it grows rides a gofresh release and this document's version;
+// an absent fingerprint is the zero row.
+func (e *SubjectEvidence) UnmarshalJSON(data []byte) error {
+	fields, err := decodeKnownObject(data, subjectEvidenceKeys)
+	if err != nil {
+		return err
+	}
+	for name, value := range fields {
+		if isJSONNull(value) {
+			return fmt.Errorf("field %s is null", name)
+		}
+	}
+	var w subjectEvidenceWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	decoded := SubjectEvidence{Symbol: w.Symbol, ModuleBase: w.ModuleBase, RuntimeUnverifiable: w.RuntimeUnverifiable, RuntimeReason: w.RuntimeReason}
+	if w.Fingerprint != nil {
+		decoded.Fingerprint = *w.Fingerprint
+	}
+	*e = decoded
+	return nil
 }
 
 func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtimeinput.State) SubjectEvidence {
-	return SubjectEvidence{
-		Symbol:                    symbol,
-		MaximalClosure:            fp.MaximalClosure,
-		TestVariantClosure:        fp.TestVariantClosure,
-		Toolchain:                 fp.Guards.Toolchain,
-		BuildConfig:               fp.Guards.BuildConfig,
-		ObservationAssertion:      fp.ObservationAssertion,
-		ObservationStrategy:       fp.ObservationProof.Strategy,
-		ObservationSubjectPackage: fp.ObservationProof.Subject.Package,
-		ObservationSubjectSymbol:  fp.ObservationProof.Subject.Symbol,
-		ObservationObservable:     fp.ObservationProof.Observable,
-		ObservationReason:         fp.ObservationProof.Reason,
-		ObservationEvidence:       fp.ObservationProof.Evidence,
-		PurityAssertion:           fp.PurityAssertion,
-		DynamicStateVouches:       fp.DynamicStateVouches,
-		PackageProcessDischarges:  fp.PackageProcessDischarges,
-		DynamicStateStrategy:      fp.DynamicStateStrategy,
-		ClosureStrategy:           fp.ClosureStrategy,
-		RuntimeInputs:             fp.RuntimeInputs,
-		RuntimeDigest:             fp.RuntimeDigest,
-		RuntimeUnverifiable:       state.Unverifiable,
-		RuntimeReason:             state.Reason,
-	}
+	return SubjectEvidence{Symbol: symbol, Fingerprint: fp, RuntimeUnverifiable: state.Unverifiable, RuntimeReason: state.Reason}
 }
 
-func (e SubjectEvidence) fingerprint() gofresh.Fingerprint {
-	return gofresh.Fingerprint{
-		MaximalClosure:           e.MaximalClosure,
-		TestVariantClosure:       e.TestVariantClosure,
-		Guards:                   guard.Guards{Toolchain: e.Toolchain, BuildConfig: e.BuildConfig},
-		PurityAssertion:          e.PurityAssertion,
-		DynamicStateVouches:      e.DynamicStateVouches,
-		PackageProcessDischarges: e.PackageProcessDischarges,
-		DynamicStateStrategy:     e.DynamicStateStrategy,
-		ClosureStrategy:          e.ClosureStrategy,
-		ObservationAssertion:     e.ObservationAssertion,
-		ObservationProof: gofresh.ObservationProof{
-			Strategy:   e.ObservationStrategy,
-			Subject:    gofresh.Subject{Package: e.ObservationSubjectPackage, Symbol: e.ObservationSubjectSymbol},
-			Observable: e.ObservationObservable, Reason: e.ObservationReason, Evidence: e.ObservationEvidence,
-		},
-		RuntimeInputs: e.RuntimeInputs,
-		RuntimeDigest: e.RuntimeDigest,
-		ResultKind:    gofresh.CodeResult,
-	}
-}
+// fingerprint is the recorded gofresh evidence as the engine reads it.
+func (e SubjectEvidence) fingerprint() gofresh.Fingerprint { return e.Fingerprint }
 
 // CompartmentDeclaration is one entry of the persisted compartment ledger —
 // gomutant's wire encoding of gofresh's test-variant declaration record.
@@ -648,9 +634,11 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // coverage-bounds table: a dropped bound reads as full coverage); an
 // audit field, whose absence widens no claim (a discharge list; a
 // survivor extent, which falls back to the anchor-point bucket), lands
-// without one. The reading
-// range each boundary draws is ParseDocument's.
-const DocumentVersion = 12
+// without one; version 13 embeds gofresh's published fingerprint record
+// in every evidence row (a shape an older reader cannot re-derive, the
+// flat rows upgraded on read). The reading range each boundary draws
+// is ParseDocument's.
+const DocumentVersion = 13
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale
@@ -864,7 +852,13 @@ func expandV11(doc internedDocument) ([]Finding, error) {
 			return SubjectEvidence{}, fmt.Errorf("gomutant: evidence index %d outside the table", i)
 		}
 		e := doc.Evidence[i].Evidence
-		e.RuntimeInputs = doc.RuntimeInputs[doc.Evidence[i].RuntimeInputs]
+		// A row whose fingerprint is the zero value (a flat legacy row
+		// under the current version, dropped to nothing) stays zero: a
+		// manifest re-inlined onto it would make a fingerprint the record
+		// form cannot encode, and the row is incomplete either way.
+		if e.Fingerprint != (gofresh.Fingerprint{}) {
+			e.RuntimeInputs = doc.RuntimeInputs[doc.Evidence[i].RuntimeInputs]
+		}
 		return e, nil
 	}
 	findings := make([]Finding, len(doc.Findings))
@@ -1029,8 +1023,10 @@ type Document struct {
 // OldestReadableDocumentVersion as ErrVersionBehind (REQ-result-export);
 // versions 4-10 are the inline shape, upgraded on read; 11 interns the
 // three measured-dominant components into document-level tables; 12
-// adds the coverage-bounds table; an unknown field within a known
-// version is discarded (REQ-result-tolerant).
+// adds the coverage-bounds table; 13 embeds the fingerprint's record
+// form in every evidence row, the flat rows of every version before it
+// upgraded on read; an unknown field within a known version is
+// discarded (REQ-result-tolerant).
 func ParseDocument(data []byte) (Document, error) {
 	top, err := decodeKnownObject(data, map[string]bool{"version": true, "findings": true})
 	if err != nil {
@@ -1054,6 +1050,9 @@ func ParseDocument(data []byte) (Document, error) {
 	}
 	if version >= 11 {
 		return parseInternedDocument(data, version)
+	}
+	if err := upgradeLegacyEvidence(top, false); err != nil {
+		return Document{}, err
 	}
 	findings, err := parseInlineFindings(top)
 	if err != nil {
@@ -1097,6 +1096,14 @@ func parseInternedFindingsAndTables(data []byte, version int) ([]Finding, intern
 		value, ok := top[name]
 		if !ok || isJSONNull(value) {
 			return nil, internedDocument{}, fmt.Errorf("gomutant: findings document field %s is missing or null", name)
+		}
+	}
+	if version < 13 {
+		if err := upgradeLegacyEvidence(top, true); err != nil {
+			return nil, internedDocument{}, err
+		}
+		if data, err = json.Marshal(top); err != nil {
+			return nil, internedDocument{}, err
 		}
 	}
 	var doc internedDocument
@@ -1512,64 +1519,27 @@ func addNonnegative(a, b int) (int, bool) {
 	return a + b, true
 }
 
-// subjectEvidenceFields is the one field inventory of the persisted
-// SubjectEvidence encoding: each descriptor names the wire field, whether a
-// complete record must carry it, and — for required string pins — the
-// accessor whose value must be non-empty. Every validation view (known
-// fields, presence, non-emptiness) derives from this table, so a new pin
-// cannot join one view and silently skip another.
-var subjectEvidenceFields = []struct {
-	name     string
-	required bool
-	pin      func(SubjectEvidence) string // non-empty when required; nil for non-string or condition-checked fields
-}{
-	{"symbol", true, func(e SubjectEvidence) string { return e.Symbol }},
-	{"maximalClosure", true, func(e SubjectEvidence) string { return e.MaximalClosure }},
-	{"testVariantClosure", true, func(e SubjectEvidence) string { return e.TestVariantClosure }},
-	{"toolchain", true, func(e SubjectEvidence) string { return e.Toolchain }},
-	{"buildConfig", true, func(e SubjectEvidence) string { return e.BuildConfig }},
-	{"observationAssertion", true, func(e SubjectEvidence) string { return e.ObservationAssertion }},
-	{"observationStrategy", true, func(e SubjectEvidence) string { return e.ObservationStrategy }},
-	{"observationSubjectPackage", true, func(e SubjectEvidence) string { return e.ObservationSubjectPackage }},
-	{"observationSubjectSymbol", true, func(e SubjectEvidence) string { return e.ObservationSubjectSymbol }},
-	{"observationObservable", true, nil},
-	{"observationReason", false, nil},
-	{"observationEvidence", true, func(e SubjectEvidence) string { return e.ObservationEvidence }},
-	{"purityAssertion", false, nil},
-	{"dynamicStateVouches", false, nil},
-	{"packageProcessDischarges", false, nil},
-	{"dynamicStateStrategy", false, nil},
-	{"closureStrategy", false, nil},
-	{"moduleBase", false, nil},
-	{"runtimeInputs", true, func(e SubjectEvidence) string { return e.RuntimeInputs }},
-	{"runtimeDigest", true, func(e SubjectEvidence) string { return e.RuntimeDigest }},
-	{"runtimeUnverifiable", false, nil},
-	{"runtimeReason", false, nil},
-}
-
+// validateSubjectEvidence decodes one persisted row and judges its
+// completeness: the outer shape and the fingerprint's record form are
+// their decoders' refusals; completeness is gomutant's — every pin a
+// serving path reads non-empty (the symbol, the two closure hashes, the
+// two code guards, the observation assertion and proof, the manifest
+// and its digest), the disposition rule (unverifiable exactly when a
+// reason is recorded), the proof rule (observable exactly when no
+// reason is recorded), and a tree-relative module base — so a document
+// carrying a row a serving path could not judge is incomplete rather
+// than served on empty pins (REQ-result-record).
 func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
-	known := make(map[string]bool, len(subjectEvidenceFields))
-	for _, field := range subjectEvidenceFields {
-		known[field.name] = true
-	}
-	fields, err := decodeKnownObject(raw, known)
-	if err != nil {
-		return false, err
-	}
-	for name, value := range fields {
-		if isJSONNull(value) {
-			return false, fmt.Errorf("field %s is null", name)
-		}
-	}
-	for _, field := range subjectEvidenceFields {
-		if _, ok := fields[field.name]; field.required && !ok {
-			return false, nil
-		}
-	}
 	var evidence SubjectEvidence
 	if err := json.Unmarshal(raw, &evidence); err != nil {
 		return false, err
 	}
+	return subjectEvidenceComplete(evidence)
+}
+
+// subjectEvidenceComplete is the completeness judgment over a decoded
+// row (validateSubjectEvidence's rules), shared with the legacy reader.
+func subjectEvidenceComplete(evidence SubjectEvidence) (bool, error) {
 	if evidence.RuntimeUnverifiable != (evidence.RuntimeReason != "") {
 		return false, nil
 	}
@@ -1590,15 +1560,259 @@ func validateSubjectEvidence(raw json.RawMessage) (bool, error) {
 			}
 		}
 	}
-	if evidence.ObservationObservable == (evidence.ObservationReason != "") {
+	proof := evidence.ObservationProof
+	if proof.Observable == (proof.Reason != "") {
 		return false, nil
 	}
-	for _, field := range subjectEvidenceFields {
-		if field.pin != nil && field.pin(evidence) == "" {
+	for _, pin := range []string{
+		evidence.Symbol, evidence.MaximalClosure, evidence.TestVariantClosure,
+		evidence.Guards.Toolchain, evidence.Guards.BuildConfig,
+		evidence.ObservationAssertion, proof.Strategy, proof.Subject.Package, proof.Subject.Symbol, proof.Evidence,
+		evidence.RuntimeInputs, evidence.RuntimeDigest,
+	} {
+		if pin == "" {
 			return false, nil
 		}
 	}
 	return true, nil
+}
+
+// legacyEvidenceKeys is the flat row shape documents up to version 12
+// carry — the fingerprint's fields beside gomutant's, the proof
+// flattened to six scalars, no result kind — read by upgrading each row
+// to the current shape before the typed decode; the current validation
+// then applies verbatim (REQ-result-export).
+var legacyEvidenceKeys = func() map[string]bool {
+	keys := map[string]bool{"symbol": true, "observationObservable": true, "moduleBase": true, "runtimeUnverifiable": true, "runtimeReason": true}
+	for name := range legacyFieldTargets(&gofresh.Fingerprint{}) {
+		keys[name] = true
+	}
+	return keys
+}()
+
+// legacyFieldTargets maps each flat string key of a legacy row onto
+// the fingerprint field it fills — the one table the key set and the
+// upgrade both read.
+func legacyFieldTargets(fp *gofresh.Fingerprint) map[string]*string {
+	return map[string]*string{
+		"maximalClosure": &fp.MaximalClosure, "testVariantClosure": &fp.TestVariantClosure,
+		"toolchain": &fp.Guards.Toolchain, "buildConfig": &fp.Guards.BuildConfig,
+		"observationAssertion": &fp.ObservationAssertion, "purityAssertion": &fp.PurityAssertion,
+		"dynamicStateVouches": &fp.DynamicStateVouches, "packageProcessDischarges": &fp.PackageProcessDischarges,
+		"dynamicStateStrategy": &fp.DynamicStateStrategy, "closureStrategy": &fp.ClosureStrategy,
+		"runtimeInputs": &fp.RuntimeInputs, "runtimeDigest": &fp.RuntimeDigest,
+		"observationStrategy": &fp.ObservationProof.Strategy, "observationSubjectPackage": &fp.ObservationProof.Subject.Package,
+		"observationSubjectSymbol": &fp.ObservationProof.Subject.Symbol, "observationReason": &fp.ObservationProof.Reason,
+		"observationEvidence": &fp.ObservationProof.Evidence,
+	}
+}
+
+// upgradeLegacyEvidenceRow rewrites one flat row into the current wire
+// form: the fingerprint's keys move under `fingerprint` — built as the
+// record value and encoded by its own encoder, so the bytes are the
+// form's canonical ones and the record's decoder reads them back (the
+// one shape the encoder admits and the decoder refuses, a positive
+// proof carrying a reason, is refused here first) — with the proof
+// nested and the code-result kind stamped (every legacy row is a
+// code-result fingerprint), gomutant's four stay outer; a duplicated
+// key or a null refuses as it always did, an unknown key is tolerated
+// as it always was; a row with no fingerprint content at all (the zero
+// row) carries no fingerprint. legacyFieldTargets is the one table of
+// the flat keys' destinations, the key set derived from it.
+func upgradeLegacyEvidenceRow(raw json.RawMessage) (json.RawMessage, error) {
+	fields, err := decodeKnownObject(raw, legacyEvidenceKeys)
+	if err != nil {
+		return nil, err
+	}
+	for name, value := range fields {
+		if isJSONNull(value) {
+			return nil, fmt.Errorf("field %s is null", name)
+		}
+	}
+	str := func(name string) (string, error) {
+		value, ok := fields[name]
+		if !ok {
+			return "", nil
+		}
+		var v string
+		if err := json.Unmarshal(value, &v); err != nil {
+			return "", fmt.Errorf("field %s: %w", name, err)
+		}
+		return v, nil
+	}
+	var fp gofresh.Fingerprint
+	for name, dst := range legacyFieldTargets(&fp) {
+		v, err := str(name)
+		if err != nil {
+			return nil, err
+		}
+		*dst = v
+	}
+	if value, ok := fields["observationObservable"]; ok {
+		if err := json.Unmarshal(value, &fp.ObservationProof.Observable); err != nil {
+			return nil, fmt.Errorf("field observationObservable: %w", err)
+		}
+	}
+	w := subjectEvidenceWire{}
+	if w.Symbol, err = str("symbol"); err != nil {
+		return nil, err
+	}
+	if w.ModuleBase, err = str("moduleBase"); err != nil {
+		return nil, err
+	}
+	if w.RuntimeReason, err = str("runtimeReason"); err != nil {
+		return nil, err
+	}
+	if value, ok := fields["runtimeUnverifiable"]; ok {
+		if err := json.Unmarshal(value, &w.RuntimeUnverifiable); err != nil {
+			return nil, fmt.Errorf("field runtimeUnverifiable: %w", err)
+		}
+	}
+	if fp.ObservationProof.Observable && fp.ObservationProof.Reason != "" {
+		// The record form refuses a positive proof carrying a reason on
+		// decode; refused here in the row's own words, before an encode
+		// that would pass it (the encoder runs the kind ladder alone).
+		return nil, fmt.Errorf("observable proof carries a reason")
+	}
+	if fp != (gofresh.Fingerprint{}) {
+		fp.ResultKind = gofresh.CodeResult
+		w.Fingerprint = &fp
+	}
+	return json.Marshal(w)
+}
+
+// upgradeLegacyEvidence rewrites every evidence row of a document
+// written before the fingerprint record form (versions up to 12) —
+// the inline findings' target and oracle rows, or the interned
+// evidence table's — so the typed decode reads one shape. The rows are
+// spliced in place over the raw bytes: nothing else in a finding or a
+// table entry is re-encoded, so a duplicated key elsewhere in the
+// object still reaches the inline decoder's refusal.
+func upgradeLegacyEvidence(top map[string]json.RawMessage, interned bool) error {
+	if interned {
+		table, err := spliceArray(top["evidenceTable"], func(i int, entry json.RawMessage) (json.RawMessage, error) {
+			out, err := spliceMember(entry, "evidence", upgradeLegacyEvidenceRow)
+			if err != nil {
+				return nil, fmt.Errorf("gomutant: evidence table entry %d: %w", i, err)
+			}
+			return out, nil
+		})
+		if err != nil {
+			return fmt.Errorf("gomutant: parse evidence table: %w", err)
+		}
+		top["evidenceTable"] = table
+		return nil
+	}
+	if isJSONNull(top["findings"]) {
+		return nil
+	}
+	findings, err := spliceArray(top["findings"], func(i int, finding json.RawMessage) (json.RawMessage, error) {
+		finding, err := spliceMember(finding, "targetEvidence", upgradeLegacyEvidenceRow)
+		if err != nil {
+			return nil, fmt.Errorf("gomutant: parse finding %d: targetEvidence: %w", i, err)
+		}
+		finding, err = spliceMember(finding, "oracleEvidence", func(rows json.RawMessage) (json.RawMessage, error) {
+			return spliceArray(rows, func(j int, row json.RawMessage) (json.RawMessage, error) {
+				out, err := upgradeLegacyEvidenceRow(row)
+				if err != nil {
+					return nil, fmt.Errorf("oracleEvidence %d: %w", j, err)
+				}
+				return out, nil
+			})
+		})
+		if err != nil {
+			return nil, fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+		}
+		return finding, nil
+	})
+	if err != nil {
+		return fmt.Errorf("gomutant: parse findings: %w", err)
+	}
+	top["findings"] = findings
+	return nil
+}
+
+// spliceMember replaces, in place, the value of every member named key
+// in one JSON object's raw bytes — every occurrence, so a duplicated
+// key survives to the decoder that refuses it; a null value is left for
+// the same reason — and returns the object's bytes otherwise untouched.
+func spliceMember(object json.RawMessage, key string, f func(json.RawMessage) (json.RawMessage, error)) (json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(object))
+	token, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return nil, errExpectedObject
+	}
+	type span struct{ start, end int64 }
+	var spans []span
+	for dec.More() {
+		name, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		nameStr, ok := name.(string)
+		if !ok {
+			return nil, fmt.Errorf("object key is not a string")
+		}
+		start := dec.InputOffset()
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		if nameStr == key && !isJSONNull(value) {
+			// The value's own bytes begin after the colon and any space.
+			valueStart := start + int64(bytes.IndexByte(object[start:dec.InputOffset()], value[0]))
+			spans = append(spans, span{valueStart, dec.InputOffset()})
+		}
+	}
+	if len(spans) == 0 {
+		return object, nil
+	}
+	out := append([]byte(nil), object...)
+	for i := len(spans) - 1; i >= 0; i-- {
+		replaced, err := f(json.RawMessage(object[spans[i].start:spans[i].end]))
+		if err != nil {
+			return nil, err
+		}
+		out = append(append(append([]byte(nil), out[:spans[i].start]...), replaced...), out[spans[i].end:]...)
+	}
+	return out, nil
+}
+
+// spliceArray replaces every element of one JSON array's raw bytes
+// through f, the array's brackets and order kept.
+func spliceArray(array json.RawMessage, f func(int, json.RawMessage) (json.RawMessage, error)) (json.RawMessage, error) {
+	if isJSONNull(array) {
+		return array, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(array))
+	token, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '[' {
+		return nil, fmt.Errorf("expected a JSON array")
+	}
+	var out bytes.Buffer
+	out.WriteByte('[')
+	for i := 0; dec.More(); i++ {
+		var element json.RawMessage
+		if err := dec.Decode(&element); err != nil {
+			return nil, err
+		}
+		replaced, err := f(i, element)
+		if err != nil {
+			return nil, err
+		}
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		out.Write(replaced)
+	}
+	out.WriteByte(']')
+	return out.Bytes(), nil
 }
 
 func validateRequiredObject(raw json.RawMessage, known map[string]bool, required []string) (map[string]json.RawMessage, error) {

@@ -708,9 +708,9 @@ func posture(f Finding, inspection FindingInspection, judgeErr error) RecordPost
 	// refused reuse — a current record may carry one its completed
 	// observation evidence served past — and only when its text is not
 	// the judgment's own.
-	if p.Reuse != FindingCurrent && !f.TargetEvidence.ObservationObservable && f.TargetEvidence.ObservationReason != "" &&
-		f.TargetEvidence.ObservationReason != strings.TrimPrefix(inspection.Reason, targetReasonPrefix) {
-		p.Reasons = append(p.Reasons, PostureReason{Channel: PostureStoredObservation, Reason: f.TargetEvidence.ObservationReason})
+	if p.Reuse != FindingCurrent && !f.TargetEvidence.ObservationProof.Observable && f.TargetEvidence.ObservationProof.Reason != "" &&
+		f.TargetEvidence.ObservationProof.Reason != strings.TrimPrefix(inspection.Reason, targetReasonPrefix) {
+		p.Reasons = append(p.Reasons, PostureReason{Channel: PostureStoredObservation, Reason: f.TargetEvidence.ObservationProof.Reason})
 	}
 	return p
 }

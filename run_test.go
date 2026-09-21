@@ -77,7 +77,7 @@ func TestRunEndToEnd(t *testing.T) {
 	if len(add.Operators) == 0 {
 		t.Fatal("Add finding omitted operator summaries")
 	}
-	if add.BodyHash == "" || add.TargetEvidence.Toolchain == "" || add.OperatorSet == "" || len(add.OracleEvidence) != 1 {
+	if add.BodyHash == "" || add.TargetEvidence.Guards.Toolchain == "" || add.OperatorSet == "" || len(add.OracleEvidence) != 1 {
 		t.Fatalf("Add pins incomplete: %+v", add)
 	}
 	if !strings.HasPrefix(iface.Skipped, "not a function - ") {
@@ -1183,8 +1183,8 @@ func TestRunRapidClassificationIncludesLaterTargets(t *testing.T) {
 	if findings[1].TargetEvidence.RuntimeUnverifiable {
 		t.Fatalf("unavailable proof forced the runtime pin unverifiable: %+v", findings[1].TargetEvidence)
 	}
-	if findings[1].TargetEvidence.ObservationStrategy != gofresh.ObservationRTA || findings[1].TargetEvidence.ObservationObservable ||
-		!strings.Contains(findings[1].TargetEvidence.ObservationReason, "observation analysis unavailable") {
+	if findings[1].TargetEvidence.ObservationProof.Strategy != gofresh.ObservationRTA || findings[1].TargetEvidence.ObservationProof.Observable ||
+		!strings.Contains(findings[1].TargetEvidence.ObservationProof.Reason, "observation analysis unavailable") {
 		t.Fatalf("external-test-only observation proof = %+v", findings[1].TargetEvidence)
 	}
 	if _, err := Export(findings, nil); err != nil {
@@ -1884,13 +1884,18 @@ func TestParseFindingsVersionAndTolerance(t *testing.T) {
 		t.Fatalf("tolerant parse failed: %v %+v", err, fs)
 	}
 	for name, doc := range map[string]string{
-		"null budget":                    `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":null,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
-		"null dirty":                     `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","dirty":null,"mutants":1,"killed":1}]}`,
-		"duplicate budget":               `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"budget":0,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
+		"null budget": `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":null,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
+		"null dirty":  `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","dirty":null,"mutants":1,"killed":1}]}`,
+		// The duplicate fixtures are complete but for the duplicate, so the
+		// refusal is the duplicate's own and never the incompleteness of
+		// an empty row (the legacy upgrade splices rows in place and keeps
+		// every other byte, a duplicated key included).
+		"duplicate budget":               `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"budget":0,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`,
+		"duplicate evidence key":         `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"targetEvidence":{"symbol":"p.F","maximalClosure":"c","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`,
 		"duplicate version":              `{"version":4,"version":99,"findings":[]}`,
 		"missing survivors":              `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0}]}`,
 		"empty attestation reason":       `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"f.go:1:1","operator":"op"}],"attested":[{"position":"f.go:1:1","operator":"op","reason":""}]}]}`,
-		"duplicate nested evidence":      `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{"symbol":"p.F","symbol":"p.G"},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":0,"killed":0}]}`,
+		"duplicate nested evidence":      `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{"symbol":"p.F","maximalClosure":"c","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d","symbol":"p.G"},"oracleEvidence":[{"symbol":"p.TestF","maximalClosure":"tc","testVariantClosure":"tv","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"gofresh/observation-rta@2","observationSubjectPackage":"p","observationSubjectSymbol":"TestF","observationObservable":true,"observationEvidence":"proof","runtimeInputs":"m","runtimeDigest":"d"}],"oracleExplicit":true,"oracleTimeout":"1m0s","dirty":true,"candidateCount":0,"generated":0,"mutants":0,"killed":0,"discarded":0,"operators":[]}]}`,
 		"inflated budget":                `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":2,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":1}]}`,
 		"colliding attestation identity": `{"version":4,"findings":[{"symbol":"p.F","bodyHash":"h","operatorSet":"go/2","budget":1,"targetEvidence":{},"oracleEvidence":[],"oracleTimeout":"1m0s","mutants":1,"killed":0,"survivors":[{"position":"a|b.go:1:1","operator":"zero return"}],"attested":[{"position":"a","operator":"b.go:1:1|zero return","reason":"not the survivor"}]}]}`,
 		"duplicate symbols":              `{"version":4,"findings":[{"symbol":"p.F","mutants":0,"killed":0},{"symbol":"p.F","mutants":0,"killed":0}]}`,
@@ -2426,7 +2431,7 @@ func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	// tiers judge the refreshed evidence, so a tampered toolchain
 	// refuses even though the compartment delta classifies attributable.
 	tampered := prior[0]
-	tampered.TargetEvidence.Toolchain = "go0.0-never"
+	tampered.TargetEvidence.Guards.Toolchain = "go0.0-never"
 	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleTimeoutDerived, tampered.OracleMemoryBytes, ""); err != nil || ok {
 		t.Fatalf("a moved toolchain hid behind the compartment verdict: ok=%v err=%v", ok, err)
 	}
@@ -2801,7 +2806,7 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 // persisted union, in manifest, digest, or verifiability, marks the splice
 // diverged; only the equal union keeps the serve reusable.
 func TestSplicedUnionDivergenceIsNonReusable(t *testing.T) {
-	prior := SubjectEvidence{RuntimeInputs: "manifest-a", RuntimeDigest: "digest-a"}
+	prior := SubjectEvidence{Fingerprint: gofresh.Fingerprint{RuntimeInputs: "manifest-a", RuntimeDigest: "digest-a", ResultKind: gofresh.CodeResult}}
 	equal := runtimeinput.State{OK: true, Manifest: "manifest-a", Digest: "digest-a"}
 	if splicedUnionDiverged(equal, prior) {
 		t.Fatal("equal union reported diverged")
@@ -2905,7 +2910,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence := SubjectEvidence{Symbol: "example.com/empty.Gone", RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest}
+	evidence := SubjectEvidence{Symbol: "example.com/empty.Gone", Fingerprint: gofresh.Fingerprint{RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest, ResultKind: gofresh.CodeResult}}
 	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
 
 	_, same, err := tree.applySplicedUnion(ctx, env, rec, recorded, newPortableUnion(recorded, env), root)
@@ -4208,7 +4213,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence := SubjectEvidence{Symbol: "example.com/empty.Gone", RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest}
+	evidence := SubjectEvidence{Symbol: "example.com/empty.Gone", Fingerprint: gofresh.Fingerprint{RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest, ResultKind: gofresh.CodeResult}}
 	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
 
 	// The suffix read a subset of the recorded pins: the fold restores the

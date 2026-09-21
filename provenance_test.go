@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
@@ -220,7 +221,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	view := &subjectView{symbol: symbol, moduleDir: moduleDir, evidenceDir: root, sourceFiles: []string{source}}
 	ctx := context.Background()
 
-	clean := Finding{Commit: "stale", Dirty: true, TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
+	clean := Finding{Commit: "stale", Dirty: true, TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest, ResultKind: gofresh.CodeResult}}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &clean); err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	if err := os.WriteFile(input, []byte("runtime moved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
+	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest, ResultKind: gofresh.CodeResult}}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &dirtied); err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +244,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 		t.Fatal("a moved evidence runtime input re-stamped clean - the served stamp ignored the record's manifest paths or resolved them against the wrong base")
 	}
 
-	unreadable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: "not-a-manifest"}}
+	unreadable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: "not-a-manifest", ResultKind: gofresh.CodeResult}}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &unreadable); err != nil {
 		t.Fatal(err)
 	}
@@ -255,13 +256,13 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	// (REQ-result-staged) — with the evidence fault named.
 	stagedRepo := repository
 	stagedRepo.staged = true
-	unreadableStaged := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: "not-a-manifest"}}
+	unreadableStaged := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: "not-a-manifest", ResultKind: gofresh.CodeResult}}}
 	if reason, err := tree.stampProvenance(ctx, stagedRepo, view, nil, nil, &unreadableStaged); err != nil ||
 		!strings.Contains(reason, "unreadable") || !strings.Contains(reason, symbol) {
 		t.Fatalf("staged unreadable manifest: reason=%q err=%v, want the staged refusal naming the fault", reason, err)
 	}
 
-	unknown := Finding{TargetEvidence: SubjectEvidence{Symbol: "example.com/provenance.Ghost", RuntimeInputs: observed.State.Manifest}}
+	unknown := Finding{TargetEvidence: SubjectEvidence{Symbol: "example.com/provenance.Ghost", Fingerprint: gofresh.Fingerprint{RuntimeInputs: observed.State.Manifest, ResultKind: gofresh.CodeResult}}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &unknown); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +335,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	view := &subjectView{symbol: symbol, moduleDir: moduleDir, evidenceDir: root, sourceFiles: []string{source}}
 	ctx := context.Background()
 
-	clean := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
+	clean := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest, ResultKind: gofresh.CodeResult}}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &clean); err != nil {
 		t.Fatal(err)
 	}
@@ -366,9 +367,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	if err := os.Symlink("missing", link); err != nil {
 		t.Fatal(err)
 	}
-	linked := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol,
-		RuntimeInputs: linkObserved.State.Manifest, RuntimeDigest: linkObserved.State.Digest,
-		RuntimeUnverifiable: linkObserved.State.Unverifiable, RuntimeReason: linkObserved.State.Reason}}
+	linked := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: linkObserved.State.Manifest, RuntimeDigest: linkObserved.State.Digest, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: linkObserved.State.Unverifiable, RuntimeReason: linkObserved.State.Reason}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &linked); err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +386,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	if err := os.WriteFile(input, []byte("runtime moved\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
+	dirtied := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest, ResultKind: gofresh.CodeResult}}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &dirtied); err != nil {
 		t.Fatal(err)
 	}
@@ -407,9 +406,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deleted := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol,
-		RuntimeInputs: deletedObserved.State.Manifest, RuntimeDigest: deletedObserved.State.Digest,
-		RuntimeUnverifiable: deletedObserved.State.Unverifiable, RuntimeReason: deletedObserved.State.Reason}}
+	deleted := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: deletedObserved.State.Manifest, RuntimeDigest: deletedObserved.State.Digest, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: deletedObserved.State.Unverifiable, RuntimeReason: deletedObserved.State.Reason}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &deleted); err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +423,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	if err := os.Remove(alias); err != nil {
 		t.Fatal(err)
 	}
-	unresolvable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
+	unresolvable := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest, ResultKind: gofresh.CodeResult}}}
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &unresolvable); err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +616,7 @@ func TestStampAsksGitAboutTheLinkAnOutsideIdentityTraverses(t *testing.T) {
 	view := &subjectView{symbol: symbol, moduleDir: moduleDir, evidenceDir: root, sourceFiles: []string{source}}
 	ctx := context.Background()
 	stamp := func() Finding {
-		f := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest}}
+		f := Finding{TargetEvidence: SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{RuntimeInputs: observed.State.Manifest, RuntimeDigest: observed.State.Digest, ResultKind: gofresh.CodeResult}}}
 		if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &f); err != nil {
 			t.Fatal(err)
 		}

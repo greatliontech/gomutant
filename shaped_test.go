@@ -139,7 +139,7 @@ func TestStructuralImportBoundaryChecksOracleTeeth(t *testing.T) {
 	// the finding re-measures every run — the serve/re-measure pins are
 	// witnessed on the manual recipe, whose plain oracle is
 	// observation-closed.
-	if findings[0].OracleEvidence[0].ObservationObservable {
+	if findings[0].OracleEvidence[0].ObservationProof.Observable {
 		t.Fatalf("fixture assumption moved: the parser oracle became observation-closed; move the serve arm back here: %+v", findings[0].OracleEvidence[0])
 	}
 	rerun, err := tree.Run(context.Background(), []Target{toothy}, Options{OracleTimeout: 2 * time.Minute, BracketPaths: []string{"core"}, Prior: findings})

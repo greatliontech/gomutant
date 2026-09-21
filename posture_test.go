@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/posturemod"
 )
 
@@ -104,7 +105,7 @@ func TestSummaryPostureRosterIsCappedAndOrdered(t *testing.T) {
 // judgment's text.
 func TestPostureComposesEveryChannel(t *testing.T) {
 	flagged := []CandidateEvidence{{Position: "p:1:1", Operator: "x", Reason: "log incomplete", Disposition: "killed"}}
-	observed := Finding{TargetEvidence: SubjectEvidence{ObservationObservable: false, ObservationReason: "subject reachability is not closed"}}
+	observed := Finding{TargetEvidence: SubjectEvidence{Fingerprint: gofresh.Fingerprint{ObservationProof: gofresh.ObservationProof{Observable: false, Reason: "subject reachability is not closed"}, ResultKind: gofresh.CodeResult}}}
 	cases := []struct {
 		name       string
 		f          Finding

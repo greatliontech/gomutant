@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -128,8 +129,8 @@ func TestApplySplicedUnionNamesDivergingInputs(t *testing.T) {
 	_, recorded := observe("open shared.txt\nopen moved.txt\n")
 
 	rec := Finding{Symbol: "example.com/splice.F",
-		TargetEvidence: SubjectEvidence{Symbol: "example.com/splice.F", RuntimeInputs: recorded, RuntimeDigest: "recorded-digest"},
-		OracleEvidence: []SubjectEvidence{{Symbol: "example.com/splice.TestF", RuntimeInputs: recorded, RuntimeDigest: "recorded-digest"}}}
+		TargetEvidence: SubjectEvidence{Symbol: "example.com/splice.F", Fingerprint: gofresh.Fingerprint{RuntimeInputs: recorded, RuntimeDigest: "recorded-digest", ResultKind: gofresh.CodeResult}},
+		OracleEvidence: []SubjectEvidence{{Symbol: "example.com/splice.TestF", Fingerprint: gofresh.Fingerprint{RuntimeInputs: recorded, RuntimeDigest: "recorded-digest", ResultKind: gofresh.CodeResult}}}}
 	_, stamped, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, env), root)
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +250,7 @@ func TestEmitOracleGuidanceNamesMutantOnlyInputs(t *testing.T) {
 	cache := map[string]oracleAttribution{
 		strings.Join(slices.Sorted(slices.Values(oracle)), "\x00"): {completed: 2, probedPaths: map[string]bool{"shared.txt": true}},
 	}
-	unstable := Finding{TargetEvidence: SubjectEvidence{RuntimeUnverifiable: true, RuntimeReason: "diverged", RuntimeInputs: state.Manifest}}
+	unstable := Finding{TargetEvidence: SubjectEvidence{Fingerprint: gofresh.Fingerprint{RuntimeInputs: state.Manifest, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: true, RuntimeReason: "diverged"}}
 	var got []OracleGuidance
 	opts := runOptions{Options: Options{Guidance: func(g OracleGuidance) { got = append(got, g) }}}
 	if err := tree.emitOracleGuidance(context.Background(), unstable, work{oracle: oracle}, "example.com/guide.F", opts, nil, cache); err != nil {

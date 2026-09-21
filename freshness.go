@@ -1282,6 +1282,10 @@ func sortedSubjectEvidence(evidence []SubjectEvidence) []SubjectEvidence {
 func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
 	evidence.DynamicStateVouches = ""
 	evidence.PackageProcessDischarges = ""
+	// SingleSubjectDischarges is the same audit class (an attestation
+	// gomutant never sets — single-subject execution — so the field is
+	// empty in practice, and it persists with the record since 13).
+	evidence.SingleSubjectDischarges = ""
 	// ModuleBase is resolution metadata for the store's portable-line
 	// walk, never a measured pin: a record grown the field on its first
 	// post-upgrade measure must not shed its dispositions over it.

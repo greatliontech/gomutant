@@ -185,7 +185,7 @@ func TestAnalysisBudgetCutLandsAnUnavailableProof(t *testing.T) {
 	var postures []RecordPosture
 	posture := func(p RecordPosture) { postures = append(postures, p) }
 	proven, err := fixtureTree(t).Run(context.Background(), []Target{target}, Options{Budget: 1, BracketPaths: []string{fixture}, Posture: posture})
-	if err != nil || len(proven) != 1 || !proven[0].TargetEvidence.ObservationObservable {
+	if err != nil || len(proven) != 1 || !proven[0].TargetEvidence.ObservationProof.Observable {
 		t.Fatalf("unbudgeted run = %+v, %v; want a proven, bound record", proven, err)
 	}
 	var mu sync.Mutex
@@ -206,8 +206,8 @@ func TestAnalysisBudgetCutLandsAnUnavailableProof(t *testing.T) {
 	}
 	const reason = "observation analysis unavailable: analysis budget 1ns exhausted: "
 	for _, e := range append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...) {
-		if e.ObservationObservable || !strings.Contains(e.ObservationReason, reason) {
-			t.Fatalf("evidence for %s = observable %v, reason %q; want an unavailable proof naming the budget", e.Symbol, e.ObservationObservable, e.ObservationReason)
+		if e.ObservationProof.Observable || !strings.Contains(e.ObservationProof.Reason, reason) {
+			t.Fatalf("evidence for %s = observable %v, reason %q; want an unavailable proof naming the budget", e.Symbol, e.ObservationProof.Observable, e.ObservationProof.Reason)
 		}
 	}
 	mu.Lock()
@@ -259,7 +259,7 @@ func TestAnalysisBudgetCutLandsAnUnavailableProof(t *testing.T) {
 	// as it would have.
 	pure := Target{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}
 	cutPure, err := fixtureTree(t).Run(context.Background(), []Target{pure}, Options{Budget: 1, AnalysisBudget: time.Nanosecond})
-	if err != nil || len(cutPure) != 1 || cutPure[0].TargetEvidence.ObservationObservable {
+	if err != nil || len(cutPure) != 1 || cutPure[0].TargetEvidence.ObservationProof.Observable {
 		t.Fatalf("budgeted run over a pure subject = %+v, %v; want its proof cut like any other", cutPure, err)
 	}
 	var decisions []RunDecision

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gomutant"
 )
 
@@ -76,10 +78,7 @@ func entries(t *testing.T) map[string]bool {
 // record is a complete machine-local (dirty) finding.
 func record(symbol string) gomutant.Finding {
 	evidence := func(sym string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: sym, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
-			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
-			ObservationSubjectSymbol: sym, ObservationObservable: true, ObservationEvidence: "proof",
-			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return gomutant.SubjectEvidence{Symbol: sym, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: sym}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		CandidateCount: 1, Generated: 1, Mutants: 1,

@@ -41,7 +41,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	renamed := seededFinding("example.com/old.F")
 	// The stored subject package must agree with the symbol - the
 	// retarget's package-boundary gate audits the stored fact.
-	renamed.TargetEvidence.ObservationSubjectPackage = "example.com/old"
+	renamed.TargetEvidence.ObservationProof.Subject.Package = "example.com/old"
 	if err := gomutant.UpdateDocument(context.Background(), filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{dead, renamed}, nil
 	}); err != nil {
@@ -114,7 +114,7 @@ func TestToolLifecycleEchoBounds(t *testing.T) {
 	}
 	for i := 0; i < 60; i++ {
 		f := seededFinding(fmt.Sprintf("example.com/old.F%d", i))
-		f.TargetEvidence.ObservationSubjectPackage = "example.com/old"
+		f.TargetEvidence.ObservationProof.Subject.Package = "example.com/old"
 		seed = append(seed, f)
 	}
 	if err := gomutant.UpdateDocument(context.Background(), filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {

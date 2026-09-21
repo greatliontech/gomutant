@@ -3,6 +3,8 @@ package gomutant
 import (
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh"
 )
 
 // TestAttestationCarryNamesADerivationMove pins the carry report's
@@ -13,14 +15,14 @@ import (
 //
 //gofresh:pure
 func TestAttestationCarryNamesADerivationMove(t *testing.T) {
-	held := derivationMove(SubjectEvidence{ClosureStrategy: "a@1"}, SubjectEvidence{ClosureStrategy: "a@1"})
+	held := derivationMove(SubjectEvidence{Fingerprint: gofresh.Fingerprint{ClosureStrategy: "a@1", ResultKind: gofresh.CodeResult}}, SubjectEvidence{Fingerprint: gofresh.Fingerprint{ClosureStrategy: "a@1", ResultKind: gofresh.CodeResult}})
 	if held != "" {
 		t.Fatalf("a held derivation named a move: %q", held)
 	}
-	if unknown := derivationMove(SubjectEvidence{}, SubjectEvidence{ClosureStrategy: "a@2"}); unknown != "" {
+	if unknown := derivationMove(SubjectEvidence{}, SubjectEvidence{Fingerprint: gofresh.Fingerprint{ClosureStrategy: "a@2", ResultKind: gofresh.CodeResult}}); unknown != "" {
 		t.Fatalf("a pre-field prior named a move: %q", unknown)
 	}
-	moved := derivationMove(SubjectEvidence{ClosureStrategy: "a@1"}, SubjectEvidence{ClosureStrategy: "a@2"})
+	moved := derivationMove(SubjectEvidence{Fingerprint: gofresh.Fingerprint{ClosureStrategy: "a@1", ResultKind: gofresh.CodeResult}}, SubjectEvidence{Fingerprint: gofresh.Fingerprint{ClosureStrategy: "a@2", ResultKind: gofresh.CodeResult}})
 	if moved != "a@1 -> a@2" {
 		t.Fatalf("derivation move = %q, want the prior and current named", moved)
 	}

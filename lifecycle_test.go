@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -45,11 +47,7 @@ func lifecycleModule(t *testing.T, seed ...Finding) (*Tree, *Store) {
 
 func lifecycleFinding(symbol string) Finding {
 	evidence := func(name string) SubjectEvidence {
-		return SubjectEvidence{Symbol: name, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
-			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1",
-			ObservationSubjectPackage: "example.com/life", ObservationSubjectSymbol: strings.TrimPrefix(name, "example.com/life."),
-			ObservationObservable: true, ObservationEvidence: "proof",
-			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return SubjectEvidence{Symbol: name, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/life", Symbol: strings.TrimPrefix(name, "example.com/life.")}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	return Finding{Symbol: symbol, BodyHash: "body", OperatorSet: engine.OperatorSet, OracleTimeout: "1m0s", Dirty: true,
 		CandidateCount: 1, Generated: 1, Mutants: 1,
@@ -111,8 +109,8 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	}
 	renamed := lifecycleFinding("example.com/old.F")
 	renamed.OracleEvidence[0].Symbol = "example.com/old.TestF"
-	renamed.OracleEvidence[0].ObservationSubjectPackage = "example.com/old"
-	renamed.TargetEvidence.ObservationSubjectPackage = "example.com/old"
+	renamed.OracleEvidence[0].ObservationProof.Subject.Package = "example.com/old"
+	renamed.TargetEvidence.ObservationProof.Subject.Package = "example.com/old"
 	renamed.Killed, renamed.Mutants, renamed.CandidateCount, renamed.Generated = 1, 2, 2, 2
 	renamed.Kills = []Kill{{Position: "p.go:2:2", Operator: "statement: delete", Killer: "example.com/old.TestF"}}
 	renamed.Operators = []OperatorSummary{{Operator: "statement: delete", Generated: 1, Killed: 1}, {Operator: "zero return", Generated: 1, Survived: 1}}
@@ -150,8 +148,8 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	// The observation-subject identity stores the package path and the
 	// local name separately; the package half rewrites under the pair's
 	// package projection (REQ-result-lifecycle).
-	if got.TargetEvidence.ObservationSubjectPackage != "example.com/life" || got.OracleEvidence[0].ObservationSubjectPackage != "example.com/life" {
-		t.Fatalf("observation-subject package not rewritten: %q/%q", got.TargetEvidence.ObservationSubjectPackage, got.OracleEvidence[0].ObservationSubjectPackage)
+	if got.TargetEvidence.ObservationProof.Subject.Package != "example.com/life" || got.OracleEvidence[0].ObservationProof.Subject.Package != "example.com/life" {
+		t.Fatalf("observation-subject package not rewritten: %q/%q", got.TargetEvidence.ObservationProof.Subject.Package, got.OracleEvidence[0].ObservationProof.Subject.Package)
 	}
 	if len(got.Attested) != 1 || got.Attested[0].Position != "p.go:1:1" || got.Attested[0].Reason != "equivalent by inspection" {
 		t.Fatalf("disposition did not ride the retarget: %+v", got.Attested)
@@ -204,8 +202,8 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	// observation package under the path projection's subpath arm.
 	subOracle := lifecycleFinding("example.com/life.F")
 	subOracle.OracleEvidence[0].Symbol = "example.com/gone/sub.TestHelper"
-	subOracle.OracleEvidence[0].ObservationSubjectPackage = "example.com/gone/sub"
-	subOracle.OracleEvidence[0].ObservationSubjectSymbol = "TestHelper"
+	subOracle.OracleEvidence[0].ObservationProof.Subject.Package = "example.com/gone/sub"
+	subOracle.OracleEvidence[0].ObservationProof.Subject.Symbol = "TestHelper"
 	treeS, storeS := lifecycleModule(t, subOracle)
 	subResult, err := treeS.RetargetContext(ctx, storeS, "example.com/gone", "example.com/moved", false)
 	if err != nil {
@@ -215,7 +213,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 		t.Fatalf("subpackage oracle rename = %+v, want touched only", subResult)
 	}
 	allS, err := storeS.Load(ctx)
-	if err != nil || allS[0].OracleEvidence[0].Symbol != "example.com/moved/sub.TestHelper" || allS[0].OracleEvidence[0].ObservationSubjectPackage != "example.com/moved/sub" {
+	if err != nil || allS[0].OracleEvidence[0].Symbol != "example.com/moved/sub.TestHelper" || allS[0].OracleEvidence[0].ObservationProof.Subject.Package != "example.com/moved/sub" {
 		t.Fatalf("subpackage observation identity not rewritten: %+v, %v", allS[0].OracleEvidence[0], err)
 	}
 
@@ -227,7 +225,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 		t.Fatalf("full-symbol rename refused: %v", err)
 	}
 	allG, err := storeG.Load(ctx)
-	if err != nil || allG[0].TargetEvidence.ObservationSubjectSymbol != "F" {
+	if err != nil || allG[0].TargetEvidence.ObservationProof.Subject.Symbol != "F" {
 		t.Fatalf("local observation half not rewritten: %+v, %v", allG[0].TargetEvidence, err)
 	}
 
@@ -277,8 +275,8 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	// crossing into a dotted sibling package refuses whole.
 	sibling := lifecycleFinding("example.com/life.F")
 	sibling.OracleEvidence[0].Symbol = "example.com/old.v2.TestX"
-	sibling.OracleEvidence[0].ObservationSubjectPackage = "example.com/old.v2"
-	sibling.OracleEvidence[0].ObservationSubjectSymbol = "TestX"
+	sibling.OracleEvidence[0].ObservationProof.Subject.Package = "example.com/old.v2"
+	sibling.OracleEvidence[0].ObservationProof.Subject.Symbol = "TestX"
 	treeV, storeV := lifecycleModule(t, sibling)
 	if _, err := treeV.RetargetContext(ctx, storeV, "example.com/old.", "example.com/new.", false); err == nil || !strings.Contains(err.Error(), "does not name") {
 		t.Fatalf("dotted-sibling evidence match accepted: %v", err)
@@ -294,8 +292,8 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	// recorded package refuses.
 	dotted := lifecycleFinding("example.com/life.F")
 	dotted.OracleEvidence[0].Symbol = "gopkg.in/mylib.v2.TestOld"
-	dotted.OracleEvidence[0].ObservationSubjectPackage = "gopkg.in/mylib.v2"
-	dotted.OracleEvidence[0].ObservationSubjectSymbol = "TestOld"
+	dotted.OracleEvidence[0].ObservationProof.Subject.Package = "gopkg.in/mylib.v2"
+	dotted.OracleEvidence[0].ObservationProof.Subject.Symbol = "TestOld"
 	treeD, storeD := lifecycleModule(t, dotted)
 	dottedResult, err := treeD.RetargetContext(ctx, storeD, "gopkg.in/mylib.v2.TestOld", "gopkg.in/mylib.v2.TestNew", false)
 	if err != nil {
@@ -306,16 +304,16 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	}
 	allD, err := storeD.Load(ctx)
 	if err != nil || allD[0].OracleEvidence[0].Symbol != "gopkg.in/mylib.v2.TestNew" ||
-		allD[0].OracleEvidence[0].ObservationSubjectPackage != "gopkg.in/mylib.v2" ||
-		allD[0].OracleEvidence[0].ObservationSubjectSymbol != "TestNew" {
+		allD[0].OracleEvidence[0].ObservationProof.Subject.Package != "gopkg.in/mylib.v2" ||
+		allD[0].OracleEvidence[0].ObservationProof.Subject.Symbol != "TestNew" {
 		t.Fatalf("dotted in-package rename mangled the identity: %+v, %v", allD[0].OracleEvidence[0], err)
 	}
 	if _, err := treeD.RetargetContext(ctx, storeD, "gopkg.in/mylib.v2.", "gopkg.in/renamed.v2.", false); err != nil {
 		t.Fatalf("dotted package rename refused: %v", err)
 	}
 	if allD, err := storeD.Load(ctx); err != nil || allD[0].OracleEvidence[0].Symbol != "gopkg.in/renamed.v2.TestNew" ||
-		allD[0].OracleEvidence[0].ObservationSubjectPackage != "gopkg.in/renamed.v2" ||
-		allD[0].OracleEvidence[0].ObservationSubjectSymbol != "TestNew" {
+		allD[0].OracleEvidence[0].ObservationProof.Subject.Package != "gopkg.in/renamed.v2" ||
+		allD[0].OracleEvidence[0].ObservationProof.Subject.Symbol != "TestNew" {
 		t.Fatalf("dotted package rename mangled the identity: %+v, %v", allD[0].OracleEvidence[0], err)
 	}
 	// A symbol pair whose destination names a different package
@@ -340,8 +338,8 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	// true boundary.
 	intoDotted := lifecycleFinding("example.com/life.F")
 	intoDotted.OracleEvidence[0].Symbol = "gopkg.in/mylib.TestZ"
-	intoDotted.OracleEvidence[0].ObservationSubjectPackage = "gopkg.in/mylib"
-	intoDotted.OracleEvidence[0].ObservationSubjectSymbol = "TestZ"
+	intoDotted.OracleEvidence[0].ObservationProof.Subject.Package = "gopkg.in/mylib"
+	intoDotted.OracleEvidence[0].ObservationProof.Subject.Symbol = "TestZ"
 	treeI, storeI := lifecycleModule(t, intoDotted)
 	intoResult, err := treeI.RetargetContext(ctx, storeI, "gopkg.in/mylib.", "gopkg.in/mylib.v2.", false)
 	if err != nil {
@@ -351,8 +349,8 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 		t.Fatalf("rename into a dotted package name = %+v, want touched", intoResult)
 	}
 	if allI, err := storeI.Load(ctx); err != nil || allI[0].OracleEvidence[0].Symbol != "gopkg.in/mylib.v2.TestZ" ||
-		allI[0].OracleEvidence[0].ObservationSubjectPackage != "gopkg.in/mylib.v2" ||
-		allI[0].OracleEvidence[0].ObservationSubjectSymbol != "TestZ" {
+		allI[0].OracleEvidence[0].ObservationProof.Subject.Package != "gopkg.in/mylib.v2" ||
+		allI[0].OracleEvidence[0].ObservationProof.Subject.Symbol != "TestZ" {
 		t.Fatalf("rename into a dotted package name mangled the identity: %+v, %v", allI[0].OracleEvidence[0], err)
 	}
 
@@ -370,7 +368,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	// A collision with an existing record refuses whole.
 	collide := lifecycleFinding("example.com/life.F")
 	other := lifecycleFinding("example.com/other.F")
-	other.TargetEvidence.ObservationSubjectPackage = "example.com/other"
+	other.TargetEvidence.ObservationProof.Subject.Package = "example.com/other"
 	tree2, store2 := lifecycleModule(t, collide, other)
 	if _, err := tree2.RetargetContext(ctx, store2, "example.com/other.", "example.com/life.", false); err == nil || !strings.Contains(err.Error(), "collides") {
 		t.Fatalf("collision accepted: %v", err)

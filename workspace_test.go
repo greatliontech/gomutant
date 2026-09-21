@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
@@ -360,7 +361,7 @@ func TestApplySplicedUnionAnchorsAWorkspaceMemberAtTheTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence := SubjectEvidence{Symbol: "example.com/root/tools.F", RuntimeInputs: relState.Manifest, RuntimeDigest: relState.Digest}
+	evidence := SubjectEvidence{Symbol: "example.com/root/tools.F", Fingerprint: gofresh.Fingerprint{RuntimeInputs: relState.Manifest, RuntimeDigest: relState.Digest, ResultKind: gofresh.CodeResult}}
 	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
 	_, same, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, env), evidenceBase(tree.dir, rec.TargetEvidence))
 	if err != nil {

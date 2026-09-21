@@ -16,6 +16,7 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -131,11 +132,7 @@ func TestCount(t *testing.T) {
 	}
 	evidence := func(symbol string) SubjectEvidence {
 		fp := captured[symbol]
-		return SubjectEvidence{Symbol: symbol, MaximalClosure: fp.MaximalClosure, TestVariantClosure: fp.TestVariantClosure,
-			Toolchain: fp.Guards.Toolchain, BuildConfig: fp.Guards.BuildConfig, ObservationAssertion: "caller assertion",
-			ObservationStrategy: "proof/v1", ObservationSubjectPackage: "example.com/vouchmut", ObservationSubjectSymbol: symbol,
-			ObservationObservable: true, ObservationEvidence: "proof", DynamicStateVouches: fp.DynamicStateVouches,
-			DynamicStateStrategy: fp.DynamicStateStrategy, RuntimeInputs: emptyManifest, RuntimeDigest: current.Digest}
+		return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: fp.MaximalClosure, TestVariantClosure: fp.TestVariantClosure, ObservationAssertion: "caller assertion", DynamicStateVouches: fp.DynamicStateVouches, DynamicStateStrategy: fp.DynamicStateStrategy, RuntimeInputs: emptyManifest, RuntimeDigest: current.Digest, Guards: guard.Guards{Toolchain: fp.Guards.Toolchain, BuildConfig: fp.Guards.BuildConfig}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/vouchmut", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	finding := Finding{Symbol: "example.com/vouchmut.Count", BodyHash: "h", OperatorSet: engine.OperatorSet,
 		OracleTimeout: "1m0s", Commit: "abc",
@@ -226,13 +223,21 @@ func TestCount(t *testing.T) {
 //gofresh:pure
 func TestAttestationPinsIgnoreRecordedVouches(t *testing.T) {
 	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
-		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
-		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}}
+		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}}
 	vouched := base
 	vouched.TargetEvidence.DynamicStateVouches = "a.example/dep.Var"
-	vouched.OracleEvidence = []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o", DynamicStateVouches: "a.example/dep.Var"}}
+	vouched.OracleEvidence = []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", DynamicStateVouches: "a.example/dep.Var", ResultKind: gofresh.CodeResult}}}
 	if !sameAttestationPins(base, vouched) {
 		t.Fatal("a vouch-set change alone shed attestation pins")
+	}
+	// The three audit sets are one class: the two discharge lists ride
+	// the record without pinning it either.
+	discharged := vouched
+	discharged.TargetEvidence.PackageProcessDischarges = "a.example/wire.reg"
+	discharged.TargetEvidence.SingleSubjectDischarges = "a.example/single.state"
+	if !sameAttestationPins(base, discharged) {
+		t.Fatal("a discharge-set change alone shed attestation pins")
 	}
 	moved := vouched
 	moved.TargetEvidence.MaximalClosure = "h2"
@@ -264,8 +269,8 @@ func TestSubjectEvidenceCarriesDynamicStateVouches(t *testing.T) {
 //gofresh:pure
 func TestOracleMemoryPinGatesReuse(t *testing.T) {
 	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleMemoryBytes: 1 << 30,
-		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
-		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}}
+		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}}
 	// The pin is directional: attestations ride to a record assembled
 	// under a ceiling at least as large — every verdict is preserved —
 	// and refuse under a smaller one (REQ-result-stale's oracle-memory
@@ -484,11 +489,11 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 //gofresh:pure
 func TestAttestationPinsIgnoreRecordedClosureStrategy(t *testing.T) {
 	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
-		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
-		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}}
+		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}}
 	stamped := base
 	stamped.TargetEvidence.ClosureStrategy = "gofresh/closure@1 gofresh/canonical-member@1 gofresh/variant-parse@1"
-	stamped.OracleEvidence = []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o", ClosureStrategy: stamped.TargetEvidence.ClosureStrategy}}
+	stamped.OracleEvidence = []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ClosureStrategy: stamped.TargetEvidence.ClosureStrategy, ResultKind: gofresh.CodeResult}}}
 	if !sameAttestationPins(base, stamped) {
 		t.Fatal("a record grown the closure-strategy field shed its attestation pins")
 	}
@@ -514,11 +519,11 @@ func TestAttestationPinsIgnoreRecordedClosureStrategy(t *testing.T) {
 //gofresh:pure
 func TestAttestationPinsIgnoreRecordedPackageProcessDischarges(t *testing.T) {
 	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
-		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
-		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}}
+		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}}
 	discharged := base
 	discharged.TargetEvidence.PackageProcessDischarges = "a.example/wire.reg"
-	discharged.OracleEvidence = []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o", PackageProcessDischarges: "a.example/wire.reg"}}
+	discharged.OracleEvidence = []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", PackageProcessDischarges: "a.example/wire.reg", ResultKind: gofresh.CodeResult}}}
 	if !sameAttestationPins(base, discharged) {
 		t.Fatal("a discharge-set change alone shed attestation pins")
 	}

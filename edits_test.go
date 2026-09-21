@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 )
 
 type cancelWhenTempWrittenContext struct {
@@ -118,10 +121,7 @@ func TestUpdateDocument(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "findings.json")
 	evidence := func(symbol string) SubjectEvidence {
-		return SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
-			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
-			ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
-			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1,

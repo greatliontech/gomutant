@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -37,9 +38,9 @@ func TestSubjectEvidencePreservesObservationProof(t *testing.T) {
 }
 
 func TestSameAttestationPins(t *testing.T) {
-	target := SubjectEvidence{Symbol: "p.F", MaximalClosure: "f", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
-	oracle := SubjectEvidence{Symbol: "p.TestF", MaximalClosure: "test", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
-	secondOracle := SubjectEvidence{Symbol: "p.TestG", MaximalClosure: "test-g", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	target := SubjectEvidence{Symbol: "p.F", Fingerprint: gofresh.Fingerprint{MaximalClosure: "f", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult}}
+	oracle := SubjectEvidence{Symbol: "p.TestF", Fingerprint: gofresh.Fingerprint{MaximalClosure: "test", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult}}
+	secondOracle := SubjectEvidence{Symbol: "p.TestG", Fingerprint: gofresh.Fingerprint{MaximalClosure: "test-g", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult}}
 	base := Finding{OperatorSet: "go/2", Budget: 3, OracleTimeout: "1m0s", TargetEvidence: target, OracleEvidence: []SubjectEvidence{oracle, secondOracle}}
 	reordered := base
 	reordered.OracleEvidence = []SubjectEvidence{secondOracle, oracle}
@@ -59,7 +60,7 @@ func TestSameAttestationPins(t *testing.T) {
 		{"property regime", func(f *Finding) { f.PropertyRegime = "rapid:nofailfile,seed=1" }},
 		{"target evidence", func(f *Finding) { f.TargetEvidence.RuntimeDigest = "moved" }},
 		{"dynamic-state strategy", func(f *Finding) { f.TargetEvidence.DynamicStateStrategy = "moved" }},
-		{"observation proof", func(f *Finding) { f.TargetEvidence.ObservationEvidence = "moved" }},
+		{"observation proof", func(f *Finding) { f.TargetEvidence.ObservationProof.Evidence = "moved" }},
 		{"oracle evidence", func(f *Finding) { f.OracleEvidence[0].RuntimeDigest = "moved" }},
 		{"oracle removed", func(f *Finding) { f.OracleEvidence = nil }},
 		{"oracle duplicated", func(f *Finding) { f.OracleEvidence = []SubjectEvidence{oracle, oracle} }},
@@ -158,60 +159,143 @@ func TestParseFindingsVersionAheadNamesProbableCause(t *testing.T) {
 	}
 }
 
-// The persisted evidence fields and the declared encoding inventory match
-// in both directions: a new pin joining the struct without a
-// subjectEvidenceFields row would skip the duplicate-key and null-field
-// validations silently, and a stale row outliving a removed field would
-// refuse every document if the row is required (REQ-result-record).
-func TestSubjectEvidenceFieldInventoryIsComplete(t *testing.T) {
-	declared := map[string]bool{}
-	for _, field := range subjectEvidenceFields {
-		declared[field.name] = true
+// TestSubjectEvidenceWireFormIsTheRecordBesideFourFields pins the row's
+// wire form by its literal: the symbol, the fingerprint in gofresh's
+// published record form under `fingerprint`, and gomutant's module
+// base and runtime disposition — an unknown outer key, a null, and a
+// flat pre-13 row refuse; a zero row carries no fingerprint
+// (REQ-result-record, REQ-result-export).
+func TestSubjectEvidenceWireFormIsTheRecordBesideFourFields(t *testing.T) {
+	row := SubjectEvidence{Symbol: "p.F", Fingerprint: gofresh.Fingerprint{
+		MaximalClosure: "m", TestVariantClosure: "v", Guards: guard.Guards{Toolchain: "go", BuildConfig: "b"},
+		ObservationAssertion: "caller assertion",
+		ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "p", Symbol: "F"}, Observable: false, Reason: "r", Evidence: "e"},
+		PurityAssertion:      "source directive", DynamicStateVouches: "vouches", SingleSubjectDischarges: "single", PackageProcessDischarges: "discharges",
+		DynamicStateStrategy: "strategy", ClosureStrategy: "closure strategy", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
+	}, ModuleBase: "sub", RuntimeUnverifiable: true, RuntimeReason: "why"}
+	raw, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
 	}
-	typeOf := reflect.TypeFor[SubjectEvidence]()
-	persisted := map[string]bool{}
-	for i := 0; i < typeOf.NumField(); i++ {
-		tag := strings.Split(typeOf.Field(i).Tag.Get("json"), ",")[0]
-		if tag == "" || tag == "-" {
-			continue
-		}
-		persisted[tag] = true
-		if !declared[tag] {
-			t.Errorf("persisted evidence field %q missing from subjectEvidenceFields", tag)
+	want := `{"symbol":"p.F","fingerprint":{"maximalClosure":"m","testVariantClosure":"v","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationProof":{"strategy":"s","package":"p","symbol":"F","observable":false,"reason":"r","evidence":"e"},"purityAssertion":"source directive","dynamicStateVouches":"vouches","singleSubjectDischarges":"single","packageProcessDischarges":"discharges","dynamicStateStrategy":"strategy","closureStrategy":"closure strategy","runtimeInputs":"manifest","runtimeDigest":"digest","resultKind":1},"moduleBase":"sub","runtimeUnverifiable":true,"runtimeReason":"why"}`
+	if string(raw) != want {
+		t.Fatalf("wire form:\n got %s\nwant %s", raw, want)
+	}
+	var back SubjectEvidence
+	if err := json.Unmarshal(raw, &back); err != nil || back != row {
+		t.Fatalf("round trip: %v, %+v", err, back)
+	}
+	if ok, err := validateSubjectEvidence(raw); err != nil || !ok {
+		t.Fatalf("a complete row judged %v, %v", ok, err)
+	}
+	// The zero row carries no fingerprint and decodes back to zero.
+	zero, err := json.Marshal(SubjectEvidence{})
+	if err != nil || string(zero) != `{"symbol":""}` {
+		t.Fatalf("zero row = %s, %v", zero, err)
+	}
+	if err := json.Unmarshal(zero, &back); err != nil || back != (SubjectEvidence{}) {
+		t.Fatalf("zero row round trip: %v, %+v", err, back)
+	}
+	// An unknown outer key is tolerated (REQ-result-tolerant) — a flat
+	// pre-13 row decodes to a zero fingerprint and is incomplete, never
+	// served; the fingerprint's own decoder is gofresh's, strict.
+	var flat SubjectEvidence
+	if err := json.Unmarshal([]byte(`{"symbol":"p.F","toolchain":"go"}`), &flat); err != nil || flat != (SubjectEvidence{Symbol: "p.F"}) {
+		t.Fatalf("a flat row under the current shape: %v, %+v", err, flat)
+	}
+	if ok, err := validateSubjectEvidence([]byte(`{"symbol":"p.F","toolchain":"go"}`)); err != nil || ok {
+		t.Fatalf("a flat row judged complete: %v, %v", ok, err)
+	}
+	for _, c := range []struct{ row, want string }{
+		{`{"symbol":"p.F","fingerprint":null}`, "fingerprint is null"},
+		{`{"symbol":null}`, "symbol is null"},
+		{`{"symbol":"p.F","moduleBase":null}`, "moduleBase is null"},
+		{`{"symbol":"p.F","runtimeReason":null}`, "runtimeReason is null"},
+		{`{"symbol":"p.F","fingerprint":{"maximalClosure":"m","testVariantClosure":"v","toolchain":"go","buildConfig":"b","resultKind":1,"bogus":1}}`, `unknown field "bogus"`},
+		{`{"symbol":"p.F","fingerprint":{"maximalClosure":"m","testVariantClosure":"v","toolchain":"go","buildConfig":"b"}}`, "invalid recorded result kind 0"},
+	} {
+		var e SubjectEvidence
+		if err := json.Unmarshal([]byte(c.row), &e); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", c.row, err, c.want)
 		}
 	}
-	for _, field := range subjectEvidenceFields {
-		if !persisted[field.name] {
-			t.Errorf("subjectEvidenceFields row %q names no persisted SubjectEvidence field", field.name)
+	// Completeness is gomutant's: an empty required pin, a disposition
+	// without its reason, or an observable proof carrying one is an
+	// incomplete row, never an error.
+	for _, mutate := range []func(*SubjectEvidence){
+		func(e *SubjectEvidence) { e.MaximalClosure = "" },
+		func(e *SubjectEvidence) { e.Guards.BuildConfig = "" },
+		func(e *SubjectEvidence) { e.ObservationProof.Evidence = "" },
+		func(e *SubjectEvidence) { e.RuntimeDigest = "" },
+		func(e *SubjectEvidence) { e.RuntimeReason = "" },
+		func(e *SubjectEvidence) { e.ObservationProof.Reason = "" },
+	} {
+		e := row
+		mutate(&e)
+		raw, err := json.Marshal(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := validateSubjectEvidence(raw); err != nil || ok {
+			t.Errorf("mutated row judged complete: %+v (%v)", e, err)
 		}
 	}
 }
 
-// The audit and strategy evidence fields' wire spellings are pinned by
-// golden keys: a tag renamed in lockstep with its inventory row would pass
-// the struct-table checks while silently orphaning the field in every
-// existing on-disk document (REQ-result-export). The required fields' wire
-// names are pinned by the document-literal parse tests; these three are
-// omitempty and appear in no literal.
-func TestEvidenceWireNamesArePinned(t *testing.T) {
-	raw, err := json.Marshal(SubjectEvidence{
-		DynamicStateVouches:      "vouches",
-		PackageProcessDischarges: "discharges",
-		DynamicStateStrategy:     "strategy",
-		ClosureStrategy:          "closure strategy",
-	})
+// TestLegacyEvidenceRowsUpgradeOnRead reads a version-12 interned
+// document whose evidence rows are the flat pre-record shape — the
+// fingerprint's fields beside gomutant's, the proof flattened — and
+// finds every row in the current shape with the code-result kind
+// stamped, then refuses the same flat row inside a version-13 document
+// (REQ-result-export).
+func TestLegacyEvidenceRowsUpgradeOnRead(t *testing.T) {
+	// The target row carries every optional legacy fact; the oracle row a
+	// negative proof with its reason and the runtime disposition.
+	flat := `{"symbol":"example.com/m.F","maximalClosure":"m","testVariantClosure":"v","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"s","observationSubjectPackage":"example.com/m","observationSubjectSymbol":"F","observationObservable":true,"observationEvidence":"e","purityAssertion":"source directive","dynamicStateVouches":"a.b","packageProcessDischarges":"a.p","dynamicStateStrategy":"strategy","closureStrategy":"closure","moduleBase":"sub/mod","runtimeInputs":"","runtimeDigest":"digest","runtimeUnverifiable":true,"runtimeReason":"external directory input: /srv"}`
+	oracle := `{"symbol":"example.com/m.TestF","maximalClosure":"m","testVariantClosure":"v","toolchain":"go","buildConfig":"b","observationAssertion":"caller assertion","observationStrategy":"s","observationSubjectPackage":"example.com/m","observationSubjectSymbol":"TestF","observationObservable":false,"observationReason":"reaches os.Getenv","observationEvidence":"e","dynamicStateStrategy":"strategy","runtimeInputs":"","runtimeDigest":"digest","runtimeUnverifiable":true,"runtimeReason":"external directory input: /srv"}`
+	doc := `{"version":12,"runtimeInputsTable":["eyJ2IjoxfQ"],"evidenceTable":[{"evidence":` + flat + `,"runtimeInputs":0},{"evidence":` + oracle + `,"runtimeInputs":0}],"ledgerTable":[],"coverageBounds":[],"findings":[{"finding":{"symbol":"example.com/m.F","bodyHash":"h","operatorSet":"go/2","oracleTimeout":"1m0s","commit":"c0ffee","candidateCount":1,"generated":1,"mutants":1,"killed":1,"operators":[{"operator":"zero return","generated":1,"killed":1}]},"targetEvidence":0,"oracleEvidence":[1]}]}`
+	parsed, err := ParseDocument([]byte(doc))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{
-		`"dynamicStateVouches":"vouches"`,
-		`"packageProcessDischarges":"discharges"`,
-		`"dynamicStateStrategy":"strategy"`,
-		`"closureStrategy":"closure strategy"`,
-	} {
-		if !strings.Contains(string(raw), key) {
-			t.Errorf("wire encoding lacks %s: %s", key, raw)
-		}
+	if len(parsed.Findings) != 1 {
+		t.Fatalf("findings = %d", len(parsed.Findings))
+	}
+	target := parsed.Findings[0].TargetEvidence
+	wantTarget := SubjectEvidence{Symbol: "example.com/m.F", Fingerprint: gofresh.Fingerprint{
+		MaximalClosure: "m", TestVariantClosure: "v", Guards: guard.Guards{Toolchain: "go", BuildConfig: "b"},
+		ObservationAssertion: "caller assertion",
+		ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "example.com/m", Symbol: "F"}, Observable: true, Evidence: "e"},
+		PurityAssertion:      "source directive", DynamicStateVouches: "a.b", PackageProcessDischarges: "a.p", DynamicStateStrategy: "strategy", ClosureStrategy: "closure",
+		RuntimeInputs: "eyJ2IjoxfQ", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
+	}, ModuleBase: "sub/mod", RuntimeUnverifiable: true, RuntimeReason: "external directory input: /srv"}
+	if target != wantTarget {
+		t.Fatalf("upgraded target row:\n got %+v\nwant %+v", target, wantTarget)
+	}
+	wantOracle := SubjectEvidence{Symbol: "example.com/m.TestF", Fingerprint: gofresh.Fingerprint{
+		MaximalClosure: "m", TestVariantClosure: "v", Guards: guard.Guards{Toolchain: "go", BuildConfig: "b"},
+		ObservationAssertion: "caller assertion",
+		ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "example.com/m", Symbol: "TestF"}, Observable: false, Reason: "reaches os.Getenv", Evidence: "e"},
+		DynamicStateStrategy: "strategy", RuntimeInputs: "eyJ2IjoxfQ", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
+	}, RuntimeUnverifiable: true, RuntimeReason: "external directory input: /srv"}
+	if len(parsed.Findings[0].OracleEvidence) != 1 || parsed.Findings[0].OracleEvidence[0] != wantOracle {
+		t.Fatalf("upgraded oracle rows:\n got %+v\nwant %+v", parsed.Findings[0].OracleEvidence, wantOracle)
+	}
+	// A legacy row whose positive proof carries a reason is refused in the
+	// row's own words (the old reader called it incomplete; the record
+	// form's decoder would refuse it too).
+	if _, err := ParseDocument([]byte(strings.Replace(doc, `"observationObservable":true,"observationEvidence":"e"`, `"observationObservable":true,"observationReason":"r","observationEvidence":"e"`, 1))); err == nil || !strings.Contains(err.Error(), "observable proof carries a reason") {
+		t.Fatalf("a positive proof with a reason: %v", err)
+	}
+	// A flat row under the current version is the old shape in a new
+	// document: its keys are tolerated and its fingerprint is empty, so
+	// the record is incomplete — refused, never upgraded silently.
+	if _, err := ParseDocument([]byte(strings.Replace(doc, `"version":12`, `"version":13`, 1))); err == nil || !strings.Contains(err.Error(), "missing or has invalid required evidence") {
+		t.Fatalf("a flat row under version 13: %v", err)
+	}
+	// A legacy row's null still refuses.
+	if _, err := ParseDocument([]byte(strings.Replace(doc, `"runtimeDigest":"digest","runtimeUnverifiable"`, `"runtimeDigest":null,"runtimeUnverifiable"`, 1))); err == nil || !strings.Contains(err.Error(), "null") {
+		t.Fatalf("a legacy row with a null: %v", err)
 	}
 }
 
@@ -220,12 +304,13 @@ func TestEvidenceWireNamesArePinned(t *testing.T) {
 // must survive the evidence round trip — a name-presence check alone would
 // pass a field neither conversion assigns (REQ-result-record).
 func TestFingerprintSurfaceIsMappedOrExempt(t *testing.T) {
-	// Exemptions with their grounds: SingleSubjectDischarges belongs to an
-	// attestation gomutant never sets (single-subject execution), so the
-	// round trip drops it; ResultKind is fixed at gofresh.CodeResult by
-	// construction; Guards' Machine and RuntimeConfig are measurement
-	// guards a code result never carries — its code guards (Toolchain,
-	// BuildConfig) round-trip as columns.
+	// Exemptions with their grounds: ResultKind is the code result by
+	// construction (an int the filler does not draw); Guards' Machine
+	// and RuntimeConfig are measurement guards a code result never
+	// carries and its record form refuses. With the record embedded the
+	// fingerprint() leg is the field itself, so the round trip's live
+	// half is the record encode and the completeness judgment over the
+	// filled row — a field the record form could not carry fails there.
 	var fp gofresh.Fingerprint
 	next := 0
 	var fill func(v reflect.Value, path string)
@@ -244,7 +329,7 @@ func TestFingerprintSurfaceIsMappedOrExempt(t *testing.T) {
 			t.Fatalf("Fingerprint field %s has unhandled kind %s: extend the filler and the evidence mapping together", path, v.Kind())
 		}
 	}
-	exempt := map[string]bool{"SingleSubjectDischarges": true, "ResultKind": true}
+	exempt := map[string]bool{"ResultKind": true}
 	fpValue := reflect.ValueOf(&fp).Elem()
 	for i := 0; i < fpValue.NumField(); i++ {
 		if name := fpValue.Type().Field(i).Name; exempt[name] {
@@ -254,6 +339,7 @@ func TestFingerprintSurfaceIsMappedOrExempt(t *testing.T) {
 		}
 	}
 	fp.Guards.Machine, fp.Guards.RuntimeConfig = "", ""
+	fp.ResultKind = gofresh.CodeResult
 	// Both legs are valid record shapes (validateSubjectEvidence pairs
 	// Observable with an empty Reason and vice versa); together they give
 	// every field a non-zero leg, so a dropped assignment fails one of
@@ -273,7 +359,6 @@ func TestFingerprintSurfaceIsMappedOrExempt(t *testing.T) {
 			t.Errorf("observable=%v: fixture is not a valid record (ok=%v err=%v)", observable, ok, verr)
 		}
 		want := leg
-		want.ResultKind = gofresh.CodeResult
 		if got := ev.fingerprint(); !reflect.DeepEqual(got, want) {
 			t.Errorf("observable=%v: fingerprint round trip dropped or altered a field:\n got %+v\nwant %+v", observable, got, want)
 		}
@@ -357,4 +442,200 @@ func TestExportCarriesTheCoverageBounds(t *testing.T) {
 	} else if doc, err := ParseDocument(again); err != nil || len(doc.CoverageBounds) != 0 {
 		t.Fatalf("no bounds written, %d read (%v)", len(doc.CoverageBounds), err)
 	}
+}
+
+// TestLegacyRowsAndTheUpgradeAreInverse ties the three spellings of the
+// legacy shape together: the test-side downgrader emits exactly the
+// key set the reader knows, and a full row survives downgrade then
+// upgrade unchanged — so a legacy fact the upgrade dropped, or a key the
+// downgrader forgot, fails here rather than silently (REQ-result-export).
+func TestLegacyRowsAndTheUpgradeAreInverse(t *testing.T) {
+	row := SubjectEvidence{Symbol: "p.F", Fingerprint: gofresh.Fingerprint{
+		MaximalClosure: "m", TestVariantClosure: "v", Guards: guard.Guards{Toolchain: "go", BuildConfig: "b"},
+		ObservationAssertion: "caller assertion",
+		ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "p", Symbol: "F"}, Observable: false, Reason: "r", Evidence: "e"},
+		PurityAssertion:      "source directive", DynamicStateVouches: "vouches", PackageProcessDischarges: "discharges",
+		DynamicStateStrategy: "strategy", ClosureStrategy: "closure strategy", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
+	}, ModuleBase: "sub", RuntimeUnverifiable: true, RuntimeReason: "why"}
+	current, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flat := legacyRows(t, []byte(`{"findings":[{"targetEvidence":`+string(current)+`}]}`))
+	var top struct {
+		Findings []struct {
+			TargetEvidence json.RawMessage `json:"targetEvidence"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(flat, &top); err != nil {
+		t.Fatal(err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(top.Findings[0].TargetEvidence, &keys); err != nil {
+		t.Fatal(err)
+	}
+	for key := range keys {
+		if !legacyEvidenceKeys[key] {
+			t.Errorf("the downgrader emits %q, a key the reader does not know", key)
+		}
+	}
+	// singleSubjectDischarges is no legacy key — a pre-13 row could not
+	// carry it — so the reader's set never names it and the fixture
+	// leaves it unset; every legacy key the downgrader must emit.
+	for key := range legacyEvidenceKeys {
+		if _, ok := keys[key]; !ok {
+			t.Errorf("the reader knows %q, a key the downgrader never emits", key)
+		}
+	}
+	upgraded, err := upgradeLegacyEvidenceRow(top.Findings[0].TargetEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back SubjectEvidence
+	if err := json.Unmarshal(upgraded, &back); err != nil || back != row {
+		t.Fatalf("downgrade then upgrade moved the row: %v\n got %+v\nwant %+v", err, back, row)
+	}
+}
+
+// TestFingerprintRecordKeysRideTheDocumentVersion pins the embedded
+// record's key set beside DocumentVersion: a fingerprint field gofresh
+// grows lands in every row and an older reader of this version refuses
+// the whole document by an unknown key, so the growth rides a version
+// bump — this golden moves and the version literal beside it moves with
+// it (REQ-result-export, REQ-result-tolerant).
+func TestFingerprintRecordKeysRideTheDocumentVersion(t *testing.T) {
+	// Every field filled by reflection, so a field gofresh grows is
+	// non-zero and renders whatever its omitempty tag says — a
+	// hand-written literal would leave it zero and the golden blind.
+	var full gofresh.Fingerprint
+	next := 0
+	var fill func(v reflect.Value)
+	fill = func(v reflect.Value) {
+		switch v.Kind() {
+		case reflect.String:
+			next++
+			v.SetString(fmt.Sprintf("v%d", next))
+		case reflect.Bool:
+			v.SetBool(true)
+		case reflect.Int:
+			v.SetInt(int64(gofresh.Measurement))
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				fill(v.Field(i))
+			}
+		default:
+			t.Fatalf("Fingerprint field of kind %s: extend the filler", v.Kind())
+		}
+	}
+	fill(reflect.ValueOf(&full).Elem())
+	raw, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keysOf := func(raw json.RawMessage) []string {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &object); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for key := range object {
+			got = append(got, key)
+		}
+		sort.Strings(got)
+		return got
+	}
+	got := keysOf(raw)
+	want := []string{"buildConfig", "closureStrategy", "dynamicStateStrategy", "dynamicStateVouches", "machine", "maximalClosure", "observationAssertion", "observationProof", "packageProcessDischarges", "purityAssertion", "resultKind", "runtimeConfig", "runtimeDigest", "runtimeInputs", "singleSubjectDischarges", "testVariantClosure", "toolchain"}
+	if !reflect.DeepEqual(got, want) || DocumentVersion != 13 {
+		t.Fatalf("the record's keys = %v (DocumentVersion %d); a moved key set rides a version bump", got, DocumentVersion)
+	}
+	// The nested proof object has its own strict decoder, so its key
+	// set rides the version the same way.
+	var outer map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &outer); err != nil {
+		t.Fatal(err)
+	}
+	if got := keysOf(outer["observationProof"]); !reflect.DeepEqual(got, []string{"evidence", "observable", "package", "reason", "strategy", "symbol"}) {
+		t.Fatalf("the proof's keys = %v; a moved key set rides a version bump", got)
+	}
+}
+
+// legacyRows rewrites a rendered document's evidence rows — the
+// interned table's or the inline findings' — into the flat pre-13
+// shape, so a fixture relabeled with an older version carries the rows
+// that version wrote; the inverse of the reader's upgrade, kept beside
+// the pins that exercise it.
+func legacyRows(t *testing.T, data []byte) []byte {
+	t.Helper()
+	flatten := func(raw json.RawMessage) json.RawMessage {
+		var e SubjectEvidence
+		if err := json.Unmarshal(raw, &e); err != nil {
+			t.Fatal(err)
+		}
+		flat := map[string]any{
+			"symbol": e.Symbol, "maximalClosure": e.MaximalClosure, "testVariantClosure": e.TestVariantClosure,
+			"toolchain": e.Guards.Toolchain, "buildConfig": e.Guards.BuildConfig,
+			"observationAssertion": e.ObservationAssertion, "observationStrategy": e.ObservationProof.Strategy,
+			"observationSubjectPackage": e.ObservationProof.Subject.Package, "observationSubjectSymbol": e.ObservationProof.Subject.Symbol,
+			"observationObservable": e.ObservationProof.Observable, "observationEvidence": e.ObservationProof.Evidence,
+			"runtimeInputs": e.RuntimeInputs, "runtimeDigest": e.RuntimeDigest,
+		}
+		for key, value := range map[string]string{
+			"observationReason": e.ObservationProof.Reason, "purityAssertion": e.PurityAssertion, "dynamicStateVouches": e.DynamicStateVouches,
+			"packageProcessDischarges": e.PackageProcessDischarges, "dynamicStateStrategy": e.DynamicStateStrategy, "closureStrategy": e.ClosureStrategy,
+			"moduleBase": e.ModuleBase, "runtimeReason": e.RuntimeReason,
+		} {
+			if value != "" {
+				flat[key] = value
+			}
+		}
+		if e.RuntimeUnverifiable {
+			flat["runtimeUnverifiable"] = true
+		}
+		out, err := json.Marshal(flat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		t.Fatal(err)
+	}
+	if raw, ok := top["evidenceTable"]; ok {
+		var table []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &table); err != nil {
+			t.Fatal(err)
+		}
+		for i := range table {
+			table[i]["evidence"] = flatten(table[i]["evidence"])
+		}
+		top["evidenceTable"], _ = json.Marshal(table)
+	} else {
+		var findings []map[string]json.RawMessage
+		if err := json.Unmarshal(top["findings"], &findings); err != nil {
+			t.Fatal(err)
+		}
+		for i := range findings {
+			if raw, ok := findings[i]["targetEvidence"]; ok {
+				findings[i]["targetEvidence"] = flatten(raw)
+			}
+			if raw, ok := findings[i]["oracleEvidence"]; ok {
+				var rows []json.RawMessage
+				if err := json.Unmarshal(raw, &rows); err != nil {
+					t.Fatal(err)
+				}
+				for j := range rows {
+					rows[j] = flatten(rows[j])
+				}
+				findings[i]["oracleEvidence"], _ = json.Marshal(rows)
+			}
+		}
+		top["findings"], _ = json.Marshal(findings)
+	}
+	out, err := json.Marshal(top)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

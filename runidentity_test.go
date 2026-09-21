@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh"
 )
 
 // A record carries the identity of the run that last measured any of
@@ -88,8 +90,8 @@ func TestNewRunIDIsFreshHex(t *testing.T) {
 // dispositions (REQ-attest-survivor).
 func TestAttestationPinsIgnoreTheRunIdentity(t *testing.T) {
 	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
-		TargetEvidence: SubjectEvidence{Symbol: "p.S", MaximalClosure: "h"},
-		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", MaximalClosure: "o"}}, Run: "run-one"}
+		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}, Run: "run-one"}
 	other := base
 	other.Run = "run-two"
 	if !sameAttestationPins(base, other) {

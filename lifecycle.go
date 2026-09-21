@@ -243,17 +243,17 @@ func retargetFinding(f Finding, from, to string) (rewritten Finding, symbolChang
 		// a dotted package boundary the string cannot express: refuse
 		// rather than write the corruption (REQ-result-lifecycle).
 		if symbolRewrote && err == nil {
-			storedPkg := e.ObservationSubjectPackage
+			storedPkg := e.ObservationProof.Subject.Package
 			switch {
 			case storedPkg == "" || storedPkg == fromPkg || strings.HasPrefix(storedPkg, fromPkg+"/"):
 				if pkgNext, ok := retargetPackagePath(storedPkg, fromPkg, toPkg); ok {
-					e.ObservationSubjectPackage = pkgNext
+					e.ObservationProof.Subject.Package = pkgNext
 				}
-				if fromLocal != "" && strings.HasPrefix(e.ObservationSubjectSymbol, fromLocal) {
+				if fromLocal != "" && strings.HasPrefix(e.ObservationProof.Subject.Symbol, fromLocal) {
 					// In the local half "." is unambiguous - identifiers
 					// cannot contain it - so a dot edge is a true boundary.
-					if b, dot := boundaryAfter(e.ObservationSubjectSymbol, fromLocal); b || dot {
-						e.ObservationSubjectSymbol = toLocal + e.ObservationSubjectSymbol[len(fromLocal):]
+					if b, dot := boundaryAfter(e.ObservationProof.Subject.Symbol, fromLocal); b || dot {
+						e.ObservationProof.Subject.Symbol = toLocal + e.ObservationProof.Subject.Symbol[len(fromLocal):]
 					}
 				}
 			// A dot-terminated from equal to storedPkg+"." projects to
@@ -265,9 +265,9 @@ func retargetFinding(f Finding, from, to string) (rewritten Finding, symbolChang
 					return e
 				}
 				localFrom, localTo := from[len(storedPkg)+1:], to[len(storedPkg)+1:]
-				if localFrom != "" && strings.HasPrefix(e.ObservationSubjectSymbol, localFrom) {
-					if b, dot := boundaryAfter(e.ObservationSubjectSymbol, localFrom); b || dot {
-						e.ObservationSubjectSymbol = localTo + e.ObservationSubjectSymbol[len(localFrom):]
+				if localFrom != "" && strings.HasPrefix(e.ObservationProof.Subject.Symbol, localFrom) {
+					if b, dot := boundaryAfter(e.ObservationProof.Subject.Symbol, localFrom); b || dot {
+						e.ObservationProof.Subject.Symbol = localTo + e.ObservationProof.Subject.Symbol[len(localFrom):]
 					}
 				}
 			default:

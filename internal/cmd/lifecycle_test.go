@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -33,10 +35,7 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 	evidence := func(name string) gomutant.SubjectEvidence {
 		// The recorded subject package must agree with the symbol - the
 		// retarget's package-boundary gate audits the stored fact.
-		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
-			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: name[:strings.LastIndex(name, ".")],
-			ObservationSubjectSymbol: name[strings.LastIndex(name, ".")+1:], ObservationObservable: true, ObservationEvidence: "proof",
-			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return gomutant.SubjectEvidence{Symbol: name, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: name[:strings.LastIndex(name, ".")], Symbol: name[strings.LastIndex(name, ".")+1:]}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	record := func(symbol string) gomutant.Finding {
 		return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: engine.OperatorSet, OracleTimeout: "1m0s", Dirty: true,

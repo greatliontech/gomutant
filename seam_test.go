@@ -511,8 +511,8 @@ func TestFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := fs[0]
-	if f.TargetEvidence.ObservationAssertion == "" || f.TargetEvidence.ObservationStrategy != gofresh.ObservationRTA ||
-		f.TargetEvidence.ObservationEvidence == "" || f.OracleEvidence[0].ObservationEvidence == "" {
+	if f.TargetEvidence.ObservationAssertion == "" || f.TargetEvidence.ObservationProof.Strategy != gofresh.ObservationRTA ||
+		f.TargetEvidence.ObservationProof.Evidence == "" || f.OracleEvidence[0].ObservationProof.Evidence == "" {
 		t.Fatalf("measured finding lacks observation proof: %+v", f)
 	}
 	inspection, err := tr.InspectFinding(context.Background(), f, nil)
@@ -546,16 +546,16 @@ func TestFresh(t *testing.T) {
 	}
 	missingProof := f
 	missingProof.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
-	missingProof.OracleEvidence[0].ObservationEvidence = ""
+	missingProof.OracleEvidence[0].ObservationProof.Evidence = ""
 	if ok, err := tr.Fresh(context.Background(), missingProof, tg, 1); err != nil || ok {
 		t.Fatalf("missing observation proof read fresh: %v %v", ok, err)
 	}
 	oldProof := f
-	oldProof.TargetEvidence.ObservationStrategy = "gofresh/observation-rta@2"
-	oldProof.TargetEvidence.ObservationEvidence = "b0c9aaba09049e1642fd517a09b00877"
+	oldProof.TargetEvidence.ObservationProof.Strategy = "gofresh/observation-rta@2"
+	oldProof.TargetEvidence.ObservationProof.Evidence = "b0c9aaba09049e1642fd517a09b00877"
 	oldProof.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
-	oldProof.OracleEvidence[0].ObservationStrategy = "gofresh/observation-rta@2"
-	oldProof.OracleEvidence[0].ObservationEvidence = "46056b8e7fea776a3b95b884b1b1c953"
+	oldProof.OracleEvidence[0].ObservationProof.Strategy = "gofresh/observation-rta@2"
+	oldProof.OracleEvidence[0].ObservationProof.Evidence = "46056b8e7fea776a3b95b884b1b1c953"
 	if ok, err := tr.Fresh(context.Background(), oldProof, tg, 1); err != nil || ok {
 		t.Fatalf("superseded observation proof read fresh: %v %v", ok, err)
 	}
@@ -580,7 +580,7 @@ func TestFresh(t *testing.T) {
 		oldProofDecisions[0].Candidates != 1 {
 		t.Fatalf("superseded observation proof run = %+v, decisions %+v", remeasured, oldProofDecisions)
 	}
-	if remeasured[0].TargetEvidence.ObservationStrategy != f.TargetEvidence.ObservationStrategy {
+	if remeasured[0].TargetEvidence.ObservationProof.Strategy != f.TargetEvidence.ObservationProof.Strategy {
 		t.Fatalf("re-measured record kept a superseded strategy: %+v", remeasured[0].TargetEvidence)
 	}
 	other := Target{Symbol: "example.com/fixture/lib.Weak"}

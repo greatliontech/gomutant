@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/gitfixture"
@@ -50,10 +52,7 @@ func seconds(n int) *int { return &n }
 
 func seededFinding(symbol string) gomutant.Finding {
 	evidence := func(name string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: name, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
-			ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
-			ObservationSubjectSymbol: name, ObservationObservable: true, ObservationEvidence: "proof",
-			RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+		return gomutant.SubjectEvidence{Symbol: name, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: name}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		CandidateCount: 0, Generated: 0,

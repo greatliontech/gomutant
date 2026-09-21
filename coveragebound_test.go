@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,19 +62,19 @@ func TestSummaryStatesTheUnreachedBoundUnderTheSelection(t *testing.T) {
 	}
 }
 
-// The document carries its coverage bounds under version 12 — written
-// present, read back — while a version-11 document reads with none and
-// a version-12 document without the table refuses
+// The document carries its coverage bounds under the current version
+// — written present, read back — while a version-11 document reads
+// with none and a version-12 document without the table refuses
 // (REQ-result-unreached-bound, REQ-result-export).
-func TestDocumentCarriesCoverageBoundsUnderVersion12(t *testing.T) {
+func TestDocumentCarriesCoverageBoundsUnderTheCurrentVersion(t *testing.T) {
 	findings := []Finding{survivorFinding("example.com/mod/host.D")}
 	bounds := []CoverageBound{{Selection: "wasm", Run: "r1", Unreached: []string{"example.com/mod/wasm.A"}}, {Selection: "js", Run: "r1", Unreached: []string{"example.com/mod/js.B"}}}
 	data, _, err := renderDocument(findings, bounds)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"version": 12`) || !strings.Contains(string(data), `"coverageBounds"`) {
-		t.Fatalf("document lacks the version-12 table:\n%s", data)
+	if !strings.Contains(string(data), `"version": 13`) || !strings.Contains(string(data), `"coverageBounds"`) {
+		t.Fatalf("document lacks the current version's table:\n%s", data)
 	}
 	doc, err := ParseDocument(data)
 	if err != nil {
@@ -96,7 +97,7 @@ func TestDocumentCarriesCoverageBoundsUnderVersion12(t *testing.T) {
 	// A version-11 document reads with no bounds; a 12 without the
 	// table refuses; a version ahead refuses ahead.
 	var top map[string]json.RawMessage
-	if err := json.Unmarshal(empty, &top); err != nil {
+	if err := json.Unmarshal(legacyRows(t, empty), &top); err != nil {
 		t.Fatal(err)
 	}
 	delete(top, "coverageBounds")
@@ -110,11 +111,11 @@ func TestDocumentCarriesCoverageBoundsUnderVersion12(t *testing.T) {
 	if _, err := ParseDocument(v12bare); err == nil || !strings.Contains(err.Error(), "coverageBounds") {
 		t.Fatalf("version 12 without the table = %v, want refused naming it", err)
 	}
-	top["version"] = json.RawMessage("13")
+	top["version"] = json.RawMessage(fmt.Sprint(DocumentVersion + 1))
 	ahead, _ := json.Marshal(top)
 	var versionErr *DocumentVersionError
 	if _, err := ParseDocument(ahead); !errors.As(err, &versionErr) || !errors.Is(err, ErrVersionAhead) {
-		t.Fatalf("version 13 = %v, want refused ahead", err)
+		t.Fatalf("version %d = %v, want refused ahead", DocumentVersion+1, err)
 	}
 	// A malformed row refuses.
 	bad := strings.Replace(string(data), `"selection": "js"`, `"selection": ""`, 1)
@@ -176,8 +177,8 @@ func TestStoreRecordsTheBoundOnTheNextWrite(t *testing.T) {
 		t.Fatalf("reread bounds = %+v, %v; want the one surviving row", reread, err)
 	}
 	data, _ := os.ReadFile(path)
-	if !strings.Contains(string(data), `"version": 12`) {
-		t.Fatalf("document not at version 12:\n%s", data)
+	if !strings.Contains(string(data), fmt.Sprintf(`"version": %d`, DocumentVersion)) {
+		t.Fatalf("document not at the current version:\n%s", data)
 	}
 }
 

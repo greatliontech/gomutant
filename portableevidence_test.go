@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
@@ -44,7 +45,7 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := Finding{TargetEvidence: SubjectEvidence{Symbol: "example.com/ws/sub.F", ModuleBase: "sub", RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest}}
+	rec := Finding{TargetEvidence: SubjectEvidence{Symbol: "example.com/ws/sub.F", Fingerprint: gofresh.Fingerprint{RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest, ResultKind: gofresh.CodeResult}, ModuleBase: "sub"}}
 
 	// The fresh union at the tree root, already absolute (the engine's
 	// in-memory form).
@@ -118,7 +119,7 @@ func TestApplySplicedUnionAcceptsRelativeEraRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence := SubjectEvidence{Symbol: "example.com/splice.F", RuntimeInputs: relState.Manifest, RuntimeDigest: relState.Digest}
+	evidence := SubjectEvidence{Symbol: "example.com/splice.F", Fingerprint: gofresh.Fingerprint{RuntimeInputs: relState.Manifest, RuntimeDigest: relState.Digest, ResultKind: gofresh.CodeResult}}
 	rec := Finding{TargetEvidence: evidence, OracleEvidence: []SubjectEvidence{evidence}}
 	_, same, err := tree.applySplicedUnion(context.Background(), env, rec, union, newPortableUnion(union, env), root)
 	if err != nil {

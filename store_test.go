@@ -13,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gofresh/guard"
 )
 
 // storeManifest builds a canonical runtimeinput manifest (the wire form
@@ -30,10 +33,7 @@ func storeManifest(paths ...string) string {
 }
 
 func cleanEvidence(symbol string) SubjectEvidence {
-	return SubjectEvidence{Symbol: symbol, MaximalClosure: "closure", TestVariantClosure: "tv", Toolchain: "go", BuildConfig: "build",
-		ObservationAssertion: "caller assertion", ObservationStrategy: "proof/v1", ObservationSubjectPackage: "p",
-		ObservationSubjectSymbol: symbol, ObservationObservable: true, ObservationEvidence: "proof",
-		RuntimeInputs: storeManifest(), RuntimeDigest: "digest"}
+	return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: storeManifest(), RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 }
 
 func storeFinding(symbol string, mutate func(*Finding)) Finding {
