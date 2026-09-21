@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gofresh/guidance"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -22,7 +23,7 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered := map[string][]string{}
+	registered := map[string]guidance.Registered{}
 	var walk func(prefix string, c *cobra.Command)
 	walk = func(prefix string, c *cobra.Command) {
 		for _, child := range c.Commands() {
@@ -34,12 +35,15 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 				walk(name, child)
 				continue
 			}
-			var flags []string
+			flags := guidance.Registered{}
 			child.Flags().VisitAll(func(f *pflag.Flag) {
 				if f.Name == "help" {
 					return
 				}
-				flags = append(flags, f.Name)
+				// The registration carries whether cobra prints a default for
+				// the flag — the fact the coverage judgment scopes its
+				// default-spelling rule by.
+				flags[f.Name] = !zeroDefault(f)
 				// Every usage string is the document's rendering — the
 				// knob's terse clause in pflag's usage grammar (no
 				// code span, since pflag reads the first back-quoted
@@ -75,6 +79,13 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 		}
 	}
 	walk("", newRootCommand())
+	// The registration's fact pinned by two literals — a flag whose
+	// default cobra prints and one whose default it does not — so the
+	// judgment's default-spelling rule keeps its population once the
+	// inline lint above goes.
+	if !registered["run"]["findings"] || registered["run"]["budget"] {
+		t.Fatalf("run registration = %v; want findings non-zero and budget zero", registered["run"])
+	}
 	// One rendering pinned by its literal, so the comparison above is
 	// never the projection judging itself.
 	if run, _, err := newRootCommand().Find([]string{"run"}); err != nil {

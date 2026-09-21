@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/greatliontech/gofresh/guidance"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -68,7 +69,7 @@ func TestGuidanceCoversTheWireSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered := map[string][]string{}
+	registered := map[string]guidance.Registered{}
 	for _, tool := range list.Tools {
 		raw, err := json.Marshal(tool.InputSchema)
 		if err != nil {
@@ -82,9 +83,9 @@ func TestGuidanceCoversTheWireSurface(t *testing.T) {
 		if err := json.Unmarshal(raw, &schema); err != nil {
 			t.Fatalf("%s: %v", tool.Name, err)
 		}
-		var params []string
+		params := guidance.Registered{}
 		for name, prop := range schema.Properties {
-			params = append(params, name)
+			params[name] = false // the wire face prints no defaults
 			// Every served description is the document's rendering — the
 			// knob's terse clause — never a second literal.
 			k, err := doc.Knob("mcp", tool.Name, name)
