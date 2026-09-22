@@ -1,9 +1,11 @@
 package gomutant
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -427,5 +429,146 @@ func TestRetargetPrefixParts(t *testing.T) {
 		if pkg != tc.pkg || local != tc.local {
 			t.Fatalf("retargetPrefixParts(%q) = %q, %q; want %q, %q", tc.prefix, pkg, local, tc.pkg, tc.local)
 		}
+	}
+}
+
+// Prune judges every stored record in its own layer: a detached symbol
+// held in both layers leaves the findings document and the overlay
+// alike, an overlay entry a hand edit parked under a foreign name is
+// removed under that name, each removal names its layer, and a check
+// preview writes nothing (REQ-result-lifecycle, REQ-result-layers).
+func TestPruneActsOnEveryLayer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	live := storeFinding("example.com/life.F", nil)
+	deadRepo := storeFinding("example.com/life.Gone", nil)
+	tree, store := lifecycleModule(t, live, deadRepo)
+	ctx := context.Background()
+	// A later machine-local measurement of each symbol shadows its
+	// committed row: both symbols are now two records.
+	deadLocal := storeFinding("example.com/life.Gone", func(f *Finding) { f.Dirty = true; f.BodyHash = "h2" })
+	liveLocal := storeFinding("example.com/life.F", func(f *Finding) { f.Dirty = true; f.BodyHash = "h2" })
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+		return []Finding{deadLocal, liveLocal}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	liveEntryBefore, err := os.Stat(store.entryPath("example.com/life.F"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A record parked under a foreign name by a hand rewrite of the
+	// overlay: served by its content, addressed by its name.
+	stray := storeFinding("example.com/life.Stray", func(f *Finding) { f.Dirty = true })
+	strayDoc, err := Export([]Finding{stray}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strayPath := filepath.Join(store.overlayDir, "0000feedfacefeedfacefeed.json")
+	if err := os.WriteFile(strayPath, strayDoc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docBefore, err := os.Stat(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type removal struct{ symbol, layer string }
+	removals := func(r PruneResult) []removal {
+		var out []removal
+		for _, record := range r.Removed {
+			out = append(out, removal{record.Symbol, record.Layer})
+		}
+		return out
+	}
+	want := []removal{{"example.com/life.Gone", LayerRepo}, {"example.com/life.Gone", LayerLocal}, {"example.com/life.Stray", LayerLocal}}
+
+	preview, err := tree.PruneDetachedContext(ctx, store, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := removals(preview); !reflect.DeepEqual(got, want) || preview.Kept != 2 {
+		t.Fatalf("preview removals = %v (kept %d), want %v (kept 2)", got, preview.Kept, want)
+	}
+	docAfterCheck, err := os.Stat(store.path)
+	if err != nil || !os.SameFile(docBefore, docAfterCheck) {
+		t.Fatalf("check rewrote the document: %v", err)
+	}
+	// The preview's read records placement like any read.
+	if !store.Overlaid("example.com/life.Gone") || !store.Overlaid("example.com/life.F") {
+		t.Fatal("the preview's read did not record the overlay placement")
+	}
+	for _, path := range []string{strayPath, store.entryPath("example.com/life.Gone")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("check touched the overlay: %s: %v", path, err)
+		}
+	}
+
+	result, err := tree.PruneDetachedContext(ctx, store, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := removals(result); !reflect.DeepEqual(got, want) || result.Kept != 2 {
+		t.Fatalf("prune removals = %v (kept %d), want %v (kept 2)", got, result.Kept, want)
+	}
+	// The kept overlay record was not rewritten: its entry keeps its
+	// identity.
+	if liveEntryAfter, err := os.Stat(store.entryPath("example.com/life.F")); err != nil || !os.SameFile(liveEntryBefore, liveEntryAfter) {
+		t.Fatalf("the kept overlay entry was rewritten: %v", err)
+	}
+	for _, path := range []string{strayPath, store.entryPath("example.com/life.Gone")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("pruned overlay entry %s still present: %v", path, err)
+		}
+	}
+	repo, err := store.loadRepo()
+	if err != nil || len(repo) != 1 || repo[0].Symbol != "example.com/life.F" {
+		t.Fatalf("document after prune = %+v, %v", repo, err)
+	}
+	if all, err := store.Load(ctx); err != nil || len(all) != 1 || all[0].Symbol != "example.com/life.F" || all[0].BodyHash != "h2" {
+		t.Fatalf("merged view after prune = %+v, %v", all, err)
+	}
+}
+
+// A prune whose only removal sits in the overlay writes exactly that:
+// the entry goes and the findings document is not rewritten — not even
+// to identical bytes (REQ-result-lifecycle).
+func TestPruneOfAnOverlayRecordLeavesTheDocumentUntouched(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	live := storeFinding("example.com/life.F", nil)
+	dead := storeFinding("example.com/life.Gone", func(f *Finding) { f.Dirty = true })
+	tree, store := lifecycleModule(t, live, dead)
+	ctx := context.Background()
+	before, err := os.Stat(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytesBefore, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tree.PruneDetachedContext(ctx, store, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Removed) != 1 || result.Removed[0].Layer != LayerLocal || result.Kept != 1 {
+		t.Fatalf("prune = %+v", result)
+	}
+	after, err := os.Stat(store.path)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("the document was rewritten for an overlay-only removal: %v", err)
+	}
+	if bytesAfter, _ := os.ReadFile(store.path); !bytes.Equal(bytesBefore, bytesAfter) {
+		t.Fatal("the document's bytes changed")
+	}
+	if _, err := os.Stat(store.entryPath("example.com/life.Gone")); !os.IsNotExist(err) {
+		t.Fatalf("the overlay entry survived the prune: %v", err)
+	}
+	if all, err := store.Load(ctx); err != nil || len(all) != 1 || all[0].Symbol != "example.com/life.F" {
+		t.Fatalf("merged view after prune = %+v, %v", all, err)
 	}
 }

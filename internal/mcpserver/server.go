@@ -1788,7 +1788,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			continue
 		}
 		layer, layerReasons := store.LayerReasons(finding)
-		if layer == "repo" {
+		if layer == gomutant.LayerRepo {
 			repo++
 			continue
 		}
@@ -1936,6 +1936,7 @@ type pruneIn struct {
 
 type prunedOut struct {
 	Symbol   string                 `json:"symbol"`
+	Layer    string                 `json:"layer" jsonschema:"repo when the record sat in the findings document, local when it sat in the machine-local overlay — a symbol held in both layers is two rows"`
 	Attested []gomutant.Attestation `json:"attested,omitempty" jsonschema:"the removed record's dispositions, echoed so the reasoning survives the removal"`
 }
 
@@ -1967,7 +1968,7 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 	// a capped check preview would hide part of what a destructive call
 	// is about to delete (REQ-mcp-lifecycle's envelope exception).
 	for _, record := range result.Removed {
-		out.Removed = append(out.Removed, prunedOut{Symbol: record.Symbol, Attested: record.Attested})
+		out.Removed = append(out.Removed, prunedOut{Symbol: record.Symbol, Layer: record.Layer, Attested: record.Attested})
 	}
 	return nil, out, nil
 }

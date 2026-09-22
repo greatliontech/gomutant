@@ -1749,4 +1749,527 @@ func TestStoreServedRecordsShareNoListWithTheCache(t *testing.T) {
 			t.Fatalf("a caller's edit reached the overlay cache:\nserved: %+v\nentry:  %+v", f, local[0])
 		}
 	}
+	// The record the read remembers for a re-home is isolated the same
+	// way: the caller's edit of the served view never reaches it.
+	served, err = store.Load(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range served {
+		mutateEveryList(reflect.ValueOf(&served[i]).Elem())
+	}
+	store.mu.Lock()
+	remembered := store.servedRecord["p.Local"]
+	store.mu.Unlock()
+	if !reflect.DeepEqual(remembered, local[0]) {
+		t.Fatalf("a caller's edit reached the served-record memo:\nmemo:  %+v\nentry: %+v", remembered, local[0])
+	}
+}
+
+// A write acts on every entry a read finds holding a symbol, never on
+// the symbol's hashed path alone: entries a hand edit parked under
+// foreign names are served (the entry at the symbol's own path winning,
+// else the first by name), superseded by the symbol's next install,
+// and removed by a prune through the measuring write
+// (REQ-result-layers).
+func TestStoreWritesActOnTheServedEntries(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := os.MkdirAll(store.overlayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Both foreign names sort BEFORE every hex-named canonical entry, so
+	// the read admits a foreign entry first and the symbol's own path
+	// must displace it.
+	first := filepath.Join(store.overlayDir, "000000000000000000000000.json")
+	second := filepath.Join(store.overlayDir, "111111111111111111111111.json")
+	park := func(path string, f Finding) {
+		doc, err := Export([]Finding{f}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, doc, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	park(first, storeFinding("p.A", func(f *Finding) { f.Dirty = true; f.BodyHash = "first" }))
+	park(second, storeFinding("p.A", func(f *Finding) { f.Dirty = true; f.BodyHash = "second" }))
+	if got := loadSymbols(t, store)["p.A"]; got.BodyHash != "first" {
+		t.Fatalf("served %q, want the first foreign name", got.BodyHash)
+	}
+	park(store.entryPath("p.A"), storeFinding("p.A", func(f *Finding) { f.Dirty = true; f.BodyHash = "canon" }))
+	if got := loadSymbols(t, store)["p.A"]; got.BodyHash != "canon" {
+		t.Fatalf("served %q, want the entry at the symbol's own path", got.BodyHash)
+	}
+
+	// An install supersedes every name the read found.
+	next := storeFinding("p.A", func(f *Finding) { f.Dirty = true; f.BodyHash = "h3" })
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{next}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{first, second} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("foreign-named entry %s survived the install: %v", path, err)
+		}
+	}
+	if got := loadSymbols(t, store)["p.A"]; got.BodyHash != "h3" {
+		t.Fatalf("served %q after the install", got.BodyHash)
+	}
+
+	// A prune through the measuring write removes every name.
+	park(first, storeFinding("p.A", func(f *Finding) { f.Dirty = true; f.BodyHash = "first" }))
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{first, store.entryPath("p.A")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("pruned entry %s survived: %v", path, err)
+		}
+	}
+	if merged := loadSymbols(t, store); len(merged) != 0 {
+		t.Fatalf("pruned symbol still served: %+v", merged)
+	}
+}
+
+// parkAt writes f as an overlay entry at path.
+func parkAt(t *testing.T, path string, f Finding) {
+	t.Helper()
+	doc, err := Export([]Finding{f}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, doc, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A write's removals spare the paths the same write installs at: a
+// record hand-parked at another symbol's own path is removed with its
+// symbol without taking that symbol's fresh record — through the
+// measuring write and through a revision alike (REQ-result-layers).
+func TestStoreWritesSpareTheirOwnInstalls(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	ctx := context.Background()
+	open := func() *Store {
+		dir := t.TempDir()
+		store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store
+	}
+
+	// The measuring write: p.X sits at p.Y's own path; one write
+	// measures p.Y local and no longer holds p.X.
+	store := open()
+	parkAt(t, store.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true }))
+	fresh := storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "fresh" })
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{fresh}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	merged := loadSymbols(t, store)
+	if got, ok := merged["p.Y"]; !ok || got.BodyHash != "fresh" {
+		t.Fatalf("p.Y's fresh record lost to p.X's removal: %+v", merged)
+	}
+	if _, ok := merged["p.X"]; ok {
+		t.Fatalf("p.X still served: %+v", merged)
+	}
+
+	// A revision: p.Z sits at p.B's own path, p.B under a foreign name;
+	// rewriting both installs p.B at its path first, then p.Z — whose
+	// removal of its old names must spare p.B's fresh entry.
+	store = open()
+	parkAt(t, store.entryPath("p.B"), storeFinding("p.Z", func(f *Finding) { f.Dirty = true }))
+	parkAt(t, filepath.Join(store.overlayDir, "000000000000000000000000.json"), storeFinding("p.B", func(f *Finding) { f.Dirty = true }))
+	if err := store.Revise(ctx, false, func(layer string, f Finding) (Finding, bool, error) {
+		f.BodyHash = "rewritten"
+		return f, true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merged = loadSymbols(t, store)
+	for _, symbol := range []string{"p.B", "p.Z"} {
+		if got, ok := merged[symbol]; !ok || got.BodyHash != "rewritten" {
+			t.Fatalf("%s after the revision = %+v (present %v)", symbol, got, ok)
+		}
+		if _, err := os.Stat(store.entryPath(symbol)); err != nil {
+			t.Fatalf("%s has no entry at its own path: %v", symbol, err)
+		}
+	}
+	if entries, _ := os.ReadDir(store.overlayDir); len(entries) != 2 {
+		t.Fatalf("overlay holds %d entries, want exactly one per symbol", len(entries))
+	}
+
+	// The measuring write's other removal arms spare the destination
+	// too: a record that became committable, and an installed symbol's
+	// other names — each with p.X parked at p.Y's own path and p.Y
+	// installing there in the same write.
+	store = open()
+	parkAt(t, store.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true }))
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+		return []Finding{fresh, storeFinding("p.X", nil)}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merged = loadSymbols(t, store)
+	if got, ok := merged["p.Y"]; !ok || got.BodyHash != "fresh" {
+		t.Fatalf("committable arm: p.Y's fresh record lost to p.X's removal: %+v", merged)
+	}
+	if got, ok := merged["p.X"]; !ok || got.Dirty {
+		t.Fatalf("committable arm: p.X = %+v, want the committed row served", got)
+	}
+	store = open()
+	parkAt(t, store.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true }))
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+		return []Finding{fresh, storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "x2" })}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merged = loadSymbols(t, store)
+	if got, ok := merged["p.Y"]; !ok || got.BodyHash != "fresh" {
+		t.Fatalf("install arm: p.Y's fresh record lost to p.X's removal: %+v", merged)
+	}
+	if got, ok := merged["p.X"]; !ok || got.BodyHash != "x2" {
+		t.Fatalf("install arm: p.X = %+v", got)
+	}
+
+	// A spared path is a path no removal clears, so the set of spared
+	// paths is exactly the installs: p.X parked at p.B's own path with
+	// p.B unchanged (nothing installs there) and p.X pruned must leave.
+	store = open()
+	parkAt(t, store.entryPath("p.B"), storeFinding("p.X", func(f *Finding) { f.Dirty = true }))
+	parkAt(t, filepath.Join(store.overlayDir, "000000000000000000000000.json"), storeFinding("p.B", func(f *Finding) { f.Dirty = true }))
+	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		for _, f := range prior {
+			if f.Symbol == "p.B" {
+				return []Finding{f}, nil
+			}
+		}
+		return nil, fmt.Errorf("p.B not served")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merged = loadSymbols(t, store)
+	if _, ok := merged["p.X"]; ok {
+		t.Fatalf("pruned p.X survived its removal: %+v", merged)
+	}
+	if _, ok := merged["p.B"]; !ok {
+		t.Fatalf("p.B lost: %+v", merged)
+	}
+}
+
+// A kept record the read found parked at a path this write installs
+// at is re-homed at its own path before the install overwrites it —
+// and a record parked at THAT record's own path in turn — so a write
+// never loses a record it reported nothing about (REQ-result-layers).
+func TestStoreInstallsRehomeTheParkedRecordsTheyOverwrite(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// p.Z sits at p.X's own path, p.X at p.Y's own path; p.Y installs.
+	parkAt(t, store.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "x" }))
+	parkAt(t, store.entryPath("p.X"), storeFinding("p.Z", func(f *Finding) { f.Dirty = true; f.BodyHash = "z" }))
+	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		return append(prior, storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" })), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merged := loadSymbols(t, store)
+	for symbol, body := range map[string]string{"p.X": "x", "p.Y": "y", "p.Z": "z"} {
+		if got, ok := merged[symbol]; !ok || got.BodyHash != body {
+			t.Fatalf("%s after the install = %+v (present %v); merged %v", symbol, got, ok, merged)
+		}
+		if _, err := os.Stat(store.entryPath(symbol)); err != nil {
+			t.Fatalf("%s has no entry at its own path after the re-home: %v", symbol, err)
+		}
+	}
+	// The re-home writes what the read parsed, never a caller's in-place
+	// edit of the merged view it was handed.
+	store6, err := OpenStore(filepath.Join(t.TempDir(), "findings.json"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parkAt(t, store6.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.Labels = []string{"orig"} }))
+	if err := store6.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		for i := range prior {
+			if prior[i].Symbol == "p.X" {
+				prior[i].Labels[0] = "TAMPERED"
+			}
+		}
+		return append(prior, storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" })), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadSymbols(t, store6)["p.X"]; len(got.Labels) != 1 || got.Labels[0] != "orig" {
+		t.Fatalf("the re-home wrote a caller's in-place edit: %v", got.Labels)
+	}
+
+	// The re-home installs the record the read SERVED: with a canonical
+	// entry beside an earlier-sorting foreign one, the canonical parse,
+	// never the foreign.
+	store4, err := OpenStore(filepath.Join(t.TempDir(), "findings.json"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parkAt(t, filepath.Join(store4.overlayDir, "000000000000000000000000.json"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "stale" }))
+	parkAt(t, store4.entryPath("p.X"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "canon" }))
+	parkAt(t, store4.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "parked" }))
+	if err := store4.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		return append(prior, storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" })), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadSymbols(t, store4)["p.X"]; got.BodyHash != "canon" {
+		t.Fatalf("the re-home installed a record the read never served: %+v", got)
+	}
+
+	// A legacy entry at the re-homed record's own path is moved aside,
+	// never overwritten (REQ-result-layers).
+	store5, err := OpenStore(filepath.Join(t.TempDir(), "findings.json"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(store5.overlayDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte(`{"version": 2, "findings": [{"symbol": "p.X", "attested": [{"reason": "authored"}]}]}`)
+	if err := os.WriteFile(store5.entryPath("p.X"), legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parkAt(t, store5.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "parked" }))
+	if err := store5.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		return append(prior, storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" })), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sidelined, err := filepath.Glob(filepath.Join(store5.overlayDir, "*.legacy-v2.json"))
+	if err != nil || len(sidelined) != 1 {
+		t.Fatalf("legacy entry not sidelined by the re-home: %v, %v", sidelined, err)
+	}
+	if got, _ := os.ReadFile(sidelined[0]); !bytes.Equal(got, legacy) {
+		t.Fatalf("sidelined legacy bytes changed: %s", got)
+	}
+	if got := loadSymbols(t, store5)["p.X"]; got.BodyHash != "parked" {
+		t.Fatalf("p.X after the re-home over a legacy home = %+v", got)
+	}
+
+	// A removal spares a re-homed path: p.W parked at p.X's own path
+	// leaves the set while p.X (parked at p.Y's path) is re-homed there
+	// by p.Y's install — p.W's removal must not take p.X's new entry.
+	store3, err := OpenStore(filepath.Join(t.TempDir(), "findings.json"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parkAt(t, store3.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "x" }))
+	parkAt(t, store3.entryPath("p.X"), storeFinding("p.W", func(f *Finding) { f.Dirty = true; f.BodyHash = "w" }))
+	if err := store3.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		var next []Finding
+		for _, f := range prior {
+			if f.Symbol != "p.W" {
+				next = append(next, f)
+			}
+		}
+		return append(next, storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" })), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merged = loadSymbols(t, store3)
+	if got := merged["p.X"]; got.BodyHash != "x" {
+		t.Fatalf("p.X's re-homed entry taken by p.W's removal: %+v", merged)
+	}
+	if _, ok := merged["p.W"]; ok {
+		t.Fatalf("pruned p.W still served: %+v", merged)
+	}
+
+	// A revision installs the same way: p.X parked at p.Y's path, p.Y
+	// rewritten, p.X kept.
+	store2, err := OpenStore(filepath.Join(t.TempDir(), "findings.json"), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parkAt(t, store2.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "x" }))
+	parkAt(t, filepath.Join(store2.overlayDir, "000000000000000000000000.json"), storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" }))
+	if err := store2.Revise(ctx, false, func(layer string, f Finding) (Finding, bool, error) {
+		if f.Symbol == "p.Y" {
+			f.BodyHash = "y2"
+		}
+		return f, true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	merged = loadSymbols(t, store2)
+	if got := merged["p.X"]; got.BodyHash != "x" {
+		t.Fatalf("p.X lost to p.Y's install through the revision: %+v", merged)
+	}
+	if got := merged["p.Y"]; got.BodyHash != "y2" {
+		t.Fatalf("p.Y = %+v", got)
+	}
+}
+
+// A revision refuses a within-layer collision before any write — two
+// records of one layer mapping onto one symbol — while the same
+// symbol held in both layers is the overlay shadowing the document
+// (REQ-result-lifecycle, REQ-result-layers).
+func TestReviseRefusesAWithinLayerCollision(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	repoA, repoB := storeFinding("p.A", nil), storeFinding("p.B", nil)
+	localA := storeFinding("p.A", func(f *Finding) { f.Dirty = true })
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{repoA, repoB}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) { return []Finding{localA, repoB}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	rename := func(from, to string) RecordEdit {
+		return func(layer string, f Finding) (Finding, bool, error) {
+			if f.Symbol == from {
+				f.Symbol, f.TargetEvidence.Symbol = to, to
+			}
+			return f, true, nil
+		}
+	}
+	docBefore, err := os.Stat(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryBefore, err := os.Stat(store.entryPath("p.A"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []bool{true, false} {
+		err := store.Revise(ctx, check, rename("p.A", "p.B"))
+		var collision *RecordCollisionError
+		if !errors.As(err, &collision) || collision.Symbol != "p.B" || collision.Layer != LayerRepo || !strings.Contains(err.Error(), "p.B collides with an existing record in the findings document") {
+			t.Fatalf("check=%v: err = %v, want the document collision", check, err)
+		}
+	}
+	docAfter, err := os.Stat(store.path)
+	if err != nil || !os.SameFile(docBefore, docAfter) {
+		t.Fatalf("a refused revision rewrote the document: %v", err)
+	}
+	entryAfter, err := os.Stat(store.entryPath("p.A"))
+	if err != nil || !os.SameFile(entryBefore, entryAfter) {
+		t.Fatalf("a refused revision touched the overlay: %v", err)
+	}
+	// Across layers the rename is no collision: the overlay's p.A becomes
+	// p.C beside the document's p.B untouched; a second overlay record
+	// renamed onto it collides in the overlay.
+	if err := store.Revise(ctx, false, rename("p.A", "p.C")); err != nil {
+		t.Fatalf("cross-layer rename refused: %v", err)
+	}
+	if _, err := os.Stat(store.entryPath("p.A")); !os.IsNotExist(err) {
+		t.Fatalf("the renamed record's old entry survived: %v", err)
+	}
+	if merged := loadSymbols(t, store); merged["p.A"].Symbol != "" || merged["p.C"].Symbol != "p.C" || merged["p.C"].TargetEvidence.Symbol != "p.C" {
+		t.Fatalf("merged view after the rename = %v", merged)
+	}
+	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		return append(prior, storeFinding("p.D", func(f *Finding) { f.Dirty = true })), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err = store.Revise(ctx, false, rename("p.D", "p.C"))
+	var collision *RecordCollisionError
+	if !errors.As(err, &collision) || collision.Layer != LayerLocal || !strings.Contains(err.Error(), "machine-local overlay") {
+		t.Fatalf("overlay collision = %v", err)
+	}
+}
+
+// A revision failing after the document write names what landed — the
+// document's state and the count of overlay edits applied — and one
+// failing before any document change says the document is untouched
+// (REQ-result-lifecycle).
+func TestReviseNamesWhatLandedOnAnOverlayFailure(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("a read-only directory does not refuse root")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	ctx := context.Background()
+	remove := func(symbol string) RecordEdit {
+		return func(layer string, f Finding) (Finding, bool, error) { return f, f.Symbol != symbol, nil }
+	}
+	for _, tc := range []struct {
+		name  string
+		repo  []Finding
+		local []Finding
+		want  string
+	}{
+		{"after the document write", []Finding{storeFinding("p.Gone", nil), storeFinding("p.Keep", nil)}, []Finding{storeFinding("p.Gone", func(f *Finding) { f.Dirty = true })},
+			"the findings document was rewritten; 0 of 1 machine-local overlay edits landed before: "},
+		{"with the document untouched", []Finding{storeFinding("p.Keep", nil)}, []Finding{storeFinding("p.Gone", func(f *Finding) { f.Dirty = true })},
+			"the findings document is untouched; 0 of 1 machine-local overlay edits landed before: "},
+	} {
+		dir := t.TempDir()
+		store, err := OpenStore(filepath.Join(dir, "findings.json"), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return tc.repo, nil }); err != nil {
+			t.Fatal(err)
+		}
+		// The local records replace their symbols' rows in the write's
+		// set; the committed rows they shadow stay in the document.
+		if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+			next := append([]Finding(nil), tc.local...)
+			for _, f := range prior {
+				shadowed := false
+				for _, l := range tc.local {
+					shadowed = shadowed || l.Symbol == f.Symbol
+				}
+				if !shadowed {
+					next = append(next, f)
+				}
+			}
+			return next, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(store.overlayDir, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(store.overlayDir, 0o755) })
+		docBefore, err := os.Stat(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = store.Revise(ctx, false, remove("p.Gone"))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: err = %v, want a prefix %q", tc.name, err, tc.want)
+		}
+		os.Chmod(store.overlayDir, 0o755)
+		docAfter, err := os.Stat(store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rewritten := !os.SameFile(docBefore, docAfter); rewritten != strings.Contains(tc.want, "was rewritten") {
+			t.Fatalf("%s: the document rewritten=%v disagrees with the text", tc.name, rewritten)
+		}
+		repo, err := store.loadRepo()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range repo {
+			if f.Symbol == "p.Gone" {
+				t.Fatalf("%s: the document still holds the removed row", tc.name)
+			}
+		}
+	}
 }

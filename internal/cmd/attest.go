@@ -97,8 +97,8 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// (REQ-result-run-posture).
 	layer, layerReason := store.Layer(attested)
 	posture := attestedPosture(ctx, o.dir, selectionOf(o.tags, o.toolchain), vouches, attested, rep)
-	layerText := "repo"
-	if layer != "repo" {
+	layerText := gomutant.LayerRepo
+	if layer != gomutant.LayerRepo {
 		layerText = "machine-local (" + layerReason + ")"
 	}
 	rep.epilogue(func(w io.Writer) {

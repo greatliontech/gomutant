@@ -101,7 +101,7 @@ func InspectDocument(ctx context.Context, tree *Tree, store *Store, matched []Fi
 		}
 		row := InspectedRecord{Finding: f, Inspection: inspection}
 		row.Layer, row.LayerReason = store.Layer(f)
-		if row.Layer == "repo" {
+		if row.Layer == LayerRepo {
 			result.Repo++
 		} else {
 			result.Local++

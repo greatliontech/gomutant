@@ -61,7 +61,14 @@ func renderPrune(w io.Writer, result gomutant.PruneResult) {
 		verb = "would prune"
 	}
 	for _, record := range result.Removed {
-		fmt.Fprintf(w, "%s     %s\n", verb, record.Symbol)
+		// The layer rides the row as the findings face spells it: the
+		// machine-local marker alone, absence meaning repo
+		// (REQ-result-layers).
+		marker := ""
+		if record.Layer == gomutant.LayerLocal {
+			marker = "  [machine-local]"
+		}
+		fmt.Fprintf(w, "%s     %s%s\n", verb, record.Symbol, marker)
 		// The dispositions echo so the reasoning survives the removal -
 		// promote-then-delete, never a silent drop
 		// (REQ-result-lifecycle).

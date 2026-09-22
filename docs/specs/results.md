@@ -764,10 +764,10 @@ record installing at a path a legacy entry holds moves the legacy entry
 aside under a name a later read still preserves and names — by the name
 alone, whatever the file holds: the move is check-then-act over a
 directory every document of the module shares, so a current record another
-session installed inside that window may be parked there, and unserved it
-costs one lost measurement (the tolerated stale-winner shape) where served
-it would be a duplicate row no write clears — and a pruned symbol's legacy
-entry is not the record being pruned and stays. The size
+session installed inside that window may be parked there, and the name
+being the preservation authority it stays unserved, costing at most one
+lost measurement (the tolerated stale-winner shape) — and a pruned
+symbol's legacy entry is not the record being pruned and stays. The size
 ceiling below judges by size before any bytes are read, so it precedes the
 version boundary: an over-ceiling entry is evicted whatever its version. An
 overlay entry larger than 64 MiB is discarded the same way, judged by the
@@ -827,7 +827,18 @@ and the run faces' result rows (REQ-exec-run-status in
 [execution.md](execution.md)) — name a local record's disqualifying reason,
 so whether the artifact is safe to stage is answered by the tool, not by
 inspecting JSON: CLI faces render only the machine-local marker, absence
-meaning repo, while MCP rows carry the layer explicitly.
+meaning repo, while MCP rows carry the layer explicitly. The overlay's
+entries are the store's to address: a read serves one record per
+symbol — the entry at the symbol's own path over one parked under
+another name, the first by name among those — and a write acts on
+every entry the read found holding the symbol, sparing only the paths
+the write itself installs at, so an entry a hand edit left under a
+foreign name is removed by a prune and superseded by the symbol's next
+install, never left behind at a path the store would not look at, and
+never taking another symbol's fresh record with it; a kept record
+parked at a path a write installs at is re-homed at its own path
+before the install, so a write never loses a record it reported
+nothing about.
 
 A survivor carries optional execution evidence — `never-executed`,
 `executed-and-passed`, `covering-passed`, `overlay-bypassed`,
@@ -1069,7 +1080,18 @@ its embedded path rewrites with the same projection.
 Each rewritten target symbol must resolve in the current tree, and a
 rewrite colliding with an existing record refuses whole. Both verbs
 offer a check mode that previews the dispositions without touching the
-document.
+document. Prune acts on every layer of REQ-result-layers: each stored
+record is judged in its own layer, a symbol held in both layers being
+two records, so a detached symbol leaves the findings document and the
+machine-local overlay alike, and the response names each removed
+record's layer and counts the kept records the same way, per layer. A
+verb's write is exactly the change it reports — no record it did not
+report changes, though a parked record's file may move to the record's
+own path (REQ-result-layers): a
+document none of whose rows changed is not rewritten, an overlay entry
+is removed under the names the read found it holding its symbol
+(REQ-result-layers), and a failure after the document write names
+what landed.
 
 **REQ-result-inspection** (behavior): Findings inspection MUST classify every
 record as `current` when all recorded mutation-domain and subject evidence

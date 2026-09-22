@@ -166,6 +166,8 @@ and each removed record's attested dispositions are echoed in the
 response, never truncated — the reasoning survives the removal.
 Shaped findings (structural targets) are kept unconditionally:
 declaration absence is their normal state, never detachment.
+Prune acts on both layers: a record in the machine-local overlay is
+removed there, and each removed record names its layer.
 **example:** a check preview at a chunk close to lint for dead
 records.
 

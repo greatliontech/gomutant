@@ -2217,10 +2217,12 @@ func UpdateDocument(ctx context.Context, path string, update func(prior []Findin
 // ParseFindings), export encodes the successor (nil is Export's writer
 // carrying the prior document's coverage bounds — read from the prior
 // bytes themselves, so any parse keeps the table — with the
-// whole-document self-check), and after runs with the bytes written
-// once the replacement is visible, still under the document lock — the
-// store's overlay writes follow the repo write there, so nothing
-// between the two is observable to another session.
+// whole-document self-check; a nil document with a nil error means
+// nothing to write — the file stands as it is), and after runs with the
+// bytes written once the replacement is visible (nil when nothing was
+// written), still under the document lock — the store's overlay writes
+// follow the repo write there, so nothing between the two is observable
+// to another session.
 type documentUpdate struct {
 	parse  func(data []byte) ([]Finding, error)
 	update func(prior []Finding) ([]Finding, error)
@@ -2294,6 +2296,15 @@ func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 	doc, err := export(next)
 	if err != nil {
 		return err
+	}
+	if doc == nil {
+		// Nothing to write: a record verb whose edits touched no repo
+		// row leaves the document exactly as it stands — a re-emission
+		// would be a change it never reported (REQ-result-lifecycle).
+		if u.after != nil {
+			return u.after(nil)
+		}
+		return nil
 	}
 	writeTemp := func(contents []byte, mode os.FileMode) (string, error) {
 		tmp, err := os.CreateTemp(filepath.Dir(path), ".gomutant-findings-*")

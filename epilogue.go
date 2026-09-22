@@ -234,7 +234,7 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 		if !l.overlaid[m.Symbol] {
 			continue
 		}
-		if layer, _ := l.store.Layer(m); layer == "repo" {
+		if layer, _ := l.store.Layer(m); layer == LayerRepo {
 			outcome.Promoted++
 		}
 	}
@@ -242,7 +242,7 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 		if f.Skipped != "" {
 			continue
 		}
-		if layer, _ := l.store.Layer(f); layer == "local" {
+		if layer, _ := l.store.Layer(f); layer == LayerLocal {
 			outcome.MachineLocal++
 		}
 	}

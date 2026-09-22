@@ -77,6 +77,18 @@ type Store struct {
 	// machine-local overlay at the last Load — a record's placement,
 	// which a later re-judgment under other exemptions cannot recover.
 	overlaid map[string]bool
+	// served lists, per symbol, every overlay entry name the last read
+	// found holding the symbol — the one it served and any it passed
+	// over: one entry per symbol is the store's own layout, but a hand
+	// edit of the overlay can park a record under a foreign name, and a
+	// write must act on every entry a read finds, never on the hashed
+	// path alone (REQ-result-layers).
+	served map[string][]string
+	// servedRecord is, per symbol, the record the last read served —
+	// the one loadOverlay chose among the symbol's entries — so a write
+	// re-homing a parked record installs exactly what the read served,
+	// by the read's own choice, never a second derivation of it.
+	servedRecord map[string]Finding
 	// hooks observes the costs the store pays — the test seam for the
 	// once-per-content claims.
 	hooks storeHooks
@@ -298,6 +310,9 @@ func (s *Store) entryPath(symbol string) string {
 func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 	entries, err := os.ReadDir(s.overlayDir)
 	if os.IsNotExist(err) {
+		s.mu.Lock()
+		s.served, s.servedRecord = nil, nil
+		s.mu.Unlock()
 		return nil, nil
 	}
 	if err != nil {
@@ -308,6 +323,23 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 	retained := make(map[string]bool, len(entries))
 	var out []Finding
 	s.legacy = nil
+	served := map[string][]string{}
+	chosen := map[string]int{}
+	// serve admits one record per symbol: the entry at the symbol's own
+	// path over one parked under a foreign name, the first by name among
+	// foreign names — and remembers every name for the symbol's next
+	// write (REQ-result-layers).
+	serve := func(f Finding, name string) {
+		served[f.Symbol] = append(served[f.Symbol], name)
+		if i, ok := chosen[f.Symbol]; ok {
+			if name == filepath.Base(s.entryPath(f.Symbol)) {
+				out[i] = f
+			}
+			return
+		}
+		chosen[f.Symbol] = len(out)
+		out = append(out, f)
+	}
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -335,9 +367,9 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 		// NAME, whatever its content: the sideline's rename is
 		// check-then-act over a shared directory, so a current record
 		// another store installed inside that window could be parked
-		// under the name — served, it would be a duplicate row for its
-		// symbol that no write ever clears; unserved, it costs one lost
-		// measurement, the overlay's tolerated stale-winner shape
+		// under the name — and the name is the preservation authority,
+		// so it stays unserved and costs at most one lost measurement,
+		// the overlay's tolerated stale-winner shape
 		// (REQ-result-layers).
 		if version, ok := sidelinedVersion(name); ok {
 			s.legacy = append(s.legacy, LegacyEntry{Path: path, Version: version})
@@ -345,7 +377,7 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 		}
 		if cached, ok := s.cache[name]; ok && cached.size == info.Size() && cached.modTime.Equal(info.ModTime()) {
 			retained[name] = true
-			out = append(out, cloneFinding(cached.finding))
+			serve(cached.finding, name)
 			continue
 		}
 		data, err := os.ReadFile(path)
@@ -378,7 +410,12 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 		}
 		s.cache[name] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: findings[0]}
 		retained[name] = true
-		out = append(out, cloneFinding(findings[0]))
+		serve(findings[0], name)
+	}
+	s.served = served
+	s.servedRecord = make(map[string]Finding, len(out))
+	for _, f := range out {
+		s.servedRecord[f.Symbol] = f
 	}
 	for name := range s.cache {
 		if !retained[name] {
@@ -386,7 +423,11 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
-	return out, nil
+	// The store's views of the read — the cache, the served names, the
+	// served records — alias one parse each and are written only whole;
+	// a caller gets clones at this one boundary, so an in-place edit of
+	// a merged view never reaches a later read or a re-home.
+	return cloneFindings(out), nil
 }
 
 // LegacyEntry names a machine-local overlay entry the last read
@@ -550,21 +591,21 @@ func LegacyOverlayLine(entries []LegacyEntry) string {
 // Load merges the repo document with the local overlay, the overlay
 // winning per symbol.
 func (s *Store) Load(ctx context.Context) ([]Finding, error) {
-	data, err := os.ReadFile(s.path)
-	var repo []Finding
-	switch {
-	case os.IsNotExist(err):
-	case err != nil:
+	repo, err := s.loadRepo()
+	if err != nil {
 		return nil, err
-	default:
-		if repo, err = s.readDocument(data); err != nil {
-			return nil, err
-		}
 	}
 	overlay, err := s.loadOverlay(ctx)
 	if err != nil {
 		return nil, err
 	}
+	s.noteOverlaid(overlay)
+	return mergeLayers(repo, overlay), nil
+}
+
+// noteOverlaid records which symbols the read just served from the
+// overlay — the placement Overlaid answers.
+func (s *Store) noteOverlaid(overlay []Finding) {
 	overlaid := make(map[string]bool, len(overlay))
 	for _, f := range overlay {
 		overlaid[f.Symbol] = true
@@ -572,7 +613,6 @@ func (s *Store) Load(ctx context.Context) ([]Finding, error) {
 	s.mu.Lock()
 	s.overlaid = overlaid
 	s.mu.Unlock()
-	return mergeLayers(repo, overlay), nil
 }
 
 // Overlaid reports whether the symbol's record was served from the
@@ -971,49 +1011,38 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		s.mu.Lock()
 		s.pendingBounds = nil
 		s.mu.Unlock()
-		// The overlay follows the repo write, under the same lock: an
-		// entry is deleted when its record is committable and the
-		// overlay holds one, written when its record is not committable
-		// and the overlay holds none or a different persisted form, and
-		// left alone otherwise.
+		// The overlay follows the repo write, under the same lock, through
+		// the one overlay writer: an entry is removed when its record is
+		// committable and the overlay holds one, installed when its record
+		// is not committable and the overlay holds none or a different
+		// persisted form, and left alone otherwise; a pruned symbol's
+		// entries go too.
+		var edits []overlayEdit
 		for _, f := range next {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
 			if f.Skipped != "" {
 				continue
 			}
 			prior, holds := held[f.Symbol]
 			switch {
 			case committable[f.Symbol]:
-				if !holds {
-					continue
-				}
-				if err := os.Remove(s.entryPath(f.Symbol)); err != nil && !os.IsNotExist(err) {
-					return err
+				if holds {
+					edits = append(edits, overlayRemoval(f.Symbol))
 				}
 			case holds && reflect.DeepEqual(prior, forms[f.Symbol]):
 				// The overlay already holds this record: nothing to rewrite.
 			default:
-				if err := s.sidelineLegacy(s.entryPath(f.Symbol)); err != nil {
-					return err
-				}
-				if err := s.installEntry(f); err != nil {
-					return err
-				}
+				edits = append(edits, overlayInstall(f))
 			}
 		}
 		for _, symbol := range pruned {
-			// A pruned symbol's entry path may hold a legacy entry
-			// instead of the pruned record (which lived in the repo
-			// document): the legacy file is not the record being
-			// pruned and stays (REQ-result-layers).
-			if _, legacy := s.legacyAt(s.entryPath(symbol)); legacy {
-				continue
-			}
-			if err := os.Remove(s.entryPath(symbol)); err != nil && !os.IsNotExist(err) {
-				return err
-			}
+			// A pruned symbol leaves by the entries the read found for
+			// it: a legacy entry parked at its path was never served and
+			// stays — it is not the record being pruned
+			// (REQ-result-layers).
+			edits = append(edits, overlayRemoval(symbol))
+		}
+		if err := s.applyOverlayEdits(ctx, true, edits); err != nil {
+			return err
 		}
 		return nil
 	}}); err != nil {
@@ -1022,12 +1051,12 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 	return nil
 }
 
-// Layer classifies one finding for the findings surfaces: "repo" for a
-// committable record, "local" with the first disqualifying reason
+// Layer classifies one finding for the findings surfaces: LayerRepo for
+// a committable record, LayerLocal with the first disqualifying reason
 // otherwise.
 func (s *Store) Layer(f Finding) (layer, reason string) {
 	l, reasons := s.LayerReasons(f)
-	if l == "local" {
+	if l == LayerLocal {
 		return l, reasons[0]
 	}
 	return l, ""
@@ -1038,9 +1067,9 @@ func (s *Store) Layer(f Finding) (layer, reason string) {
 // the next.
 func (s *Store) LayerReasons(f Finding) (layer string, reasons []string) {
 	if rs := CommittableReasons(f, s.moduleDir, s.exemptions); len(rs) > 0 {
-		return "local", rs
+		return LayerLocal, rs
 	}
-	return "repo", nil
+	return LayerRepo, nil
 }
 
 // RollUpMachineLocalInputs collapses machine-local runtime-input

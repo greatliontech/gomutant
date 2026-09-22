@@ -284,7 +284,7 @@ func renderDocumentTail(out io.Writer, tail documentTail) {
 func renderFindingSummaries(w io.Writer, views []findingView, inspection gomutant.Inspection, judged bool, cut bool) {
 	for _, view := range views {
 		layer := view.Layer
-		if layer == "local" {
+		if layer == gomutant.LayerLocal {
 			layer = "machine-local"
 		}
 		fmt.Fprintf(w, "%s  %s  [%s]  %d open", view.State, view.Symbol, layer, len(view.Open))
@@ -345,7 +345,7 @@ func renderFindingViews(w io.Writer, views []findingView, inspection gomutant.In
 		for _, attestation := range view.Attested {
 			fmt.Fprintf(w, "    attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
 		}
-		if view.Layer == "local" {
+		if view.Layer == gomutant.LayerLocal {
 			fmt.Fprintf(w, "    machine-local: %s\n", view.LayerReason)
 		}
 		for _, candidate := range view.Candidates {

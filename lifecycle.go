@@ -10,15 +10,19 @@ import (
 )
 
 // PrunedRecord is one resolved-dead record a prune removed (or would
-// remove, under check), its dispositions echoed so the reasoning
-// survives the removal - promote-then-delete, never a silent drop
-// (REQ-result-lifecycle).
+// remove, under check) from the layer it sat in — a symbol held in
+// both layers is two records — its dispositions echoed so the
+// reasoning survives the removal - promote-then-delete, never a silent
+// drop (REQ-result-lifecycle).
 type PrunedRecord struct {
-	Symbol   string
+	Symbol string
+	// Layer is where the record sat: LayerRepo or LayerLocal.
+	Layer    string
 	Attested []Attestation
 }
 
-// PruneResult reports a prune's dispositions.
+// PruneResult reports a prune's dispositions: Removed the records
+// removed and Kept the records kept, counted per layer.
 type PruneResult struct {
 	Removed []PrunedRecord
 	Kept    int
@@ -30,8 +34,12 @@ type PruneResult struct {
 // revive (REQ-result-lifecycle). The declared-symbol snapshot comes
 // from the loaded tree, so a tree that fails to load never reaches
 // here: a load failure is indistinguishable from a rename at the
-// symbol layer, and pruning on it would destroy live records. Under
-// check the store is untouched and the result previews the removals.
+// symbol layer, and pruning on it would destroy live records. Every
+// stored record is judged in its own layer, so a detached symbol
+// leaves the findings document and the machine-local overlay alike and
+// each removal names its layer; the write is exactly the removals —
+// a document none of whose rows left is not rewritten. Under check the
+// store is untouched and the result previews the removals.
 func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check bool) (PruneResult, error) {
 	// A package with load errors "loads" with its declarations silently
 	// missing from the partial syntax; judging absence there would
@@ -49,42 +57,20 @@ func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check boo
 		return i < len(declared) && declared[i] == symbol
 	}
 	result := PruneResult{Check: check}
-	decide := func(all []Finding) []Finding {
-		kept := all[:0:0]
-		for _, f := range all {
-			if f.Shape != nil {
-				// A shaped finding's identity is declared, never a
-				// resolvable symbol: absence from the declaration set
-				// is its normal state, so prune keeps it — retirement
-				// is the caller's explicit edit of the target set and
-				// document (REQ-target-structural,
-				// REQ-target-manual-recipes).
-				kept = append(kept, f)
-				continue
-			}
-			if resolves(f.Symbol) {
-				kept = append(kept, f)
-				continue
-			}
-			result.Removed = append(result.Removed, PrunedRecord{Symbol: f.Symbol, Attested: append([]Attestation(nil), f.AttestedDispositions()...)})
+	decide := func(layer string, f Finding) (Finding, bool, error) {
+		// A shaped finding's identity is declared, never a resolvable
+		// symbol: absence from the declaration set is its normal
+		// state, so prune keeps it — retirement is the caller's
+		// explicit edit of the target set and document
+		// (REQ-target-structural, REQ-target-manual-recipes).
+		if f.Shape != nil || resolves(f.Symbol) {
+			result.Kept++
+			return f, true, nil
 		}
-		result.Kept = len(kept)
-		return kept
+		result.Removed = append(result.Removed, PrunedRecord{Symbol: f.Symbol, Layer: layer, Attested: append([]Attestation(nil), f.AttestedDispositions()...)})
+		return f, false, nil
 	}
-	if check {
-		all, err := store.Load(ctx)
-		if err != nil {
-			return PruneResult{}, err
-		}
-		decide(all)
-		return result, nil
-	}
-	if err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return decide(all), nil
-	}); err != nil {
+	if err := store.Revise(ctx, check, decide); err != nil {
 		return PruneResult{}, err
 	}
 	return result, nil

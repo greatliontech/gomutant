@@ -72,7 +72,9 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 	if err := pruneCommand(ctx, pruneOptions{dir: dir, findingsFile: defaultFindings}, &pruned); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(pruned.String(), "pruned     example.com/life.Gone") ||
+	// The dirty record sat in the overlay: the row carries the
+	// machine-local marker (REQ-result-layers).
+	if !strings.Contains(pruned.String(), "pruned     example.com/life.Gone  [machine-local]\n") ||
 		!strings.Contains(pruned.String(), "attested p.go:1:1 zero return  (equivalent by inspection)") {
 		t.Fatalf("prune output lost the disposition echo: %q", pruned.String())
 	}

@@ -436,7 +436,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			// to the machine-local overlay names its disqualifier, so a run
 			// that rendered healthy counts never leaves the repo document
 			// silently missing the record.
-			if l, reason := docStore.Layer(f); l == "local" {
+			if l, reason := docStore.Layer(f); l == gomutant.LayerLocal {
 				layer, layerReason = l, reason
 			}
 		}
@@ -474,7 +474,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		default:
 			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open%s\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()), deltaCount(cut, onDelta))
 		}
-		if layer == "local" {
+		if layer == gomutant.LayerLocal {
 			fmt.Fprintf(&terminal, "          machine-local: %s\n", layerReason)
 		}
 		if p, ok := postures[f.Symbol]; ok && f.Skipped == "" && p.Reuse != gomutant.FindingCurrent {

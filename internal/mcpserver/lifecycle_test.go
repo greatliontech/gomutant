@@ -67,6 +67,9 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	if err != nil || len(pOut.Removed) != 1 || pOut.Kept != 1 {
 		t.Fatalf("prune = %+v, %v", pOut, err)
 	}
+	if pOut.Removed[0].Layer != gomutant.LayerLocal {
+		t.Fatalf("prune row layer = %q, want the overlay the dirty record sat in", pOut.Removed[0].Layer)
+	}
 	if len(pOut.Removed[0].Attested) != 1 || !strings.Contains(pOut.Removed[0].Attested[0].Reason, "equivalent by inspection") {
 		t.Fatalf("prune response lost the disposition echo: %+v", pOut.Removed[0])
 	}
