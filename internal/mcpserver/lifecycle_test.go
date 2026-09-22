@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":    "module example.com/life\n\ngo 1.26.4\n",
-		"p.go":      "package life\n\nfunc F() int { return 1 }\n",
+		"p.go":      "package life\n\nfunc F() int { return 1 }\n\nfunc G() int { return 2 }\n",
 		"p_test.go": "package life\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { if F() != 1 { t.Fatal() } }\n",
 	}
 	for name, content := range files {
@@ -42,7 +43,14 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	// The stored subject package must agree with the symbol - the
 	// retarget's package-boundary gate audits the stored fact.
 	renamed.TargetEvidence.ObservationProof.Subject.Package = "example.com/old"
-	if err := gomutant.UpdateDocument(context.Background(), filepath.Join(dir, gomutant.DefaultFindingsPath), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	// Seeded through the store: the dirty records land in the overlay,
+	// the layer the verbs keep them in.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	seed, err := gomutant.OpenStore(filepath.Join(dir, gomutant.DefaultFindingsPath), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{dead, renamed}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -54,9 +62,52 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	if err != nil || !preview.Check || len(preview.Rewritten) != 1 {
 		t.Fatalf("retarget preview = %+v, %v", preview, err)
 	}
+	// A reviewed entry no record carries rides the response as stale.
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(filepath.Join(dir, gomutant.DefaultFindingsPath)), []byte(`{"version":1,"exemptions":[{"subject":"example.com/old.TestUnmeasured","reason":"r","rationale":"why"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	_, rOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old.", To: "example.com/life."})
-	if err != nil || len(rOut.Rewritten) != 1 || rOut.Rewritten[0].To != "example.com/life.F" {
+	if err != nil || len(rOut.Rewritten) != 1 || rOut.Rewritten[0].To != "example.com/life.F" || rOut.Rewritten[0].Layer != gomutant.LayerLocal || !reflect.DeepEqual(rOut.StaleExemptions, []string{"example.com/old.TestUnmeasured"}) {
 		t.Fatalf("retarget = %+v, %v", rOut, err)
+	}
+	// The shadow statement on the wire: a committed row renamed onto a
+	// symbol the overlay holds.
+	shadowed := seededFinding("example.com/old2.F")
+	shadowed.TargetEvidence.ObservationProof.Subject.Package = "example.com/old2"
+	shadowed.Dirty, shadowed.Commit = false, "abc"
+	shadowed.TargetEvidence.RuntimeInputs, shadowed.OracleEvidence[0].RuntimeInputs = "eyJ2IjoxfQ", "eyJ2IjoxfQ"
+	if err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) { return append(prior, shadowed), nil }); err != nil {
+		t.Fatal(err)
+	}
+	_, sOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old2.", To: "example.com/life."})
+	if err != nil || len(sOut.Rewritten) != 1 || sOut.Rewritten[0].Layer != gomutant.LayerRepo || !sOut.Rewritten[0].Shadowed {
+		t.Fatalf("shadowed retarget = %+v, %v", sOut, err)
+	}
+	// A touched row reaches the wire whole: a record outside the rename
+	// whose killer carries the prefix.
+	killed := seededFinding("example.com/life.G")
+	killed.Killed, killed.Mutants, killed.CandidateCount, killed.Generated = 1, 1, 1, 1
+	killed.Kills = []gomutant.Kill{{Position: "p.go:1:1", Operator: "zero return", Killer: "example.com/gone.TestHelper"}}
+	killed.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}
+	if err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) { return append(prior, killed), nil }); err != nil {
+		t.Fatal(err)
+	}
+	_, tOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/gone.", To: "example.com/moved."})
+	if err != nil || tOut.Touched != 1 || len(tOut.TouchedRewrites) != 1 || tOut.TouchedRewrites[0] != (touchedOut{Record: "example.com/life.G", Layer: gomutant.LayerLocal, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"}) {
+		t.Fatalf("touched retarget = %+v, %v", tOut, err)
+	}
+	// The stale roster caps like every row list, the remainder counted
+	// (REQ-mcp-envelope).
+	var entries []string
+	for i := 0; i < 60; i++ {
+		entries = append(entries, fmt.Sprintf(`{"subject":"example.com/old3.Test%02d","reason":"r","rationale":"why"}`, i))
+	}
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(filepath.Join(dir, gomutant.DefaultFindingsPath)), []byte(`{"version":1,"exemptions":[`+strings.Join(entries, ",")+`]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, cOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old3.", To: "example.com/life.", Check: true})
+	if err != nil || len(cOut.StaleExemptions) != 50 || cOut.OmittedStaleExemptions != 10 {
+		t.Fatalf("stale roster = %d listed, %d omitted, %v", len(cOut.StaleExemptions), cOut.OmittedStaleExemptions, err)
 	}
 
 	_, pPreview, err := s.toolPrune(ctx, nil, pruneIn{Check: true})
@@ -64,7 +115,9 @@ func TestToolPruneAndRetarget(t *testing.T) {
 		t.Fatalf("prune preview = %+v, %v", pPreview, err)
 	}
 	_, pOut, err := s.toolPrune(ctx, nil, pruneIn{})
-	if err != nil || len(pOut.Removed) != 1 || pOut.Kept != 1 {
+	// Kept counts records per layer: the committed life.F beside the
+	// overlay's, and the touched life.G.
+	if err != nil || len(pOut.Removed) != 1 || pOut.Kept != 3 {
 		t.Fatalf("prune = %+v, %v", pOut, err)
 	}
 	if pOut.Removed[0].Layer != gomutant.LayerLocal {
@@ -74,8 +127,8 @@ func TestToolPruneAndRetarget(t *testing.T) {
 		t.Fatalf("prune response lost the disposition echo: %+v", pOut.Removed[0])
 	}
 	all, err := s.loadFindings("")
-	if err != nil || len(all) != 1 || all[0].Symbol != "example.com/life.F" {
-		t.Fatalf("document after lifecycle verbs = %+v, %v", all, err)
+	if err != nil || len(all) != 2 || all[0].Symbol != "example.com/life.F" || all[1].Symbol != "example.com/life.G" {
+		t.Fatalf("document after lifecycle verbs = %d records, %v", len(all), err)
 	}
 }
 
@@ -253,4 +306,51 @@ func TestToolRunRefusesWhileCampaignLockHeldAndShortOpsProceed(t *testing.T) {
 	if _, _, err := s.toolPrune(ctx, nil, pruneIn{Check: true}); err != nil {
 		t.Fatalf("prune under a held campaign lock refused: %v", err)
 	}
+}
+
+// The lifecycle wire rows are hand-copied projections of the library's
+// records: a record filled in every field by reflection projects to a
+// row carrying each value under the same name, so a field the library
+// grows cannot miss the wire silently (REQ-mcp-lifecycle).
+func TestLifecycleWireRowsProjectEveryRecordField(t *testing.T) {
+	fill := func(v reflect.Value) {
+		for i := 0; i < v.NumField(); i++ {
+			f := v.Field(i)
+			switch f.Kind() {
+			case reflect.String:
+				f.SetString(v.Type().Field(i).Name + "-value")
+			case reflect.Bool:
+				f.SetBool(true)
+			case reflect.Int:
+				f.SetInt(int64(i) + 1)
+			case reflect.Slice:
+				f.Set(reflect.MakeSlice(f.Type(), 1, 1))
+			default:
+				t.Fatalf("%s.%s: unhandled kind %s — extend the filler", v.Type().Name(), v.Type().Field(i).Name, f.Kind())
+			}
+		}
+	}
+	check := func(record, row reflect.Value) {
+		t.Helper()
+		for i := 0; i < record.NumField(); i++ {
+			name := record.Type().Field(i).Name
+			got := row.FieldByName(name)
+			if !got.IsValid() {
+				t.Errorf("%s.%s reaches no field of %s", record.Type().Name(), name, row.Type().Name())
+				continue
+			}
+			if !reflect.DeepEqual(got.Interface(), record.Field(i).Interface()) {
+				t.Errorf("%s.%s = %v on the wire, want %v", record.Type().Name(), name, got.Interface(), record.Field(i).Interface())
+			}
+		}
+	}
+	var pruned gomutant.PrunedRecord
+	fill(reflect.ValueOf(&pruned).Elem())
+	check(reflect.ValueOf(pruned), reflect.ValueOf(prunedRow(pruned)))
+	var rewritten gomutant.RetargetedRecord
+	fill(reflect.ValueOf(&rewritten).Elem())
+	check(reflect.ValueOf(rewritten), reflect.ValueOf(rewrittenRow(rewritten)))
+	var touched gomutant.TouchedRewrite
+	fill(reflect.ValueOf(&touched).Elem())
+	check(reflect.ValueOf(touched), reflect.ValueOf(touchedRow(touched)))
 }

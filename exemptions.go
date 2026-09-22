@@ -18,7 +18,9 @@ import (
 // every read, so deleting an entry revokes it for every later
 // decision - and the matched entries are stamped onto each finding
 // they touch, so a reviewer inheriting the repo document sees the
-// acceptance beside the evidence it excuses.
+// acceptance beside the evidence it excuses — a rename leaves the
+// stamp naming the old subject until the next measurement re-derives
+// it, the retarget rewriting identity only (REQ-result-lifecycle).
 type Exemption struct {
 	Subject   string `json:"subject"`
 	Reason    string `json:"reason"`

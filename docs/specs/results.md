@@ -1084,7 +1084,27 @@ document. Prune acts on every layer of REQ-result-layers: each stored
 record is judged in its own layer, a symbol held in both layers being
 two records, so a detached symbol leaves the findings document and the
 machine-local overlay alike, and the response names each removed
-record's layer and counts the kept records the same way, per layer. A
+record's layer and counts the kept records the same way, per layer.
+Retarget acts on every layer the same way: each stored record is
+rewritten in its own layer — the layer a record's measuring write
+placed it in is never re-judged by a rename — and a rewrite collides
+only within a layer (two records of one layer cannot share a symbol),
+while a symbol held in both layers is the overlay shadowing the
+document, never a collision; the response names each rewritten
+record's layer, says when the overlay holds a rewritten document
+row's new symbol after the write (that entry shadows the row until it
+leaves), and counts rewritten and touched records per layer. A retarget rewrites identity only: the measured facts a record
+carries — runtime-input manifests, compartment ledgers, exemption
+stamps (the audit the measuring write derives, REQ-result-exemptions;
+a stamp names the old subject until the next measurement re-derives
+it) — stay as measured. A reviewed exemption entry
+(REQ-result-exemptions) whose subject a record's evidence names under
+the old prefix refuses the retarget whole, naming the subject: the
+record is the reviewer's, never the tool's to edit, and the subject
+left under the old prefix could never match the rewritten evidence
+again; the moved subjects no record carries are listed in the
+response for the reviewer, since no later measurement can match them
+either. A
 verb's write is exactly the change it reports — no record it did not
 report changes, though a parked record's file may move to the record's
 own path (REQ-result-layers): a

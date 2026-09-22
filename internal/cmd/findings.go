@@ -283,11 +283,7 @@ func renderDocumentTail(out io.Writer, tail documentTail) {
 // (REQ-result-inspection).
 func renderFindingSummaries(w io.Writer, views []findingView, inspection gomutant.Inspection, judged bool, cut bool) {
 	for _, view := range views {
-		layer := view.Layer
-		if layer == gomutant.LayerLocal {
-			layer = "machine-local"
-		}
-		fmt.Fprintf(w, "%s  %s  [%s]  %d open", view.State, view.Symbol, layer, len(view.Open))
+		fmt.Fprintf(w, "%s  %s%s  %d open", view.State, view.Symbol, layerMarker(view.Layer), len(view.Open))
 		if cut && view.DeltaOpen != nil {
 			fmt.Fprintf(w, " (%d on the delta)", len(*view.DeltaOpen))
 		}

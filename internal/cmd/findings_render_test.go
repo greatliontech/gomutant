@@ -50,7 +50,7 @@ func TestRenderFindingSummariesIsOneRowPerRecord(t *testing.T) {
 	if !strings.Contains(text, "stale  p.F  [machine-local]  1 open, 0 attested  (oracle p.TestF: subject identity changed)") {
 		t.Fatalf("summary row missing state, layer, counts, or cause:\n%s", text)
 	}
-	if !strings.Contains(text, "current  p.G  [repo]  0 open, 1 attested") {
+	if !strings.Contains(text, "current  p.G  0 open, 1 attested") {
 		t.Fatalf("current row missing:\n%s", text)
 	}
 	if strings.Contains(text, "survivor f.go:1:1") || strings.Contains(text, "attested g.go:1:1") {

@@ -40,6 +40,14 @@ func (e *RecordCollisionError) Error() string {
 	return fmt.Sprintf("%s collides with an existing record in the %s", e.Symbol, LayerHome(e.Layer))
 }
 
+// Revision is what a revision leaves behind, the same under check:
+// Overlay is the set of symbols the machine-local overlay holds once
+// the edits are applied — the verbs' one source for whether the
+// overlay shadows a document row (REQ-result-layers).
+type Revision struct {
+	Overlay map[string]bool
+}
+
 // RecordEdit is a record verb's decision for one stored record: the
 // record as it should persist and whether it persists at all. It runs
 // once per stored record — a symbol held in both layers is two records,
@@ -74,12 +82,13 @@ func overlayInstall(f Finding) overlayEdit { return overlayEdit{symbol: f.Symbol
 // under check nothing is written and the edits are judged the same
 // way. An overlay failure after the document write names what landed
 // (REQ-result-lifecycle, REQ-result-layers).
-func (s *Store) Revise(ctx context.Context, check bool, edit RecordEdit) error {
+func (s *Store) Revise(ctx context.Context, check bool, edit RecordEdit) (Revision, error) {
 	var (
 		repoChanged bool
 		edits       []overlayEdit
 		rows        []Finding
 		bounds      []CoverageBound
+		revision    = Revision{Overlay: map[string]bool{}}
 	)
 	plan := func(repoPrior, overlay []Finding) ([]Finding, error) {
 		next := make([]Finding, 0, len(repoPrior))
@@ -130,6 +139,7 @@ func (s *Store) Revise(ctx context.Context, check bool, edit RecordEdit) error {
 				return nil, &RecordCollisionError{Symbol: n.Symbol, Layer: LayerLocal}
 			}
 			seenLocal[n.Symbol] = true
+			revision.Overlay[n.Symbol] = true
 			if n.Symbol == f.Symbol && reflect.DeepEqual(persistedForm(n), persistedForm(f)) {
 				continue
 			}
@@ -143,20 +153,20 @@ func (s *Store) Revise(ctx context.Context, check bool, edit RecordEdit) error {
 	if check {
 		repo, err := s.loadRepo()
 		if err != nil {
-			return err
+			return Revision{}, err
 		}
 		overlay, err := s.loadOverlay(ctx)
 		if err != nil {
-			return err
+			return Revision{}, err
 		}
 		if _, err := plan(repo, overlay); err != nil {
-			return err
+			return Revision{}, err
 		}
 		// Published as Load publishes it: after the read succeeded whole.
 		s.noteOverlaid(overlay)
-		return nil
+		return revision, nil
 	}
-	return updateDocument(ctx, s.path, documentUpdate{parse: s.readDocument, update: func(repoPrior []Finding) ([]Finding, error) {
+	err := updateDocument(ctx, s.path, documentUpdate{parse: s.readDocument, update: func(repoPrior []Finding) ([]Finding, error) {
 		overlay, err := s.loadOverlay(ctx)
 		if err != nil {
 			return nil, err
@@ -181,6 +191,10 @@ func (s *Store) Revise(ctx context.Context, check bool, edit RecordEdit) error {
 		}
 		return s.applyOverlayEdits(ctx, written != nil, edits)
 	}})
+	if err != nil {
+		return Revision{}, err
+	}
+	return revision, nil
 }
 
 // applyOverlayEdits is the one overlay writer — the measuring write's

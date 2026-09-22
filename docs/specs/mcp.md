@@ -51,7 +51,8 @@ rendered as one summary row per record — symbol, state, reason, layer, run
 identity, open and attested counts — with the full rows behind `detail` and
 the roster narrowable by state, by symbol, and by run identity; a run
 summary's unreached roster and the findings inspection's coverage-bound
-rows, each row's roster likewise, at 50) with the omitted remainder counted,
+rows, each row's roster likewise, at 50; a retarget's rewrites, touched
+rewrites, and uncarried exemption subjects at 50) with the omitted remainder counted,
 never silently dropped — the findings document on disk always carries the
 full set and the response names its path. Preparation events and target
 decisions are progress data, not result data: a request carrying a progress
@@ -139,7 +140,7 @@ surface-table pin).
 | explain | mcp | — | a symbol's causal record, or the document's promotion triage; groups capped at 50, symbols per group at 10, open survivors and clauses at 20 | — |
 | attest_survivor (CLI `attest`) | mcp, cli | the recorded echo with the record's layer and its reuse posture on the one verdict line, judged once before it is written | the same, the posture an object | symbol, position, operator, reason |
 | prune | mcp, cli | the removals; `--check` previews | the removals, never truncated (the lifecycle exception to the row bound, REQ-mcp-lifecycle); `check` previews | the selection decides which records are dead |
-| retarget | mcp, cli | the rewrites; `--check` previews | the rewrites capped at 50; `check` previews | `from` and `to` terminated alike |
+| retarget | mcp, cli | the rewrites, each row's layer, a shadowed row said, the uncarried exemption subjects noted (twenty, the rest counted); `--check` previews | the rewrites capped at 50, the touched rewrites and the uncarried exemption subjects each capped alike; `check` previews | `from` and `to` terminated alike |
 | ephemeral | mcp, cli | `--file` with a `--replacement` path, or `--batch` a JSON file `{"edits":[{"file","old_string","new_string"},…]}`; a progress line on the shared cadence; the command timeout unlimited | inline `replacement`, `edits`, or `batch_edits`; notifications and a heartbeat under a token; the command timeout 300 seconds | exactly one mutation form; runs 1–10; oracle timeout 0 derives the budget; `attest` records a judged equivalence |
 | guidance | mcp, cli | a verb's section, or the orientation | the same | — |
 | mcp | cli | serves the tools over stdio; the exit log `.gomutant/mcp.log` beside the findings document | — | per-server vouches; the exit classes |

@@ -6,7 +6,6 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
-| [retarget-drops-a-record-then-refuses-the-rerun](retarget-drops-a-record-then-refuses-the-rerun.md) | a package retarget reported 25 records rewritten and wrote 24, dropping a record whose symbol resolves under the new prefix with a moved body; the identical rerun refuses whole naming it as a collision | cross-tool train chunk 282 |
 | [retarget-rewrites-the-whole-document](retarget-rewrites-the-whole-document.md) | a prefix retarget over 21 of 290 records re-emitted the runtime-inputs table in a new order and changed 144 records' evidence digests for a pure path rename; whether those records stay fresh is the triage question | cross-tool train chunk 282 |
 | [package-crash-kill-omits-the-panic](package-crash-kill-omits-the-panic.md) | an ephemeral kill attributed as a package-scope failure carries only the package's FAIL line, not the panic that killed the binary | cross-tool train chunk 267 |
 | [divergence-reason-stamped-on-every-evidence-subject](divergence-reason-stamped-on-every-evidence-subject.md) | the post-splice divergence arm copies one target-side runtime reason onto every evidence subject beside their untouched manifests | cross-tool train chunk 258 |

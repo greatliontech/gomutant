@@ -616,7 +616,8 @@ func (s *Store) noteOverlaid(overlay []Finding) {
 }
 
 // Overlaid reports whether the symbol's record was served from the
-// machine-local overlay by the last Load: where the record sat, as
+// machine-local overlay by the last read — Load's, or the read a
+// revision's check preview started from: where the record sat, as
 // opposed to where Layer would place it now — the baseline a run's
 // promoted count is judged against, since an exemption landing between
 // two runs moves a standing record without any re-measure.

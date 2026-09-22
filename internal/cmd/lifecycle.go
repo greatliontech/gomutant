@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/spf13/cobra"
@@ -61,14 +62,7 @@ func renderPrune(w io.Writer, result gomutant.PruneResult) {
 		verb = "would prune"
 	}
 	for _, record := range result.Removed {
-		// The layer rides the row as the findings face spells it: the
-		// machine-local marker alone, absence meaning repo
-		// (REQ-result-layers).
-		marker := ""
-		if record.Layer == gomutant.LayerLocal {
-			marker = "  [machine-local]"
-		}
-		fmt.Fprintf(w, "%s     %s%s\n", verb, record.Symbol, marker)
+		fmt.Fprintf(w, "%s     %s%s\n", verb, record.Symbol, layerMarker(record.Layer))
 		// The dispositions echo so the reasoning survives the removal -
 		// promote-then-delete, never a silent drop
 		// (REQ-result-lifecycle).
@@ -78,6 +72,10 @@ func renderPrune(w io.Writer, result gomutant.PruneResult) {
 	}
 	fmt.Fprintf(w, "%s %d record(s), %d kept\n", verb, len(result.Removed), result.Kept)
 }
+
+// staleExemptionRoster bounds the uncarried exemption subjects a
+// retarget's note lists, the remainder counted.
+const staleExemptionRoster = 20
 
 type retargetOptions struct {
 	dir, findingsFile, from, to string
@@ -137,12 +135,27 @@ func renderRetarget(w io.Writer, result gomutant.RetargetResult) {
 		verb = "would retarget"
 	}
 	for _, record := range result.Rewritten {
-		fmt.Fprintf(w, "%s %s -> %s\n", verb, record.From, record.To)
+		shadowed := ""
+		if record.Shadowed {
+			shadowed = "  (a machine-local record holds the new symbol and shadows this row)"
+		}
+		fmt.Fprintf(w, "%s %s -> %s%s%s\n", verb, record.From, record.To, layerMarker(record.Layer), shadowed)
 	}
 	// The touched surface owes no resolution, so the preview is the one
 	// audit point - each field rewrite is echoed (REQ-result-lifecycle).
 	for _, move := range result.TouchedRewrites {
-		fmt.Fprintf(w, "%s on %s: %s -> %s\n", verb, move.Record, move.From, move.To)
+		fmt.Fprintf(w, "%s on %s%s: %s -> %s\n", verb, move.Record, layerMarker(move.Layer), move.From, move.To)
+	}
+	if n := len(result.StaleExemptions); n > 0 {
+		// Bounded like every roster: the first staleExemptionRoster
+		// subjects, the remainder counted.
+		shown := result.StaleExemptions
+		more := ""
+		if n > staleExemptionRoster {
+			shown = shown[:staleExemptionRoster]
+			more = fmt.Sprintf(" (+%d more)", n-staleExemptionRoster)
+		}
+		fmt.Fprintf(w, "note: %d reviewed exemption subject(s) under the old prefix that no record carries - no rewrite reaches them; rewrite or delete them by hand: %s%s\n", n, strings.Join(shown, ", "), more)
 	}
 	if result.Touched > 0 {
 		fmt.Fprintf(w, "%s %d further record(s) whose oracle or killer identities carry the rename\n", verb, result.Touched)

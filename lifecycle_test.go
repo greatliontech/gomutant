@@ -3,6 +3,7 @@ package gomutant
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -174,7 +175,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	}
 	// The touched surface owes no resolution, so its rewrites echo row
 	// by row - the one audit point for that path.
-	if len(touched.TouchedRewrites) != 1 || touched.TouchedRewrites[0] != (TouchedRewrite{Record: "example.com/life.F", From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"}) {
+	if len(touched.TouchedRewrites) != 1 || touched.TouchedRewrites[0] != (TouchedRewrite{Record: "example.com/life.F", Layer: LayerLocal, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"}) {
 		t.Fatalf("touched rewrites not echoed: %+v", touched.TouchedRewrites)
 	}
 	if allK, err := storeK.Load(ctx); err != nil || allK[0].Kills[0].Killer != "example.com/moved.TestHelper" {
@@ -570,5 +571,279 @@ func TestPruneOfAnOverlayRecordLeavesTheDocumentUntouched(t *testing.T) {
 	}
 	if all, err := store.Load(ctx); err != nil || len(all) != 1 || all[0].Symbol != "example.com/life.F" {
 		t.Fatalf("merged view after prune = %+v, %v", all, err)
+	}
+}
+
+// lifecycleRepoFinding is a committable record for the lifecycle tree
+// whose subject packages agree with its symbol, so the retarget's
+// package-boundary gate admits it.
+func lifecycleRepoFinding(symbol, pkg string) Finding {
+	f := lifecycleFinding(symbol)
+	f.Dirty, f.Commit = false, "abc"
+	f.TargetEvidence.RuntimeInputs = storeManifest()
+	f.TargetEvidence.ObservationProof.Subject.Package = pkg
+	f.OracleEvidence[0].Symbol = pkg + ".TestF"
+	f.OracleEvidence[0].RuntimeInputs = storeManifest()
+	f.OracleEvidence[0].ObservationProof.Subject.Package = pkg
+	return f
+}
+
+// Retarget rewrites every stored record in its own layer: a symbol held
+// in both layers — a committed row shadowed by a newer machine-local
+// measurement — is two rewrites, the document keeps its row under the
+// new symbol, the overlay its entry, and the identical rerun over the
+// restored document succeeds with the same end state
+// (REQ-result-lifecycle, REQ-result-layers).
+func TestRetargetActsOnEveryLayer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	committed := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	tree, store := lifecycleModule(t, committed)
+	ctx := context.Background()
+	shadow := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	shadow.Dirty, shadow.BodyHash = true, "moved"
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{shadow}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	documentBefore, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type rewrite struct{ from, to, layer string }
+	rewrites := func(r RetargetResult) []rewrite {
+		var out []rewrite
+		for _, record := range r.Rewritten {
+			out = append(out, rewrite{record.From, record.To, record.Layer})
+		}
+		return out
+	}
+	want := []rewrite{{"example.com/old.F", "example.com/life.F", LayerRepo}, {"example.com/old.F", "example.com/life.F", LayerLocal}}
+	verifyStore := func() {
+		t.Helper()
+		repo, err := store.loadRepo()
+		if err != nil || len(repo) != 1 || repo[0].Symbol != "example.com/life.F" || repo[0].BodyHash != "body" {
+			t.Fatalf("document after retarget = %+v, %v; want the committed row under the new symbol", repo, err)
+		}
+		merged, err := store.Load(ctx)
+		if err != nil || len(merged) != 1 || merged[0].Symbol != "example.com/life.F" || merged[0].BodyHash != "moved" {
+			t.Fatalf("merged view after retarget = %+v, %v; want the shadow under the new symbol", merged, err)
+		}
+		if _, err := os.Stat(store.entryPath("example.com/old.F")); !os.IsNotExist(err) {
+			t.Fatalf("the old symbol's overlay entry survived: %v", err)
+		}
+	}
+	result, err := tree.RetargetContext(ctx, store, "example.com/old.", "example.com/life.", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rewrites(result); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rewrites = %v, want %v", got, want)
+	}
+	// The overlay's record, rewritten beside the row, shadows it once
+	// the write is done; the overlay row itself is never shadowed.
+	if !result.Rewritten[0].Shadowed || result.Rewritten[1].Shadowed {
+		t.Fatalf("shadowed = %v/%v, want the document row alone", result.Rewritten[0].Shadowed, result.Rewritten[1].Shadowed)
+	}
+	verifyStore()
+	// The consumer's shape: the document restored from the commit
+	// while the overlay holds the first run's rewrite. The repo row
+	// rewrites again; the overlay's entry is the same symbol's record
+	// in another layer, never a collision.
+	if err := os.WriteFile(store.path, documentBefore, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rerun, err := tree.RetargetContext(ctx, store, "example.com/old.", "example.com/life.", false)
+	if err != nil {
+		t.Fatalf("the rerun over the restored document refused: %v", err)
+	}
+	if got := rewrites(rerun); !reflect.DeepEqual(got, want[:1]) {
+		t.Fatalf("rerun rewrites = %v, want the repo row alone", got)
+	}
+	// The overlay's entry — the first run's rewrite — holds the new
+	// symbol and shadows the restored row exactly as it shadowed the old
+	// one; the rerun says so.
+	if !rerun.Rewritten[0].Shadowed {
+		t.Fatal("the rerun did not report the restored row shadowed by the overlay's entry")
+	}
+	verifyStore()
+}
+
+// A rewrite collides only within a layer: two document rows mapping
+// onto one symbol refuse whole before any write, while a document row
+// renamed onto a symbol the overlay already holds is the overlay
+// shadowing the document (REQ-result-lifecycle).
+func TestRetargetCollisionIsJudgedWithinALayer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	old := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	standing := lifecycleRepoFinding("example.com/life.F", "example.com/life")
+	standing.BodyHash = "standing"
+	tree, store := lifecycleModule(t, old, standing)
+	ctx := context.Background()
+	before, err := os.Stat(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []bool{true, false} {
+		_, err := tree.RetargetContext(ctx, store, "example.com/old.", "example.com/life.", check)
+		var collision *RecordCollisionError
+		if !errors.As(err, &collision) || collision.Symbol != "example.com/life.F" || collision.Layer != LayerRepo || !strings.Contains(err.Error(), "findings document") {
+			t.Fatalf("check=%v: err = %v, want the within-document collision", check, err)
+		}
+	}
+	if after, err := os.Stat(store.path); err != nil || !os.SameFile(before, after) {
+		t.Fatalf("a refused retarget rewrote the document: %v", err)
+	}
+	// The same shape across layers is no collision: the overlay's
+	// record shadows the document's rewritten row.
+	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		return []Finding{old}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	local := lifecycleRepoFinding("example.com/life.F", "example.com/life")
+	local.Dirty, local.BodyHash = true, "local"
+	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		return append(prior, local), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := tree.RetargetContext(ctx, store, "example.com/old.", "example.com/life.", false)
+	if err != nil || len(result.Rewritten) != 1 || result.Rewritten[0].Layer != LayerRepo || !result.Rewritten[0].Shadowed {
+		t.Fatalf("cross-layer retarget = %+v, %v; want the repo row rewritten and reported shadowed", result, err)
+	}
+	repo, err := store.loadRepo()
+	if err != nil || len(repo) != 1 || repo[0].Symbol != "example.com/life.F" || repo[0].BodyHash != "body" {
+		t.Fatalf("document = %+v, %v", repo, err)
+	}
+	if merged, err := store.Load(ctx); err != nil || len(merged) != 1 || merged[0].BodyHash != "local" {
+		t.Fatalf("merged view = %+v, %v; want the overlay shadowing", merged, err)
+	}
+	// Two overlay records mapping onto one symbol collide in the overlay.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	localOld := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	localOld.Dirty = true
+	localNew := lifecycleRepoFinding("example.com/life.F", "example.com/life")
+	localNew.Dirty = true
+	tree2, store2 := lifecycleModule(t, localOld, localNew)
+	_, err = tree2.RetargetContext(ctx, store2, "example.com/old.", "example.com/life.", false)
+	var overlayCollision *RecordCollisionError
+	if !errors.As(err, &overlayCollision) || overlayCollision.Layer != LayerLocal || !strings.Contains(err.Error(), "machine-local overlay") {
+		t.Fatalf("overlay collision = %v", err)
+	}
+}
+
+// Rewritten and touched records are counted per layer: a symbol held in
+// both layers whose killer carries the rename is two touched records,
+// each naming its layer (REQ-result-lifecycle).
+func TestRetargetCountsTouchedRecordsPerLayer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	killed := func(dirty bool) Finding {
+		f := lifecycleRepoFinding("example.com/life.F", "example.com/life")
+		f.Dirty = dirty
+		f.Killed, f.Mutants, f.CandidateCount, f.Generated = 1, 1, 1, 1
+		f.Kills = []Kill{{Position: "p.go:2:2", Operator: "statement: delete", Killer: "example.com/gone.TestHelper"}}
+		f.Operators = []OperatorSummary{{Operator: "statement: delete", Generated: 1, Killed: 1}}
+		f.Survivors, f.Attested = nil, nil
+		return f
+	}
+	tree, store := lifecycleModule(t, killed(false))
+	ctx := context.Background()
+	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{killed(true)}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	result, err := tree.RetargetContext(ctx, store, "example.com/gone.", "example.com/moved.", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []TouchedRewrite{
+		{Record: "example.com/life.F", Layer: LayerRepo, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"},
+		{Record: "example.com/life.F", Layer: LayerLocal, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"},
+	}
+	if result.Touched != 2 || len(result.Rewritten) != 0 || !reflect.DeepEqual(result.TouchedRewrites, want) {
+		t.Fatalf("touched per layer = %+v, want 2 with %v", result, want)
+	}
+}
+
+// A retarget whose prefix rewrites a reviewed exemption entry's
+// subject refuses whole, naming the entries — the tool never edits the
+// reviewer's record, and a subject left under the old prefix could
+// never match again (REQ-result-lifecycle, REQ-result-exemptions).
+func TestRetargetRefusesWhenAnExemptionNamesTheOldPrefix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads the fixture tree")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	old := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	tree, store := lifecycleModule(t, old)
+	ctx := context.Background()
+	// Two entries under the old prefix: one a subject the record's
+	// evidence names, one no record carries (inert either way); one
+	// outside the prefix.
+	record := `{"version":1,"exemptions":[{"subject":"example.com/old.TestF","reason":"runtime input outside the tree: /tmp/x","rationale":"reviewed"},{"subject":"example.com/old.TestUnmeasured","reason":"runtime input outside the tree: /tmp/z","rationale":"reviewed"},{"subject":"example.com/other.TestG","reason":"runtime input outside the tree: /tmp/y","rationale":"reviewed"}]}`
+	if err := os.WriteFile(ExemptionsPathFor(store.path), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenStore(store.path, tree.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []bool{true, false} {
+		_, err := tree.RetargetContext(ctx, reopened, "example.com/old.", "example.com/life.", check)
+		if err == nil || !strings.Contains(err.Error(), "names example.com/old.TestF, a subject of example.com/old.F's evidence, under the old prefix (example.com/old.TestF -> example.com/life.TestF)") || strings.Contains(err.Error(), "other") || strings.Contains(err.Error(), "Unmeasured") {
+			t.Fatalf("check=%v: err = %v, want the refusal naming the carried subject alone", check, err)
+		}
+	}
+	if after, err := os.Stat(store.path); err != nil || !os.SameFile(before, after) {
+		t.Fatalf("a refused retarget rewrote the document: %v", err)
+	}
+	// With the carried subject rewritten by the reviewer, the entry no
+	// record carries blocks nothing.
+	inert := `{"version":1,"exemptions":[{"subject":"example.com/life.TestF","reason":"runtime input outside the tree: /tmp/x","rationale":"reviewed"},{"subject":"example.com/old.TestUnmeasured","reason":"runtime input outside the tree: /tmp/z","rationale":"reviewed"}]}`
+	if err := os.WriteFile(ExemptionsPathFor(store.path), []byte(inert), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err = OpenStore(store.path, tree.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tree.RetargetContext(ctx, reopened, "example.com/old.", "example.com/life.", false)
+	if err != nil || len(result.Rewritten) != 1 || !reflect.DeepEqual(result.StaleExemptions, []string{"example.com/old.TestUnmeasured"}) {
+		t.Fatalf("retarget beside an inert entry = %+v, %v; want the inert subject listed", result, err)
+	}
+	// The list is the same under check, sorted, however many.
+	two := `{"version":1,"exemptions":[{"subject":"example.com/old.TestZ","reason":"r","rationale":"why"},{"subject":"example.com/old.TestA","reason":"r","rationale":"why"}]}`
+	if err := os.WriteFile(ExemptionsPathFor(store.path), []byte(two), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err = OpenStore(store.path, tree.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := tree.RetargetContext(ctx, reopened, "example.com/old.", "example.com/elsewhere.", true)
+	if err != nil || len(preview.Rewritten) != 0 || !reflect.DeepEqual(preview.StaleExemptions, []string{"example.com/old.TestA", "example.com/old.TestZ"}) {
+		t.Fatalf("check preview = %+v, %v; want both inert subjects, sorted", preview, err)
+	}
+	// A retarget rewrites identity only: the stamp a measuring write
+	// derived stays as measured (REQ-result-exemptions).
+	stamped := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	stamped.Exempted = []Exemption{{Subject: "example.com/old.TestF", Reason: "r", Rationale: "why"}}
+	tree2, store2 := lifecycleModule(t, stamped)
+	if _, err := tree2.RetargetContext(ctx, store2, "example.com/old.", "example.com/life.", false); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := store2.Load(ctx); err != nil || len(after) != 1 || len(after[0].Exempted) != 1 || after[0].Exempted[0].Subject != "example.com/old.TestF" {
+		t.Fatalf("the stamp moved under the rename: %+v, %v", after, err)
 	}
 }

@@ -1968,7 +1968,7 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 	// a capped check preview would hide part of what a destructive call
 	// is about to delete (REQ-mcp-lifecycle's envelope exception).
 	for _, record := range result.Removed {
-		out.Removed = append(out.Removed, prunedOut{Symbol: record.Symbol, Layer: record.Layer, Attested: record.Attested})
+		out.Removed = append(out.Removed, prunedRow(record))
 	}
 	return nil, out, nil
 }
@@ -1981,19 +1981,53 @@ type retargetIn struct {
 	Findings string `json:"findings,omitempty"`
 }
 
+// rewrittenOut is one record whose mutated symbol a retarget rewrote,
+// in its own layer.
+type rewrittenOut struct {
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Layer    string `json:"layer" jsonschema:"repo when the record sits in the findings document, local when it sits in the machine-local overlay — a symbol held in both layers is two rows"`
+	Shadowed bool   `json:"shadowed,omitempty" jsonschema:"a document row whose new symbol the machine-local overlay holds once the retarget has written: every read serves the overlay's record until that entry leaves"`
+}
+
+// touchedOut is one field rewrite on a record whose own symbol stayed.
+type touchedOut struct {
+	Record string `json:"record"`
+	Layer  string `json:"layer" jsonschema:"the touched record's layer: repo or local"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+}
+
+// prunedRow, rewrittenRow, and touchedRow are the lifecycle records'
+// wire projections — every field copied by name, the projection pin
+// comparing values through them.
+func prunedRow(r gomutant.PrunedRecord) prunedOut {
+	return prunedOut{Symbol: r.Symbol, Layer: r.Layer, Attested: r.Attested}
+}
+
+func rewrittenRow(r gomutant.RetargetedRecord) rewrittenOut {
+	return rewrittenOut{From: r.From, To: r.To, Layer: r.Layer, Shadowed: r.Shadowed}
+}
+
+func touchedRow(m gomutant.TouchedRewrite) touchedOut {
+	return touchedOut{Record: m.Record, Layer: m.Layer, From: m.From, To: m.To}
+}
+
 type retargetOut struct {
-	Rewritten        []gomutant.RetargetedRecord `json:"rewritten" jsonschema:"records whose mutated symbol changed"`
-	Touched          int                         `json:"touched,omitempty" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface)"`
-	TouchedRewrites  []gomutant.TouchedRewrite   `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
-	OmittedRewritten int                         `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
-	OmittedTouched   int                         `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
-	Check            bool                        `json:"check,omitempty"`
-	Document         string                      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
-	Note             string                      `json:"note,omitempty" jsonschema:"set when the prefix matched nothing: the rename touched no record, and the findings tool lists the recorded symbols"`
+	Rewritten              []rewrittenOut `json:"rewritten" jsonschema:"records whose mutated symbol changed, each in its own layer"`
+	Touched                int            `json:"touched,omitempty" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface), counted per layer"`
+	TouchedRewrites        []touchedOut   `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
+	OmittedRewritten       int            `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
+	OmittedTouched         int            `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
+	Check                  bool           `json:"check,omitempty"`
+	Document               string         `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	StaleExemptions        []string       `json:"staleExemptions,omitempty" jsonschema:"reviewed exemption subjects the pair moves that no record carries - no rewrite reaches them; the reviewer rewrites or deletes them by hand; capped like every row list"`
+	OmittedStaleExemptions int            `json:"omittedStaleExemptions,omitempty" jsonschema:"stale exemption subjects beyond the response cap - counted, not listed"`
+	Note                   string         `json:"note,omitempty" jsonschema:"set when the prefix matched nothing: the rename touched no record, and the findings tool lists the recorded symbols"`
 }
 
 func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
-	out := retargetOut{Rewritten: []gomutant.RetargetedRecord{}, Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
+	out := retargetOut{Rewritten: []rewrittenOut{}, Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
 	if err := gomutant.ValidateRetargetPair(in.From, in.To); err != nil {
 		return nil, out, err
 	}
@@ -2012,8 +2046,13 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 	}
 	out.Check = result.Check
 	out.Touched = result.Touched
-	out.Rewritten = append(out.Rewritten, result.Rewritten...)
-	out.TouchedRewrites = append(out.TouchedRewrites, result.TouchedRewrites...)
+	for _, r := range result.Rewritten {
+		out.Rewritten = append(out.Rewritten, rewrittenRow(r))
+	}
+	for _, m := range result.TouchedRewrites {
+		out.TouchedRewrites = append(out.TouchedRewrites, touchedRow(m))
+	}
+	out.StaleExemptions, out.OmittedStaleExemptions = capRows(result.StaleExemptions)
 	// A rename that moved nothing is an answer with a next step, not an
 	// empty success: the prefix either mismatches the recorded spelling
 	// or the rewrite already landed (REQ-mcp-envelope).

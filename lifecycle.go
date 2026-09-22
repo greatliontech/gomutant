@@ -70,17 +70,25 @@ func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check boo
 		result.Removed = append(result.Removed, PrunedRecord{Symbol: f.Symbol, Layer: layer, Attested: append([]Attestation(nil), f.AttestedDispositions()...)})
 		return f, false, nil
 	}
-	if err := store.Revise(ctx, check, decide); err != nil {
+	if _, err := store.Revise(ctx, check, decide); err != nil {
 		return PruneResult{}, err
 	}
 	return result, nil
 }
 
 // RetargetedRecord names one symbol rewrite a retarget performed (or
-// previews, under check).
+// previews, under check) on one stored record — a symbol held in both
+// layers is two records, each rewritten in its own layer.
 type RetargetedRecord struct {
 	From string
 	To   string
+	// Layer is where the record sits: LayerRepo or LayerLocal.
+	Layer string
+	// Shadowed reports a rewritten document row whose new symbol the
+	// machine-local overlay holds once the retarget has written: every
+	// read serves the overlay's record for it until that entry leaves
+	// (REQ-result-layers).
+	Shadowed bool
 }
 
 // TouchedRewrite names one evidence-symbol or kill-attribution rewrite
@@ -89,8 +97,10 @@ type RetargetedRecord struct {
 // what would change (REQ-result-lifecycle).
 type TouchedRewrite struct {
 	Record string
-	From   string
-	To     string
+	// Layer is where the record sits: LayerRepo or LayerLocal.
+	Layer string
+	From  string
+	To    string
 }
 
 // RetargetResult reports a retarget's rewrites: Rewritten names the
@@ -103,6 +113,12 @@ type RetargetResult struct {
 	Rewritten       []RetargetedRecord
 	Touched         int
 	TouchedRewrites []TouchedRewrite
+	// StaleExemptions lists, sorted, the reviewed exemption subjects
+	// the pair moves that no record's evidence carries: no rewrite
+	// reaches them and no later measurement can match them under the
+	// old prefix, so they are the reviewer's to rewrite or delete
+	// (REQ-result-exemptions). The same under check.
+	StaleExemptions []string
 	Check           bool
 }
 
@@ -311,9 +327,18 @@ func retargetFinding(f Finding, from, to string) (rewritten Finding, symbolChang
 // to the to prefix, so surviving attestations follow their mutants by
 // their own anchors instead of dying detached (REQ-result-lifecycle).
 // Each rewritten target symbol must resolve in the current tree - a
-// retarget follows a rename that happened - and a rewrite colliding
-// with an existing record refuses whole; under check the store is
-// untouched and the result previews the rewrites.
+// retarget follows a rename that happened. Every stored record is
+// rewritten in its own layer — a rename never re-judges the layer a
+// measuring write placed a record in — and a rewrite collides only
+// within a layer (the overlay shadowing the document is no collision),
+// refusing whole before any write. A retarget rewrites identity only:
+// the measured facts a record carries — runtime-input manifests,
+// compartment ledgers, exemption stamps — stay as measured. An
+// exemption entry whose subject a record's evidence names under the
+// old prefix refuses the retarget too: the record is reviewed and the
+// tool never edits it, and the subject left under the old prefix
+// could never match again (REQ-result-exemptions). Under check the
+// store is untouched and the result previews the rewrites.
 func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to string, check bool) (RetargetResult, error) {
 	// The pair's shape is decided before any load by the faces; the
 	// library entry keeps the same judgment for callers that skipped it.
@@ -328,53 +353,90 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 		i := sort.SearchStrings(declared, symbol)
 		return i < len(declared) && declared[i] == symbol
 	}
-	result := RetargetResult{Check: check}
-	decide := func(all []Finding) ([]Finding, error) {
-		next := make([]Finding, 0, len(all))
-		seen := make(map[string]bool, len(all))
-		for _, f := range all {
-			rewritten, symbolChanged, touched, moves, err := retargetFinding(f, from, to)
-			if err != nil {
-				return nil, err
-			}
-			switch {
-			case symbolChanged:
-				// Only a record whose own symbol rewrote owes resolution:
-				// the rename it follows must have happened
-				// (REQ-result-lifecycle).
-				if !resolves(rewritten.Symbol) {
-					return nil, fmt.Errorf("retarget: %s does not resolve in the current tree - a retarget follows a rename that happened", rewritten.Symbol)
-				}
-				result.Rewritten = append(result.Rewritten, RetargetedRecord{From: f.Symbol, To: rewritten.Symbol})
-			case touched:
-				result.Touched++
-				result.TouchedRewrites = append(result.TouchedRewrites, moves...)
-			}
-			if seen[rewritten.Symbol] {
-				return nil, fmt.Errorf("retarget: %s collides with an existing record", rewritten.Symbol)
-			}
-			seen[rewritten.Symbol] = true
-			next = append(next, rewritten)
-		}
-		return next, nil
-	}
-	if check {
-		all, err := store.Load(ctx)
-		if err != nil {
-			return RetargetResult{}, err
-		}
-		if _, err := decide(all); err != nil {
-			return RetargetResult{}, err
-		}
-		return result, nil
-	}
-	if err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return decide(all)
-	}); err != nil {
+	moved, err := movedExemptionSubjects(store.exemptions, from, to)
+	if err != nil {
 		return RetargetResult{}, err
 	}
+	result := RetargetResult{Check: check}
+	decide := func(layer string, f Finding) (Finding, bool, error) {
+		if err := detachedExemption(f, moved); err != nil {
+			return Finding{}, false, err
+		}
+		rewritten, symbolChanged, touched, moves, err := retargetFinding(f, from, to)
+		if err != nil {
+			return Finding{}, false, err
+		}
+		switch {
+		case symbolChanged:
+			// Only a record whose own symbol rewrote owes resolution:
+			// the rename it follows must have happened
+			// (REQ-result-lifecycle).
+			if !resolves(rewritten.Symbol) {
+				return Finding{}, false, fmt.Errorf("retarget: %s does not resolve in the current tree - a retarget follows a rename that happened", rewritten.Symbol)
+			}
+			result.Rewritten = append(result.Rewritten, RetargetedRecord{From: f.Symbol, To: rewritten.Symbol, Layer: layer})
+		case touched:
+			result.Touched++
+			for i := range moves {
+				moves[i].Layer = layer
+			}
+			result.TouchedRewrites = append(result.TouchedRewrites, moves...)
+		}
+		return rewritten, true, nil
+	}
+	revision, err := store.Revise(ctx, check, decide)
+	if err != nil {
+		return RetargetResult{}, fmt.Errorf("retarget: %w", err)
+	}
+	// A document row is shadowed when the overlay holds its new symbol
+	// once the edits are applied — the revision's own account, whatever
+	// the entries were before. Said, not silent: every read serves the
+	// overlay's record until it leaves.
+	for i := range result.Rewritten {
+		r := &result.Rewritten[i]
+		r.Shadowed = r.Layer == LayerRepo && revision.Overlay[r.To]
+	}
+	// Every moved subject a record carried refused above, so the moved
+	// subjects left are the ones no record carries: the reviewer's to
+	// rewrite or delete.
+	for subject := range moved {
+		result.StaleExemptions = append(result.StaleExemptions, subject)
+	}
+	sort.Strings(result.StaleExemptions)
 	return result, nil
+}
+
+// movedExemptionSubjects maps each reviewed exemption subject the
+// prefix pair rewrites to its rewritten spelling; a subject the pair
+// cannot rewrite unambiguously refuses, attributed to the record.
+func movedExemptionSubjects(exemptions []Exemption, from, to string) (map[string]string, error) {
+	moved := map[string]string{}
+	for _, e := range exemptions {
+		next, ok, err := retargetSymbol(e.Subject, from, to)
+		if err != nil {
+			return nil, fmt.Errorf("exemption record entry for %s: %w", e.Subject, err)
+		}
+		if ok {
+			moved[e.Subject] = next
+		}
+	}
+	return moved, nil
+}
+
+// detachedExemption refuses a retarget that would rewrite a record
+// whose evidence names a reviewed exemption subject the pair moves: the
+// record beside the document is the reviewer's, never the tool's to
+// edit, and the subject left under the old prefix could never match
+// the rewritten evidence again — the acceptance would die detached
+// exactly as an unrewritten attestation would (REQ-result-exemptions,
+// REQ-result-lifecycle). An entry no record's evidence names is inert
+// either way and blocks nothing.
+func detachedExemption(f Finding, moved map[string]string) error {
+	subjects := append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...)
+	for _, ev := range subjects {
+		if next, ok := moved[ev.Symbol]; ok {
+			return fmt.Errorf("retarget: the reviewed exemption record names %s, a subject of %s's evidence, under the old prefix (%s -> %s) - the tool never edits that record, so rewrite the subject there first or the acceptance dies detached", ev.Symbol, f.Symbol, ev.Symbol, next)
+		}
+	}
+	return nil
 }

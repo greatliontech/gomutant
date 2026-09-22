@@ -1889,7 +1889,7 @@ func TestStoreWritesSpareTheirOwnInstalls(t *testing.T) {
 	store = open()
 	parkAt(t, store.entryPath("p.B"), storeFinding("p.Z", func(f *Finding) { f.Dirty = true }))
 	parkAt(t, filepath.Join(store.overlayDir, "000000000000000000000000.json"), storeFinding("p.B", func(f *Finding) { f.Dirty = true }))
-	if err := store.Revise(ctx, false, func(layer string, f Finding) (Finding, bool, error) {
+	if _, err := store.Revise(ctx, false, func(layer string, f Finding) (Finding, bool, error) {
 		f.BodyHash = "rewritten"
 		return f, true, nil
 	}); err != nil {
@@ -2101,7 +2101,7 @@ func TestStoreInstallsRehomeTheParkedRecordsTheyOverwrite(t *testing.T) {
 	}
 	parkAt(t, store2.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "x" }))
 	parkAt(t, filepath.Join(store2.overlayDir, "000000000000000000000000.json"), storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" }))
-	if err := store2.Revise(ctx, false, func(layer string, f Finding) (Finding, bool, error) {
+	if _, err := store2.Revise(ctx, false, func(layer string, f Finding) (Finding, bool, error) {
 		if f.Symbol == "p.Y" {
 			f.BodyHash = "y2"
 		}
@@ -2155,7 +2155,7 @@ func TestReviseRefusesAWithinLayerCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, check := range []bool{true, false} {
-		err := store.Revise(ctx, check, rename("p.A", "p.B"))
+		_, err := store.Revise(ctx, check, rename("p.A", "p.B"))
 		var collision *RecordCollisionError
 		if !errors.As(err, &collision) || collision.Symbol != "p.B" || collision.Layer != LayerRepo || !strings.Contains(err.Error(), "p.B collides with an existing record in the findings document") {
 			t.Fatalf("check=%v: err = %v, want the document collision", check, err)
@@ -2172,7 +2172,7 @@ func TestReviseRefusesAWithinLayerCollision(t *testing.T) {
 	// Across layers the rename is no collision: the overlay's p.A becomes
 	// p.C beside the document's p.B untouched; a second overlay record
 	// renamed onto it collides in the overlay.
-	if err := store.Revise(ctx, false, rename("p.A", "p.C")); err != nil {
+	if _, err := store.Revise(ctx, false, rename("p.A", "p.C")); err != nil {
 		t.Fatalf("cross-layer rename refused: %v", err)
 	}
 	if _, err := os.Stat(store.entryPath("p.A")); !os.IsNotExist(err) {
@@ -2186,7 +2186,7 @@ func TestReviseRefusesAWithinLayerCollision(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	err = store.Revise(ctx, false, rename("p.D", "p.C"))
+	_, err = store.Revise(ctx, false, rename("p.D", "p.C"))
 	var collision *RecordCollisionError
 	if !errors.As(err, &collision) || collision.Layer != LayerLocal || !strings.Contains(err.Error(), "machine-local overlay") {
 		t.Fatalf("overlay collision = %v", err)
@@ -2250,7 +2250,7 @@ func TestReviseNamesWhatLandedOnAnOverlayFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = store.Revise(ctx, false, remove("p.Gone"))
+		_, err = store.Revise(ctx, false, remove("p.Gone"))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("%s: err = %v, want a prefix %q", tc.name, err, tc.want)
 		}
