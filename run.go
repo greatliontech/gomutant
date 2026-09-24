@@ -294,6 +294,13 @@ type Options struct {
 	// every completed or drifted run; a run cancelled before that calls
 	// it never (REQ-exec-banked-summary).
 	Tallies func(RunTallies)
+	// Layer classifies a committed finding by the layer its commit
+	// landed it in — the store's own predicate, LayerRepo or LayerLocal
+	// with the disqualifying reason — so the banked tallies count what
+	// the findings document holds apart from what stayed machine-local
+	// (REQ-exec-banked-summary, REQ-result-layers). Nil counts every
+	// commit as the document's.
+	Layer func(Finding) (layer, reason string)
 	// PlanOnly stops the run after the deterministic preparation sequence
 	// and target decisions: mutants are enumerated and every decision is
 	// computed and delivered, but no baseline probes, no mutant executes,
@@ -790,9 +797,9 @@ type RunSummary struct {
 	// run (REQ-exec-oracle-run's narrowed-survivor clause); absent
 	// when the run audited nothing.
 	Audit *AuditSummary `json:"audit,omitempty"`
-	// Banked is a cancelled run's banked state: what the document kept
-	// under the named exit cause (REQ-exec-banked-summary); absent on
-	// a completed run.
+	// Banked is a cancelled run's banked state: what the two layers
+	// kept under the named exit cause (REQ-exec-banked-summary);
+	// absent on a completed run.
 	Banked *BankedState `json:"banked,omitempty"`
 }
 

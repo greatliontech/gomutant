@@ -33,10 +33,11 @@ type runReporter struct {
 	skipped  int // decisions: skipped
 	measure  int // decisions: measure
 
-	committed    int // findings whose incremental commit returned
-	bankedKilled int
-	bankedOpen   int
-	lastExec     gomutant.ExecutionEvent
+	committed      int // findings whose incremental commit returned
+	committedLocal int // committed findings whose commit landed machine-local
+	bankedKilled   int
+	bankedOpen     int
+	lastExec       gomutant.ExecutionEvent
 	// paceStart/paceBase/paceDone anchor the measured execution pace:
 	// first completion tick to latest, so the progress line's
 	// estimated-remaining reflects mutant execution alone —
@@ -277,11 +278,15 @@ func (r *runReporter) selectionNote(targetCount int) string {
 }
 
 // banked records one incrementally committed finding — the only
-// evidence the exit summary may claim.
-func (r *runReporter) bankedFinding(f gomutant.Finding) {
+// evidence the exit summary may claim — and its layer, so the
+// progress line says how many stayed machine-local.
+func (r *runReporter) bankedFinding(f gomutant.Finding, layer string) {
 	r.mu.Lock()
 	r.lastSequence = r.now()
 	r.committed++
+	if layer == gomutant.LayerLocal {
+		r.committedLocal++
+	}
 	r.bankedKilled += f.Killed
 	r.bankedOpen += len(f.Open())
 	r.mu.Unlock()
@@ -289,6 +294,7 @@ func (r *runReporter) bankedFinding(f gomutant.Finding) {
 
 type progressPayload struct {
 	TargetsDone     int    `json:"targetsDone"`
+	TargetsLocal    int    `json:"targetsLocal"`
 	Selected        int    `json:"selected"`
 	Served          int    `json:"served"`
 	Skipped         int    `json:"skipped"`
@@ -322,8 +328,8 @@ func (r *runReporter) progressSnapshot() progressPayload {
 		// all-served resume. Skipped targets never commit, so a
 		// selection with skips tops out below N/N by design — the
 		// skipped split beside it says why.
-		TargetsDone: r.committed,
-		Selected:    r.selected, Served: r.served, Skipped: r.skipped,
+		TargetsDone: r.committed, TargetsLocal: r.committedLocal,
+		Selected: r.selected, Served: r.served, Skipped: r.skipped,
 		CandidatesDone: r.lastExec.CandidatesDone, CandidatesTotal: r.lastExec.CandidatesTotal,
 		Killed: r.bankedKilled, Open: r.bankedOpen,
 		Elapsed:      time.Since(r.start).Round(time.Second).String(),
@@ -376,8 +382,8 @@ func (r *runReporter) progressLine() {
 	}
 	p := r.progressSnapshot()
 	r.line("progress", p, func(w io.Writer) {
-		line := fmt.Sprintf("progress  %d/%d targets committed (%d served, %d skipped), candidates %d/%d, %d killed, %d open, elapsed %s",
-			p.TargetsDone, p.Selected, p.Served, p.Skipped,
+		line := fmt.Sprintf("progress  %d/%d targets committed (%d machine-local, %d served, %d skipped), candidates %d/%d, %d killed, %d open, elapsed %s",
+			p.TargetsDone, p.Selected, p.TargetsLocal, p.Served, p.Skipped,
 			p.CandidatesDone, p.CandidatesTotal, p.Killed, p.Open, p.Elapsed)
 		if p.EstRemaining != "" {
 			line += ", est ~" + p.EstRemaining + " remaining (pace)"

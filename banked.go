@@ -18,15 +18,19 @@ import (
 // narrowed-survivor clause). Committed counts exactly the findings
 // whose incremental commit RETURNED SUCCESSFULLY, with their kill and
 // open tallies — never in-flight work, never a commit that failed —
-// and stays zero for a caller that persists nothing.
+// and stays zero for a caller that persists nothing. CommittedLocal
+// counts, among them, the findings whose commit landed machine-local
+// (REQ-result-layers): the document holds Committed less
+// CommittedLocal.
 type RunTallies struct {
-	Committed int
-	Killed    int
-	Open      int
-	Selected  int
-	Served    int
-	Skipped   int
-	Audit     AuditSummary
+	Committed      int
+	CommittedLocal int
+	Killed         int
+	Open           int
+	Selected       int
+	Served         int
+	Skipped        int
+	Audit          AuditSummary
 }
 
 // AuditSummary is the narrowed-survivor audit's measured rate: how
@@ -37,12 +41,16 @@ type AuditSummary struct {
 	Disagreed int `json:"disagreed"`
 }
 
-// BankedState is a cancelled run's report of what the findings
-// document kept: the exit cause and the tallies at the exit
-// (REQ-exec-banked-summary). Both faces render it from Text.
+// BankedState is a cancelled run's report of what the two layers
+// kept: the exit cause and the tallies at the exit, the committed
+// count split between the findings document and the machine-local
+// overlay (REQ-exec-banked-summary) — a reader checking the document,
+// or git, finds the document's share there and must not read the
+// whole as missing. Both faces render it from Text.
 type BankedState struct {
 	Cause     string `json:"cause" jsonschema:"the exit cause: the graceful drain, the command timeout, an interrupt or cancellation, or an abort with its error"`
-	Committed int    `json:"committed" jsonschema:"findings whose incremental commit returned successfully — exactly what the document holds from this run"`
+	Committed int    `json:"committed" jsonschema:"findings whose incremental commit returned successfully — the findings document holds them less the machine-local ones"`
+	Local     int    `json:"local" jsonschema:"findings among the committed whose commit landed in the machine-local overlay beside the document — kept there, never promoted until portable, not served by a run on another machine"`
 	Killed    int    `json:"killed" jsonschema:"kills among the committed findings"`
 	Open      int    `json:"open" jsonschema:"open survivors among the committed findings"`
 	Selected  int    `json:"selected" jsonschema:"targets the selection held"`
@@ -56,7 +64,7 @@ type BankedState struct {
 // from its own start — the load and selection the run never saw
 // included.
 func (r RunTallies) Banked(cause string, elapsed time.Duration) BankedState {
-	return BankedState{Cause: cause, Committed: r.Committed, Killed: r.Killed, Open: r.Open,
+	return BankedState{Cause: cause, Committed: r.Committed, Local: r.CommittedLocal, Killed: r.Killed, Open: r.Open,
 		Selected: r.Selected, Served: r.Served, Skipped: r.Skipped, Elapsed: elapsed.Round(time.Second).String()}
 }
 
@@ -78,10 +86,28 @@ func PostCommitRenderContext(ctx context.Context, bound time.Duration) (context.
 	return context.WithTimeout(context.WithoutCancel(ctx), bound)
 }
 
-// Text renders the banked state as the one sentence both faces show.
+// Text renders the banked state as the one sentence both faces show,
+// each committed record's layer named: a reader checking the findings
+// document, or git, finds exactly the document's share there, the
+// machine-local share beside it in the overlay.
 func (b BankedState) Text() string {
-	return fmt.Sprintf("%s after %s: %d target(s) committed to the findings document this run (%d killed, %d open among them); selection was %d target(s) — %d served, %d skipped before exit; every committed target is kept (REQ-exec-cancellation), the rest re-measure — a gracefully drained prefix extends — on the next run",
-		b.Cause, b.Elapsed, b.Committed, b.Killed, b.Open, b.Selected, b.Served, b.Skipped)
+	return fmt.Sprintf("%s after %s: %d target(s) committed this run — %s (%d killed, %d open among them); selection was %d target(s) — %d served, %d skipped before exit; every committed target is kept (REQ-exec-cancellation), the rest re-measure — a gracefully drained prefix extends — on the next run",
+		b.Cause, b.Elapsed, b.Committed, b.layers(), b.Killed, b.Open, b.Selected, b.Served, b.Skipped)
+}
+
+// layers spells the committed records' split between the findings
+// document and the machine-local overlay.
+func (b BankedState) layers() string {
+	switch {
+	case b.Committed == 0:
+		return "none to the findings document"
+	case b.Local == 0:
+		return fmt.Sprintf("%d to the findings document, none machine-local", b.Committed)
+	case b.Local == b.Committed:
+		return "every one machine-local (kept beside the findings document, none in it)"
+	default:
+		return fmt.Sprintf("%d to the findings document, %d machine-local (kept beside it)", b.Committed-b.Local, b.Local)
+	}
 }
 
 // ExitCause names a run's non-drift exit for the banked state: the
@@ -120,6 +146,11 @@ func tallyCallbacks(opts Options, tally *RunTallies, started *bool) Options {
 				return err
 			}
 			tally.Committed++
+			if opts.Layer != nil {
+				if layer, _ := opts.Layer(f); layer == LayerLocal {
+					tally.CommittedLocal++
+				}
+			}
 			tally.Killed += f.Killed
 			tally.Open += len(f.Open())
 			return nil

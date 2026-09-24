@@ -83,27 +83,7 @@ func isolatedFixture(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"init", "--quiet"},
-		{"add", "."},
-		{"-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "commit", "--quiet", "--message", "fixture"},
-	} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		// The helper must hold on any machine: neither config files
-		// (signing, templates, hooks) nor exported GIT_* plumbing
-		// (GIT_DIR, GIT_WORK_TREE, author overrides) may reach the
-		// isolated repo.
-		for _, kv := range os.Environ() {
-			if !strings.HasPrefix(kv, "GIT_") {
-				cmd.Env = append(cmd.Env, kv)
-			}
-		}
-		cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, output)
-		}
-	}
+	gitCommitAll(t, dir)
 	return dir
 }
 
@@ -962,4 +942,31 @@ func TestRunCommandRenderBoundExitCarriesThePersistedDrop(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "additionally, the whole-tree reconcile dropped 1 record(s)") || !strings.Contains(err.Error(), "(persisted)") {
 		t.Fatalf("render-bound exit = %v; want the deadline with the persisted drop riding it\n%s", err, output.String())
 	}
+}
+
+// gitIn runs one git command in dir, isolated from the machine:
+// neither config files (signing, templates, hooks) nor exported
+// GIT_* plumbing (GIT_DIR, GIT_WORK_TREE, author overrides) may reach
+// a fixture repository.
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+}
+
+// gitCommitAll makes dir a repository with everything in it committed.
+func gitCommitAll(t *testing.T, dir string) {
+	t.Helper()
+	gitIn(t, dir, "init", "--quiet")
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "-c", "user.name=fixture", "-c", "user.email=fixture@example.com", "commit", "--quiet", "--message", "fixture")
 }

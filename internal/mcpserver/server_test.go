@@ -1729,7 +1729,7 @@ func TestToolRunCancelledAfterACommitReturnsTheBankedState(t *testing.T) {
 	s := serverAt(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	seams.afterCommit = func(gomutant.Finding) { cancel() }
+	seams.afterCommit = func(gomutant.Finding, string) { cancel() }
 	t.Cleanup(func() { seams.afterCommit = nil })
 	_, out, err := s.toolRun(ctx, nil, runIn{
 		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
@@ -1738,8 +1738,8 @@ func TestToolRunCancelledAfterACommitReturnsTheBankedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a cancellation after the first commit errored: %v", err)
 	}
-	if out.Exit == "" || out.Summary.Banked == nil || out.Summary.Banked.Committed != 1 || out.Summary.Banked.Selected != 2 || out.Summary.Banked.Cause != out.Exit {
-		t.Fatalf("banked result = exit %q, banked %+v; want one committed of two under the exit cause", out.Exit, out.Summary.Banked)
+	if out.Exit == "" || out.Summary.Banked == nil || out.Summary.Banked.Committed != 1 || out.Summary.Banked.Local != 1 || out.Summary.Banked.Selected != 2 || out.Summary.Banked.Cause != out.Exit {
+		t.Fatalf("banked result = exit %q, banked %+v; want one committed of two under the exit cause, machine-local (the fixture is no git repository)", out.Exit, out.Summary.Banked)
 	}
 	if len(out.Findings) != 0 || out.Document == "" {
 		t.Fatalf("banked result carried rows %d / document %q; want none and the document named", len(out.Findings), out.Document)
@@ -1814,7 +1814,7 @@ func TestToolRunBankedResultListsEachShedOnce(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	seams.afterCommit = func(gomutant.Finding) { cancel() }
+	seams.afterCommit = func(gomutant.Finding, string) { cancel() }
 	t.Cleanup(func() { seams.afterCommit = nil })
 	_, out, err := s.toolRun(ctx, nil, runIn{Changed: "HEAD"})
 	if err != nil || out.Exit == "" {

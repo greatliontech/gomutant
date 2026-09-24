@@ -25,9 +25,9 @@ func TestBankedStateNamesOnlyCommittedFindings(t *testing.T) {
 	rep := newRunReporter(&out, false, 5)
 	// The banked state is the run's own tally, rendered as its one text
 	// under this face's prefix.
-	rep.bankedState(gomutant.RunTallies{Committed: 2, Killed: 4, Selected: 5, Served: 1, Skipped: 1}.Banked("command timeout", 3*time.Second))
+	rep.bankedState(gomutant.RunTallies{Committed: 2, CommittedLocal: 1, Killed: 4, Selected: 5, Served: 1, Skipped: 1}.Banked("command timeout", 3*time.Second))
 	line := out.String()
-	for _, want := range []string{"banked", "command timeout", "2 target(s) committed", "4 killed", "5 target(s)", "1 served", "1 skipped"} {
+	for _, want := range []string{"banked", "command timeout", "2 target(s) committed", "1 to the findings document, 1 machine-local", "4 killed", "5 target(s)", "1 served", "1 skipped"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("banked line %q missing %q", line, want)
 		}
@@ -42,10 +42,12 @@ func TestProgressLineRendersCumulativeState(t *testing.T) {
 	rep := newRunReporter(&out, false, 85)
 	rep.decision(gomutant.RunDecision{Action: "cached"})
 	rep.executing(gomutant.ExecutionEvent{Phase: "executing", TargetCount: 42, CandidatesDone: 100, CandidatesTotal: 1826})
-	rep.bankedFinding(gomutant.Finding{Symbol: "a.F", Killed: 7})
+	rep.bankedFinding(gomutant.Finding{Symbol: "a.F", Killed: 7}, gomutant.LayerRepo)
+	rep.bankedFinding(gomutant.Finding{Symbol: "a.G", Killed: 1}, gomutant.LayerLocal)
+	rep.bankedFinding(gomutant.Finding{Symbol: "a.H", Killed: 1}, gomutant.LayerRepo)
 	rep.progressLine()
 	line := out.String()
-	for _, want := range []string{"progress", "1/85 targets committed", "1 served", "candidates 100/1826", "7 killed", "elapsed"} {
+	for _, want := range []string{"progress", "3/85 targets committed", "(1 machine-local", "1 served", "candidates 100/1826", "9 killed", "elapsed"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("progress line %q missing %q", line, want)
 		}
@@ -114,7 +116,7 @@ func TestJSONLEnvelopesParse(t *testing.T) {
 	rep := newRunReporter(&out, true, 3)
 	rep.emit("decision", gomutant.RunDecision{Symbol: "a.F", Action: "measure", Candidates: 4})
 	rep.emit("execution", gomutant.ExecutionEvent{Phase: "confirming", Symbol: "a.F", ConfirmationMode: "stride-sampled"})
-	rep.bankedFinding(gomutant.Finding{Symbol: "a.F", Killed: 2})
+	rep.bankedFinding(gomutant.Finding{Symbol: "a.F", Killed: 2}, gomutant.LayerRepo)
 	rep.bankedState(gomutant.RunTallies{Committed: 1, Killed: 2}.Banked("interrupt/cancellation", time.Second))
 	rep.progressLine()
 	kinds := map[string]bool{}
@@ -569,5 +571,54 @@ func TestRenderAuditReadsTheSummary(t *testing.T) {
 	renderAudit(&out, gomutant.RunSummary{Audit: &gomutant.AuditSummary{Narrowed: 4, Disagreed: 1}})
 	if !strings.Contains(out.String(), "4 narrowed survivor(s)") || !strings.Contains(out.String(), "1 disagreed") {
 		t.Fatalf("audit line = %q", out.String())
+	}
+}
+
+// The banked line names the layer each committed record landed in
+// from a real run: a tree with git-visible drift keeps its records
+// machine-local, and a run cancelled after its first commit says so
+// beside the count, so a reader checking the findings document does
+// not read the run as having banked nothing (REQ-exec-banked-summary).
+func TestRunCommandBankedLineNamesTheMachineLocalShare(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test over a fixture module")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":       "module example.com/ml\n\ngo 1.26.5\n",
+		"m.go":         "package ml\nfunc One() int { return 1 }\nfunc Two() int { return 2 }\n",
+		"m_test.go":    "package ml\nimport \"testing\"\nfunc TestOne(t *testing.T) { if One() != 1 { t.Fail() } }\nfunc TestTwo(t *testing.T) { if Two() != 2 { t.Fail() } }\n",
+		"targets.json": `{"targets":[{"symbol":"example.com/ml.One","oracle":["example.com/ml.TestOne"]},{"symbol":"example.com/ml.Two","oracle":["example.com/ml.TestTwo"]}]}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A repository whose tracked source moved since its commit:
+	// git-visible drift, so every record the run commits is
+	// machine-local (REQ-result-layers).
+	gitCommitAll(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "m.go"), []byte("package ml\n// drift since the commit\nfunc One() int { return 1 }\nfunc Two() int { return 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Cancelled once the progress line banks the first commit, so the
+	// exit is a banked state over one machine-local record.
+	out := &triggerCancelWriter{cancel: cancel, trigger: []byte("1/2 targets committed")}
+	err := runCommand(ctx, runOptions{
+		dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: defaultFindings,
+		budget: 1, jobs: 1, oracleTimeout: 2 * time.Minute, progressEvery: time.Millisecond, output: out,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled run = %v, want context.Canceled\n%s", err, out.buf.String())
+	}
+	rendered := out.buf.String()
+	if !strings.Contains(rendered, "1 target(s) committed this run — every one machine-local") {
+		t.Fatalf("banked line does not name the machine-local share:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "(1 machine-local,") {
+		t.Fatalf("progress line does not carry the machine-local count:\n%s", rendered)
 	}
 }

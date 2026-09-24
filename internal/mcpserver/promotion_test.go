@@ -273,7 +273,7 @@ func TestToolRunDriftExitCarriesThePersistedDrop(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	seams.afterCommit = func(gomutant.Finding) {
+	seams.afterCommit = func(gomutant.Finding, string) {
 		if err := os.WriteFile(filepath.Join(dir, "current.go"), []byte(src+"\nfunc Drifted() int { return 9 }\n"), 0o644); err != nil {
 			t.Error(err)
 		}

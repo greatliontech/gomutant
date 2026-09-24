@@ -735,7 +735,8 @@ aborts rather than scoring.
 face and, when a token listens, its MCP face; the CLI face keeps a
 cadenced progress line naming the stretch in flight — the load, an
 ephemeral probe's phase, a judged record — until the first decision,
-after which the line carries the served, skipped, and committed tallies
+after which the line carries the served, skipped, and committed
+tallies, the machine-local count among the committed beside them,
 and, when a freshness-analysis keep-alive named a unit after the
 sequence's latest event — a preparation event, a decision, a commit —
 that unit's stretch with its age; a keep-alive names a stretch only for
@@ -1147,9 +1148,11 @@ the recorded environment evidence (REQ-exec-oracle-parallelism).
 exits on cancellation — command-timeout expiry, signal, or abort — MUST
 render a banked-state summary naming the exit cause, the count of findings
 whose incremental commit RETURNED SUCCESSFULLY (with their kill and open
-tallies), and the selection's disposition so far; the summary claims only
+tallies) split by the layer the commit landed each in — the findings
+document's share and the machine-local share (REQ-result-layers) —
+and the selection's disposition so far; the summary claims only
 committed findings — never in-flight work and never a finding whose commit
-failed — so what it reports is exactly what the findings document holds. A
+failed — so what it reports is exactly what the two layers hold. A
 run cancelled before measurement began stays silent — there is no banked
 state to report — and the drift exit renders its full result rows and
 summary instead, which are its banked state. The run counts the banked

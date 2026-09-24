@@ -369,6 +369,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// Plan mode suppresses this at the library boundary — the run owns
 		// the plan clause's no-write guarantee.
 		Commit: ledger.Commit(ctx),
+		Layer:  ledger.Layer,
 	})
 	if soft != nil {
 		soft.disarm()
@@ -377,8 +378,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 	var drift *gomutant.TreeDriftError
 	if err != nil && !errors.As(err, &drift) {
 		// The banked-state exit summary (REQ-exec-banked-summary): a
-		// budget, signal, or abort exit names what the findings
-		// document kept instead of ending on a bare context error —
+		// budget, signal, or abort exit names what the two layers kept
+		// instead of ending on a bare context error —
 		// the run's own tallies, claiming only returned commits; a run
 		// cancelled before measurement began has no tallies and stays
 		// silent.

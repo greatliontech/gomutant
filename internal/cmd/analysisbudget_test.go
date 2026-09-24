@@ -96,7 +96,7 @@ func TestProgressLineNamesTheAnalysisStretch(t *testing.T) {
 	rep.now = func() time.Time { return t0.Add(10 * time.Minute) }
 	rep.analysis(gomutant.AnalysisEvent{Phase: "prove", Package: "example.com/p", Index: 7, Total: 40})
 	rep.now = func() time.Time { return t0.Add(11 * time.Minute) }
-	rep.bankedFinding(gomutant.Finding{Symbol: "p.I"})
+	rep.bankedFinding(gomutant.Finding{Symbol: "p.I"}, gomutant.LayerRepo)
 	rep.progressLine()
 	if strings.Contains(out.String(), "analysis") {
 		t.Fatalf("tallies line after a commit cleared the stretch = %q", out.String())

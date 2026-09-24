@@ -57,7 +57,7 @@ func TestRunLedgerReportsEachShedOnce(t *testing.T) {
 	var delivered []string
 	ledger.Shed = func(d AttestationShed) { delivered = append(delivered, d.Text()) }
 	var committed []string
-	ledger.Committed = func(f Finding) { committed = append(committed, f.Symbol) }
+	ledger.Committed = func(f Finding, _ string) { committed = append(committed, f.Symbol) }
 	ctx := context.Background()
 	ledger.Contradiction(AttestationContradiction{Symbol: "pkg.B", Position: "b.go:1:1", Operator: "comparison: > -> >=", Killer: "TestB", Reason: "equivalent"})
 	ledger.SiteShed(AttestationShed{Symbol: "pkg.C", Position: "c.go:1:1", Operator: "comparison: > -> >=", Reason: "site content changed"})
@@ -183,7 +183,7 @@ func TestRunLedgerBanksOnlyReturnedCommits(t *testing.T) {
 	ledger := NewRunLedger(store, nil, "run-5", false)
 	refused := errors.New("the document write refused")
 	ledger.Update = func(context.Context, func([]Finding) ([]Finding, error)) error { return refused }
-	ledger.Committed = func(f Finding) { t.Fatalf("a failed commit banked %s", f.Symbol) }
+	ledger.Committed = func(f Finding, _ string) { t.Fatalf("a failed commit banked %s", f.Symbol) }
 	if err := ledger.Commit(context.Background())(storeFinding("pkg.A", nil)); !errors.Is(err, refused) {
 		t.Fatalf("commit error = %v, want the write's refusal", err)
 	}

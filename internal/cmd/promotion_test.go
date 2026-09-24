@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gomutant"
 )
 
 // A run that carries a record from the machine-local overlay into the
@@ -94,22 +96,44 @@ func TestRunProgressBanksCommittedTargets(t *testing.T) {
 	if err := runCommand(context.Background(), opts); err != nil {
 		t.Fatal(err)
 	}
-	banked := -1
+	banked, local := -1, -1
 	for _, line := range strings.Split(out.String(), "\n") {
 		if !strings.Contains(line, `"event":"progress"`) {
 			continue
 		}
 		var event struct {
-			TargetsDone *int `json:"targetsDone"`
+			TargetsDone  *int `json:"targetsDone"`
+			TargetsLocal *int `json:"targetsLocal"`
 		}
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			t.Fatalf("progress line %q: %v", line, err)
 		}
 		if event.TargetsDone != nil && *event.TargetsDone > banked {
-			banked = *event.TargetsDone
+			if event.TargetsLocal == nil {
+				t.Fatalf("progress line %q carries no targetsLocal", line)
+			}
+			banked, local = *event.TargetsDone, *event.TargetsLocal
 		}
 	}
 	if banked != 1 {
 		t.Fatalf("progress banked %d committed targets, want the run's 1:\n%s", banked, out.String())
+	}
+	// The machine-local count is the store's own classification of the
+	// committed record — the layer the write routed it to — not a
+	// count the face keeps apart from it.
+	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(fixture, defaultFindings), fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := store.Load(context.Background())
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records after the run: %v, %v", records, err)
+	}
+	wantLocal := 0
+	if layer, _ := store.Layer(records[0]); layer == gomutant.LayerLocal {
+		wantLocal = 1
+	}
+	if local != wantLocal {
+		t.Fatalf("progress banked %d machine-local, the store classifies the record %d:\n%s", local, wantLocal, out.String())
 	}
 }

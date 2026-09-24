@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // RunLedger is a run's document side, one implementation both faces
@@ -44,11 +45,19 @@ type RunLedger struct {
 	// Finish instead, for the face to place in its epilogue.
 	Shed func(AttestationShed)
 	// Committed observes each finding after its commit returned, never
-	// before: a face's cumulative progress line banks it as committed
-	// work (REQ-exec-run-status), and a failed or cancelled commit is
-	// work the document does not hold (REQ-exec-cancellation's
-	// claims-only-committed clause).
-	Committed func(Finding)
+	// before, with the layer the commit landed it in: a face's
+	// cumulative progress line banks it as committed work and names
+	// the machine-local share (REQ-exec-run-status), and a failed or
+	// cancelled commit is work the document does not hold
+	// (REQ-exec-cancellation's claims-only-committed clause).
+	Committed func(f Finding, layer string)
+	// layers is the layer each committed record's write routed it to,
+	// classified once at the commit; Layer serves it to the engine's
+	// tallies (REQ-exec-banked-summary).
+	layers map[string]committedLayer
+	// mu guards layers: the commit records under the engine's callback
+	// lock, and Layer may be asked outside it.
+	mu sync.Mutex
 }
 
 // NewRunLedger opens the ledger over the document as read at
@@ -64,12 +73,30 @@ func NewRunLedger(store *Store, prior []Finding, runID string, wholeTree bool) *
 		overlaid:  make(map[string]bool, len(prior)),
 		postMerge: map[string]Finding{},
 		reported:  map[string]bool{},
+		layers:    map[string]committedLayer{},
 	}
 	for _, f := range prior {
 		l.snapshot[f.Symbol] = append([]Attestation(nil), f.Attested...)
 		l.overlaid[f.Symbol] = store.Overlaid(f.Symbol)
 	}
 	return l
+}
+
+// committedLayer is one commit's routing: the layer and, for a
+// machine-local record, the first disqualifying reason.
+type committedLayer struct{ layer, reason string }
+
+// Layer is Options.Layer: the layer a committed record's write routed
+// it to, as the commit classified it; a record this ledger never
+// committed classifies afresh.
+func (l *RunLedger) Layer(f Finding) (layer, reason string) {
+	l.mu.Lock()
+	c, ok := l.layers[f.Symbol]
+	l.mu.Unlock()
+	if ok {
+		return c.layer, c.reason
+	}
+	return l.store.Layer(f)
 }
 
 func (l *RunLedger) update(ctx context.Context, change func([]Finding) ([]Finding, error)) error {
@@ -131,8 +158,16 @@ func (l *RunLedger) Commit(ctx context.Context) func(Finding) error {
 		if err != nil {
 			return err
 		}
+		// The layer the write routed the record to: the store's
+		// predicate over the exemptions the run was prepared with, the
+		// same the write judged under its lock, classified once here
+		// and served to the engine's tallies by Layer.
+		layer, reason := l.store.Layer(finding)
+		l.mu.Lock()
+		l.layers[finding.Symbol] = committedLayer{layer, reason}
+		l.mu.Unlock()
 		if l.Committed != nil {
-			l.Committed(finding)
+			l.Committed(finding, layer)
 		}
 		l.commitSheds = append(l.commitSheds, dropped...)
 		for _, d := range dropped {

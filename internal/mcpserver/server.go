@@ -814,7 +814,7 @@ type findingOut struct {
 
 type runOut struct {
 	Summary                   gomutant.RunSummary         `json:"summary"`
-	Exit                      string                      `json:"exit,omitempty" jsonschema:"set when the campaign ended on a cancellation after measurement began — the exit cause; summary.banked carries what the document kept, the findings list is empty, and the document holds every committed row"`
+	Exit                      string                      `json:"exit,omitempty" jsonschema:"set when the campaign ended on a cancellation after measurement began — the exit cause; summary.banked carries what the run committed, split between the findings document and the machine-local overlay; the findings list is empty, and the two layers hold every committed row"`
 	Document                  string                      `json:"document"`
 	Findings                  []findingOut                `json:"findings"`
 	OmittedFindings           int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
@@ -1137,6 +1137,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		// merge takes, so an interrupted run keeps its completed targets; the
 		// final merge below remains the authority (REQ-exec-cancellation).
 		Commit: ledger.Commit(ctx),
+		Layer:  ledger.Layer,
 	}
 	options.AnalysisEvent = streams.analysis
 	// The heartbeat keeps long compile and execution stretches audible

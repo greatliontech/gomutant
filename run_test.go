@@ -6223,7 +6223,15 @@ func TestRunTalliesBankOnlyReturnedCommits(t *testing.T) {
 		t.Fatalf("tallies after a cancelled second commit = %+v, want one committed of two selected", delivered)
 	}
 	delivered = nil
-	findings, err := tr.Run(context.Background(), []Target{add, weak}, Options{Jobs: 1, Commit: func(Finding) error { return nil }, Tallies: func(r RunTallies) { delivered = append(delivered, r) }})
+	// The layer each commit landed in rides the tallies: the classifier
+	// is the store's, here one naming the weak target machine-local.
+	findings, err := tr.Run(context.Background(), []Target{add, weak}, Options{Jobs: 1, Commit: func(Finding) error { return nil }, Tallies: func(r RunTallies) { delivered = append(delivered, r) },
+		Layer: func(f Finding) (string, string) {
+			if f.Symbol == weak.Symbol {
+				return LayerLocal, "test"
+			}
+			return LayerRepo, ""
+		}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6231,7 +6239,7 @@ func TestRunTalliesBankOnlyReturnedCommits(t *testing.T) {
 	for _, f := range findings {
 		killed += f.Killed
 	}
-	if len(delivered) != 1 || delivered[0].Committed != 2 || delivered[0].Killed != killed || delivered[0].Served != 0 {
+	if len(delivered) != 1 || delivered[0].Committed != 2 || delivered[0].CommittedLocal != 1 || delivered[0].Killed != killed || delivered[0].Served != 0 {
 		t.Fatalf("tallies after a completed run = %+v, want both committed with %d killed", delivered, killed)
 	}
 	// A run over the prior findings serves both: served decisions are

@@ -22,7 +22,7 @@ type serverSeams struct {
 	// final replacement returned — so a test can end the request
 	// exactly there and pin what each boundary claims
 	// (REQ-exec-banked-summary, REQ-exec-cancellation).
-	afterCommit           func(gomutant.Finding)
+	afterCommit           func(gomutant.Finding, string)
 	afterFinalReplacement func()
 	// stretchObserver sees every stretch label a run records and
 	// selectionObserver the dispatch's start (the inputs were read at

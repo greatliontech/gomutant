@@ -278,7 +278,7 @@ func TestToolRunDriftExitCarriesTheAnalysisPayloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seams.afterCommit = func(gomutant.Finding) {
+	seams.afterCommit = func(gomutant.Finding, string) {
 		// The first commit lands; the tree moves under the target still
 		// to be stamped.
 		if err := os.WriteFile(libPath, append(append([]byte{}, src...), []byte("\nfunc Drifted() int { return 9 }\n")...), 0o644); err != nil {
