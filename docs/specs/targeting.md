@@ -140,13 +140,27 @@ by build constraints — an unbound surface named as such, never mislabeled) —
 so a caller layering its own classification (or a user deciding what to
 hand-mutate) sees the whole changed surface, never a silently narrowed one.
 A test-file residue row additionally names what the changed tests closed
-over, best-effort: when prior findings outside the run's target set are
-stale for an oracle-caused reason, the row counts them and suggests the
-re-measure by symbol — changed-scope discovery alone would never re-measure
-them. The count is attribution-free: any oracle-caused staleness qualifies,
-including staleness predating the delta, because the cost of naming a
-record that already wanted re-measuring is nil and per-file attribution is
-not.
+over, best-effort: when prior findings outside the run's target set
+that the changed test files reach are stale for an oracle-caused
+reason, the row counts them and suggests the re-measure by symbol —
+changed-scope discovery alone would never re-measure them. A changed
+test file reaches, through its package — the loaded package holding
+it, a deleted or unparseable file's the package holding its directory
+or the directory's path under its main module, a file reaching
+nothing where no package of a main module can hold it (outside every
+main module, under a nested module, or under a directory a `./...`
+pattern never loads) — a record whose recorded oracle names a test of
+that package, and, where the record's oracle is derived, a record
+whose own package that package's test binary links, the derived
+oracle's membership rule; a package is named exactly, a dotted last
+path element included. The reach is read from the records and one
+listing per changed package, never judged; only the reached records
+are judged, so the pass scales with what the delta reaches and not
+with the document, and each half is priced before it is paid: the
+listings by changed packages, the judged pass by reached records. Any
+oracle-caused staleness of a reached record qualifies, staleness
+predating the delta included, since naming a record that already
+wanted re-measuring costs nothing once it is judged.
 The one named exclusion: paths under gomutant's own state directory
 (`.gomutant/`) are outside the changed source surface and report as neither
 targets nor residue — the tool's bookkeeping can never produce a mutation

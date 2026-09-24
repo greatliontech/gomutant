@@ -6,10 +6,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // FileSurface is the Go content of one changed source file, tree-relative:
@@ -23,6 +26,17 @@ type FileSurface struct {
 	IsGo      bool
 	IsTest    bool
 	Generated bool
+	// Package is the import path of the package the file belongs to: the
+	// loaded package holding it, a test file's under its base package;
+	// for a file the loaded packages do not hold (deleted, unparseable,
+	// build-excluded), the package holding its directory, else the
+	// directory's path under its main module; empty where no package of
+	// a main module can hold it — outside every main module, under a
+	// nested module, or under a directory a `./...` pattern never
+	// loads. A changed test file's package is what its change could
+	// have closed over, a deleted test file's included
+	// (REQ-target-changed).
+	Package string
 	// Loaded reports whether the loaded packages cover the path: false for a
 	// deleted, unparseable, or build-constraint-excluded file, whose bodies
 	// the engine cannot see — an unbound surface, never silently classified.
@@ -65,6 +79,7 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 		hash   string
 	}
 	type fileDecls struct {
+		pkg       string
 		generated bool
 		byKey     map[string]decl
 	}
@@ -93,7 +108,7 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 			if _, seen := byPath[rel]; seen {
 				continue
 			}
-			fdecls := &fileDecls{generated: ast.IsGenerated(f), byKey: map[string]decl{}}
+			fdecls := &fileDecls{pkg: pkgPath, generated: ast.IsGenerated(f), byKey: map[string]decl{}}
 			byPath[rel] = fdecls
 			inits := 0
 			for _, d := range f.Decls {
@@ -140,8 +155,13 @@ func (t *Tree) SurfaceContext(ctx context.Context, paths []string, ref func(path
 			return nil, err
 		}
 		fs := FileSurface{Path: p, IsGo: strings.HasSuffix(p, ".go"), IsTest: strings.HasSuffix(p, "_test.go")}
-		// Test files are oracles, never mutation targets: classified, no
-		// symbols surfaced (REQ-target-changed).
+		if d := byPath[p]; d != nil {
+			fs.Package = d.pkg
+		} else if fs.IsGo {
+			fs.Package = t.packageOfDir(filepath.Dir(p))
+		}
+		// Test files are oracles, never mutation targets: classified with
+		// their package, no symbols surfaced (REQ-target-changed).
 		if fs.IsTest {
 			out = append(out, fs)
 			continue
@@ -297,4 +317,51 @@ func recvTypeName(fd *ast.FuncDecl) string {
 			return ""
 		}
 	}
+}
+
+// packageOfDir is the import path of the tree-relative directory: the
+// loaded package holding a file there, else the directory's path under
+// the main module containing it, empty outside every main module and
+// empty where no package of that module can live — under a nested
+// module's go.mod, or an element named testdata or beginning with "_"
+// or "." (what a `./...` pattern never loads) — so a deleted or
+// unparseable file still names the package its change touched, and a
+// directory that is no package names none.
+func (t *Tree) packageOfDir(rel string) string {
+	abs := filepath.Join(t.dir, rel)
+	var module *packages.Module
+	for _, pkg := range t.pkgs {
+		for _, file := range pkg.GoFiles {
+			if filepath.Dir(file) == abs {
+				return basePackagePath(pkg)
+			}
+		}
+		if pkg.Module != nil && pkg.Module.Main && pkg.Module.Dir != "" && (abs == pkg.Module.Dir || strings.HasPrefix(abs, pkg.Module.Dir+string(filepath.Separator))) {
+			if module == nil || len(pkg.Module.Dir) > len(module.Dir) {
+				module = pkg.Module
+			}
+		}
+	}
+	if module == nil {
+		return ""
+	}
+	sub, err := filepath.Rel(module.Dir, abs)
+	if err != nil {
+		return ""
+	}
+	if sub == "." {
+		return module.Path
+	}
+	elements := strings.Split(filepath.ToSlash(sub), "/")
+	nested := module.Dir
+	for _, element := range elements {
+		if element == "testdata" || strings.HasPrefix(element, "_") || strings.HasPrefix(element, ".") {
+			return ""
+		}
+		nested = filepath.Join(nested, element)
+		if _, err := os.Stat(filepath.Join(nested, "go.mod")); err == nil {
+			return ""
+		}
+	}
+	return module.Path + "/" + strings.Join(elements, "/")
 }

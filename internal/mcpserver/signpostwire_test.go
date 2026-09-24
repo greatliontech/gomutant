@@ -66,7 +66,7 @@ func TestToolRunChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantStretchesInOrder(t, labels(), []string{gomutant.StretchSelecting, gomutant.StretchInspecting("closure signpost over 1 prior record(s)")})
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchSelecting, gomutant.StretchInspecting("closure signpost listing the test closure of 1 changed package(s)"), gomutant.StretchInspecting("closure signpost over 1 prior record(s) the changed tests reach (1 subject(s) in 1 package(s))")})
 	found := false
 	for _, r := range out.Residue {
 		if strings.Contains(r.Reason, "oracle closure of 1 stale finding(s) - re-measure by symbol: example.com/fixture/lib.Weak") {

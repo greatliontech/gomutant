@@ -59,5 +59,5 @@ func TestRunCommandChangedTestResidueCarriesOracleClosureSignpost(t *testing.T) 
 	if !strings.Contains(output.String(), "oracle closure of 1 stale finding(s) - re-measure by symbol: example.com/fixture/lib.Weak") {
 		t.Fatalf("changed-mode residue missing the signpost:\n%s", output.String())
 	}
-	wantStretchesInOrder(t, labels(), []string{gomutant.StretchPreparation, gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}), gomutant.StretchSelecting, gomutant.StretchInspecting("closure signpost over 1 prior record(s)")})
+	wantStretchesInOrder(t, labels(), []string{gomutant.StretchPreparation, gomutant.StretchPreparing(gomutant.PreparationEvent{Stage: gomutant.PreparationLoading}), gomutant.StretchSelecting, gomutant.StretchInspecting("closure signpost listing the test closure of 1 changed package(s)"), gomutant.StretchInspecting("closure signpost over 1 prior record(s) the changed tests reach (1 subject(s) in 1 package(s))")})
 }

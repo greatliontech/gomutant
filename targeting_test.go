@@ -357,6 +357,15 @@ func TestDiscoverChanged(t *testing.T) {
 	if _, ok := reasons["lib/lib.go"]; ok {
 		t.Error("a targeting file also reported as residue")
 	}
+	// A changed test file's row names its package — what its change
+	// reaches; a non-test row names none.
+	packages := map[string]string{}
+	for _, r := range residue {
+		packages[r.Path] = r.Package
+	}
+	if packages["lib/lib_test.go"] != "example.com/fixture/lib" || packages["lib/removed.go"] != "" || packages["README.md"] != "" {
+		t.Errorf("residue packages = %v, want the test file's package alone", packages)
+	}
 	// The tool's own state directory is outside the changed source
 	// surface: neither target nor residue (REQ-target-changed).
 	for _, owned := range []string{".gomutant/findings.json", ".gomutant/targets/extra.json"} {

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -266,6 +267,11 @@ func (t *Tree) DescribeTargets(ctx context.Context, targets []Target) ([]TargetD
 type Residue struct {
 	Path   string
 	Reason string
+	// Package is the import path of a changed test file's package — the
+	// package whose oracles its change reaches, a deleted file's
+	// derived from its directory — empty for every other row and for a
+	// test file no main module holds (REQ-target-changed).
+	Package string `json:",omitempty"`
 }
 
 // Tree is a loaded Go tree targets resolve against.
@@ -537,7 +543,7 @@ func (t *Tree) DiscoverChangedContext(ctx context.Context, paths []string, ref f
 		}
 		switch {
 		case fs.IsTest:
-			residue = append(residue, Residue{Path: fs.Path, Reason: testFileResidueReason})
+			residue = append(residue, Residue{Path: fs.Path, Reason: testFileResidueReason, Package: fs.Package})
 		case !fs.IsGo:
 			residue = append(residue, Residue{Path: fs.Path, Reason: "not a Go source file"})
 		case !fs.Loaded:
@@ -568,42 +574,99 @@ const testFileResidueReason = "test file: tests are oracles, never targets"
 
 // OracleClosureSignpostContext extends changed-scope test-file residue
 // rows with what the changed tests closed over: prior findings outside
-// the run's target set whose records are stale for an oracle-caused
-// reason are exactly the measurements this change touched without
-// re-measuring, so the row names them and the re-measure move
-// (REQ-target-changed). Counting is best-effort - a record whose
-// inspection errors is skipped; the run that re-measures it will say
-// why - and the rows pass through unchanged when nothing qualifies.
+// the run's target set that the changed test files reach and whose
+// records are stale for an oracle-caused reason are exactly the
+// measurements this change touched without re-measuring, so the row
+// names them and the re-measure move (REQ-target-changed). A changed
+// test file reaches, through its package, a record whose recorded
+// oracle names a test of that package, and — where the record's
+// oracle is derived, never chosen — a record whose own package that
+// package's test binary links, the derived oracle's membership rule
+// (a test newly written there joins the record's oracle). The reach
+// is read from the records and one listing per changed package, never
+// judged; only the reached records are judged, so the pass scales
+// with what the delta reaches and not with the document. A test file
+// with no package (one no main module's package can hold) reaches
+// nothing; a package whose listing fails reaches by recorded evidence
+// alone.
+// Counting is best-effort - a record whose inspection errors is
+// skipped; the run that re-measures it will say why - and the rows
+// pass through unchanged when nothing qualifies. Each half is priced
+// before it is paid: one stage names the changed packages the listings
+// cover, another the records, subjects and packages the pass judges.
 func (t *Tree) OracleClosureSignpostContext(ctx context.Context, residue []Residue, prior []Finding, targets []Target, progress func(stage string)) ([]Residue, error) {
-	hasTestRow := false
+	changed := map[string]bool{}
 	for _, r := range residue {
-		if r.Reason == testFileResidueReason {
-			hasTestRow = true
-			break
+		if r.Reason == testFileResidueReason && r.Package != "" {
+			changed[r.Package] = true
 		}
 	}
-	if !hasTestRow || len(prior) == 0 {
+	if len(changed) == 0 || len(prior) == 0 {
 		return residue, nil
+	}
+	// The packages a changed package's test binary links: a derived
+	// oracle over any of them includes that package's tests. One
+	// listing per changed package, priced before it runs.
+	if progress != nil {
+		progress(fmt.Sprintf("closure signpost listing the test closure of %d changed package(s)", len(changed)))
+	}
+	linked := map[string]bool{}
+	for _, pkg := range slices.Sorted(maps.Keys(changed)) {
+		set, err := t.eng.LinkedTestPackagesContext(ctx, pkg)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		for p := range set {
+			linked[p] = true
+		}
 	}
 	targeted := make(map[string]bool, len(targets))
 	for _, target := range targets {
 		targeted[target.Symbol] = true
 	}
 	var candidates []Finding
+	subjects := map[string]bool{}
 	for _, finding := range prior {
-		if !targeted[finding.Symbol] {
-			candidates = append(candidates, finding)
+		if targeted[finding.Symbol] {
+			continue
 		}
+		// A recorded oracle subject is a test function, whose package
+		// the last-dot cut names exactly, a dotted last path element
+		// included; a record's own subject may be a Type.Method
+		// spelling, which only the loaded packages tell apart from a
+		// dotted path element — the string alone guesses short.
+		reached := false
+		for _, e := range finding.OracleEvidence {
+			if pkg, _ := splitTestSymbol(e.Symbol); changed[pkg] {
+				reached = true
+			}
+		}
+		if !reached && !finding.OracleExplicit {
+			pkg, err := t.eng.PackagePathContext(ctx, finding.Symbol)
+			if err != nil && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			reached = err == nil && linked[pkg]
+		}
+		if !reached {
+			continue
+		}
+		for _, e := range finding.OracleEvidence {
+			subjects[e.Symbol] = true
+		}
+		candidates = append(candidates, finding)
 	}
 	if len(candidates) == 0 {
 		return residue, nil
 	}
-	// One judged pass over the untargeted records' shared views — the
-	// signpost's cost is one view build, whatever the document's size —
-	// with the per-record boundary: a record whose judgment errors is
-	// skipped, the rest still count.
+	// One judged pass over the reached records' shared views, with the
+	// per-record boundary: a record whose judgment errors is skipped,
+	// the rest still count.
 	if progress != nil {
-		progress(fmt.Sprintf("closure signpost over %d prior record(s)", len(candidates)))
+		progress(fmt.Sprintf("closure signpost over %d prior record(s) the changed tests reach (%d subject(s) in %d package(s))", len(candidates), len(subjects), len(changed)))
 	}
 	inspections, errs, err := t.inspectFindings(ctx, candidates, nil, true)
 	if err != nil {
