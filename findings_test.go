@@ -546,7 +546,7 @@ func TestFingerprintRecordKeysRideTheDocumentVersion(t *testing.T) {
 	}
 	got := keysOf(raw)
 	want := []string{"buildConfig", "closureStrategy", "dynamicStateStrategy", "dynamicStateVouches", "machine", "maximalClosure", "observationAssertion", "observationProof", "packageProcessDischarges", "purityAssertion", "resultKind", "runtimeConfig", "runtimeDigest", "runtimeInputs", "singleSubjectDischarges", "testVariantClosure", "toolchain"}
-	if !reflect.DeepEqual(got, want) || DocumentVersion != 13 {
+	if !reflect.DeepEqual(got, want) || DocumentVersion != 14 {
 		t.Fatalf("the record's keys = %v (DocumentVersion %d); a moved key set rides a version bump", got, DocumentVersion)
 	}
 	// The nested proof object has its own strict decoder, so its key
@@ -603,14 +603,54 @@ func legacyRows(t *testing.T, data []byte) []byte {
 		t.Fatal(err)
 	}
 	if raw, ok := top["evidenceTable"]; ok {
-		var table []map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &table); err != nil {
+		// A current document references its tables by content key; the
+		// positional shape of versions 11 to 13 references by index, so
+		// the keyed tables are re-emitted positional first.
+		var keyed internedDocument14
+		if err := json.Unmarshal(data, &keyed); err != nil {
 			t.Fatal(err)
 		}
-		for i := range table {
-			table[i]["evidence"] = flatten(table[i]["evidence"])
+		manifestAt := map[string]int{}
+		manifests := []string{}
+		for _, m := range keyed.RuntimeInputs {
+			manifestAt[m.Key] = len(manifests)
+			manifests = append(manifests, m.Manifest)
 		}
+		evidenceAt := map[string]int{}
+		table := []map[string]json.RawMessage{}
+		for _, e := range keyed.Evidence {
+			evidenceAt[e.Key] = len(table)
+			ev, _ := json.Marshal(e.Evidence)
+			ri, _ := json.Marshal(manifestAt[e.RuntimeInputs])
+			table = append(table, map[string]json.RawMessage{"evidence": flatten(ev), "runtimeInputs": ri})
+		}
+		ledgerAt := map[string]int{}
+		ledgers := []CompartmentLedger{}
+		for _, l := range keyed.Ledgers {
+			ledgerAt[l.Key] = len(ledgers)
+			ledgers = append(ledgers, l.Ledger)
+		}
+		rows := []findingV11{}
+		for _, r := range keyed.Findings {
+			row := findingV11{Finding: r.Finding, OracleEvidence: []int{}}
+			if r.TargetEvidence != nil {
+				i := evidenceAt[*r.TargetEvidence]
+				row.TargetEvidence = &i
+			}
+			for _, k := range r.OracleEvidence {
+				row.OracleEvidence = append(row.OracleEvidence, evidenceAt[k])
+			}
+			if r.CompartmentLedger != nil {
+				i := ledgerAt[*r.CompartmentLedger]
+				row.CompartmentLedger = &i
+			}
+			rows = append(rows, row)
+		}
+		top["runtimeInputsTable"], _ = json.Marshal(manifests)
 		top["evidenceTable"], _ = json.Marshal(table)
+		top["ledgerTable"], _ = json.Marshal(ledgers)
+		top["findings"], _ = json.Marshal(rows)
+		_ = raw
 	} else {
 		var findings []map[string]json.RawMessage
 		if err := json.Unmarshal(top["findings"], &findings); err != nil {

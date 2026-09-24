@@ -633,7 +633,16 @@ refuses the target (staged) rather than vouching for bytes git was told not
 to watch.
 
 **REQ-result-export** (structural): Findings MUST be serializable to a
-portable versioned document that gomutant owns — carrying, per mutated
+portable versioned document that gomutant owns — its records ordered
+by symbol, its document-level tables keyed by content (each entry
+under the digest of its own bytes, a manifest by the manifest, an
+evidence entry by its manifest's key and its evidence, a ledger by
+the ledger) and emitted in key order, a record referencing its entries
+by key and never by position, so one record set is one byte sequence
+and a record renamed, added or removed diffs as its own row and the
+entries only it referenced, never as every reference into a table
+renumbered behind a moved entry; an entry whose key is not its
+content's, or two entries under one key, is malformed — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,
 each carrying its package's test-variant compartment hash beside the maximal
 closure;
@@ -654,7 +663,10 @@ Gofresh's fingerprint record form in every evidence row (a shape an
 older reader cannot re-derive), the flat rows of every version before
 it upgraded on read to the same shape and judged by the same rules,
 spliced in place so every other byte of a row's finding — a duplicated
-key included — still reaches the inline decoder's refusals. The
+key included — still reaches the inline decoder's refusals; version
+14 references the tables by content key where 11 to 13 referenced by
+position (a shape an older reader cannot resolve), the positional
+documents read as they were and rewritten keyed at the next write. The
 embedded record's key set rides the version: a fingerprint field
 Gofresh grows requires a document version bump, since an older reader of the
 same version refuses the row's unknown key rather than tolerating it. A list the document requires — a record's
@@ -1097,7 +1109,14 @@ leaves), and counts rewritten and touched records per layer. A retarget rewrites
 carries — runtime-input manifests, compartment ledgers, exemption
 stamps (the audit the measuring write derives, REQ-result-exemptions;
 a stamp names the old subject until the next measurement re-derives
-it) — stay as measured. A reviewed exemption entry
+it) — stay as measured, and their freshness stays the tree's to
+judge: a package move re-measures its records, since the package
+closure the evidence digests is salted with the subject identity,
+which names the import path (gofresh's closure specification, the
+maximal analysis view's salt), so
+the moved package's stored evidence proves nothing about the moved
+code and its retargeted record judges stale until re-measured. A
+reviewed exemption entry
 (REQ-result-exemptions) whose subject a record's evidence names under
 the old prefix refuses the retarget whole, naming the subject: the
 record is the reviewer's, never the tool's to edit, and the subject

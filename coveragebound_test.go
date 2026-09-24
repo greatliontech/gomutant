@@ -73,7 +73,7 @@ func TestDocumentCarriesCoverageBoundsUnderTheCurrentVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"version": 13`) || !strings.Contains(string(data), `"coverageBounds"`) {
+	if !strings.Contains(string(data), `"version": 14`) || !strings.Contains(string(data), `"coverageBounds"`) {
 		t.Fatalf("document lacks the current version's table:\n%s", data)
 	}
 	doc, err := ParseDocument(data)

@@ -636,9 +636,11 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // survivor extent, which falls back to the anchor-point bucket), lands
 // without one; version 13 embeds gofresh's published fingerprint record
 // in every evidence row (a shape an older reader cannot re-derive, the
-// flat rows upgraded on read). The reading range each boundary draws
-// is ParseDocument's.
-const DocumentVersion = 13
+// flat rows upgraded on read); version 14 references the tables by
+// content key in place of position (a shape an older reader cannot
+// resolve, the positional documents of 11-13 read as they were). The
+// reading range each boundary draws is ParseDocument's.
+const DocumentVersion = 14
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale
@@ -705,10 +707,12 @@ type document struct {
 	Findings []Finding `json:"findings"`
 }
 
-// internedDocument is the interned document (REQ-result-export,
-// versions 11 and 12): subject evidence, runtime-inputs manifests, and
-// compartment ledgers live once each in document-level tables; records
-// reference them by index; version 12 adds the coverage-bounds table.
+// internedDocument is the positional interned document (REQ-result-export,
+// versions 11 to 13, read and never written): subject evidence,
+// runtime-inputs manifests, and compartment ledgers live once each in
+// document-level tables; records reference them by index; version 12
+// adds the coverage-bounds table. Version 14 references by content key
+// (interned.go).
 // The tables exist because those three components dominated the
 // inline shape — per-oracle subject evidence was 93% of a 66 MB field
 // store at 8.8× duplication, and eight unique runtime-inputs manifests
@@ -749,88 +753,6 @@ type findingV11 struct {
 	TargetEvidence    *int    `json:"targetEvidence,omitempty"`
 	OracleEvidence    []int   `json:"oracleEvidence"`
 	CompartmentLedger *int    `json:"compartmentLedger,omitempty"`
-}
-
-// internDocument builds the v11 interned form: identical evidence
-// rows, manifests, and ledgers collapse to one table entry each.
-func internDocument(kept []Finding) (internedDocument, error) {
-	doc := internedDocument{Version: DocumentVersion, RuntimeInputs: []string{}, Evidence: []evidenceEntryV11{}, Ledgers: []CompartmentLedger{}}
-	riIdx := map[string]int{}
-	evIdx := map[string]int{}
-	ldIdx := map[string]int{}
-	internRI := func(s string) int {
-		if i, ok := riIdx[s]; ok {
-			return i
-		}
-		riIdx[s] = len(doc.RuntimeInputs)
-		doc.RuntimeInputs = append(doc.RuntimeInputs, s)
-		return riIdx[s]
-	}
-	internEv := func(e SubjectEvidence) (int, error) {
-		ri := internRI(e.RuntimeInputs)
-		e.RuntimeInputs = ""
-		key, err := json.Marshal(e)
-		if err != nil {
-			return 0, err
-		}
-		k := fmt.Sprintf("%d|%s", ri, key)
-		if i, ok := evIdx[k]; ok {
-			return i, nil
-		}
-		evIdx[k] = len(doc.Evidence)
-		doc.Evidence = append(doc.Evidence, evidenceEntryV11{Evidence: e, RuntimeInputs: ri})
-		return evIdx[k], nil
-	}
-	internLedger := func(l CompartmentLedger) (int, error) {
-		key, err := json.Marshal(l)
-		if err != nil {
-			return 0, err
-		}
-		if i, ok := ldIdx[string(key)]; ok {
-			return i, nil
-		}
-		ldIdx[string(key)] = len(doc.Ledgers)
-		doc.Ledgers = append(doc.Ledgers, l)
-		return ldIdx[string(key)], nil
-	}
-	doc.Findings = make([]findingV11, len(kept))
-	for i, f := range kept {
-		row := findingV11{}
-		// A shaped finding's target row is the zero value by contract
-		// (REQ-target-structural); interning would silently drop a
-		// stray one, so refuse it here where the caller still sees it.
-		if f.Shape != nil && f.TargetEvidence != (SubjectEvidence{}) {
-			return doc, fmt.Errorf("gomutant: finding %d (%s) is shaped but carries target evidence", i, f.Symbol)
-		}
-		if f.Shape == nil {
-			te, err := internEv(f.TargetEvidence)
-			if err != nil {
-				return doc, err
-			}
-			row.TargetEvidence = &te
-		}
-		row.OracleEvidence = make([]int, len(f.OracleEvidence))
-		for j, e := range f.OracleEvidence {
-			oe, err := internEv(e)
-			if err != nil {
-				return doc, err
-			}
-			row.OracleEvidence[j] = oe
-		}
-		if f.CompartmentLedger != nil {
-			cl, err := internLedger(*f.CompartmentLedger)
-			if err != nil {
-				return doc, err
-			}
-			row.CompartmentLedger = &cl
-		}
-		f.TargetEvidence = SubjectEvidence{}
-		f.OracleEvidence = nil
-		f.CompartmentLedger = nil
-		row.Finding = f
-		doc.Findings[i] = row
-	}
-	return doc, nil
 }
 
 // expandV11 rebuilds the inline finding set from an interned
@@ -1025,8 +947,9 @@ type Document struct {
 // three measured-dominant components into document-level tables; 12
 // adds the coverage-bounds table; 13 embeds the fingerprint's record
 // form in every evidence row, the flat rows of every version before it
-// upgraded on read; an unknown field within a known version is
-// discarded (REQ-result-tolerant).
+// upgraded on read; 14 references the tables by content key where 11
+// to 13 referenced by position (interned.go); an unknown field within
+// a known version is discarded (REQ-result-tolerant).
 func ParseDocument(data []byte) (Document, error) {
 	top, err := decodeKnownObject(data, map[string]bool{"version": true, "findings": true})
 	if err != nil {
@@ -1047,6 +970,9 @@ func ParseDocument(data []byte) (Document, error) {
 	}
 	if version < OldestReadableDocumentVersion {
 		return Document{}, &DocumentVersionError{Version: version, Sentinel: ErrVersionBehind}
+	}
+	if version >= 14 {
+		return parseInternedDocument14(data)
 	}
 	if version >= 11 {
 		return parseInternedDocument(data, version)
