@@ -19,15 +19,12 @@ import (
 // silently shifted evidence — and refuses here, once, for every
 // entry, before any package loads; an unidentifiable toolchain
 // refuses in the composite's own words, go's cause named. The sample
-// is returned so the build-events floor reads the same one: the
-// sampler's memo answers the second ask, so one ladder is one
-// process whichever check reads first.
+// the check judged is returned so the build-events floor reads the
+// same one: one ladder is one process, and the sample it reads is the
+// sample that passed.
 func toolchainProvenance(ctx context.Context, sampler gofresh.ToolchainSampler, dir string, env []string) (string, error) {
 	check := gofresh.ToolchainProvenance{Sampler: sampler}
-	if err := check.Check(ctx, dir, env); err != nil {
-		return "", err
-	}
-	return sampler.Sample(ctx, dir, env)
+	return check.Check(ctx, dir, env)
 }
 
 // CheckToolchainProvenance runs the load guard standalone, for verbs

@@ -3122,16 +3122,6 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-exec-provenance"
-  content_hash: "0ea678224ea52c037eaf15bf0245918aad953ed21f21d259ddf363c431d4c68b"
-  source_hash: "08df00ecac441d8c89c94e77cf8892a1fb7ff846eda8325bbaaa460b4f0d5241"
-  backend: "go"
-  symbol: "github.com/greatliontech/gomutant/internal/engine.TestToolchainLadderSamplesOnceThroughTheMemoizedSampler"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "cdf03c875f4e54e1c216af619cc5286868c751c8d24c166b94045bb378ab3ce2"
-}
-
-bindings {
   requirement_id: "REQ-exec-oracle-parallelism"
   content_hash: "de1d05c1f1dc6c87343c9b57901bdcc110fcd7c8a172e92150b80628c00d9775"
   source_hash: "dd4dcc5be5976313270e5321829efad08e0d9a2e58b88f77de2bc3febfacf696"
@@ -3299,4 +3289,14 @@ bindings {
   symbol: "github.com/greatliontech/gomutant.TestRunPricesWindowsOffTheMeasuredBaseline"
   role: BINDING_ROLE_TESTS
   shape_hash: "340f7b444b3324ac63627dd241618b067c113edfc704fc5270e4ac38843c9df5"
+}
+
+bindings {
+  requirement_id: "REQ-exec-provenance"
+  content_hash: "0ea678224ea52c037eaf15bf0245918aad953ed21f21d259ddf363c431d4c68b"
+  source_hash: "08df00ecac441d8c89c94e77cf8892a1fb7ff846eda8325bbaaa460b4f0d5241"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestToolchainLadderSamplesOnce"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5b7ca976ff5423a895ce0eb9129841b543c98e8aecdff4921cd66a1a45e11fc7"
 }

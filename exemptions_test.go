@@ -112,6 +112,12 @@ func TestExemptionLiftsUnverifiableClauseExactly(t *testing.T) {
 	if reasonClause(`external directory input: /srv/other — open "/srv/other" in "/home/u/repo/pkg"`) == reasonClause(classified) {
 		t.Fatal("a different clause read as the same reason")
 	}
+	// A resolved-target refusal's suffix — the recorded path's spelling
+	// and target — is the other shape gofresh's split strips.
+	const resolved = `external runtime input target: /abs/checkout/pkg/link — recorded path "pkg/link" resolves to "/srv/elsewhere/x" outside the tree`
+	if got := reasonClause(resolved); got != "external runtime input target: /abs/checkout/pkg/link" {
+		t.Fatalf("reasonClause over a resolved-target attribution = %q", got)
+	}
 	// Every other clause ends in a path, and a path may end in a
 	// bracketed segment: only the moved-bracket clause is stripped.
 	if bracketed := "external directory input: /srv/fixtures [2026]"; reasonClause(bracketed) != bracketed {

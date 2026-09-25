@@ -3,8 +3,6 @@ package engine
 import (
 	"context"
 	"os/exec"
-	"strings"
-	"sync"
 
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/gotool"
@@ -19,19 +17,19 @@ import (
 // unsynchronized.
 
 // newToolchainSampler mints the sampler one toolchain ladder reads:
-// gofresh's memoized sampler under the tree's runner, so the ladder's
-// two reads of the serving toolchain — the skew judgment and the
-// build-events floor — are one `go env GOVERSION`, in the TARGET
-// directory under the SELECTION-APPLIED environment (the declared
-// GOTOOLCHAIN directive honored, the operator's stray GOWORK already
-// stripped), so the witnessed toolchain is the one the run actually
-// uses (gofresh.ToolchainSkew's sampling contract; a cwd- or
+// gofresh's memoized sampler under the tree's runner, asked once per
+// ladder — the provenance check judges the skew and hands the floor
+// the sample it judged — in the TARGET directory under the
+// SELECTION-APPLIED environment (the declared GOTOOLCHAIN directive
+// honored, the operator's stray GOWORK already stripped), so the
+// witnessed toolchain is the one the run actually uses
+// (gofresh.ToolchainSkew's sampling contract; a cwd- or
 // ambient-env-sampled version can agree while the selection's
-// toolchain skews). The memo is one ladder's, never the process's: a
-// long-lived server samples again at its next load, so a toolchain
+// toolchain skews). The sampler is one ladder's, never the process's:
+// a long-lived server samples again at its next load, so a toolchain
 // moved between two requests is witnessed there (the served face's
 // tree cache keys on GOVERSION for the same reason). A seam for the
-// skew tests; production always mints the memoized sampler.
+// skew tests; production always mints gofresh's sampler.
 var newToolchainSampler = func() gofresh.ToolchainSampler {
 	return &gotool.Sampler{Runner: goRunner}
 }
@@ -39,50 +37,12 @@ var newToolchainSampler = func() gofresh.ToolchainSampler {
 // SwapGoVersionSamplerForTest replaces the sample every minted sampler
 // answers and returns the restore — the skew paths are unreachable
 // under a healthy real toolchain, so their tests inject the sample.
-// The injected sample is memoized per ladder exactly as the production
-// sampler is, so an injected sampler sees one ask per ladder.
+// The injected function is the sampler itself, unmemoized, so a test
+// counting its asks sees exactly the ladder's reads.
 func SwapGoVersionSamplerForTest(f func(context.Context, string, []string) (string, error)) (restore func()) {
 	prior := newToolchainSampler
-	newToolchainSampler = func() gofresh.ToolchainSampler { return &sampleMemo{f: f} }
+	newToolchainSampler = func() gofresh.ToolchainSampler { return gofresh.SampleFunc(f) }
 	return func() { newToolchainSampler = prior }
-}
-
-// sampleMemo memoizes an injected sample per (directory, environment)
-// for one ladder, a cancelled ask never memoized — gotool.Sampler's
-// shape over a function.
-type sampleMemo struct {
-	f    func(context.Context, string, []string) (string, error)
-	mu   sync.Mutex
-	memo map[string]sampled
-}
-
-type sampled struct {
-	version string
-	err     error
-}
-
-func (s *sampleMemo) Sample(ctx context.Context, dir string, env []string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	key := dir + "\x00" + strings.Join(env, "\x00")
-	s.mu.Lock()
-	got, ok := s.memo[key]
-	s.mu.Unlock()
-	if ok {
-		return got.version, got.err
-	}
-	got.version, got.err = s.f(ctx, dir, env)
-	if ctx.Err() != nil {
-		return "", ctx.Err()
-	}
-	s.mu.Lock()
-	if s.memo == nil {
-		s.memo = map[string]sampled{}
-	}
-	s.memo[key] = got
-	s.mu.Unlock()
-	return got.version, got.err
 }
 
 // goCommandObserver is the test seam behind the runner's hook

@@ -129,10 +129,10 @@ func TestCheckToolchainProvenanceSharesTheGuard(t *testing.T) {
 // gofresh's contract, pinned there by gotool's
 // TestSampleGoVersionRunsInTheModuleDirectory; the env half is
 // witnessed through an undownloadable directive, refused in the
-// provenance composite's words over go's own cause), and one ladder's
-// two reads of it — the skew judgment and the build-events floor —
-// spawn ONE process: the memo answers the second (REQ-exec-provenance).
-func TestToolchainLadderSamplesOnceThroughTheMemoizedSampler(t *testing.T) {
+// provenance composite's words over go's own cause), and one ladder
+// asks the sampler ONCE: the provenance check hands the build-events
+// floor the sample it judged (REQ-exec-provenance).
+func TestToolchainLadderSamplesOnce(t *testing.T) {
 	env := GoEnv("testdata/fixturemod")
 	sampled, err := toolchainGuard(context.Background(), "testdata/fixturemod", env)
 	if err != nil || !strings.HasPrefix(sampled, "go") || strings.ContainsAny(sampled, " \n") {
@@ -152,10 +152,10 @@ func TestToolchainLadderSamplesOnceThroughTheMemoizedSampler(t *testing.T) {
 		t.Fatal(err)
 	}
 	if spawns != 1 {
-		t.Fatalf("one ladder spawned %d samples, want 1 — the floor reads the memo", spawns)
+		t.Fatalf("one ladder spawned %d samples, want 1 — the floor reads the sample the check judged", spawns)
 	}
-	// The seam memoizes as production does: an injected sampler is
-	// asked once per ladder.
+	// The injected sampler is unmemoized, so its asks are the ladder's
+	// reads: one.
 	asks := 0
 	restore := SwapGoVersionSamplerForTest(func(context.Context, string, []string) (string, error) {
 		asks++

@@ -95,10 +95,13 @@ func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
 // strip is gated on this prefix and touches no other clause.
 const movedBracketClause = "observation bracket moved: "
 
-// reasonClause is a recorded reason without the producer's
-// attribution: the classification refusals' " — <op> …" suffix, split
-// by gofresh's one implementation (runtimeinput.RefusalClause), and
-// the moved-bracket clause's trailing bracketed member list, which
+// reasonClause is a recorded reason without the attribution after
+// gofresh's separator — a resolved-target refusal's recorded-path
+// spelling and target, and the operation, logged name and directory
+// a classification refusal carried before gofresh moved its
+// attribution off the reason onto the observation — split by
+// gofresh's one implementation (runtimeinput.RefusalClause), and the
+// moved-bracket clause's trailing bracketed member list, which
 // gofresh publishes no split for. The exemption record's readers —
 // the match and the dead-acceptance refusal — key on it; the freshness
 // judgments of recorded evidence compare a reason whole, the
