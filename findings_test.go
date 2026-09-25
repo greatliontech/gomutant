@@ -30,7 +30,7 @@ func TestSubjectEvidencePreservesObservationProof(t *testing.T) {
 			PackageProcessDischarges: "a.example/wire.reg", DynamicStateStrategy: gofresh.DynamicStateStrategy, ClosureStrategy: gofresh.ClosureStrategy,
 			RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
 		}
-		evidence := evidenceFromFingerprint("p.F", fingerprint, runtimeinput.State{})
+		evidence := evidenceFromFingerprint("p.F", fingerprint, runtimeEvidence{state: runtimeinput.State{}})
 		if got := evidence.fingerprint(); got != fingerprint {
 			t.Fatalf("observable %v round trip = %+v, want %+v", observable, got, fingerprint)
 		}
@@ -46,6 +46,16 @@ func TestSameAttestationPins(t *testing.T) {
 	reordered.OracleEvidence = []SubjectEvidence{secondOracle, oracle}
 	if !sameAttestationPins(base, reordered) {
 		t.Fatal("identical pins did not match")
+	}
+	// The refusal's attribution is audit, never a pin: a record grown
+	// the field, or re-measured in another checkout, keeps its
+	// dispositions.
+	attributed := base
+	attributed.TargetEvidence.RuntimeAttribution = `open "/" in "/w/p"`
+	attributed.OracleEvidence = []SubjectEvidence{oracle, secondOracle}
+	attributed.OracleEvidence[0].RuntimeAttribution = `open "/" in "/w/p"`
+	if !sameAttestationPins(base, attributed) {
+		t.Fatal("the refusal's attribution read as a pin")
 	}
 	cases := []struct {
 		name string
@@ -350,7 +360,7 @@ func TestFingerprintSurfaceIsMappedOrExempt(t *testing.T) {
 		if observable {
 			leg.ObservationProof.Reason = ""
 		}
-		ev := evidenceFromFingerprint("pkg.Sym", leg, runtimeinput.State{Unverifiable: true, Reason: "runtime reason"})
+		ev := evidenceFromFingerprint("pkg.Sym", leg, runtimeEvidence{state: runtimeinput.State{Unverifiable: true, Reason: "runtime reason"}})
 		raw, err := json.Marshal(ev)
 		if err != nil {
 			t.Fatalf("observable=%v: marshal: %v", observable, err)
@@ -698,4 +708,44 @@ func legacyRows(t *testing.T, data []byte) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// A row carries the attribution of the refusal its reason names as its
+// own wire key, audit beside the reason: round-tripped, absent when
+// empty, refused as null, and tolerated absent on a record measured
+// before it was recorded (REQ-result-record).
+func TestSubjectEvidenceCarriesItsAttributionOnTheWire(t *testing.T) {
+	row := SubjectEvidence{Symbol: "p.F", RuntimeUnverifiable: true, RuntimeReason: "external directory input: /", RuntimeAttribution: `open "/" in "/w/pkg"`}
+	raw, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"symbol":"p.F","runtimeUnverifiable":true,"runtimeReason":"external directory input: /","runtimeAttribution":"open \"/\" in \"/w/pkg\""}`; string(raw) != want {
+		t.Fatalf("wire form:\n got %s\nwant %s", raw, want)
+	}
+	var back SubjectEvidence
+	if err := json.Unmarshal(raw, &back); err != nil || back != row {
+		t.Fatalf("round trip: %v, %+v", err, back)
+	}
+	if err := json.Unmarshal([]byte(`{"symbol":"p.F","runtimeAttribution":null}`), &back); err == nil || !strings.Contains(err.Error(), "runtimeAttribution is null") {
+		t.Fatalf("a null attribution = %v, want refused", err)
+	}
+	if err := json.Unmarshal([]byte(`{"symbol":"p.F","runtimeUnverifiable":true,"runtimeReason":"r"}`), &back); err != nil || back.RuntimeAttribution != "" {
+		t.Fatalf("a row without the key = %v, %+v", err, back)
+	}
+}
+
+// The attestation-pin view strips every audit field a row carries —
+// the vouches, the discharges, the module base, the closure strategy,
+// the refusal's attribution — and nothing else (REQ-result-record).
+func TestAttestationPinViewStripsEveryAuditField(t *testing.T) {
+	row := SubjectEvidence{Symbol: "p.F", ModuleBase: "m", RuntimeUnverifiable: true, RuntimeReason: "r", RuntimeAttribution: `open "/" in "p"`}
+	row.Fingerprint = gofresh.Fingerprint{MaximalClosure: "f", DynamicStateVouches: "v", PackageProcessDischarges: "d", SingleSubjectDischarges: "s", ClosureStrategy: "c", RuntimeInputs: "manifest", RuntimeDigest: "digest"}
+	got := attestationPinView(row)
+	want := row
+	want.ModuleBase, want.RuntimeAttribution = "", ""
+	want.DynamicStateVouches, want.PackageProcessDischarges, want.SingleSubjectDischarges, want.ClosureStrategy = "", "", "", ""
+	if got != want {
+		t.Fatalf("attestation pin view = %+v, want the audit fields stripped and the pins kept", got)
+	}
 }

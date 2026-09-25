@@ -240,7 +240,7 @@ func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopA
 			// disqualifier the one unverifiable answer that dead-ends.
 			clause := "runtime-unverifiable evidence for " + ev.Symbol
 			if ev.RuntimeReason != "" {
-				clause += ": " + ev.RuntimeReason
+				clause += ": " + AttributedReason(ev.RuntimeReason, ev.RuntimeAttribution)
 			}
 			if add(clause) {
 				return reasons

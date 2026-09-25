@@ -1095,6 +1095,26 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 		}
 		if passed && observed.Unverifiable {
 			attr.unstable = append(attr.unstable, test)
+			// The test's own solo observation attributes its own read,
+			// named with that and never with the union's, in the
+			// portable form the record's rows carry (the process's
+			// directory tree-relative) so the guidance names the same
+			// directory the row does; a conversion that fails leaves
+			// the observation's own form, still the test's own.
+			solo := observed
+			if portable, perr := runtimeinput.Relative(observed, t.dir, runEnv); perr == nil {
+				solo = portable
+			}
+			soloReason := ""
+			if state, serr := runtimeinput.CompletedState(solo); serr == nil {
+				soloReason = state.Reason
+			}
+			if attribution := evidenceAttribution(solo.Attribution, soloReason); attribution != "" {
+				if attr.attributions == nil {
+					attr.attributions = map[string]string{}
+				}
+				attr.attributions[test] = attribution
+			}
 		}
 	}
 	return attr, nil
@@ -5215,7 +5235,7 @@ func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol
 			mutantOnly = mutantOnlyInputs(paths, attr.probedPaths)
 		}
 	}
-	opts.Guidance(buildOracleGuidance(symbol, f.TargetEvidence.RuntimeReason, w.oracle, attr, mutantOnly))
+	opts.Guidance(buildOracleGuidance(symbol, f.TargetEvidence.RuntimeReason, f.TargetEvidence.RuntimeAttribution, w.oracle, attr, mutantOnly))
 	return nil
 }
 
@@ -6235,11 +6255,11 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 		if err != nil {
 			return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 		}
-		state, err := runtimeinput.CompletedState(stamped)
+		re, err := completedEvidence(stamped)
 		if err != nil {
 			return SubjectEvidence{}, err
 		}
-		return withRuntimeState(evidence, state), nil
+		return withRuntimeState(evidence, re), nil
 	}
 	rec.TargetEvidence, err = stampAt(rec.TargetEvidence)
 	if err != nil {
@@ -6517,11 +6537,12 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 	return rec, nil
 }
 
-func withRuntimeState(evidence SubjectEvidence, state runtimeinput.State) SubjectEvidence {
-	evidence.RuntimeInputs = state.Manifest
-	evidence.RuntimeDigest = state.Digest
-	evidence.RuntimeUnverifiable = state.Unverifiable
-	evidence.RuntimeReason = state.Reason
+func withRuntimeState(evidence SubjectEvidence, re runtimeEvidence) SubjectEvidence {
+	evidence.RuntimeInputs = re.state.Manifest
+	evidence.RuntimeDigest = re.state.Digest
+	evidence.RuntimeUnverifiable = re.state.Unverifiable
+	evidence.RuntimeReason = re.state.Reason
+	evidence.RuntimeAttribution = re.attribution
 	return evidence
 }
 

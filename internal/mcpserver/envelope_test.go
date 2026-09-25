@@ -96,7 +96,7 @@ func structJSONTags(v any) []string {
 // (REQ-mcp-envelope).
 func TestGuidanceAggregatesPerOracleSet(t *testing.T) {
 	var entries []guidanceOut
-	shared := gomutant.OracleGuidance{UnstableTests: []string{"p.TestU"}, Reason: "sealed", Suggestion: "narrow"}
+	shared := gomutant.OracleGuidance{UnstableTests: []string{"p.TestU"}, UnstableAttributions: map[string]string{"p.TestU": `open "/" in "/w/p"`}, Reason: "sealed", Attribution: `open "/" in "/w/p"`, Suggestion: "narrow"}
 	for _, sym := range []string{"p.A", "p.B", "p.C"} {
 		g := shared
 		g.Symbol = sym
@@ -106,6 +106,11 @@ func TestGuidanceAggregatesPerOracleSet(t *testing.T) {
 	appendGuidance(&entries, other)
 	if len(entries) != 2 || len(entries[0].Targets) != 3 || entries[0].Targets[2] != "p.C" || len(entries[1].Targets) != 1 {
 		t.Fatalf("aggregated guidance = %+v", entries)
+	}
+	// The entry carries the first covered finding's refusal attribution
+	// and each unstable test's own.
+	if entries[0].Attribution != `open "/" in "/w/p"` || entries[0].UnstableAttributions["p.TestU"] != `open "/" in "/w/p"` {
+		t.Fatalf("aggregated attribution = %q, per test %v", entries[0].Attribution, entries[0].UnstableAttributions)
 	}
 }
 

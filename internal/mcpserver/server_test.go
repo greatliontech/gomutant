@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1475,7 +1476,11 @@ func TestRunAdvisoryCapsAreWired(t *testing.T) {
 		return out
 	}
 	rows := make([]guidanceOut, 60)
-	rows[0] = guidanceOut{Targets: many("t", 25), UnstableTests: many("u", 25)}
+	attributions := map[string]string{}
+	for _, test := range many("u", 25) {
+		attributions[test] = "open " + strconv.Quote("/") + " in " + strconv.Quote(test)
+	}
+	rows[0] = guidanceOut{Targets: many("t", 25), UnstableTests: many("u", 25), UnstableAttributions: attributions}
 	out := runOut{
 		Guidance:           rows,
 		Contradictions:     make([]contradictionOut, 60),
@@ -1490,6 +1495,19 @@ func TestRunAdvisoryCapsAreWired(t *testing.T) {
 	if len(out.Guidance[0].Targets) != envelope.nested || out.Guidance[0].OmittedTargets != 15 ||
 		len(out.Guidance[0].UnstableTests) != envelope.nested || out.Guidance[0].OmittedTests != 15 {
 		t.Fatalf("guidance nested caps unwired: %+v", out.Guidance[0])
+	}
+	// The per-test attributions follow the kept tests: none for a test
+	// the cap counted omitted.
+	if len(out.Guidance[0].UnstableAttributions) != envelope.nested {
+		t.Fatalf("capped attributions = %d, want one per kept test", len(out.Guidance[0].UnstableAttributions))
+	}
+	for _, test := range out.Guidance[0].UnstableTests {
+		if out.Guidance[0].UnstableAttributions[test] == "" {
+			t.Fatalf("kept test %s lost its attribution", test)
+		}
+	}
+	if _, omitted := out.Guidance[0].UnstableAttributions["u-24"]; omitted {
+		t.Fatal("an omitted test kept its attribution")
 	}
 	if len(out.Guidance) != envelope.rows || out.OmittedGuidance != 10 {
 		t.Fatalf("guidance row cap unwired: %d rows, %d omitted", len(out.Guidance), out.OmittedGuidance)

@@ -71,9 +71,18 @@ type SubjectEvidence struct {
 	ModuleBase          string
 	RuntimeUnverifiable bool
 	RuntimeReason       string
+	// RuntimeAttribution is the attribution of the classification
+	// refusal RuntimeReason names — the harness operation, its logged
+	// name, and the producing process's own directory, as gofresh
+	// attributes it on the observation the row's state was read from
+	// (the union's, so every row of a record carries the union's) —
+	// audit riding the row, never a pin: empty where the reason names
+	// no attributed refusal, and on records measured before it was
+	// recorded (REQ-result-record's subject-evidence term).
+	RuntimeAttribution string
 }
 
-// subjectEvidenceWire is the row's wire form: gomutant's four fields and
+// subjectEvidenceWire is the row's wire form: gomutant's five fields and
 // the fingerprint's own record, the latter absent on the zero row.
 type subjectEvidenceWire struct {
 	Symbol              string               `json:"symbol"`
@@ -81,12 +90,13 @@ type subjectEvidenceWire struct {
 	ModuleBase          string               `json:"moduleBase,omitempty"`
 	RuntimeUnverifiable bool                 `json:"runtimeUnverifiable,omitempty"`
 	RuntimeReason       string               `json:"runtimeReason,omitempty"`
+	RuntimeAttribution  string               `json:"runtimeAttribution,omitempty"`
 }
 
 // MarshalJSON encodes the row in its wire form, the fingerprint in
 // gofresh's record form (REQ-result-record).
 func (e SubjectEvidence) MarshalJSON() ([]byte, error) {
-	w := subjectEvidenceWire{Symbol: e.Symbol, ModuleBase: e.ModuleBase, RuntimeUnverifiable: e.RuntimeUnverifiable, RuntimeReason: e.RuntimeReason}
+	w := subjectEvidenceWire{Symbol: e.Symbol, ModuleBase: e.ModuleBase, RuntimeUnverifiable: e.RuntimeUnverifiable, RuntimeReason: e.RuntimeReason, RuntimeAttribution: e.RuntimeAttribution}
 	if e.Fingerprint != (gofresh.Fingerprint{}) {
 		fp := e.Fingerprint
 		w.Fingerprint = &fp
@@ -96,7 +106,7 @@ func (e SubjectEvidence) MarshalJSON() ([]byte, error) {
 
 // subjectEvidenceKeys is the row's known key set — the outer shape the
 // parser refuses beyond; the fingerprint's own keys are its decoder's.
-var subjectEvidenceKeys = map[string]bool{"symbol": true, "fingerprint": true, "moduleBase": true, "runtimeUnverifiable": true, "runtimeReason": true}
+var subjectEvidenceKeys = map[string]bool{"symbol": true, "fingerprint": true, "moduleBase": true, "runtimeUnverifiable": true, "runtimeReason": true, "runtimeAttribution": true}
 
 // UnmarshalJSON decodes the wire form: a duplicated outer key or a
 // null refuses, an unknown outer key is tolerated (REQ-result-tolerant);
@@ -119,7 +129,7 @@ func (e *SubjectEvidence) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &w); err != nil {
 		return err
 	}
-	decoded := SubjectEvidence{Symbol: w.Symbol, ModuleBase: w.ModuleBase, RuntimeUnverifiable: w.RuntimeUnverifiable, RuntimeReason: w.RuntimeReason}
+	decoded := SubjectEvidence{Symbol: w.Symbol, ModuleBase: w.ModuleBase, RuntimeUnverifiable: w.RuntimeUnverifiable, RuntimeReason: w.RuntimeReason, RuntimeAttribution: w.RuntimeAttribution}
 	if w.Fingerprint != nil {
 		decoded.Fingerprint = *w.Fingerprint
 	}
@@ -127,8 +137,56 @@ func (e *SubjectEvidence) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, state runtimeinput.State) SubjectEvidence {
-	return SubjectEvidence{Symbol: symbol, Fingerprint: fp, RuntimeUnverifiable: state.Unverifiable, RuntimeReason: state.Reason}
+func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, re runtimeEvidence) SubjectEvidence {
+	return SubjectEvidence{Symbol: symbol, Fingerprint: fp, RuntimeUnverifiable: re.state.Unverifiable, RuntimeReason: re.state.Reason, RuntimeAttribution: re.attribution}
+}
+
+// runtimeEvidence is what a completed observation stamps on an evidence
+// row: its state — the manifest, digest, unverifiable disposition and
+// reason — and the attribution of the refusal that reason names, read
+// from the one observation so a row can never carry one observation's
+// reason beside another's attribution (REQ-result-record).
+type runtimeEvidence struct {
+	state       runtimeinput.State
+	attribution string
+}
+
+// completedEvidence reads a completed observation's runtime evidence:
+// its state, and the attribution of the refusal the state's reason
+// names — the observation's own for a classification refusal, else
+// the one a resolved-target refusal carries in the reason itself as
+// state, split by gofresh's one implementation of that split.
+func completedEvidence(observation runtimeinput.Observation) (runtimeEvidence, error) {
+	state, err := runtimeinput.CompletedState(observation)
+	if err != nil {
+		return runtimeEvidence{}, err
+	}
+	return runtimeEvidence{state: state, attribution: evidenceAttribution(observation.Attribution, state.Reason)}, nil
+}
+
+// AttributedReason renders a row's reason with its attribution after it
+// ("<reason>; attributed to <attribution>"), the one spelling explain
+// and the guidance line share: the reason is the union's on every row,
+// so the attribution is what says whose process made the read. A
+// reason that already carries the attribution as state (a
+// resolved-target refusal's) renders once (REQ-result-exemptions).
+func AttributedReason(reason, attribution string) string {
+	if attribution == "" || runtimeinput.RefusalAttribution(reason) == attribution {
+		return reason
+	}
+	return reason + "; attributed to " + attribution
+}
+
+// evidenceAttribution is the attribution a row records for its reason:
+// the observation's own, which gofresh sets for a classification
+// refusal, else the one a resolved-target refusal carries in the
+// reason itself as state, split by gofresh's one implementation —
+// empty where the reason names no attributed refusal.
+func evidenceAttribution(observed, reason string) string {
+	if observed != "" {
+		return observed
+	}
+	return runtimeinput.RefusalAttribution(reason)
 }
 
 // fingerprint is the recorded gofresh evidence as the engine reads it.

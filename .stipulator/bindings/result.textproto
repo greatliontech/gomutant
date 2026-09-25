@@ -143,8 +143,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestDeltaCountsFoldsConsultExemptions"
   role: BINDING_ROLE_TESTS
@@ -153,8 +153,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestExemptedRecordStillNeverServes"
   role: BINDING_ROLE_TESTS
@@ -163,8 +163,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestExemptionLiftsUnverifiableClauseExactly"
   role: BINDING_ROLE_TESTS
@@ -173,8 +173,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestExemptionRestoresSurvivorBuckets"
   role: BINDING_ROLE_TESTS
@@ -183,8 +183,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestLoadExemptionsValidation"
   role: BINDING_ROLE_TESTS
@@ -193,8 +193,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestStampExemptionsClearsOnRevocation"
   role: BINDING_ROLE_TESTS
@@ -203,8 +203,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestStoreLayerConsultsCommittedExemptionRecord"
   role: BINDING_ROLE_TESTS
@@ -213,8 +213,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestUpdateEvictsRevokedRepoRow"
   role: BINDING_ROLE_TESTS
@@ -883,8 +883,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestPrepareCampaignCarriesTheExemptionRecord"
   role: BINDING_ROLE_TESTS
@@ -1053,8 +1053,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestExemptionRecordRefusesAnAttributedReason"
   role: BINDING_ROLE_TESTS
@@ -1823,8 +1823,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-result-exemptions"
-  content_hash: "9d15f301b0d02f843bf3375330740ffa9cdf3e56e7acc662419e9b45a21a6587"
-  source_hash: "8a1ac6874f3b0103d7e4b9cb0bc4076fcedafc8bf63825f5a2efc64f45469c62"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRetargetRefusesWhenAnExemptionNamesTheOldPrefix"
   role: BINDING_ROLE_TESTS
@@ -1919,4 +1919,54 @@ bindings {
   symbol: "github.com/greatliontech/gomutant.TestMovedPinAttributionReadsViewsUnderTheRecordsMode"
   role: BINDING_ROLE_TESTS
   shape_hash: "eca3e06635e19e65353132042491f7ab276f647365bd5e03221572b3938d2a15"
+}
+
+bindings {
+  requirement_id: "REQ-result-record"
+  content_hash: "4d9a5ec8bd7636d761467e39641a158938c8a3eea7cc9b995cc7013645235d31"
+  source_hash: "bd4670aafa141305316b317d6c086869ee3a9e7dce05b068048f78336f245a68"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestSubjectEvidenceCarriesItsAttributionOnTheWire"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ab1182d13f8515e390d2efadfb4cdd2c9d20a616575e98fc4c271101e56a3c3f"
+}
+
+bindings {
+  requirement_id: "REQ-result-exemptions"
+  content_hash: "fd4866d2ca64c8566a47291b2db6db7830806d7c451cf060bd95bc3380f8d87d"
+  source_hash: "8e59b0ee246a09f01b053442c26bebc772de124e25ee8bda4dbe22e49ec370ef"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestUnverifiableClauseNamesTheRefusalsAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cf2b454adb3ad55c9bc12ae17e49b36d5f2a331177139314107da6d3f6af52f3"
+}
+
+bindings {
+  requirement_id: "REQ-result-record"
+  content_hash: "4d9a5ec8bd7636d761467e39641a158938c8a3eea7cc9b995cc7013645235d31"
+  source_hash: "bd4670aafa141305316b317d6c086869ee3a9e7dce05b068048f78336f245a68"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestUnverifiableEvidenceCarriesTheRefusalsAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cad31e8348df0211b64ccfc4e5298a6bdf937dc7c84ff3c5eaa1985b91d0d3d4"
+}
+
+bindings {
+  requirement_id: "REQ-result-record"
+  content_hash: "4d9a5ec8bd7636d761467e39641a158938c8a3eea7cc9b995cc7013645235d31"
+  source_hash: "bd4670aafa141305316b317d6c086869ee3a9e7dce05b068048f78336f245a68"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestEvidenceAttributionPrefersTheObservationsThenTheReasons"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ab6221276c4f344a009bffad32fa8c46bdad5aacbe9dedd07c37a72bb218f90b"
+}
+
+bindings {
+  requirement_id: "REQ-result-record"
+  content_hash: "4d9a5ec8bd7636d761467e39641a158938c8a3eea7cc9b995cc7013645235d31"
+  source_hash: "bd4670aafa141305316b317d6c086869ee3a9e7dce05b068048f78336f245a68"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestRuntimeEvidenceStampsTheAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ada445bda7cb2d6bedb68afc9d22ea135ac3e4230e4f3c1d2e17617f289cd8d6"
 }

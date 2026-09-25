@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2271,5 +2272,46 @@ func TestReviseNamesWhatLandedOnAnOverlayFailure(t *testing.T) {
 				t.Fatalf("%s: the document still holds the removed row", tc.name)
 			}
 		}
+	}
+}
+
+// The explain clause names whose observation carried the refusal: the
+// reason on every row is the union's, and the attribution says which
+// process made the read (REQ-result-exemptions' clause).
+func TestUnverifiableClauseNamesTheRefusalsAttribution(t *testing.T) {
+	f := Finding{Symbol: "p.A",
+		TargetEvidence: SubjectEvidence{Symbol: "p.A", RuntimeUnverifiable: true, RuntimeReason: "external directory input: /", RuntimeAttribution: `open "/" in "/w/pkg"`},
+		OracleEvidence: []SubjectEvidence{{Symbol: "p.TestA", RuntimeUnverifiable: true, RuntimeReason: "external directory input: /", RuntimeAttribution: `open "/" in "/w/pkg"`}}}
+	reasons := CommittableReasons(f, t.TempDir(), nil)
+	want := []string{
+		`runtime-unverifiable evidence for p.A: external directory input: /; attributed to open "/" in "/w/pkg"`,
+		`runtime-unverifiable evidence for p.TestA: external directory input: /; attributed to open "/" in "/w/pkg"`,
+	}
+	for _, w := range want {
+		if !slices.Contains(reasons, w) {
+			t.Fatalf("reasons = %q, missing %q", reasons, w)
+		}
+	}
+	bare := f
+	bare.TargetEvidence.RuntimeAttribution = ""
+	for _, r := range CommittableReasons(bare, t.TempDir(), nil) {
+		if strings.HasPrefix(r, "runtime-unverifiable evidence for p.A") && strings.Contains(r, "attributed to") {
+			t.Fatalf("an unattributed row named an attribution: %q", r)
+		}
+	}
+}
+
+// A reason carrying its attribution as state renders it once
+// (REQ-result-exemptions).
+func TestAttributedReasonRendersAStateAttributionOnce(t *testing.T) {
+	resolved := `external runtime input target: /w/pkg/link — recorded path "pkg/link" resolves to "/srv/x" outside the tree`
+	if got := AttributedReason(resolved, `recorded path "pkg/link" resolves to "/srv/x" outside the tree`); got != resolved {
+		t.Fatalf("a state attribution rendered twice: %q", got)
+	}
+	if got := AttributedReason("external directory input: /", `open "/" in "pkg"`); got != `external directory input: /; attributed to open "/" in "pkg"` {
+		t.Fatalf("attributed reason = %q", got)
+	}
+	if got := AttributedReason("runtime input observations diverged", ""); got != "runtime input observations diverged" {
+		t.Fatalf("an unattributed reason = %q", got)
 	}
 }

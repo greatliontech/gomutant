@@ -338,9 +338,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			renderAnalysis(out, event)
 		},
 		Guidance: func(g gomutant.OracleGuidance) {
-			rep.line("guidance", g, func(w io.Writer) {
-				fmt.Fprintf(w, "guidance  %s  unstable oracle evidence (%s): %s\n", g.Symbol, g.Reason, g.Suggestion)
-			})
+			rep.line("guidance", g, func(w io.Writer) { fmt.Fprint(w, guidanceLine(g)) })
 		},
 		Contradiction: func(c gomutant.AttestationContradiction) {
 			ledger.Contradiction(c)
@@ -784,4 +782,11 @@ func targetInputs(dir, targetsFile, changed string) gomutant.TargetInputs {
 		in.Changed = gitref.ChangedSelection(dir, changed)
 	}
 	return in
+}
+
+// guidanceLine is the human face's guidance line: the target, its
+// unverifiable reason with the refusal's attribution, and the sweep's
+// suggestion (REQ-exec-oracle-guidance).
+func guidanceLine(g gomutant.OracleGuidance) string {
+	return fmt.Sprintf("guidance  %s  unstable oracle evidence (%s): %s\n", g.Symbol, gomutant.AttributedReason(g.Reason, g.Attribution), g.Suggestion)
 }

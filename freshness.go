@@ -733,11 +733,12 @@ func producerValidation(ctx context.Context, views *subjectViewSet) (unavailable
 // unverifiable under one reason: the evidence a finding carries as a
 // whole — a divergence between its observations, a proof its validation
 // could not re-establish — refuses reuse of the whole record
-// (REQ-exec-observation).
+// (REQ-exec-observation). Such a reason names no attributed refusal,
+// so the rows carry no attribution.
 func stampUnverifiable(f *Finding, reason string) {
-	f.TargetEvidence.RuntimeUnverifiable, f.TargetEvidence.RuntimeReason = true, reason
+	f.TargetEvidence.RuntimeUnverifiable, f.TargetEvidence.RuntimeReason, f.TargetEvidence.RuntimeAttribution = true, reason, ""
 	for i := range f.OracleEvidence {
-		f.OracleEvidence[i].RuntimeUnverifiable, f.OracleEvidence[i].RuntimeReason = true, reason
+		f.OracleEvidence[i].RuntimeUnverifiable, f.OracleEvidence[i].RuntimeReason, f.OracleEvidence[i].RuntimeAttribution = true, reason, ""
 	}
 }
 
@@ -1334,6 +1335,13 @@ func attestationPinView(evidence SubjectEvidence) SubjectEvidence {
 	// hashes folded by different derivations say nothing about each
 	// other's source (REQ-result-record's subject-evidence term).
 	evidence.ClosureStrategy = ""
+	// RuntimeAttribution is audit riding the row — the refusal's
+	// producing process, fresh per measurement and carrying a checkout's
+	// own directory — never a pin: a record grown the field on its
+	// first post-upgrade measure, or re-measured in another checkout,
+	// must not shed its dispositions over it (REQ-result-record's
+	// subject-evidence term).
+	evidence.RuntimeAttribution = ""
 	return evidence
 }
 
@@ -2138,7 +2146,7 @@ func attachSubjectEvidence(subject *subjectView, union *portableUnion) (SubjectE
 	if err != nil {
 		return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
-	state, err := runtimeinput.CompletedState(observation)
+	re, err := completedEvidence(observation)
 	if err != nil {
 		return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
@@ -2146,7 +2154,7 @@ func attachSubjectEvidence(subject *subjectView, union *portableUnion) (SubjectE
 	if err != nil {
 		return SubjectEvidence{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
-	return evidenceFromFingerprint(subject.symbol, fp, state), nil
+	return evidenceFromFingerprint(subject.symbol, fp, re), nil
 }
 
 func attachEvidence(target *subjectView, oracle []*subjectView, union *portableUnion) (SubjectEvidence, []SubjectEvidence, error) {

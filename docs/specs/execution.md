@@ -438,8 +438,15 @@ best-effort, by the module-local inputs the finding observed that no solo
 probe reached — the narrowest place to look for the mutant-induced read; a
 sweep in which no probe completed claims nothing — it reports attribution
 unavailable with the first probe failure. Targets sharing one oracle set share
-one attribution: the probes run once per set, not per finding.
-Attribution is advisory run output, never persisted to the finding, and its
+one sweep: the probes run once per set, not per finding. The report
+carries the refusal's own attribution beside the finding's reason — the
+observation that produced it: the operation, its logged name, and the
+producing process's directory, the first producer in the merged union's
+order — and names each unstable test with its own solo run's refusal
+attribution, so a test is named with what its own observation carried
+and never under the union's alone. The sweep is advisory run output,
+never persisted to the finding (the refusal's attribution persists on the
+record's rows, results.md's subject-evidence term), and its
 probes are best-effort: a probe that errors, matches nothing, or fails skips
 its test instead of aborting a run whose finding already committed. Explicit
 oracles receive no attribution — the caller already chose the tests.

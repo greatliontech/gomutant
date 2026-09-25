@@ -18,8 +18,20 @@ type OracleGuidance struct {
 	// unverifiable runtime evidence; empty when no single test
 	// reproduces the instability.
 	UnstableTests []string
+	// UnstableAttributions is each unstable test's own solo run's
+	// refusal attribution, by test — the process that made the read
+	// under that test alone — so a test is named with what its own
+	// observation carried and never under another's; absent for a
+	// test whose solo reason names no attributed refusal.
+	UnstableAttributions map[string]string
 	// Reason is the finding's unverifiable runtime reason.
 	Reason string
+	// Attribution names the observation that produced the refusal the
+	// finding's reason names — the operation, its logged name, and the
+	// producing process's own directory, the first producer in the
+	// merged union's order — so the reader is sent to that package's
+	// process; empty where the reason names no attributed refusal.
+	Attribution string
 	// Suggestion is the one-line next action.
 	Suggestion string
 }
@@ -27,9 +39,12 @@ type OracleGuidance struct {
 // oracleAttribution is one probed oracle set's result, memoizable
 // across the targets that share the set.
 type oracleAttribution struct {
-	unstable  []string
-	completed int
-	firstErr  string
+	unstable []string
+	// attributions is each unstable test's own solo run's refusal
+	// attribution, by test.
+	attributions map[string]string
+	completed    int
+	firstErr     string
 	// probedPaths unions the completed solo probes' observed
 	// module-local input paths; an input the finding observed that no
 	// solo probe did was reached only under mutant execution.
@@ -50,9 +65,9 @@ func mutantOnlyInputs(findingPaths []string, probed map[string]bool) []string {
 	return out
 }
 
-func buildOracleGuidance(symbol, reason string, oracle []string, attr oracleAttribution, mutantOnly []string) OracleGuidance {
+func buildOracleGuidance(symbol, reason, attribution string, oracle []string, attr oracleAttribution, mutantOnly []string) OracleGuidance {
 	unstable := attr.unstable
-	g := OracleGuidance{Symbol: symbol, UnstableTests: unstable, Reason: reason}
+	g := OracleGuidance{Symbol: symbol, UnstableTests: unstable, UnstableAttributions: attr.attributions, Reason: reason, Attribution: attribution}
 	if attr.completed == 0 {
 		// No probe completed: a sweep that never ran proves nothing, so
 		// the report says so instead of claiming reproducibility.
@@ -82,10 +97,25 @@ func buildOracleGuidance(symbol, reason string, oracle []string, attr oracleAttr
 		}
 	}
 	if len(stable) == 0 {
-		g.Suggestion = fmt.Sprintf("every oracle test's own run is unstable (%s); stabilize the input or give this target an explicit oracle", strings.Join(unstable, ", "))
+		g.Suggestion = fmt.Sprintf("every oracle test's own run is unstable (%s); stabilize the input or give this target an explicit oracle", attributedTests(unstable, attr.attributions))
 		return g
 	}
 	g.Suggestion = fmt.Sprintf("rerun with an explicit oracle excluding %s if it does not vouch for this target (stable oracle: %s)",
-		strings.Join(unstable, ", "), strings.Join(stable, ", "))
+		attributedTests(unstable, attr.attributions), strings.Join(stable, ", "))
 	return g
+}
+
+// attributedTests names each unstable test with its own solo run's
+// attribution in parentheses, where it has one: what that test's own
+// observation carried, never the union's.
+func attributedTests(tests []string, attributions map[string]string) string {
+	named := make([]string, 0, len(tests))
+	for _, test := range tests {
+		if attribution := attributions[test]; attribution != "" {
+			named = append(named, test+" ("+attribution+")")
+		} else {
+			named = append(named, test)
+		}
+	}
+	return strings.Join(named, ", ")
 }

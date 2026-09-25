@@ -56,7 +56,14 @@ A subject evidence row is encoded as `symbol`, the fingerprint under
 fingerprint-record clause: the closure hashes, the code guards, the
 observation assertion and nested proof, the assertions, the strategies,
 the manifest and digest, the code-result kind), `moduleBase`,
-`runtimeUnverifiable`, and `runtimeReason`; the fingerprint is absent
+`runtimeUnverifiable`, `runtimeReason`, and `runtimeAttribution` — the
+attribution of the classification refusal the reason names (the
+harness operation, its logged name, and the producing process's own
+directory, as Gofresh attributes it on the observation the row's state
+was read from: the union's, so every row of a record carries the
+union's), audit riding the row and never a pin, absent where the
+reason names no attributed refusal and on records measured before it
+was recorded; the fingerprint is absent
 only on the zero row a shaped finding carries. The record form's own
 decoder judges the fingerprint's shape (a key it does not define
 refuses — the record is Gofresh's contract, and a field it grows rides
@@ -532,7 +539,12 @@ covered by an entry naming any of the finding's oracle subjects under the
 same reason, the read that tainted the union - passes the portable line's
 unverifiable clause and its survivors bucket normally instead of
 unstable-oracle; every other portable-line clause, and reuse (an unverifiable
-record still never serves), are untouched. The matched entries are stamped
+record still never serves), are untouched. The unverifiable clause a
+reader is served names the row's reason and, where the row carries one,
+the refusal's attribution after it ("attributed to <operation>
+<name> in <directory>"): the reason is the union's on every row, so the
+attribution is what says whose process made the read, and a reader is
+never sent to a test under a reason that was never its own. The matched entries are stamped
 onto each finding they cover as audit metadata; classification re-derives
 from the record on every decision, so deleting an entry revokes the
 acceptance for every later classification without a stamp rewrite - never a

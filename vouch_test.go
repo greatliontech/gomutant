@@ -252,7 +252,7 @@ func TestAttestationPinsIgnoreRecordedVouches(t *testing.T) {
 //gofresh:pure
 func TestSubjectEvidenceCarriesDynamicStateVouches(t *testing.T) {
 	fp := gofresh.Fingerprint{MaximalClosure: "h", DynamicStateVouches: "a.example/dep.Var"}
-	e := evidenceFromFingerprint("p.S", fp, runtimeinput.State{})
+	e := evidenceFromFingerprint("p.S", fp, runtimeEvidence{state: runtimeinput.State{}})
 	if e.DynamicStateVouches != "a.example/dep.Var" {
 		t.Fatalf("evidence discharge = %q", e.DynamicStateVouches)
 	}

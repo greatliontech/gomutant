@@ -215,3 +215,18 @@ func zeroDefault(f *pflag.Flag) bool {
 	}
 	return false
 }
+
+// The guidance line carries the refusal's attribution after the reason,
+// once: a reason already carrying it as state renders it once
+// (REQ-exec-oracle-guidance).
+func TestGuidanceLineNamesTheRefusalsAttribution(t *testing.T) {
+	g := gomutant.OracleGuidance{Symbol: "p.F", Reason: "external directory input: /", Attribution: `open "/" in "pkg"`, Suggestion: "narrow"}
+	if got := guidanceLine(g); !strings.Contains(got, `(external directory input: /; attributed to open "/" in "pkg"): narrow`) {
+		t.Fatalf("guidance line = %q", got)
+	}
+	bare := g
+	bare.Attribution = ""
+	if got := guidanceLine(bare); strings.Contains(got, "attributed to") {
+		t.Fatalf("an unattributed reason named an attribution: %q", got)
+	}
+}

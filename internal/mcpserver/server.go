@@ -555,7 +555,11 @@ type guidanceOut struct {
 	UnstableTests  []string `json:"unstableTests,omitempty" jsonschema:"capped with the remainder counted"`
 	OmittedTests   int      `json:"omittedUnstableTests,omitempty" jsonschema:"unstable tests beyond the per-row cap"`
 	Reason         string   `json:"reason,omitempty" jsonschema:"the first covered finding's unverifiable reason"`
-	Suggestion     string   `json:"suggestion"`
+	Attribution    string   `json:"attribution,omitempty" jsonschema:"the first covered finding's refusal attribution: the operation, its logged name, and the producing process's directory"`
+	// UnstableAttributions names each unstable test's own solo run's
+	// refusal attribution, by test.
+	UnstableAttributions map[string]string `json:"unstableAttributions,omitempty" jsonschema:"each unstable test's own solo run's refusal attribution, by test"`
+	Suggestion           string            `json:"suggestion"`
 }
 
 // contradictionOut is one shed attestation report (a drift serve's added
@@ -579,7 +583,7 @@ func appendGuidance(entries *[]guidanceOut, g gomutant.OracleGuidance) {
 			return
 		}
 	}
-	*entries = append(*entries, guidanceOut{Targets: []string{g.Symbol}, UnstableTests: g.UnstableTests, Reason: g.Reason, Suggestion: g.Suggestion})
+	*entries = append(*entries, guidanceOut{Targets: []string{g.Symbol}, UnstableTests: g.UnstableTests, Reason: g.Reason, Attribution: g.Attribution, UnstableAttributions: g.UnstableAttributions, Suggestion: g.Suggestion})
 }
 
 // runStreams routes the run's preparation and decision streams: with a
@@ -925,6 +929,16 @@ func (out *runOut) capAdvisories() (fullSheds []string) {
 		if n := len(out.Guidance[i].UnstableTests); n > envelope.nested {
 			out.Guidance[i].OmittedTests = n - envelope.nested
 			out.Guidance[i].UnstableTests = out.Guidance[i].UnstableTests[:envelope.nested:envelope.nested]
+			// The per-test attributions follow the kept tests: an
+			// omitted test's rides out with it, so the map never
+			// carries what the list's cap counted omitted.
+			kept := make(map[string]string, len(out.Guidance[i].UnstableTests))
+			for _, test := range out.Guidance[i].UnstableTests {
+				if attribution, ok := out.Guidance[i].UnstableAttributions[test]; ok {
+					kept[test] = attribution
+				}
+			}
+			out.Guidance[i].UnstableAttributions = kept
 		}
 	}
 	out.Guidance, out.OmittedGuidance = capRows(out.Guidance)

@@ -123,8 +123,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
-  content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
-  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
+  content_hash: "97b876dceec68d2781d13561e87ded62d2a619febc1cd58e5361285019126d49"
+  source_hash: "04890c24aaf301a8a6c07cf6d39e0971865057391f73e52261c7b6573efc11bd"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestBuildOracleGuidanceArms"
   role: BINDING_ROLE_TESTS
@@ -133,8 +133,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
-  content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
-  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
+  content_hash: "97b876dceec68d2781d13561e87ded62d2a619febc1cd58e5361285019126d49"
+  source_hash: "04890c24aaf301a8a6c07cf6d39e0971865057391f73e52261c7b6573efc11bd"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestEmitOracleGuidanceGuards"
   role: BINDING_ROLE_TESTS
@@ -143,8 +143,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
-  content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
-  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
+  content_hash: "97b876dceec68d2781d13561e87ded62d2a619febc1cd58e5361285019126d49"
+  source_hash: "04890c24aaf301a8a6c07cf6d39e0971865057391f73e52261c7b6573efc11bd"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunAttributesOracleInstability"
   role: BINDING_ROLE_TESTS
@@ -153,8 +153,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
-  content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
-  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
+  content_hash: "97b876dceec68d2781d13561e87ded62d2a619febc1cd58e5361285019126d49"
+  source_hash: "04890c24aaf301a8a6c07cf6d39e0971865057391f73e52261c7b6573efc11bd"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestRunExtensionDivergenceStampsAndAttributes"
   role: BINDING_ROLE_TESTS
@@ -2633,8 +2633,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-exec-oracle-guidance"
-  content_hash: "d2e7935c591a49a06eda35b923c39232ca9272699350678e04b9f5848b0bb086"
-  source_hash: "f7b72bf24e76a7b13af16503bc24c188cc42e4c9dae3270c8be1b6451a95f851"
+  content_hash: "97b876dceec68d2781d13561e87ded62d2a619febc1cd58e5361285019126d49"
+  source_hash: "04890c24aaf301a8a6c07cf6d39e0971865057391f73e52261c7b6573efc11bd"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestProbeOracleInstabilityCollectsProbedPaths"
   role: BINDING_ROLE_TESTS
@@ -3299,4 +3299,24 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestToolchainLadderSamplesOnce"
   role: BINDING_ROLE_TESTS
   shape_hash: "5b7ca976ff5423a895ce0eb9129841b543c98e8aecdff4921cd66a1a45e11fc7"
+}
+
+bindings {
+  requirement_id: "REQ-exec-oracle-guidance"
+  content_hash: "97b876dceec68d2781d13561e87ded62d2a619febc1cd58e5361285019126d49"
+  source_hash: "04890c24aaf301a8a6c07cf6d39e0971865057391f73e52261c7b6573efc11bd"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestUnverifiableEvidenceCarriesTheRefusalsAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cad31e8348df0211b64ccfc4e5298a6bdf937dc7c84ff3c5eaa1985b91d0d3d4"
+}
+
+bindings {
+  requirement_id: "REQ-exec-observation"
+  content_hash: "15da75faabbcf174bf2f3d8b9022cb195cdb3bba96e3d328497659176b1e9d71"
+  source_hash: "0643e3a949e1703ac0b39480ea5bc89e469835480bb934ae5b7869f46ee91b1c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestWholeRecordStampClearsTheAttribution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8bd36c361f93595acfa0d0d47dcd571a7c0be0a309c83ffbd0c36561b16120b7"
 }
