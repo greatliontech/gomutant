@@ -4373,27 +4373,37 @@ func TestRunCommitsEarlierWindowsBeforeLaterOnesDispatch(t *testing.T) {
 // Window EXECUTION is value-ordered (REQ-exec-run-status's estimate
 // class): with the wait-prepared seam every pick sees the whole ready
 // pool, and the CHEAPEST pre-probe projection dispatches first — the
-// exact inverse of arrival order, which the fixture's baseline sleeps
-// make the only discriminator (a > b > c by measured baseline; a
-// arrives first). Membership and the decision sequence stay
-// deterministic — only execution order moves.
+// exact inverse of arrival order, which the supplied prices make the
+// only discriminator (a > b > c by price; a arrives first).
+// Membership and the decision sequence stay deterministic — only
+// execution order moves.
 func TestRunExecutesCheapestReadyWindowFirst(t *testing.T) {
 	if testing.Short() {
-		t.Skip("runs go test with sleeping oracles")
+		t.Skip("runs go test per mutant")
 	}
 	old := seams.windowCandidates
 	seams.windowCandidates = 1
 	seams.waitPreparedBeforePick = true
-	t.Cleanup(func() { seams.windowCandidates = old; seams.waitPreparedBeforePick = false })
+	// The prices are supplied, not measured: a measured baseline is
+	// compile time plus the test's own, and a loaded machine's compile
+	// noise reordered b and c under sleeps of 900ms apart.
+	prices := map[string]time.Duration{"example.com/valueorder/a": 2400 * time.Millisecond, "example.com/valueorder/b": 900 * time.Millisecond, "example.com/valueorder/c": time.Millisecond}
+	seams.baselinePrice = func(pkgs []string) (time.Duration, bool) {
+		if len(pkgs) != 1 {
+			return 0, false
+		}
+		d, ok := prices[pkgs[0]]
+		return d, ok
+	}
+	t.Cleanup(func() { seams.windowCandidates = old; seams.waitPreparedBeforePick = false; seams.baselinePrice = nil })
 	files := map[string]string{
 		"go.mod": "module example.com/valueorder\n\ngo 1.26\n",
-		// a: the slow first window — its oracle sleep keeps the driver
-		// busy long enough for b and c to gather into the ready pool.
+		// a: the expensive first window (arrives first).
 		"a/a.go":      "package a\n\nfunc F(v int) int {\n\treturn v + 1\n}\n",
-		"a/a_test.go": "package a\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestF(t *testing.T) {\n\ttime.Sleep(2400 * time.Millisecond)\n\tif F(1) != 2 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F(1) != 2 {\n\t\tt.Fatal()\n\t}\n}\n",
 		// b: expensive (arrives before c).
 		"b/b.go":      "package b\n\nfunc G(v int) int {\n\treturn v + 2\n}\n",
-		"b/b_test.go": "package b\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestG(t *testing.T) {\n\ttime.Sleep(900 * time.Millisecond)\n\tif G(1) != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"b/b_test.go": "package b\n\nimport \"testing\"\n\nfunc TestG(t *testing.T) {\n\tif G(1) != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
 		// c: cheap (arrives last, must execute before b).
 		"c/c.go":      "package c\n\nfunc H(v int) int {\n\treturn v + 3\n}\n",
 		"c/c_test.go": "package c\n\nimport \"testing\"\n\nfunc TestH(t *testing.T) {\n\tif H(1) != 4 {\n\t\tt.Fatal()\n\t}\n}\n",
@@ -6315,5 +6325,37 @@ func TestTallyCallbacksAccumulateTheAuditRate(t *testing.T) {
 	opts.Decision(RunDecision{Action: "skipped"})
 	if tally.Served != 1 || tally.Skipped != 1 || tally.Committed != 0 || opts.Commit != nil {
 		t.Fatalf("decision tallies = %+v, commit %v; want one served, one skipped, no commit wrapper", tally, opts.Commit != nil)
+	}
+}
+
+// A window's price comes from the measured passing baseline: a run
+// whose oracle passes its baseline projects a priced estimate for its
+// window, nothing left unpriced (REQ-exec-run-status's estimate
+// class). The pin is on pricing alone, never on the order a machine's
+// load would move.
+func TestRunPricesWindowsOffTheMeasuredBaseline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr := fixtureTree(t)
+	var estimates []ExecutionEvent
+	findings, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/fixture/lib.Add", Oracle: []string{"example.com/fixture/lib.TestAdd"}}}, Options{
+		Budget: 1,
+		Executing: func(e ExecutionEvent) {
+			if e.Phase == "estimate" {
+				estimates = append(estimates, e)
+			}
+		},
+	})
+	if err != nil || len(findings) != 1 || findings[0].Mutants == 0 {
+		t.Fatalf("run = %+v, %v", findings, err)
+	}
+	if len(estimates) == 0 {
+		t.Fatal("no estimate event")
+	}
+	for _, e := range estimates {
+		if e.EstimateProjected == "" || e.EstimateUnknown != 0 {
+			t.Fatalf("estimate = %+v, want the window priced off its measured baseline with nothing unpriced", e)
+		}
 	}
 }

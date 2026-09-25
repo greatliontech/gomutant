@@ -2624,6 +2624,11 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		return leashFor(opts.OracleTimeout, b.raw)
 	}
 	opts.baselineDur = func(g group) (time.Duration, bool) {
+		if seams.baselinePrice != nil {
+			if d, ok := seams.baselinePrice(g.pkgs); ok {
+				return d, true
+			}
+		}
 		groupBudgetMu.Lock()
 		defer groupBudgetMu.Unlock()
 		b, ok := groupBaselines[keyFor(g)]

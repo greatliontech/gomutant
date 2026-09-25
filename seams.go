@@ -111,6 +111,14 @@ type runSeams struct {
 	// of racing the serial preparation. Production picks never wait: a
 	// window that has not been gathered is not ready.
 	waitPreparedBeforePick bool
+	// baselinePrice, when set, answers a group's passing-baseline
+	// wall-clock for the window cost model in place of the measured
+	// one, by the group's packages: value-order assertions pin the
+	// pick against prices no machine load can reorder, where a
+	// measured baseline is compile time plus the test's own, and a
+	// loaded machine's compile noise exceeds any sleep a fixture
+	// affords. Production prices are measured, never supplied.
+	baselinePrice func(pkgs []string) (time.Duration, bool)
 	// truncateAfterItems, when positive, makes the preparation pipeline
 	// stop delivering work after that many items with the stopping
 	// error lost — the truncation shape REQ-exec-completion refuses.
