@@ -5,7 +5,7 @@ import "testing"
 // The package cut absorbs gopkg.in-style version elements and leaves
 // method spellings alone: without the absorption a dark versioned
 // package merged with its sibling and went unreported
-// (REQ-result-skip-radius; the chunk-132 review's L2).
+// (REQ-result-skip-radius).
 func TestSymbolPackageAbsorbsVersionElements(t *testing.T) {
 	cases := map[string]string{
 		"example.com/mod/pkg.Func":        "example.com/mod/pkg",

@@ -557,12 +557,13 @@ type PreparationEvent struct {
 
 // pricedPass builds a pass-pricing event over the symbols the pass
 // covers: the distinct subjects (an oracle shared by two targets is one
-// subject of the pass) and their distinct packages.
-func pricedPass(stage PreparationStage, symbols []string) PreparationEvent {
+// subject of the pass) and their distinct packages, named by the
+// tree's package resolution.
+func pricedPass(stage PreparationStage, symbols []string, packageOf func(string) string) PreparationEvent {
 	subjects, packages := map[string]bool{}, map[string]bool{}
 	for _, symbol := range symbols {
 		subjects[symbol] = true
-		packages[symbolPackage(symbol)] = true
+		packages[packageOf(symbol)] = true
 	}
 	return PreparationEvent{Stage: stage, Subjects: len(subjects), Packages: len(packages)}
 }
@@ -829,7 +830,10 @@ func (s *RunSummary) AddPostures(postures map[string]RecordPosture) {
 }
 
 // SummarizeRun derives deterministic aggregate totals from findings.
-func SummarizeRun(findings []Finding, sel Selection) RunSummary {
+// packageOf names each finding's package for the dark-package radius
+// (REQ-result-skip-radius): a loaded tree's PackageOf, or nil where no
+// tree is loaded, which groups by the string cut's guess.
+func SummarizeRun(findings []Finding, sel Selection, packageOf func(string) string) RunSummary {
 	summary := RunSummary{Targets: len(findings), Selection: SelectionKey(sel)}
 	if bound := CoverageBoundOf(findings, sel, ""); bound != nil {
 		summary.Unreached = bound.Unreached
@@ -850,7 +854,7 @@ func SummarizeRun(findings []Finding, sel Selection) RunSummary {
 		summary.Attested += len(finding.Attested)
 		summary.Open += len(finding.Open())
 	}
-	for _, radius := range SkippedPackageRadius(findings) {
+	for _, radius := range SkippedPackageRadius(findings, packageOf) {
 		if radius.Dark() && radius.Targets > 1 {
 			summary.DarkPackages = append(summary.DarkPackages, radius.Package)
 		}
@@ -2311,7 +2315,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			f.BodyHash = digest
 			f.OperatorSet = shapedOperatorSet
 			f.Shape = &TargetShape{Structural: tg.Structural, Manual: tg.Manual}
-			resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, oracleNote: oracleNote, shaped: candidates, shapedDigest: digest, shapedFiles: shapedFiles, attested: packageProcessAttestable(tg.Symbol, oracle)})
+			resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, oracleNote: oracleNote, shaped: candidates, shapedDigest: digest, shapedFiles: shapedFiles, attested: packageProcessAttestable(t.PackageOf, tg.Symbol, oracle)})
 			continue
 		}
 		bodyHash, err := t.eng.BodyHashContext(ctx, tg.Symbol)
@@ -2343,7 +2347,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, oracleNote: oracleNote, attested: packageProcessAttestable(tg.Symbol, oracle)})
+		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, oracleNote: oracleNote, attested: packageProcessAttestable(t.PackageOf, tg.Symbol, oracle)})
 	}
 	// Per-mode view bundles: each target's attestation is its own (the
 	// pairing above), so a mixed run builds one engine and view set per
@@ -2379,9 +2383,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if !ok {
 			mv = &modeViews{
 				engines:        t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds.Width, opts.AnalysisBudget),
-				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width},
+				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width, packageProcess: attested},
 				viewFaults:     map[string]error{},
-				producerUnion:  &observedViewSet{&subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width}},
+				producerUnion:  &observedViewSet{&subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width, packageProcess: attested}},
 				producerFaults: map[string]error{},
 			}
 			modes[attested] = mv
@@ -2399,7 +2403,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if len(mv.symbols) == 0 {
 			return nil
 		}
-		reportPreparation(opts.Progress, pricedPass(PreparationViews, mv.symbols))
+		reportPreparation(opts.Progress, pricedPass(PreparationViews, mv.symbols, t.PackageOf))
 		var err error
 		mv.views, mv.viewFaults, err = t.buildSubjectViews(ctx, mv.symbols, preparation.packageContext, mv.engines)
 		if err != nil {
@@ -2477,7 +2481,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// The union is priced before it is paid: the subjects with a
 		// decision view — the proof pass's exact population — and the
 		// packages they span (REQ-exec-run-status).
-		reportPreparation(opts.Progress, pricedPass(PreparationProofs, slices.Collect(maps.Keys(mv.views.bySymbol))))
+		reportPreparation(opts.Progress, pricedPass(PreparationProofs, slices.Collect(maps.Keys(mv.views.bySymbol)), t.PackageOf))
 		probeGate.RLock()
 		defer probeGate.RUnlock()
 		var err error
@@ -4738,20 +4742,21 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				opts.Posture(RecordPosture{Symbol: f.Symbol, Measurement: "skipped"})
 				continue
 			}
-			// The record's own posture keys the set, exactly as the
-			// inspection pass keys its prebuilt views: the set's engine
-			// carries the package-process execution posture, which
-			// changes what the evidence check means, so a set built under
-			// the other posture is never read even when it holds the
-			// symbol; a posture the run built no set under is judged over
-			// a supplementary view, as the inspection pass would.
-			var prebuilt *subjectViewSet
-			if mv, ok := modes[findingPackageProcessAttestable(f)]; ok {
-				prebuilt = mv.views
-			}
+			// The record's own posture, decided at its admission, keys
+			// the set, exactly as the inspection pass keys its prebuilt
+			// views: the set's engine carries the package-process
+			// execution posture, which changes what the evidence check
+			// means, so a set built under the other posture is never
+			// read even when it holds the symbol; a posture the run built
+			// no set under is judged over a supplementary view, as the
+			// inspection pass would.
 			var inspection FindingInspection
 			adm, err := t.admitFindingContext(ctx, f, shared)
 			if err == nil {
+				var prebuilt *subjectViewSet
+				if mv, ok := modes[adm.packageProcess]; ok {
+					prebuilt = mv.views
+				}
 				inspection, err = t.judgeAdmittedContext(ctx, f, adm, prebuilt)
 			}
 			if err == nil {

@@ -531,10 +531,24 @@ func TestAttestationPinsIgnoreRecordedPackageProcessDischarges(t *testing.T) {
 
 // The package-process attestation is honest exactly when every oracle
 // symbol's package equals its target's — the pairing gate the run and
-// the record inspections share.
+// the record inspections share — with the packages named by the
+// caller's resolution, never by a string cut: a method of package x
+// and a test of its dotted sibling x.go share a cut but not a package.
 //
 //gofresh:pure
 func TestPackageProcessAttestablePairing(t *testing.T) {
+	loaded := map[string]string{
+		"example.com/mod/x.T.M":      "example.com/mod/x",
+		"example.com/mod/x.go.TestM": "example.com/mod/x.go",
+		"example.com/mod/x.go.F":     "example.com/mod/x.go",
+		"example.com/mod/x.go.TestF": "example.com/mod/x.go",
+	}
+	packageOf := func(symbol string) string {
+		if pkg, ok := loaded[symbol]; ok {
+			return pkg
+		}
+		return symbolPackage(symbol)
+	}
 	cases := []struct {
 		target string
 		oracle []string
@@ -544,17 +558,23 @@ func TestPackageProcessAttestablePairing(t *testing.T) {
 		{"example.com/mod/node.Host.Drain", []string{"example.com/mod/node.TestA", "example.com/mod/other.TestB"}, false},
 		{"example.com/mod/node.F", nil, true},
 		{"example.com/mod/v2.F", []string{"example.com/mod/v2.TestF"}, true},
+		{"example.com/mod/x.go.F", []string{"example.com/mod/x.go.TestF"}, true},
+		{"example.com/mod/x.T.M", []string{"example.com/mod/x.go.TestM"}, false},
 	}
 	for _, tc := range cases {
-		if got := packageProcessAttestable(tc.target, tc.oracle); got != tc.want {
+		if got := packageProcessAttestable(packageOf, tc.target, tc.oracle); got != tc.want {
 			t.Fatalf("attestable(%s, %v) = %v, want %v", tc.target, tc.oracle, got, tc.want)
 		}
 	}
 	f := Finding{Symbol: "example.com/mod/node.Host.Drain", OracleEvidence: []SubjectEvidence{
 		{Symbol: "example.com/mod/node.TestDrain"}, {Symbol: "example.com/mod/other.TestB"},
 	}}
-	if findingPackageProcessAttestable(f) {
+	if findingPackageProcessAttestable(packageOf, f) {
 		t.Fatal("a cross-package oracle row read as attestable")
+	}
+	sibling := Finding{Symbol: "example.com/mod/x.T.M", OracleEvidence: []SubjectEvidence{{Symbol: "example.com/mod/x.go.TestM"}}}
+	if findingPackageProcessAttestable(packageOf, sibling) {
+		t.Fatal("a dotted sibling's oracle row read as attestable")
 	}
 }
 

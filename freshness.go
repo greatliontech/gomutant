@@ -84,6 +84,12 @@ type moduleSubjectView struct {
 type subjectViewSet struct {
 	bySymbol map[string]*subjectView
 	modules  []*moduleSubjectView
+	// packageProcess is the view mode the set was built under — the
+	// package-process execution posture its engines carry, which
+	// changes what the evidence check means — so a reader under the
+	// other mode never serves a view from it, whichever symbols it
+	// holds (REQ-result-record's attestation clause).
+	packageProcess bool
 	// width is the oracle width the set's evidence environment carries
 	// — the run's for a campaign's sets, none for a standalone
 	// inspection's — so a supplementary view built beside this set
@@ -181,16 +187,18 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 // path element (the gopkg.in pattern, exactly ".vN"), which belongs to
 // the path: without the absorption "gopkg.in/yaml.v3.Marshal" grouped
 // as "gopkg.in/yaml" and a genuinely dark versioned package merged
-// with its sibling (the chunk-132 review's L2). A dotted path element
+// with its sibling. A dotted path element
 // outside the vN pattern stays ambiguous against a Type.Method
 // spelling and keeps the first-dot cut — NOT benign everywhere: two
-// dotted sibling package dirs truncate to one prefix, and
-// packageProcessAttestable would then grant process-execution honesty
+// dotted sibling package dirs truncate to one prefix, and an
+// attestation cut this way would grant process-execution honesty
 // across them; the string alone cannot decide that edge, the loaded
-// package set can. splitTestSymbol is this grammar's sibling for the
-// NARROWER test-function input class, where the last-dot cut is exact
-// — the two cutters trade generality for exactness and neither
-// subsumes the other.
+// package set can, so every reader with a loaded tree resolves through
+// Tree.PackageOf and this cut serves only a symbol no loaded package
+// owns. splitTestSymbol is this grammar's sibling for the NARROWER
+// test-function input class, where the last-dot cut is exact — the
+// two cutters trade generality for exactness and neither subsumes the
+// other.
 func symbolPackage(symbol string) string {
 	slash := strings.LastIndex(symbol, "/")
 	rest := symbol[slash+1:]
@@ -223,15 +231,34 @@ func allDigits(s string) bool {
 	return len(s) > 0
 }
 
+// PackageOf names the package owning a subject symbol: the loaded
+// package whose import path prefixes the symbol before a dot, the
+// longest such, so a Type.Method spelling and a dotted last path
+// element (nats.go) are told apart by the packages that exist (a
+// symbol under a loaded package's path with no loaded sibling beneath
+// it is that package's, whatever its spelling); a symbol no loaded
+// package's path prefixes falls back to the string cut's guess, the
+// best a reader without the symbol's package can do. It is the one
+// package resolution every reader with a loaded tree uses — the
+// process-execution attestation, the skip radius, a pass's pricing,
+// the delta cut — so no two of them can disagree about a package.
+func (t *Tree) PackageOf(symbol string) string {
+	if pkg, _ := t.eng.PackageOf(symbol); pkg != "" {
+		return pkg
+	}
+	return symbolPackage(symbol)
+}
+
 // packageProcessAttestable reports whether a target's measurement
 // processes are its own package's test binary: every oracle symbol's
 // package equals the target's (gofresh WithPackageProcessExecution's
 // honesty condition — gomutant runs oracles as `go test` of the oracle
-// packages).
-func packageProcessAttestable(targetSymbol string, oracle []string) bool {
-	targetPkg := symbolPackage(targetSymbol)
+// packages), the packages named by the caller's resolution, a loaded
+// tree's PackageOf.
+func packageProcessAttestable(packageOf func(string) string, targetSymbol string, oracle []string) bool {
+	targetPkg := packageOf(targetSymbol)
 	for _, symbol := range oracle {
-		if symbolPackage(symbol) != targetPkg {
+		if packageOf(symbol) != targetPkg {
 			return false
 		}
 	}
@@ -240,12 +267,12 @@ func packageProcessAttestable(targetSymbol string, oracle []string) bool {
 
 // findingPackageProcessAttestable is packageProcessAttestable over a
 // record's evidence rows.
-func findingPackageProcessAttestable(f Finding) bool {
+func findingPackageProcessAttestable(packageOf func(string) string, f Finding) bool {
 	oracle := make([]string, 0, len(f.OracleEvidence))
 	for _, evidence := range f.OracleEvidence {
 		oracle = append(oracle, evidence.Symbol)
 	}
-	return packageProcessAttestable(f.Symbol, oracle)
+	return packageProcessAttestable(packageOf, f.Symbol, oracle)
 }
 
 // newSubjectViews is the standalone inspection's strict build: its
@@ -296,7 +323,7 @@ func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups [
 	if seams.subjectViewBuild != nil {
 		seams.subjectViewBuild(requested)
 	}
-	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(requested)), width: engines.width}
+	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(requested)), width: engines.width, packageProcess: engines.packageProcess}
 	env := engines.evidenceEnv
 	capture := func(ctx context.Context, view *gofresh.View, module *moduleSubjectView, resolved []resolvedSubject) error {
 		for _, r := range resolved {
@@ -559,7 +586,7 @@ type observedViewSet struct {
 // fault faults that module's symbols, never the union.
 func (s *subjectViewSet) observed(ctx context.Context) (*observedViewSet, map[string]error, error) {
 	faults := map[string]error{}
-	union := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(s.bySymbol)), width: s.width}
+	union := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(s.bySymbol)), width: s.width, packageProcess: s.packageProcess}
 	symbols := make([]string, 0, len(s.bySymbol))
 	for symbol := range s.bySymbol {
 		symbols = append(symbols, symbol)
@@ -621,7 +648,7 @@ func (s *subjectViewSet) observed(ctx context.Context) (*observedViewSet, map[st
 // never a partial narrowing; a sibling derivation failure is
 // target-local like any evidence-construction fault.
 func (s *observedViewSet) forTarget(target string, oracle []string, faults map[string]error) (*subjectViewSet, error) {
-	narrowed := &subjectViewSet{bySymbol: make(map[string]*subjectView, 1+len(oracle)), width: s.width}
+	narrowed := &subjectViewSet{bySymbol: make(map[string]*subjectView, 1+len(oracle)), width: s.width, packageProcess: s.packageProcess}
 	symbols := append([]string{target}, oracle...)
 	for _, symbol := range symbols {
 		if _, ok := s.bySymbol[symbol]; !ok {
@@ -952,7 +979,7 @@ func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress
 			continue
 		}
 		for _, symbol := range admissions[i].symbols {
-			subjects[findingPackageProcessAttestable(f)][symbol] = true
+			subjects[admissions[i].packageProcess][symbol] = true
 		}
 	}
 	prebuilt := map[bool]*subjectViewSet{}
@@ -985,7 +1012,7 @@ func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress
 			continue
 		}
 		report("judging " + f.Symbol)
-		inspection, err := t.judgeAdmittedContext(ctx, f, admissions[i], prebuilt[findingPackageProcessAttestable(f)])
+		inspection, err := t.judgeAdmittedContext(ctx, f, admissions[i], prebuilt[admissions[i].packageProcess])
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
@@ -1076,6 +1103,10 @@ type judgmentAdmission struct {
 	oracle      []SubjectEvidence
 	validOracle map[string]bool
 	symbols     []string
+	// packageProcess is the record's package-process attestation
+	// (packageProcessAttestable over its rows), decided once at
+	// admission: the view mode every read of the record shares.
+	packageProcess bool
 }
 
 // admitFindingContext runs a record's pre-checks over the shared walk —
@@ -1083,7 +1114,7 @@ type judgmentAdmission struct {
 // consult, so the views a pass builds are exactly the views its records
 // then read.
 func (t *Tree) admitFindingContext(ctx context.Context, f Finding, shared *admissionShared) (judgmentAdmission, error) {
-	var adm judgmentAdmission
+	adm := judgmentAdmission{packageProcess: findingPackageProcessAttestable(t.PackageOf, f)}
 	decided := func(inspection FindingInspection) (judgmentAdmission, error) {
 		adm.decided = &inspection
 		return adm, nil
@@ -1162,13 +1193,13 @@ func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgment
 	if adm.decided != nil {
 		inspection := *adm.decided
 		if adm.enrichDelta != nil {
-			if modified := t.modifiedOracleNames(ctx, f, adm.enrichDelta, prebuilt); len(modified) > 0 {
+			if modified := t.modifiedOracleNames(ctx, f, adm.enrichDelta, prebuilt, adm.packageProcess); len(modified) > 0 {
 				inspection.Reason = strings.TrimSuffix(inspection.Reason, ")") + "; modified: " + cappedNameList(modified, "tests") + ")"
 			}
 		}
 		return inspection, nil
 	}
-	viewFor, err := t.viewsFor(ctx, adm.symbols, prebuilt, findingPackageProcessAttestable(f))
+	viewFor, err := t.viewsFor(ctx, adm.symbols, prebuilt, adm.packageProcess)
 	if err != nil {
 		return FindingInspection{}, err
 	}
@@ -1212,13 +1243,16 @@ func (t *Tree) supplementaryViews(ctx context.Context, symbols []string, prebuil
 	return t.newSubjectViews(ctx, symbols, packageProcess, width)
 }
 
-// viewsFor serves each symbol's view from the prebuilt set, building
-// one supplementary set for the rest.
+// viewsFor serves each symbol's view from the prebuilt set where the
+// set was built under the reader's view mode, building one
+// supplementary set under that mode for the rest — a set built under
+// the other mode serves nothing, however many of the symbols it
+// holds, and lends only its width.
 func (t *Tree) viewsFor(ctx context.Context, symbols []string, prebuilt *subjectViewSet, packageProcess bool) (map[string]*subjectView, error) {
 	viewFor := make(map[string]*subjectView, len(symbols))
 	var missing []string
 	for _, symbol := range symbols {
-		if prebuilt != nil {
+		if prebuilt != nil && prebuilt.packageProcess == packageProcess {
 			if view, ok := prebuilt.bySymbol[symbol]; ok {
 				viewFor[symbol] = view
 				continue
@@ -1509,7 +1543,7 @@ func retainedOracleNames(f Finding, currentOracle []string) map[string]string {
 // rather than failing a decision that is already stale. The target
 // view comes from the caller's prebuilt set where present - the same
 // second-construction avoidance the enclosing inspection documents.
-func (t *Tree) modifiedOracleNames(ctx context.Context, f Finding, currentOracle []string, prebuilt *subjectViewSet) []string {
+func (t *Tree) modifiedOracleNames(ctx context.Context, f Finding, currentOracle []string, prebuilt *subjectViewSet, packageProcess bool) []string {
 	if f.CompartmentLedger == nil {
 		return nil
 	}
@@ -1518,11 +1552,11 @@ func (t *Tree) modifiedOracleNames(ctx context.Context, f Finding, currentOracle
 		return nil
 	}
 	var target *subjectView
-	if prebuilt != nil {
+	if prebuilt != nil && prebuilt.packageProcess == packageProcess {
 		target = prebuilt.bySymbol[f.Symbol]
 	}
 	if target == nil {
-		views, err := t.supplementaryViews(ctx, []string{f.Symbol}, prebuilt, findingPackageProcessAttestable(f))
+		views, err := t.supplementaryViews(ctx, []string{f.Symbol}, prebuilt, packageProcess)
 		if err != nil {
 			return nil
 		}

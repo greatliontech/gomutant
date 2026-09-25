@@ -380,20 +380,40 @@ func TestSkippedPackageRadiusNamesDarkPackages(t *testing.T) {
 		{Symbol: "example.com/mod/mixed.C", Skipped: "oracle baseline probe failed"},
 		{Symbol: "example.com/mod/mixed.D", Generated: 3, Mutants: 3, Killed: 3},
 		{Symbol: "example.com/mod/clean.E", Generated: 2, Mutants: 2, Killed: 2},
+		// A dotted package beside its sibling: the string cut would fold
+		// dot.go's two skips into dot's three targets and hide a dark
+		// package; the caller's resolution keeps them apart.
+		{Symbol: "example.com/mod/dot.go.F", Skipped: "unsupported analysis shape: T"},
+		{Symbol: "example.com/mod/dot.go.G", Skipped: "unsupported analysis shape: T"},
+		{Symbol: "example.com/mod/dot.H", Generated: 2, Mutants: 2, Killed: 2},
 	}
-	radius := SkippedPackageRadius(findings)
-	if len(radius) != 2 {
-		t.Fatalf("radius = %+v, want dark and mixed only", radius)
+	packageOf := func(symbol string) string {
+		if strings.HasPrefix(symbol, "example.com/mod/dot.go.") {
+			return "example.com/mod/dot.go"
+		}
+		return symbolPackage(symbol)
+	}
+	radius := SkippedPackageRadius(findings, packageOf)
+	if len(radius) != 3 {
+		t.Fatalf("radius = %+v, want dark, dot.go and mixed only", radius)
 	}
 	if radius[0].Package != "example.com/mod/dark" || !radius[0].Dark() || radius[0].Targets != 2 {
 		t.Fatalf("dark package misreported: %+v", radius[0])
 	}
-	if radius[1].Package != "example.com/mod/mixed" || radius[1].Dark() {
-		t.Fatalf("mixed package misreported as dark: %+v", radius[1])
+	if radius[1].Package != "example.com/mod/dot.go" || !radius[1].Dark() || radius[1].Targets != 2 {
+		t.Fatalf("dotted dark package misreported: %+v", radius[1])
 	}
-	summary := SummarizeRun(findings, Selection{})
-	if len(summary.DarkPackages) != 1 || summary.DarkPackages[0] != "example.com/mod/dark" {
-		t.Fatalf("summary dark packages = %+v, want exactly the dark one", summary.DarkPackages)
+	if radius[2].Package != "example.com/mod/mixed" || radius[2].Dark() {
+		t.Fatalf("mixed package misreported as dark: %+v", radius[2])
+	}
+	summary := SummarizeRun(findings, Selection{}, packageOf)
+	if strings.Join(summary.DarkPackages, ",") != "example.com/mod/dark,example.com/mod/dot.go" {
+		t.Fatalf("summary dark packages = %+v, want exactly the two dark ones", summary.DarkPackages)
+	}
+	// Without a loaded tree the cut's guess groups: the dotted sibling
+	// folds into dot and reads as partially skipped.
+	if guessed := SummarizeRun(findings, Selection{}, nil); strings.Join(guessed.DarkPackages, ",") != "example.com/mod/dark" {
+		t.Fatalf("tree-less dark packages = %+v, want the guess to name dark alone", guessed.DarkPackages)
 	}
 }
 

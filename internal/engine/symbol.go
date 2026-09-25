@@ -299,10 +299,20 @@ func (t *Tree) initObjectContext(ctx context.Context, symbol, pkgPath, file stri
 }
 
 // splitSymbol finds the loaded package whose path prefixes the symbol
-// (longest match wins) and returns it with the remainder.
+// (longest match wins) and returns it with the remainder. The
+// synthesized test main a test load carries beside each tested
+// package (`<path>.test`, whose one Go file is the generated main the
+// loader reports by its build-cache object, a path no source package
+// can hold since every source file ends in .go) is no package a
+// symbol names: skipped, so a method of a type named test resolves to
+// the package that declares it, while a real main package in a
+// directory ending in .test keeps resolving to itself.
 func (t *Tree) splitSymbol(symbol string) (string, string) {
 	best := ""
 	for _, pkg := range t.pkgs {
+		if len(pkg.GoFiles) == 1 && !strings.HasSuffix(pkg.GoFiles[0], ".go") {
+			continue
+		}
 		p := basePackagePath(pkg)
 		if strings.HasPrefix(symbol, p+".") && len(p) > len(best) {
 			best = p

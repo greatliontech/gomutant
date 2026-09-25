@@ -65,7 +65,7 @@ func TestRunStatesEachRecordsReusePosture(t *testing.T) {
 	if clean.Measurement != "measured" || clean.Reuse != FindingCurrent || len(clean.Reasons) != 0 || clean.Analysis != "" {
 		t.Fatalf("clean posture = %+v", clean)
 	}
-	summary := SummarizeRun(findings, tr.Selection())
+	summary := SummarizeRun(findings, tr.Selection(), tr.PackageOf)
 	summary.AddPostures(byName)
 	if summary.Reusable != 1 || len(summary.NotReusable) != 1 || summary.NotReusable[0].Symbol != shared.Symbol || summary.OmittedNotReusable != 0 {
 		t.Fatalf("summary posture = %+v", summary)

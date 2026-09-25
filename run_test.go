@@ -244,7 +244,7 @@ func TestSummarizeRun(t *testing.T) {
 		{Symbol: "p.Skipped", Skipped: "no oracle"},
 	}
 	want := RunSummary{Targets: 3, Measured: 1, Cached: 1, Skipped: 1, Generated: 6, Discarded: 1, Killed: 3, Survived: 2, Attested: 1, Open: 1}
-	if got := SummarizeRun(findings, Selection{}); !reflect.DeepEqual(got, want) {
+	if got := SummarizeRun(findings, Selection{}, nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("summary = %+v, want %+v", got, want)
 	}
 }
@@ -3321,7 +3321,11 @@ func TestRunBucketsSurvivorExecution(t *testing.T) {
 // The run's stale-reason enrichment reuses the run's own subject views: when
 // the record's oracle matches the target's, attribution builds no second
 // view; a recorded oracle the current target no longer names builds exactly
-// one supplementary view for the difference (REQ-result-stale's naming arm).
+// one supplementary view for the difference (REQ-result-stale's naming arm)
+// — where the record shares the run's view mode. A recorded oracle in
+// another package puts the record under the cross-package mode, and the
+// run's attested views serve it nothing: every view is rebuilt under the
+// record's own mode (REQ-result-record's attestation clause).
 func TestRunStaleReasonReusesTheRunsViews(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -3355,21 +3359,42 @@ func TestRunStaleReasonReusesTheRunsViews(t *testing.T) {
 		t.Fatalf("decisions = %+v; want the moved pin still attributed through the run's views", decisions)
 	}
 
-	// A recorded oracle outside the current target's oracle set builds one
-	// supplementary view for exactly the uncovered symbol.
-	foreign := append([]Finding(nil), first...)
-	extra := foreign[0].OracleEvidence[0]
-	extra.Symbol = "example.com/fixture/plain.TestPlain"
-	foreign[0].OracleEvidence = append(append([]SubjectEvidence(nil), foreign[0].OracleEvidence...), extra)
+	// A recorded oracle outside the current target's oracle set, in the
+	// target's own package, builds one supplementary view for exactly the
+	// uncovered symbol.
+	withRecordOnly := func(symbol string) []Finding {
+		foreign := append([]Finding(nil), first...)
+		extra := foreign[0].OracleEvidence[0]
+		extra.Symbol = symbol
+		foreign[0].OracleEvidence = append(append([]SubjectEvidence(nil), foreign[0].OracleEvidence...), extra)
+		return foreign
+	}
 	supplementary = nil
 	decisions = nil
-	if _, err := tr.Run(ctx, []Target{target}, Options{Budget: 1, Prior: foreign, Decision: func(d RunDecision) {
+	if _, err := tr.Run(ctx, []Target{target}, Options{Budget: 1, Prior: withRecordOnly("example.com/fixture/lib.TestWeak"), Decision: func(d RunDecision) {
 		decisions = append(decisions, d)
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(supplementary) != 1 || len(supplementary[0]) != 1 || supplementary[0][0] != "example.com/fixture/plain.TestPlain" {
+	if len(supplementary) != 1 || len(supplementary[0]) != 1 || supplementary[0][0] != "example.com/fixture/lib.TestWeak" {
 		t.Fatalf("supplementary views = %v; want exactly the record-only oracle symbol", supplementary)
+	}
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.Contains(decisions[0].Reason, "oracle example.com/fixture/lib.TestWeak") {
+		t.Fatalf("decisions = %+v; want a re-measure whose reason names the record-only oracle through the supplementary view", decisions)
+	}
+
+	// A recorded oracle in another package: the record's mode is
+	// cross-package, the run's set attested, so nothing is served from it
+	// and the whole record is rebuilt under its own mode.
+	supplementary = nil
+	decisions = nil
+	if _, err := tr.Run(ctx, []Target{target}, Options{Budget: 1, Prior: withRecordOnly("example.com/fixture/plain.TestPlain"), Decision: func(d RunDecision) {
+		decisions = append(decisions, d)
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(supplementary) != 1 || strings.Join(supplementary[0], ",") != "example.com/fixture/lib.Add,example.com/fixture/lib.TestAdd,example.com/fixture/plain.TestPlain" {
+		t.Fatalf("supplementary views = %v; want every view of the cross-package record rebuilt under its own mode", supplementary)
 	}
 	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.Contains(decisions[0].Reason, "oracle example.com/fixture/plain.TestPlain") {
 		t.Fatalf("decisions = %+v; want a re-measure whose reason names the record-only oracle through the supplementary view", decisions)

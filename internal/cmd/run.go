@@ -502,7 +502,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// A plan renders its own tallies; the zeroed run summary would
 	// claim a measurement that never happened (REQ-exec-plan).
 	if !o.plan {
-		summary := gomutant.SummarizeRun(rendered, tree.Selection())
+		summary := gomutant.SummarizeRun(rendered, tree.Selection(), tree.PackageOf)
 		summary.Run = runID
 		summary.AddPostures(postures)
 		if cut != nil {
@@ -530,13 +530,13 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// Whole-package blast radius, one line per dark package: the count
 	// line above cannot distinguish scattered skips from a package
 	// whose entire target set carries no campaign evidence.
-	for _, radius := range gomutant.SkippedPackageRadius(rendered) {
+	for _, radius := range gomutant.SkippedPackageRadius(rendered, tree.PackageOf) {
 		if radius.Dark() && radius.Targets > 1 {
 			fmt.Fprintf(&terminal, "dark      %s: all %d targets skipped\n", radius.Package, radius.Targets)
 		}
 	}
 	if o.plan {
-		planSummary := gomutant.SummarizeRun(rendered, tree.Selection())
+		planSummary := gomutant.SummarizeRun(rendered, tree.Selection(), tree.PackageOf)
 		if o.jsonl {
 			// The structured face carries the radius in plan mode too:
 			// the run summary is suppressed there (a zeroed summary

@@ -3270,3 +3270,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "15e8e54027bf9880d3af8aa13c3fb381e90a260c48d31d833552662d4467e159"
 }
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "07bd8092a1ab1197fc70fbb16f18d0acbe0318e75311e2ba2c18ff97d9cee8b3"
+  source_hash: "cf2783572c3d79c948849c0d257c45718551d357db46ce6de7308ab0219e9b31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestPricedPassCountsPackagesAsTheTreeOwnsThem"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2fff6727ba7e111343435a344da5e52bc1f48803661da74d0877ddd15af3e5a9"
+}
+
+bindings {
+  requirement_id: "REQ-exec-run-status"
+  content_hash: "07bd8092a1ab1197fc70fbb16f18d0acbe0318e75311e2ba2c18ff97d9cee8b3"
+  source_hash: "cf2783572c3d79c948849c0d257c45718551d357db46ce6de7308ab0219e9b31"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestCutSurvivorsResolvesADottedPackage"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "30ac3844bfb905254c20c11bbea9aeda8e1121fc8afeab93fa56e9c4171ecdda"
+}

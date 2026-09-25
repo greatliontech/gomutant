@@ -71,7 +71,7 @@ func WithDynamicStateVouches(identities ...string) Option {
 // (REQ-exec-banked-summary; REQ-exec-oracle-run's narrowed-survivor
 // clause).
 func bankedRunSummary(tallies gomutant.RunTallies, cause string, elapsed time.Duration, sel gomutant.Selection, runID string) gomutant.RunSummary {
-	summary := gomutant.SummarizeRun(nil, sel)
+	summary := gomutant.SummarizeRun(nil, sel, nil)
 	summary.Run = runID
 	banked := tallies.Banked(cause, elapsed)
 	summary.Banked = &banked
@@ -1206,7 +1206,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	defer cancelRender()
 	streams.stretch(gomutant.StretchRendering)
 	rendered := outcome.Rendered
-	out.Summary = gomutant.SummarizeRun(rendered, tree.Selection())
+	out.Summary = gomutant.SummarizeRun(rendered, tree.Selection(), tree.PackageOf)
 	out.Summary.Run = runID
 	out.Summary.AddPostures(postures)
 	if tallies != nil && tallies.Audit.Narrowed > 0 {

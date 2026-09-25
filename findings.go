@@ -1861,7 +1861,7 @@ func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget
 		return false, err
 	}
 	symbols := append([]string{tg.Symbol}, oracle...)
-	views, err := t.newSubjectViews(ctx, symbols, packageProcessAttestable(tg.Symbol, oracle), 0)
+	views, err := t.newSubjectViews(ctx, symbols, packageProcessAttestable(t.PackageOf, tg.Symbol, oracle), 0)
 	if err != nil {
 		return false, err
 	}
@@ -2303,11 +2303,17 @@ type PackageSkip struct {
 func (p PackageSkip) Dark() bool { return p.Skipped == p.Targets }
 
 // SkippedPackageRadius groups a run's skips by package, package path
-// ascending, packages with no skips omitted.
-func SkippedPackageRadius(findings []Finding) []PackageSkip {
+// ascending, packages with no skips omitted. packageOf names each
+// finding's package: a loaded tree's PackageOf, exact for a dotted
+// last path element and a Type.Method spelling alike; nil where no
+// tree is loaded, which groups by the string cut's guess.
+func SkippedPackageRadius(findings []Finding, packageOf func(string) string) []PackageSkip {
+	if packageOf == nil {
+		packageOf = symbolPackage
+	}
 	byPkg := map[string]*PackageSkip{}
 	for _, f := range findings {
-		pkg := symbolPackage(f.Symbol)
+		pkg := packageOf(f.Symbol)
 		entry := byPkg[pkg]
 		if entry == nil {
 			entry = &PackageSkip{Package: pkg}

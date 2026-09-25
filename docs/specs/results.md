@@ -105,6 +105,16 @@ never widens to the finding. Dirty provenance bars a finding from explicit commi
 but does not prevent reuse in the unchanged working tree. The commit is omitted only
 when no repository HEAD exists; that unavailable provenance carries `dirty=true`.
 
+gomutant grants the package-process attestation the discharges ride exactly
+when every oracle subject's package, as the loaded tree owns it, is the
+target's own — a package named by ownership (the loaded package, never a
+synthesized test main, whose import path prefixes the symbol, the longest
+such), never by a spelling cut, so a dotted last path element or a Type.Method
+spelling merges no two packages into one attestation. The attestation is the
+view mode the record's evidence re-derives under, at every site that reads it:
+a view built under the other mode is never served to a record, whichever
+symbols it holds.
+
 **INV-RESULT-CANDIDATE-CONSERVATION** (project invariant): Every finding
 produced by a candidate-accounted active basis carries required `candidateCount` and
 `generated` fields. `candidateCount` is the total applicable catalog candidates

@@ -24,14 +24,14 @@ func TestSummaryStatesTheUnreachedBoundUnderTheSelection(t *testing.T) {
 		{Symbol: "example.com/mod/host.D", Generated: 2, Mutants: 2, Killed: 2},
 	}
 	sel := Selection{Tags: []string{"wasm", "js"}}
-	summary := SummarizeRun(findings, sel)
+	summary := SummarizeRun(findings, sel, nil)
 	if summary.Selection != "tags:js,wasm" || strings.Join(summary.Unreached, ",") != "example.com/mod/wasm.A,example.com/mod/wasm.B" {
 		t.Fatalf("summary = %+v, want the two unreached symbols sorted under tags:js,wasm", summary)
 	}
 	if summary.Skipped != 3 {
 		t.Fatalf("skipped = %d, want 3 (the stood-down skip counts as skipped, never as unreached)", summary.Skipped)
 	}
-	if plain := SummarizeRun(findings, Selection{}); plain.Selection != "" || plain.Unreached != nil {
+	if plain := SummarizeRun(findings, Selection{}, nil); plain.Selection != "" || plain.Unreached != nil {
 		t.Fatalf("no declared selection stated a bound: %+v", plain)
 	}
 	if bound := CoverageBoundOf(findings, sel, "run-1"); bound == nil || bound.Run != "run-1" || bound.Selection != "tags:js,wasm" || len(bound.Unreached) != 2 {
@@ -216,7 +216,7 @@ func TestTaggedLegWithoutAnOracleIsAStatedBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	summary := SummarizeRun(findings, selected.Selection())
+	summary := SummarizeRun(findings, selected.Selection(), selected.PackageOf)
 	if summary.Selection != "tags:seltag" || strings.Join(summary.Unreached, ",") != "example.com/sel/leg.Also,example.com/sel/leg.Dark" {
 		t.Fatalf("summary = %+v, want leg.Also and leg.Dark unreached under tags:seltag, sorted", summary)
 	}
@@ -300,7 +300,7 @@ func TestStoodDownDerivationIsNotACoverageBound(t *testing.T) {
 	if !strings.Contains(findings[0].Skipped, "stood down on: example.com/darkmod/c") || findings[0].Unreached {
 		t.Fatalf("stood-down skip = %q unreached %v, want the packages named and no bound", findings[0].Skipped, findings[0].Unreached)
 	}
-	if summary := SummarizeRun(findings, tr.Selection()); len(summary.Unreached) != 0 || summary.Skipped != 1 {
+	if summary := SummarizeRun(findings, tr.Selection(), tr.PackageOf); len(summary.Unreached) != 0 || summary.Skipped != 1 {
 		t.Fatalf("summary = %+v, want the skip counted and nothing unreached", summary)
 	}
 	// The declared selection's bound exists — empty: the stood-down

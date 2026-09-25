@@ -104,7 +104,14 @@ func (t *Tree) CutSurvivorsContext(ctx context.Context, f Finding, cut DeltaCut)
 	if current != f.BodyHash {
 		return out, nil
 	}
-	_, pkgDir, err := t.eng.PackageContextContext(ctx, symbolPackage(f.Symbol))
+	pkgPath, err := t.eng.PackagePathContext(ctx, f.Symbol)
+	if err != nil {
+		if ctx.Err() != nil {
+			return out, ctx.Err()
+		}
+		return out, nil
+	}
+	_, pkgDir, err := t.eng.PackageContextContext(ctx, pkgPath)
 	if err != nil {
 		if ctx.Err() != nil {
 			return out, ctx.Err()
