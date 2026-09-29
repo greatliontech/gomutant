@@ -15,5 +15,6 @@ between pins moved under a new derivation and a source move — so a
 structured reader must parse it out of the prose today; the CLI's
 --json face carries it as its own field.
 
-Lands: user decision (a breaking change to the structured face's
-run response).
+Lands: cross-tool train chunk 267 (derived at the 2026-09-29 replan:
+the structured face is structured by the two-surfaces doctrine; a
+BREAKING wire change declared at its tick).

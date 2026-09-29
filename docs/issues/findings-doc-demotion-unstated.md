@@ -9,4 +9,6 @@ invisible-until-committed change neither face states. Either the
 clause gains a demotion count beside the promotion, stated on both
 faces, or it says that only promotion is owned.
 
-Lands: user decision (the clause's scope).
+Lands: cross-tool train chunk 283 (derived at the 2026-09-29 replan:
+the demoted count is the promoted count's twin, read from the write's
+routing).

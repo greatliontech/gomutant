@@ -20,5 +20,5 @@ run's pricing line. Two shapes to decide between: a fixed slice size (a knob
 beside the budget) or a slice derived from the host's memory (the oracle
 memory ceiling's derivation, RAM/(2 × jobs), applied to the analysis).
 
-Lands: user decision — the trade is throughput (repeated typed loads) against
-the resident bound, and the derivation's shape is a product choice.
+Lands: cross-tool train chunk 284 (derived at the 2026-09-29 replan: a
+measured cost, decided where the affordable self-campaign pays it).
