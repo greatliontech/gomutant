@@ -45,4 +45,6 @@ the measurement itself — one of the two shapes above.
 Field report: wisp, 2026-09-05 (docs/issues/wasm-oracle-campaign-gap.md
 there), on gomutant v0.52.0.
 
-Lands: user decision — the external-oracle mode (or materialized mutation), deferred 2026-09-07: revisit when a consumer needs the tagged leg measured rather than declared; the stated-coverage-bound interim landed at cross-tool train chunk 163
+Lands: cross-tool train chunk 294 (gofresh docs/plans/cross-tool-train.md;
+derived 2026-09-29 — the deferral's trigger, a consumer's request to
+measure the bounded leg, is the wisp report above).

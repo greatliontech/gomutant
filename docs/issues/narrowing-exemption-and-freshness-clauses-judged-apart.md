@@ -42,7 +42,9 @@ freshness clauses. But every survivor of every target still carries
 determinism evidence. Reach, determinism, and reuse are the three
 facts; this run conflates the last two.
 
-Related: own-face-gate-suite-decomposition.md (narrowing engaged but
+Related: the deleted own-face-gate-suite-decomposition doc (`git log --all --
+docs/issues/own-face-gate-suite-decomposition.md`; resolved 2026-09-29 by
+the train doctrine — the gate is the probes) (narrowing engaged but
 bought little where covering ≈ suite — a different cause with the
 same symptom, which is why the ground must be named).
 

@@ -47,4 +47,9 @@ issue asks for must cover the observation bracket, and the volatile
 input must not feed the unstable-oracle class (see
 narrowing-exemption-and-freshness-clauses-judged-apart.md).
 
-Lands: user decision
+Lands: two halves (derived 2026-09-29): the scoring half — an observed
+volatile input is a reuse blocker on the record's layer and never scores
+as instability — is a rider on cross-tool train chunk 254; the
+declaration half — the caller's assertion carried for exactly the
+ephemeral process-identity path class — is gofresh chunk 295, gomutant
+passing it at its next bump.

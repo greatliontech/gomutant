@@ -33,4 +33,7 @@ shape is a verdict-affecting narrowing whose acceptance is the user's;
 what is derivable today (naming the flipping test with its flip
 evidence on every face) rides the same design.
 
-Lands: user decision
+Lands: cross-tool train chunk 296 (derived 2026-09-29: the per-test
+exclusion with a stated cap is the narrowing class the 2026-08-31 ruling
+accepted for the survivor oracle; the alternative degrades every verdict
+in the group for one test's defect).
