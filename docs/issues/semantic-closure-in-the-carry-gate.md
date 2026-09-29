@@ -62,4 +62,4 @@ real source edit made in the same window as the bump, which the gate
 cannot tell apart; whether that risk is acceptable for the re-attest
 cost it saves is the design question this issue's chunk opens with.
 
-Lands: cross-tool train chunk 175 (a design chunk opening with the user)
+Lands: cross-tool train chunk 175 (autonomous since the 2026-09-29 ratification)

@@ -10,7 +10,7 @@ classes below are gofresh precision positions, each already owned there:
 (a subject reading a file is observable by contract; a vouch cannot
 discharge an effect); `testing runtime value escapes analyzable
 receiver` is gofresh docs/issues/immutable-after-construction-objects.md
-(user decision); `subject accepts caller-supplied dynamic behavior` is
+(gofresh chunk 193 since the 2026-09-29 ratification); `subject accepts caller-supplied dynamic behavior` is
 gofresh docs/issues/invoke-targets-narrowed-by-operand.md (the chartered
 narrowing). This doc stands until those two decide, as the consumer-level
 record of which VMM targets each governs.
