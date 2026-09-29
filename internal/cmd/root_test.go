@@ -886,7 +886,7 @@ func TestRunCommandStatesAPromotionOnTheZeroTargetReconcile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{shaped}, nil }); err != nil {
+	if _, err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{shaped}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if layer, _ := seed.Layer(shaped); layer != "local" {

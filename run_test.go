@@ -4919,9 +4919,10 @@ func TestServedDirtyRecordPromotesToRepoDocumentOnCleanTree(t *testing.T) {
 	}
 	ctx := context.Background()
 	commit := func(finding Finding) error {
-		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		_, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 			return mergeOnly(MergeFindings(current, []Finding{finding}, nil)), nil
 		})
+		return err
 	}
 	target := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
 
@@ -4948,7 +4949,7 @@ func TestServedDirtyRecordPromotesToRepoDocumentOnCleanTree(t *testing.T) {
 
 	// The dev loop's disposition, recorded before any commit exists.
 	s0 := first[0].Survivors[0]
-	if err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
 		for i := range all {
 			if all[i].Symbol == target.Symbol {
 				return all, all[i].Attest(s0.Position, s0.Operator, "equivalent: untested branch is dead code in this corpus")
@@ -5083,9 +5084,10 @@ func TestExtendedDirtyRecordPromotesOnCleanTree(t *testing.T) {
 	}
 	ctx := context.Background()
 	commit := func(finding Finding) error {
-		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		_, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 			return mergeOnly(MergeFindings(current, []Finding{finding}, nil)), nil
 		})
+		return err
 	}
 	target := Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}}
 	tr, err := Load(tmp)
@@ -5160,9 +5162,10 @@ func TestCandidateSpliceDirtyRecordPromotesOnCleanTree(t *testing.T) {
 	}
 	ctx := context.Background()
 	commit := func(finding Finding) error {
-		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		_, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 			return mergeOnly(MergeFindings(current, []Finding{finding}, nil)), nil
 		})
+		return err
 	}
 	target := Target{Symbol: "example.com/fixture/candlocal.Value", Oracle: []string{"example.com/fixture/candlocal.TestValue"}}
 	tr, err := Load(tmp)

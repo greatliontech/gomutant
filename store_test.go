@@ -167,7 +167,7 @@ func TestStoreSplitsUpdatesAcrossLayers(t *testing.T) {
 
 	clean := storeFinding("p.A", nil)
 	local := storeFinding("p.B", func(f *Finding) { f.Dirty = true })
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{clean, local}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{clean, local}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	repoData, err := os.ReadFile(path)
@@ -186,7 +186,7 @@ func TestStoreSplitsUpdatesAcrossLayers(t *testing.T) {
 	// A local successor for the clean symbol shadows the merged view but
 	// never evicts the portable repo row.
 	dirtyA := storeFinding("p.A", func(f *Finding) { f.Dirty = true; f.BodyHash = "h2" })
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		next := append([]Finding(nil), prior...)
 		for i := range next {
 			if next[i].Symbol == "p.A" {
@@ -216,7 +216,7 @@ func TestStoreSplitsUpdatesAcrossLayers(t *testing.T) {
 	// A committable successor for the local symbol evicts its overlay
 	// entry and lands in the repo document.
 	cleanB := storeFinding("p.B", nil)
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		next := append([]Finding(nil), prior...)
 		for i := range next {
 			if next[i].Symbol == "p.B" {
@@ -237,7 +237,7 @@ func TestStoreSplitsUpdatesAcrossLayers(t *testing.T) {
 	}
 
 	// Pruning a symbol clears both layers.
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		var next []Finding
 		for _, f := range prior {
 			if f.Symbol != "p.A" {
@@ -397,7 +397,7 @@ func TestOverlayServesUnchangedEntriesWithoutReparsing(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) {
 		return []Finding{survivorFinding("p.A")}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -446,7 +446,7 @@ func TestOverlayInstallWarmsTheParseCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) {
+	if _, err := store.Update(context.Background(), func([]Finding) ([]Finding, error) {
 		served := survivorFinding("p.A")
 		served.Cached = true
 		return []Finding{served}, nil
@@ -485,7 +485,7 @@ func TestOverlayReloadTracksRewrittenAndDeletedEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) {
+	if _, err := store.Update(context.Background(), func([]Finding) ([]Finding, error) {
 		return []Finding{survivorFinding("p.A")}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -527,13 +527,13 @@ func TestOverlayMergedViewIsIsolatedFromCallerMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) {
 		return []Finding{survivorFinding("p.A")}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	abort := fmt.Errorf("abort after mutating the merged view")
-	if err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
 		for i := range all {
 			if all[i].Symbol == "p.A" {
 				all[i].Labels[0] = "corrupted"
@@ -575,10 +575,10 @@ func TestStoreUpdateDecidesMembershipUnderTheDocumentLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
 		nested, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		defer cancel()
-		if err := second.Update(nested, func(p []Finding) ([]Finding, error) { return p, nil }); err == nil {
+		if _, err := second.Update(nested, func(p []Finding) ([]Finding, error) { return p, nil }); err == nil {
 			t.Fatal("a second session's update proceeded while the caller's update held the document lock")
 		}
 		return prior, nil
@@ -791,7 +791,7 @@ func TestStoreUpdateSidelinesLegacyEntriesInsteadOfOverwriting(t *testing.T) {
 	local := storeFinding("p.Legacy", func(f *Finding) { f.Dirty = true })
 	install := func() {
 		t.Helper()
-		if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
+		if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -868,7 +868,7 @@ func TestStoreSidelineSkipsAnEntryReplacedSinceTheRead(t *testing.T) {
 		}
 	}
 	mine := storeFinding("p.Legacy", func(f *Finding) { f.Dirty = true })
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{mine}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{mine}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Dir(path))
@@ -945,7 +945,7 @@ func TestStoreSidelineFollowsTheContentSinceTheRead(t *testing.T) {
 				replaced, _ = os.ReadFile(p)
 			}
 			mine := storeFinding("p.Legacy", func(f *Finding) { f.Dirty = true })
-			if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{mine}, nil }); err != nil {
+			if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{mine}, nil }); err != nil {
 				t.Fatal(err)
 			}
 			entries, err := os.ReadDir(filepath.Dir(path))
@@ -1040,7 +1040,7 @@ func TestStoreUpdatePruneLeavesLegacyEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.Legacy", nil)}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.Legacy", nil)}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	path := store.entryPath("p.Legacy")
@@ -1051,7 +1051,7 @@ func TestStoreUpdatePruneLeavesLegacyEntries(t *testing.T) {
 	if err := os.WriteFile(path, legacy, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return nil, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, legacy) {
@@ -1074,7 +1074,7 @@ func TestStoreUpdateRewritesOnlyChangedEntries(t *testing.T) {
 	}
 	ctx := context.Background()
 	local := func(symbol string) Finding { return storeFinding(symbol, func(f *Finding) { f.Dirty = true }) }
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local("p.A"), local("p.B"), local("p.C")}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local("p.A"), local("p.B"), local("p.C")}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	identity := func(symbol string) string {
@@ -1093,7 +1093,7 @@ func TestStoreUpdateRewritesOnlyChangedEntries(t *testing.T) {
 	// row — rewrites no entry: the changed/unchanged decision compares
 	// persisted forms on both sides.
 	sameA := local("p.A")
-	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 		next := append([]Finding(nil), current...)
 		for i := range next {
 			switch next[i].Symbol {
@@ -1140,7 +1140,7 @@ func TestStoreUpdateComparesThePersistedForm(t *testing.T) {
 	}
 	ctx := context.Background()
 	local := storeFinding("p.A", func(f *Finding) { f.Dirty = true })
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(store.entryPath("p.A"))
@@ -1149,7 +1149,7 @@ func TestStoreUpdateComparesThePersistedForm(t *testing.T) {
 	}
 	served := local
 	served.Cached = true
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{served}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{served}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if again, err := os.Stat(store.entryPath("p.A")); err != nil || !again.ModTime().Equal(info.ModTime()) || again.Size() != info.Size() {
@@ -1158,7 +1158,7 @@ func TestStoreUpdateComparesThePersistedForm(t *testing.T) {
 	if err := os.Remove(store.entryPath("p.A")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{local}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(store.entryPath("p.A")); err != nil {
@@ -1186,7 +1186,7 @@ func TestStoreDeletesTheEntryWhenAnUnchangedRecordBecomesCommittable(t *testing.
 			f.OracleEvidence[i].RuntimeReason = "clock"
 		}
 	})
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{unverifiable}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{unverifiable}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(store.entryPath("p.A")); err != nil {
@@ -1199,7 +1199,7 @@ func TestStoreDeletesTheEntryWhenAnUnchangedRecordBecomesCommittable(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reopened.Update(ctx, func(current []Finding) ([]Finding, error) { return current, nil }); err != nil {
+	if _, err := reopened.Update(ctx, func(current []Finding) ([]Finding, error) { return current, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(store.entryPath("p.A")); !os.IsNotExist(err) {
@@ -1229,7 +1229,7 @@ func TestStoreParsesTheDocumentOncePerContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) {
 		return []Finding{storeFinding("p.A", nil), storeFinding("p.B", nil)}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -1242,7 +1242,7 @@ func TestStoreParsesTheDocumentOncePerContent(t *testing.T) {
 		}
 	}
 	changed := storeFinding("p.B", func(f *Finding) { f.BodyHash = "h2" })
-	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 		next := append([]Finding(nil), current...)
 		for i := range next {
 			if next[i].Symbol == "p.B" {
@@ -1394,7 +1394,7 @@ func TestStoreCachedDocumentEqualsAFreshParse(t *testing.T) {
 	for i, shape := range shapes {
 		records = append(records, storeFinding(fmt.Sprintf("p.S%d", i), shape))
 	}
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return records, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return records, nil }); err != nil {
 		t.Fatal(err)
 	}
 	check("first commit")
@@ -1411,7 +1411,7 @@ func TestStoreCachedDocumentEqualsAFreshParse(t *testing.T) {
 			changed.Skipped = "no tests"
 		}
 		recordParses = 0
-		if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		if _, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 			next := append([]Finding(nil), current...)
 			for j := range next {
 				if next[j].Symbol == changed.Symbol {
@@ -1458,7 +1458,7 @@ func TestStoreCachedDocumentEqualsAFreshParse(t *testing.T) {
 		{"in-memory", func([]Finding) []Finding { return inMemory }},
 	} {
 		recordParses = 0
-		if err := store.Update(ctx, func(current []Finding) ([]Finding, error) { return leg.supply(current), nil }); err != nil {
+		if _, err := store.Update(ctx, func(current []Finding) ([]Finding, error) { return leg.supply(current), nil }); err != nil {
 			t.Fatal(err)
 		}
 		check("unchanged commit from the " + leg.name)
@@ -1481,7 +1481,7 @@ func TestStoreSkippedRecordPersistsNothing(t *testing.T) {
 	}
 	ctx := context.Background()
 	local := storeFinding("p.B", func(f *Finding) { f.Dirty = true })
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.A", nil), local}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.A", nil), local}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	entry, err := os.ReadFile(store.entryPath("p.B"))
@@ -1492,7 +1492,7 @@ func TestStoreSkippedRecordPersistsNothing(t *testing.T) {
 		f.BodyHash, f.Skipped = "h2", "no tests"
 		return f
 	}
-	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 		next := []Finding{skipped(storeFinding("p.C", nil))}
 		for _, f := range current {
 			next = append(next, skipped(f))
@@ -1538,10 +1538,10 @@ func TestStoreDocumentViewIsIsolatedFromCallerMutation(t *testing.T) {
 		f.Exempted = []Exemption{{Subject: "p", Reason: "r", Rationale: "why"}}
 	})
 	var retained []Finding
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{record}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{record}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 		retained = current
 		return current, nil
 	}); err != nil {
@@ -1567,7 +1567,7 @@ func TestStoreDocumentViewIsIsolatedFromCallerMutation(t *testing.T) {
 	// A repo row kept in place of a machine-local successor is the
 	// same path with the row taken from the prior document.
 	var kept []Finding
-	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 		kept = current
 		local := cloneFinding(current[0])
 		local.Dirty = true
@@ -1593,7 +1593,7 @@ func TestStoreWriteRefusesAnInvalidChangedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.A", nil)}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{storeFinding("p.A", nil)}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(path)
@@ -1601,7 +1601,7 @@ func TestStoreWriteRefusesAnInvalidChangedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	invalid := storeFinding("p.A", func(f *Finding) { f.Killed = 5 })
-	err = store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{invalid}, nil })
+	_, err = store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{invalid}, nil })
 	if err == nil || !strings.Contains(err.Error(), "export invalid findings") {
 		t.Fatalf("invalid changed record: %v; want the export refusal", err)
 	}
@@ -1696,7 +1696,7 @@ func TestStoreServedRecordsShareNoListWithTheCache(t *testing.T) {
 		}),
 		storeFinding("p.Local", func(f *Finding) { full(f); f.Dirty = true }),
 	}
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return records, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return records, nil }); err != nil {
 		t.Fatal(err)
 	}
 	// Both caches warm: the document's from the write, the overlay's
@@ -1810,7 +1810,7 @@ func TestStoreWritesActOnTheServedEntries(t *testing.T) {
 
 	// An install supersedes every name the read found.
 	next := storeFinding("p.A", func(f *Finding) { f.Dirty = true; f.BodyHash = "h3" })
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{next}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{next}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{first, second} {
@@ -1824,7 +1824,7 @@ func TestStoreWritesActOnTheServedEntries(t *testing.T) {
 
 	// A prune through the measuring write removes every name.
 	park(first, storeFinding("p.A", func(f *Finding) { f.Dirty = true; f.BodyHash = "first" }))
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return nil, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{first, store.entryPath("p.A")} {
@@ -1873,7 +1873,7 @@ func TestStoreWritesSpareTheirOwnInstalls(t *testing.T) {
 	store := open()
 	parkAt(t, store.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true }))
 	fresh := storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "fresh" })
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{fresh}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{fresh}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	merged := loadSymbols(t, store)
@@ -1915,7 +1915,7 @@ func TestStoreWritesSpareTheirOwnInstalls(t *testing.T) {
 	// installing there in the same write.
 	store = open()
 	parkAt(t, store.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true }))
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) {
 		return []Finding{fresh, storeFinding("p.X", nil)}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -1929,7 +1929,7 @@ func TestStoreWritesSpareTheirOwnInstalls(t *testing.T) {
 	}
 	store = open()
 	parkAt(t, store.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true }))
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) {
 		return []Finding{fresh, storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "x2" })}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -1948,7 +1948,7 @@ func TestStoreWritesSpareTheirOwnInstalls(t *testing.T) {
 	store = open()
 	parkAt(t, store.entryPath("p.B"), storeFinding("p.X", func(f *Finding) { f.Dirty = true }))
 	parkAt(t, filepath.Join(store.overlayDir, "000000000000000000000000.json"), storeFinding("p.B", func(f *Finding) { f.Dirty = true }))
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		for _, f := range prior {
 			if f.Symbol == "p.B" {
 				return []Finding{f}, nil
@@ -1982,7 +1982,7 @@ func TestStoreInstallsRehomeTheParkedRecordsTheyOverwrite(t *testing.T) {
 	// p.Z sits at p.X's own path, p.X at p.Y's own path; p.Y installs.
 	parkAt(t, store.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "x" }))
 	parkAt(t, store.entryPath("p.X"), storeFinding("p.Z", func(f *Finding) { f.Dirty = true; f.BodyHash = "z" }))
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		return append(prior, storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" })), nil
 	}); err != nil {
 		t.Fatal(err)
@@ -2003,7 +2003,7 @@ func TestStoreInstallsRehomeTheParkedRecordsTheyOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	parkAt(t, store6.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.Labels = []string{"orig"} }))
-	if err := store6.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store6.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		for i := range prior {
 			if prior[i].Symbol == "p.X" {
 				prior[i].Labels[0] = "TAMPERED"
@@ -2027,7 +2027,7 @@ func TestStoreInstallsRehomeTheParkedRecordsTheyOverwrite(t *testing.T) {
 	parkAt(t, filepath.Join(store4.overlayDir, "000000000000000000000000.json"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "stale" }))
 	parkAt(t, store4.entryPath("p.X"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "canon" }))
 	parkAt(t, store4.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "parked" }))
-	if err := store4.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store4.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		return append(prior, storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" })), nil
 	}); err != nil {
 		t.Fatal(err)
@@ -2050,7 +2050,7 @@ func TestStoreInstallsRehomeTheParkedRecordsTheyOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	parkAt(t, store5.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "parked" }))
-	if err := store5.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store5.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		return append(prior, storeFinding("p.Y", func(f *Finding) { f.Dirty = true; f.BodyHash = "y" })), nil
 	}); err != nil {
 		t.Fatal(err)
@@ -2075,7 +2075,7 @@ func TestStoreInstallsRehomeTheParkedRecordsTheyOverwrite(t *testing.T) {
 	}
 	parkAt(t, store3.entryPath("p.Y"), storeFinding("p.X", func(f *Finding) { f.Dirty = true; f.BodyHash = "x" }))
 	parkAt(t, store3.entryPath("p.X"), storeFinding("p.W", func(f *Finding) { f.Dirty = true; f.BodyHash = "w" }))
-	if err := store3.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store3.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		var next []Finding
 		for _, f := range prior {
 			if f.Symbol != "p.W" {
@@ -2133,10 +2133,10 @@ func TestReviseRefusesAWithinLayerCollision(t *testing.T) {
 	ctx := context.Background()
 	repoA, repoB := storeFinding("p.A", nil), storeFinding("p.B", nil)
 	localA := storeFinding("p.A", func(f *Finding) { f.Dirty = true })
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{repoA, repoB}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{repoA, repoB}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) { return []Finding{localA, repoB}, nil }); err != nil {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) { return []Finding{localA, repoB}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	rename := func(from, to string) RecordEdit {
@@ -2182,7 +2182,7 @@ func TestReviseRefusesAWithinLayerCollision(t *testing.T) {
 	if merged := loadSymbols(t, store); merged["p.A"].Symbol != "" || merged["p.C"].Symbol != "p.C" || merged["p.C"].TargetEvidence.Symbol != "p.C" {
 		t.Fatalf("merged view after the rename = %v", merged)
 	}
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		return append(prior, storeFinding("p.D", func(f *Finding) { f.Dirty = true })), nil
 	}); err != nil {
 		t.Fatal(err)
@@ -2223,12 +2223,12 @@ func TestReviseNamesWhatLandedOnAnOverlayFailure(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return tc.repo, nil }); err != nil {
+		if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return tc.repo, nil }); err != nil {
 			t.Fatal(err)
 		}
 		// The local records replace their symbols' rows in the write's
 		// set; the committed rows they shadow stay in the document.
-		if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+		if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 			next := append([]Finding(nil), tc.local...)
 			for _, f := range prior {
 				shadowed := false

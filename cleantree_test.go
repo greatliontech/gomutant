@@ -69,7 +69,7 @@ func TestCleanTreeWithTempDirOracleStampsClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
 		merged, _ := MergeFindings(prior, findings, nil)
 		return merged, nil
 	}); err != nil {
@@ -94,7 +94,7 @@ func TestCleanTreeWithTempDirOracleStampsClean(t *testing.T) {
 	// downstream was attest failing "no finding" for symbols the
 	// summary reported measured.
 	if len(committed[0].Survivors) > 0 {
-		if err := store.Update(context.Background(), func(all []Finding) ([]Finding, error) {
+		if _, err := store.Update(context.Background(), func(all []Finding) ([]Finding, error) {
 			for i := range all {
 				if all[i].Symbol == "example.com/clean.F" {
 					if err := all[i].Attest(committed[0].Survivors[0].Position, committed[0].Survivors[0].Operator, "equivalent by inspection"); err != nil {

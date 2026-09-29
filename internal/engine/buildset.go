@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // buildSet indexes the loaded build once: package import paths and the
@@ -82,7 +84,7 @@ func (t *Tree) LinkedTestPackagesContext(ctx context.Context, testPkg string) (m
 	// Tree (the MCP server) derive in parallel, and a racing duplicate
 	// derivation costs one redundant go list, never a wrong set.
 	out, err := goRunner.Run(ctx, t.dir, t.env, "list", "-deps", "-test", "-f", "{{.ImportPath}}", testPkg)
-	if errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil {
+	if gotool.Salvaged(ctx, err) {
 		// The listing answered and exited; a descendant held the pipe
 		// past the policy's wait delay (a go wrapper's housekeeping
 		// child). The answer serves (REQ-exec-go-command-runner): the

@@ -123,7 +123,7 @@ func TestStagedPreCommitLoopPersistsAndServes(t *testing.T) {
 	if layer, reason := store.Layer(first[0]); layer != "repo" {
 		t.Fatalf("staged record routed %s (%s), want the repo document", layer, reason)
 	}
-	if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) { return first, nil }); err != nil {
+	if _, err := store.Update(context.Background(), func([]Finding) ([]Finding, error) { return first, nil }); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(root, ".gomutant", "findings.json"))

@@ -39,7 +39,7 @@ func lifecycleModule(t *testing.T, seed ...Finding) (*Tree, *Store) {
 		t.Fatal(err)
 	}
 	if len(seed) > 0 {
-		if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) {
+		if _, err := store.Update(context.Background(), func([]Finding) ([]Finding, error) {
 			return seed, nil
 		}); err != nil {
 			t.Fatal(err)
@@ -451,7 +451,7 @@ func TestPruneActsOnEveryLayer(t *testing.T) {
 	// committed row: both symbols are now two records.
 	deadLocal := storeFinding("example.com/life.Gone", func(f *Finding) { f.Dirty = true; f.BodyHash = "h2" })
 	liveLocal := storeFinding("example.com/life.F", func(f *Finding) { f.Dirty = true; f.BodyHash = "h2" })
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) {
 		return []Finding{deadLocal, liveLocal}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -604,7 +604,7 @@ func TestRetargetActsOnEveryLayer(t *testing.T) {
 	ctx := context.Background()
 	shadow := lifecycleRepoFinding("example.com/old.F", "example.com/old")
 	shadow.Dirty, shadow.BodyHash = true, "moved"
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{shadow}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{shadow}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	documentBefore, err := os.ReadFile(store.path)
@@ -700,14 +700,14 @@ func TestRetargetCollisionIsJudgedWithinALayer(t *testing.T) {
 	}
 	// The same shape across layers is no collision: the overlay's
 	// record shadows the document's rewritten row.
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		return []Finding{old}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	local := lifecycleRepoFinding("example.com/life.F", "example.com/life")
 	local.Dirty, local.BodyHash = true, "local"
-	if err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(prior []Finding) ([]Finding, error) {
 		return append(prior, local), nil
 	}); err != nil {
 		t.Fatal(err)
@@ -756,7 +756,7 @@ func TestRetargetCountsTouchedRecordsPerLayer(t *testing.T) {
 	}
 	tree, store := lifecycleModule(t, killed(false))
 	ctx := context.Background()
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{killed(true)}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{killed(true)}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	result, err := tree.RetargetContext(ctx, store, "example.com/gone.", "example.com/moved.", false)

@@ -79,11 +79,12 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 		return err
 	}
 	var attested gomutant.Finding
-	if err := store.Update(ctx, func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+	routing, err := store.Update(ctx, func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		var err error
 		all, attested, err = gomutant.AttestFinding(all, o.symbol, o.position, o.operator, o.reason)
 		return all, err
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 	// The echo states what the disposition did and where the record
@@ -95,7 +96,7 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// the line is written, so a disposition is never read as reusable
 	// evidence by a reader who stopped at the echo
 	// (REQ-result-run-posture).
-	layer, layerReason := store.Layer(attested)
+	layer, layerReason := routing.Of(store, attested)
 	posture := attestedPosture(ctx, o.dir, selectionOf(o.tags, o.toolchain), vouches, attested, rep)
 	layerText := gomutant.LayerRepo
 	if layer != gomutant.LayerRepo {

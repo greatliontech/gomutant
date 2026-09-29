@@ -37,7 +37,7 @@ type RunLedger struct {
 	// Update is the document write every commit and the final merge go
 	// through; nil is the store's own. A face routes it through a seam
 	// of its own here.
-	Update func(ctx context.Context, change func([]Finding) ([]Finding, error)) error
+	Update func(ctx context.Context, change func([]Finding) ([]Finding, error)) (Routing, error)
 	// Shed receives each shed the first time it is known — a site shed
 	// as the run reports it, a commit's strip after the update returned
 	// — never under the document lock, so a slow terminal or client
@@ -54,8 +54,8 @@ type RunLedger struct {
 	// layers is the layer each committed record's write routed it to,
 	// classified once at the commit; Layer serves it to the engine's
 	// tallies (REQ-exec-banked-summary).
-	layers map[string]committedLayer
-	// mu guards layers: the commit records under the engine's callback
+	routed Routing
+	// mu guards routed: the commit records under the engine's callback
 	// lock, and Layer may be asked outside it.
 	mu sync.Mutex
 }
@@ -73,7 +73,7 @@ func NewRunLedger(store *Store, prior []Finding, runID string, wholeTree bool) *
 		overlaid:  make(map[string]bool, len(prior)),
 		postMerge: map[string]Finding{},
 		reported:  map[string]bool{},
-		layers:    map[string]committedLayer{},
+		routed:    Routing{},
 	}
 	for _, f := range prior {
 		l.snapshot[f.Symbol] = append([]Attestation(nil), f.Attested...)
@@ -82,24 +82,24 @@ func NewRunLedger(store *Store, prior []Finding, runID string, wholeTree bool) *
 	return l
 }
 
-// committedLayer is one commit's routing: the layer and, for a
-// machine-local record, the first disqualifying reason.
-type committedLayer struct{ layer, reason string }
-
-// Layer is Options.Layer: the layer a committed record's write routed
-// it to, as the commit classified it; a record this ledger never
-// committed classifies afresh.
+// Layer is Options.Layer: the layer a record's commit routed it to,
+// read as Routing.Of over every commit of this run — the write's
+// placement where one of the run's writes routed the record, else the
+// store's classification (the one fallback, spelled once at Of).
 func (l *RunLedger) Layer(f Finding) (layer, reason string) {
 	l.mu.Lock()
-	c, ok := l.layers[f.Symbol]
+	p, ok := l.routed[f.Symbol]
 	l.mu.Unlock()
+	var r Routing
 	if ok {
-		return c.layer, c.reason
+		r = Routing{f.Symbol: p}
 	}
-	return l.store.Layer(f)
+	// The fallback's walk runs outside the mutex: a reader outside the
+	// engine's callback lock never holds up a commit.
+	return r.Of(l.store, f)
 }
 
-func (l *RunLedger) update(ctx context.Context, change func([]Finding) ([]Finding, error)) error {
+func (l *RunLedger) update(ctx context.Context, change func([]Finding) ([]Finding, error)) (Routing, error) {
 	if l.Update != nil {
 		return l.Update(ctx, change)
 	}
@@ -142,7 +142,7 @@ func (l *RunLedger) deliver(d AttestationShed) {
 func (l *RunLedger) Commit(ctx context.Context) func(Finding) error {
 	return func(finding Finding) error {
 		var dropped []AttestationShed
-		err := l.update(ctx, func(current []Finding) ([]Finding, error) {
+		routing, err := l.update(ctx, func(current []Finding) ([]Finding, error) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
@@ -158,13 +158,14 @@ func (l *RunLedger) Commit(ctx context.Context) func(Finding) error {
 		if err != nil {
 			return err
 		}
-		// The layer the write routed the record to: the store's
-		// predicate over the exemptions the run was prepared with, the
-		// same the write judged under its lock, classified once here
-		// and served to the engine's tallies by Layer.
-		layer, reason := l.store.Layer(finding)
+		// The layer the write routed the record to, as the write judged
+		// it under its lock — the routing's answer, kept for the tallies
+		// and the rows, which read it through Layer; a write that
+		// answers without a placement for the record (a seam's) leaves
+		// the store's classification to answer.
+		layer, _ := routing.Of(l.store, finding)
 		l.mu.Lock()
-		l.layers[finding.Symbol] = committedLayer{layer, reason}
+		l.routed[finding.Symbol] = routing[finding.Symbol]
 		l.mu.Unlock()
 		if l.Committed != nil {
 			l.Committed(finding, layer)
@@ -197,6 +198,13 @@ type RunOutcome struct {
 	// any standing record the write's re-judgment moved — a document
 	// change git only sees when committed (REQ-mcp-findings-doc).
 	Promoted int
+	// Demoted counts the standing committed records the run's final
+	// write re-judged or re-measured into the machine-local overlay
+	// (an exemption withdrawn, a bracket no longer holding, a fresh
+	// measurement whose evidence is unverifiable) — the promotion's
+	// twin, a row leaving the committed document that git only sees
+	// when committed (REQ-mcp-findings-doc).
+	Demoted int
 	// MachineLocal counts the measured records the store routed
 	// machine-local, the aggregate REQ-result-local-signpost states
 	// beside the per-record disqualifiers.
@@ -229,7 +237,7 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 	var finalSheds []AttestationShed
 	var merged []Finding
 	dropped := 0
-	err := l.update(ctx, func(current []Finding) ([]Finding, error) {
+	routing, err := l.update(ctx, func(current []Finding) ([]Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -259,25 +267,33 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 		l.reported[key] = true
 		outcome.ResidueSheds = append(outcome.ResidueSheds, d)
 	}
-	// Promotion is judged over the whole merged document against where
-	// each record SAT, not the run's own symbols alone: the write
-	// re-judges every standing record against the exemptions in force,
-	// so a record untouched by this run can leave the overlay on it — a
-	// document change the run owns exactly as it owns its own records'
-	// (REQ-mcp-findings-doc).
+	// Promotion and demotion are judged over the whole merged document
+	// against where each record SAT at the run's start, not the run's
+	// own symbols alone: the write re-judges every standing record
+	// against the exemptions in force, so a record untouched by this
+	// run can leave the overlay on it, or leave the committed document
+	// for it — document changes the run owns exactly as it owns its own
+	// records' (REQ-mcp-findings-doc). The layer is the final write's
+	// routing: the one decision, never the predicate re-run after it.
 	for _, m := range merged {
-		if !l.overlaid[m.Symbol] {
+		p, routed := routing[m.Symbol]
+		if !routed {
 			continue
 		}
-		if layer, _ := l.store.Layer(m); layer == LayerRepo {
+		_, standing := l.snapshot[m.Symbol]
+		overlaidAtStart := l.overlaid[m.Symbol]
+		switch {
+		case overlaidAtStart && p.Layer == LayerRepo:
 			outcome.Promoted++
+		case standing && !overlaidAtStart && p.Layer == LayerLocal:
+			outcome.Demoted++
 		}
 	}
 	for _, f := range outcome.Rendered {
 		if f.Skipped != "" {
 			continue
 		}
-		if layer, _ := l.store.Layer(f); layer == LayerLocal {
+		if p, ok := routing[f.Symbol]; ok && p.Layer == LayerLocal {
 			outcome.MachineLocal++
 		}
 	}
@@ -322,17 +338,29 @@ func (o RunOutcome) PromotedText() string {
 	return fmt.Sprintf("%d record(s) promoted - findings document changed, commit it", o.Promoted)
 }
 
+// DemotedText states the standing committed records the run's final
+// write re-judged or re-measured into the machine-local overlay — the
+// promotion's twin, the one spelling on both faces
+// (REQ-mcp-findings-doc).
+func (o RunOutcome) DemotedText() string {
+	if o.Demoted == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d record(s) demoted to the machine-local overlay - findings document changed, commit it", o.Demoted)
+}
+
 // PersistedRiding folds the document changes the final merge persisted
-// — a reconcile's drop, a promotion — into an error exit after it: a
-// face that reports the error alone would hide a document change git
-// only sees when committed, so the counts ride the error text on both
-// faces, as sheds do on the structured one (REQ-mcp-findings-doc).
+// — a reconcile's drop, a promotion, a demotion — into an error exit
+// after it: a face that reports the error alone would hide a document
+// change git only sees when committed, so the counts ride the error
+// text on both faces, as sheds do on the structured one
+// (REQ-mcp-findings-doc).
 func (o RunOutcome) PersistedRiding(err error) error {
 	if err == nil {
 		return nil
 	}
 	var parts []string
-	for _, line := range []string{o.DropText(), o.PromotedText()} {
+	for _, line := range []string{o.DropText(), o.PromotedText(), o.DemotedText()} {
 		if line != "" {
 			parts = append(parts, line)
 		}

@@ -75,7 +75,7 @@ func TestFindingsServesTheDocumentCoverageBounds(t *testing.T) {
 	for i := 0; i < envelope.rows+1; i++ {
 		store.RecordCoverageBound(gomutant.CoverageBound{Selection: fmt.Sprintf("toolchain:go1.%03d", i), Run: "r1", Unreached: []string{"example.com/fixture/leg.Dark"}})
 	}
-	if err := store.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return nil, nil }); err != nil {
+	if _, err := store.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	_, out, err := s.toolFindings(context.Background(), nil, findingsIn{})
@@ -180,7 +180,7 @@ func TestZeroTargetWholeTreeRunClearsTheServedBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.RecordCoverageBound(gomutant.CoverageBound{Selection: "tags:seltag", Run: "r-old", Unreached: []string{"example.com/bare/leg.Gone"}})
-	if err := store.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return nil, nil }); err != nil {
+	if _, err := store.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.toolRun(context.Background(), nil, runIn{selectionIn: selectionIn{Tags: []string{"seltag"}}}); err != nil {

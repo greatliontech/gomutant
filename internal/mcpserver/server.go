@@ -33,7 +33,7 @@ const clientKeepAliveInterval = 30 * time.Second
 // Server is a dir-bound MCP server over the gomutant library.
 type Server struct {
 	dir            string
-	updateDocument func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error
+	updateDocument func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error)
 
 	// mu guards the loaded-tree cache. The cached Tree is read-only after
 	// load and served to concurrent tool calls; see loadTreeContext for the
@@ -87,7 +87,7 @@ func bankedRunSummary(tallies gomutant.RunTallies, cause string, elapsed time.Du
 // the exemptions record the run was prepared with (a store opened per
 // commit would re-read the document and re-judge every row against a
 // possibly changed record). The test seam, when set, takes the path.
-func (s *Server) updateStore(ctx context.Context, store *gomutant.Store, path string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
+func (s *Server) updateStore(ctx context.Context, store *gomutant.Store, path string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error) {
 	if s.updateDocument != nil {
 		return s.updateDocument(ctx, path, change)
 	}
@@ -833,6 +833,7 @@ type runOut struct {
 	AttestationCarries        []string                    `json:"attestationCarries,omitempty" jsonschema:"dispositions carried across moved measurement pins: the mutated source is unchanged and the mutant survived re-execution, so the equivalence reasoning rides - auditable acceptances, no action needed"`
 	OmittedAttestationCarries int                         `json:"omittedAttestationCarries,omitempty" jsonschema:"carry rows beyond the response cap; the document's attestations carry the reasoning"`
 	Promoted                  int                         `json:"promoted,omitempty" jsonschema:"records this run carried from the machine-local overlay into the committed findings document - the document changed, commit it"`
+	Demoted                   int                         `json:"demoted,omitempty" jsonschema:"standing committed records this run's final write re-judged or re-measured into the machine-local overlay (an exemption withdrawn, a bracket no longer holding, a fresh measurement whose evidence is unverifiable) - a row leaving the findings document, a change git only sees when committed"`
 	MachineLocalOnly          int                         `json:"machineLocalOnly,omitempty" jsonschema:"records this run routed to the machine-local overlay - the repo findings document gains nothing from them until their per-record disqualifiers clear; the capped findings list may omit some, this count never does"`
 	Residue                   []gomutant.Residue          `json:"residue,omitempty"`
 	OmittedResidue            int                         `json:"omittedResidue,omitempty"`
@@ -949,6 +950,17 @@ func (out *runOut) capAdvisories() (fullSheds []string) {
 	return fullSheds
 }
 
+// recordOutcome states the document changes the final merge made — the
+// promoted and demoted counts and the machine-local aggregate — on the
+// response, one composition for every path that writes: the measuring
+// run and the zero-target reconcile alike (REQ-mcp-findings-doc,
+// REQ-result-local-signpost).
+func (out *runOut) recordOutcome(outcome gomutant.RunOutcome) {
+	out.Promoted = outcome.Promoted
+	out.Demoted = outcome.Demoted
+	out.MachineLocalOnly = outcome.MachineLocal
+}
+
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
 	// One heartbeat spans the whole call — the load, the selection and
 	// its signposts, the run, the merge, the rendering — naming the
@@ -1046,7 +1058,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// (REQ-attest-survivor, REQ-mcp-findings-doc); its writes take the
 	// server's document seam.
 	ledger := gomutant.NewRunLedger(prepared.Store, prior, runID, wholeTree)
-	ledger.Update = func(ctx context.Context, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
+	ledger.Update = func(ctx context.Context, change func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error) {
 		return s.updateStore(ctx, prepared.Store, gomutant.FindingsPathAt(s.dir, in.Findings), change)
 	}
 	out.LegacyOverlays, out.OmittedLegacyOverlays = capRows(prepared.Store.LegacyEntries())
@@ -1077,8 +1089,9 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 			return err
 		}
 		// The zero-target write re-judges the standing records too: a
-		// promotion on it is the response's to state (REQ-mcp-findings-doc).
-		out.Promoted = outcome.Promoted
+		// promotion or a demotion on it is the response's to state
+		// (REQ-mcp-findings-doc).
+		out.recordOutcome(outcome)
 		if line := outcome.DropText(); line != "" {
 			out.Note += "; " + line
 		}
@@ -1230,7 +1243,6 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// The summary's unreached roster caps like every row list, the
 	// remainder counted (REQ-mcp-envelope).
 	out.Summary.Unreached, out.OmittedUnreached = capRows(out.Summary.Unreached)
-	runStore := prepared.Store
 	// The cut is derived once per row; the summary sums the rows. The
 	// rows beyond the response cap are cut too, so the total is exact.
 	var onDelta func(gomutant.Finding) ([]gomutant.Survivor, error)
@@ -1241,7 +1253,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		}
 	}
 	var deltaOpen int
-	if out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(ctx, rendered, runStore.Layer, onDelta); err == nil {
+	if out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(ctx, rendered, ledger.Layer, onDelta); err == nil {
 		for i := range out.Findings {
 			if p, ok := postures[out.Findings[i].Symbol]; ok {
 				out.Findings[i].Reuse, out.Findings[i].Reasons, out.Findings[i].Analysis = string(p.Reuse), p.Reasons, p.Analysis
@@ -1255,11 +1267,10 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		out.Summary.Delta = &gomutant.DeltaSummary{Ref: sel.Cut.Ref, Open: deltaOpen}
 	}
 	out.Residue, out.OmittedResidue = capRows(out.Residue)
-	// A record this run carried from the machine-local overlay into the
-	// committed document is a state change git does not see until
+	// A record this run moved between the layers — into the committed
+	// document or out of it — is a state change git does not see until
 	// committed, so the response says it happened (REQ-mcp-findings-doc).
-	out.Promoted = outcome.Promoted
-	out.MachineLocalOnly = outcome.MachineLocal
+	out.recordOutcome(outcome)
 	out.Document = gomutant.FindingsPathAt(s.dir, in.Findings)
 	// The advisory lists cap like every row surface; the drift error
 	// still folds over the FULL shed list, capped by its own exemplar
@@ -1909,7 +1920,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	if err != nil {
 		return nil, out, err
 	}
-	err = s.updateStore(ctx, store, gomutant.FindingsPathAt(s.dir, in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
+	routing, err := s.updateStore(ctx, store, gomutant.FindingsPathAt(s.dir, in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		var err error
 		all, attested, err = gomutant.AttestFinding(all, in.Symbol, in.Position, in.Operator, in.Reason)
 		if err != nil {
@@ -1929,7 +1940,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	// the tree load and inspection below demote their failures to
 	// warnings - a hard error there would read as a failed write that
 	// in fact landed.
-	out.Layer, out.LayerReason = store.Layer(attested)
+	out.Layer, out.LayerReason = routing.Of(store, attested)
 	notify := progressNotifier(ctx, req)
 	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {

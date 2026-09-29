@@ -17,7 +17,7 @@ func ledgerStore(t *testing.T, prior []Finding) (*Store, string) {
 		t.Fatal(err)
 	}
 	if len(prior) > 0 {
-		if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) { return prior, nil }); err != nil {
+		if _, err := store.Update(context.Background(), func([]Finding) ([]Finding, error) { return prior, nil }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -127,7 +127,7 @@ func TestRunLedgerCountsPromotedMachineLocalAndDropped(t *testing.T) {
 	}
 	// pkg.Skipped's standing record holds counts the skipped row must
 	// not inherit.
-	if err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 		return append(current, storeFinding("pkg.Skipped", nil)), nil
 	}); err != nil {
 		t.Fatal(err)
@@ -162,9 +162,9 @@ func TestRunLedgerCountsPromotedMachineLocalAndDropped(t *testing.T) {
 	// A scoped selection of nothing writes nothing; a whole-tree one
 	// reconciles, even against zero targets.
 	scoped := NewRunLedger(store, all, "run-3", false)
-	scoped.Update = func(context.Context, func([]Finding) ([]Finding, error)) error {
+	scoped.Update = func(context.Context, func([]Finding) ([]Finding, error)) (Routing, error) {
 		t.Fatal("a scoped empty run wrote")
-		return nil
+		return nil, nil
 	}
 	if out, err := scoped.Finish(ctx, nil, nil, Selection{}); err != nil || out.Dropped != 0 {
 		t.Fatalf("scoped empty finish = %+v, %v", out, err)
@@ -182,7 +182,7 @@ func TestRunLedgerBanksOnlyReturnedCommits(t *testing.T) {
 	store, _ := ledgerStore(t, nil)
 	ledger := NewRunLedger(store, nil, "run-5", false)
 	refused := errors.New("the document write refused")
-	ledger.Update = func(context.Context, func([]Finding) ([]Finding, error)) error { return refused }
+	ledger.Update = func(context.Context, func([]Finding) ([]Finding, error)) (Routing, error) { return nil, refused }
 	ledger.Committed = func(f Finding, _ string) { t.Fatalf("a failed commit banked %s", f.Symbol) }
 	if err := ledger.Commit(context.Background())(storeFinding("pkg.A", nil)); !errors.Is(err, refused) {
 		t.Fatalf("commit error = %v, want the write's refusal", err)
@@ -191,11 +191,11 @@ func TestRunLedgerBanksOnlyReturnedCommits(t *testing.T) {
 	// persist it states no drop: the outcome reads the write's answer.
 	gone := []Finding{storeFinding("pkg.Gone", nil)}
 	whole := NewRunLedger(store, gone, "run-5", true)
-	whole.Update = func(_ context.Context, change func([]Finding) ([]Finding, error)) error {
+	whole.Update = func(_ context.Context, change func([]Finding) ([]Finding, error)) (Routing, error) {
 		if merged, err := change(gone); err != nil || len(merged) != 0 {
 			t.Fatalf("the reconcile did not drop the stale record: %+v, %v", merged, err)
 		}
-		return refused
+		return nil, refused
 	}
 	if outcome, err := whole.Finish(context.Background(), nil, nil, Selection{}); !errors.Is(err, refused) || outcome.Dropped != 0 {
 		t.Fatalf("failed whole-tree write: dropped %d, %v; want 0 and the refusal", outcome.Dropped, err)
@@ -220,7 +220,7 @@ func TestRunLedgerCountsAStandingRecordTheWritePromotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := before.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{unverifiable}, nil }); err != nil {
+	if _, err := before.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{unverifiable}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if layer, _ := before.Layer(unverifiable); layer != "local" {
@@ -273,7 +273,7 @@ func TestRunLedgerCountsAPromotionOnTheZeroTargetWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := before.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{shaped}, nil }); err != nil {
+	if _, err := before.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{shaped}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if layer, _ := before.Layer(shaped); layer != "local" {

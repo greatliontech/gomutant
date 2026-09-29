@@ -138,7 +138,7 @@ func TestStoreRecordsTheBoundOnTheNextWrite(t *testing.T) {
 	f := survivorFinding("example.com/mod/host.D")
 	store.RecordCoverageBound(CoverageBound{Selection: "wasm", Run: "r1", Unreached: []string{"example.com/mod/wasm.A"}})
 	store.RecordCoverageBound(CoverageBound{Selection: "js", Run: "r1", Unreached: []string{"example.com/mod/js.B"}})
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{f}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{f}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	bounds, err := store.CoverageBounds(ctx)
@@ -148,10 +148,10 @@ func TestStoreRecordsTheBoundOnTheNextWrite(t *testing.T) {
 	// A later run of one selection replaces its row alone; a write with
 	// nothing recorded keeps every row.
 	store.RecordCoverageBound(CoverageBound{Selection: "wasm", Run: "r2", Unreached: []string{"example.com/mod/wasm.A", "example.com/mod/wasm.C"}})
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{f}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{f}, nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{f}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{f}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	bounds, err = store.CoverageBounds(ctx)
@@ -161,7 +161,7 @@ func TestStoreRecordsTheBoundOnTheNextWrite(t *testing.T) {
 	// An empty bound clears its selection's row — the leg reached
 	// everything — and leaves the others.
 	store.RecordCoverageBound(CoverageBound{Selection: "js", Run: "r3", Unreached: []string{}})
-	if err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{f}, nil }); err != nil {
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{f}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	bounds, err = store.CoverageBounds(ctx)
@@ -322,7 +322,7 @@ func TestUpdateDocumentKeepsTheCoverageBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.RecordCoverageBound(CoverageBound{Selection: "tags:wasm", Run: "r1", Unreached: []string{"example.com/mod/wasm.A"}})
-	if err := store.Update(context.Background(), func([]Finding) ([]Finding, error) { return []Finding{survivorFinding("example.com/mod/host.D")}, nil }); err != nil {
+	if _, err := store.Update(context.Background(), func([]Finding) ([]Finding, error) { return []Finding{survivorFinding("example.com/mod/host.D")}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := UpdateDocument(context.Background(), path, func(prior []Finding) ([]Finding, error) { return prior, nil }); err != nil {

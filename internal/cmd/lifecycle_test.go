@@ -61,7 +61,7 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 		f.TargetEvidence.RuntimeInputs, f.OracleEvidence[0].RuntimeInputs = "eyJ2IjoxfQ", "eyJ2IjoxfQ"
 		return f
 	}
-	if err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if _, err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{record("example.com/life.Gone"), record("example.com/old.F"), committed("example.com/life.Gone2"), committed("example.com/old.G")}, nil
 	}); err != nil {
 		t.Fatal(err)

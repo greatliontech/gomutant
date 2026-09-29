@@ -145,6 +145,45 @@ type overlayCacheEntry struct {
 type judgedRecord struct {
 	finding     Finding
 	committable bool
+	reasons     []string
+}
+
+// Placement is the layer a write routed one record to, with every
+// portable-line clause that disqualified it from the repo document
+// (none for a repo row) — the write's own decision, served so no reader
+// re-derives it after the write (REQ-result-layers).
+type Placement struct {
+	Layer   string
+	Reasons []string
+}
+
+// Reason is the first disqualifying clause, or "" for a repo row: the
+// one-line form the run's progress lines and the attest echo state.
+func (p Placement) Reason() string {
+	if len(p.Reasons) == 0 {
+		return ""
+	}
+	return p.Reasons[0]
+}
+
+// Routing is a write's placements by symbol: every record the update
+// returned that is not skipped — a skipped record persists nothing and
+// is not routed; a standing record the final merge kept is routed as
+// the write re-judged it.
+type Routing map[string]Placement
+
+// Of is the one reading of a routing for one record: the write's
+// placement where the write routed the record, else the store's
+// classification. A Store write routes every record it persists, so
+// the fallback answers for a write that reports no placement — a
+// seam standing in for the store, or a skipped record no write
+// routes — as the store's answer stated once, never a zero placement
+// (REQ-result-layers).
+func (r Routing) Of(store *Store, f Finding) (layer, reason string) {
+	if p, ok := r[f.Symbol]; ok && p.Layer != "" {
+		return p.Layer, p.Reason()
+	}
+	return store.Layer(f)
 }
 
 // machineLocalDir derives this machine's per-tree cache home — the
@@ -864,18 +903,26 @@ func presentWhenAbsent[T any](list []T) []T {
 	return list
 }
 
-// committable judges a record's committability once per distinct
-// persisted content: an unchanged record (the common case across a
-// campaign's commits) is served from the memo, never re-walked.
-func (s *Store) committable(f, form Finding) bool {
+// route judges a record's committability once per distinct persisted
+// content, with the clauses that disqualify it: an unchanged record
+// (the common case across a campaign's commits) is served from the
+// memo, never re-walked. The reasons ride the memo so a write's routing
+// report costs no second walk.
+func (s *Store) route(f, form Finding) (bool, []string) {
 	if memo, ok := s.judged[f.Symbol]; ok && reflect.DeepEqual(memo.finding, form) {
-		return memo.committable
+		return memo.committable, memo.reasons
 	}
 	if s.hooks.walk != nil {
 		s.hooks.walk(f.Symbol)
 	}
-	ok, _ := Committable(f, s.moduleDir, s.exemptions)
-	s.judged[f.Symbol] = judgedRecord{finding: form, committable: ok}
+	reasons := CommittableReasons(f, s.moduleDir, s.exemptions)
+	s.judged[f.Symbol] = judgedRecord{finding: form, committable: len(reasons) == 0, reasons: reasons}
+	return len(reasons) == 0, reasons
+}
+
+// committable is route's verdict alone.
+func (s *Store) committable(f, form Finding) bool {
+	ok, _ := s.route(f, form)
 	return ok
 }
 
@@ -899,12 +946,16 @@ func (s *Store) committable(f, form Finding) bool {
 // symbol's next update, never a lost record. The update callback runs
 // under the document lock and must not call Store or document methods
 // on the same document — a nested writer waits out the lock retries
-// and errors.
-func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Finding, error)) error {
+// and errors. The returned routing is the write's own placement of
+// every record the update returned, as it judged them under the lock:
+// the one source a run's ledger, tallies, and echoes read, never a
+// re-classification after the write (REQ-result-layers).
+func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Finding, error)) (Routing, error) {
 	var next, rows []Finding
 	var bounds []CoverageBound
 	var pruned []string
 	committable := map[string]bool{}
+	routing := Routing{}
 	held := map[string]Finding{}
 	forms := map[string]Finding{}
 	if err := updateDocument(ctx, s.path, documentUpdate{parse: s.readDocument, update: func(repoPrior []Finding) ([]Finding, error) {
@@ -936,7 +987,14 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 				continue
 			}
 			forms[f.Symbol] = persistedForm(f)
-			committable[f.Symbol] = s.committable(f, forms[f.Symbol])
+			ok, reasons := s.route(f, forms[f.Symbol])
+			committable[f.Symbol] = ok
+			layer := LayerRepo
+			if !ok {
+				layer = LayerLocal
+			}
+			// The routing's slice is its own: the memo keeps the store's.
+			routing[f.Symbol] = Placement{Layer: layer, Reasons: slices.Clone(reasons)}
 		}
 		byRepo := make(map[string]Finding, len(repoPrior))
 		for _, f := range repoPrior {
@@ -1047,9 +1105,9 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		}
 		return nil
 	}}); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return routing, nil
 }
 
 // Layer classifies one finding for the findings surfaces: LayerRepo for

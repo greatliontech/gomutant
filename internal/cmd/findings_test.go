@@ -27,7 +27,7 @@ func TestFindingsTailStatesTheDocumentCoverageBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.RecordCoverageBound(gomutant.CoverageBound{Selection: "tags:wasm", Run: "r1", Unreached: []string{"example.com/empty/leg.Dark"}})
-	if err := store.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return nil, nil }); err != nil {
+	if _, err := store.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
@@ -144,7 +144,7 @@ func TestZeroTargetWholeTreeRunClearsTheBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.RecordCoverageBound(gomutant.CoverageBound{Selection: "tags:seltag", Run: "r-old", Unreached: []string{"example.com/bare/leg.Gone"}})
-	if err := store.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return nil, nil }); err != nil {
+	if _, err := store.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer

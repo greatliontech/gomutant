@@ -285,7 +285,7 @@ func TestServePathPanicIsLoggedAndReraised(t *testing.T) {
 // served (REQ-mcp-exit-log).
 func TestHandlerPanicIsLoggedAndAnsweredAsAnError(t *testing.T) {
 	s := serverAt(t)
-	s.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
+	s.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error) {
 		panic("handler boom")
 	}
 	err := serveOnce(t, s, func(ctx context.Context, _ context.CancelFunc, client *mcp.ClientSession, _ func()) {

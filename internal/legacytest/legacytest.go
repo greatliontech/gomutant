@@ -33,7 +33,7 @@ func Plant(t *testing.T, dir, findingsPath string, versions ...int) []string {
 	for i, version := range versions {
 		symbol := fmt.Sprintf("example.com/empty.Legacy%d", i)
 		before := entries(t)
-		if err := store.Update(context.Background(), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
+		if _, err := store.Update(context.Background(), func(current []gomutant.Finding) ([]gomutant.Finding, error) {
 			return append(append([]gomutant.Finding(nil), current...), record(symbol)), nil
 		}); err != nil {
 			t.Fatal(err)

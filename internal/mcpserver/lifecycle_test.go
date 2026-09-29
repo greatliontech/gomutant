@@ -50,7 +50,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if _, err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{dead, renamed}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	shadowed.TargetEvidence.ObservationProof.Subject.Package = "example.com/old2"
 	shadowed.Dirty, shadowed.Commit = false, "abc"
 	shadowed.TargetEvidence.RuntimeInputs, shadowed.OracleEvidence[0].RuntimeInputs = "eyJ2IjoxfQ", "eyJ2IjoxfQ"
-	if err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) { return append(prior, shadowed), nil }); err != nil {
+	if _, err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) { return append(prior, shadowed), nil }); err != nil {
 		t.Fatal(err)
 	}
 	_, sOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old2.", To: "example.com/life."})
@@ -89,7 +89,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	killed.Killed, killed.Mutants, killed.CandidateCount, killed.Generated = 1, 1, 1, 1
 	killed.Kills = []gomutant.Kill{{Position: "p.go:1:1", Operator: "zero return", Killer: "example.com/gone.TestHelper"}}
 	killed.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}
-	if err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) { return append(prior, killed), nil }); err != nil {
+	if _, err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) { return append(prior, killed), nil }); err != nil {
 		t.Fatal(err)
 	}
 	_, tOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/gone.", To: "example.com/moved."})

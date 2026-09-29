@@ -116,7 +116,7 @@ func TestToolExplainAnswersSymbolAndTriage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Update(ctx, func([]gomutant.Finding) ([]gomutant.Finding, error) {
+	if _, err := st.Update(ctx, func([]gomutant.Finding) ([]gomutant.Finding, error) {
 		return []gomutant.Finding{multi, single}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestToolExplainCapsEveryRowSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Update(ctx, func([]gomutant.Finding) ([]gomutant.Finding, error) { return seeds, nil }); err != nil {
+	if _, err := st.Update(ctx, func([]gomutant.Finding) ([]gomutant.Finding, error) { return seeds, nil }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1130,7 +1130,9 @@ func TestToolRunPropagatesUpdateFailure(t *testing.T) {
 	}
 	s := serverAt(t)
 	want := errors.New("update failed")
-	s.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error { return want }
+	s.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error) {
+		return nil, want
+	}
 	_, _, err := s.toolRun(context.Background(), nil, runIn{
 		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"oracleExplicit":true}]}`,
 	})
@@ -1146,11 +1148,11 @@ func TestToolRunCancellationAtUpdateLeavesDocumentUntouched(t *testing.T) {
 	s := serverAt(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	called := false
-	s.updateDocument = func(_ context.Context, _ string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
+	s.updateDocument = func(_ context.Context, _ string, change func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error) {
 		called = true
 		cancel()
 		_, err := change(nil)
-		return err
+		return nil, err
 	}
 	_, _, err := s.toolRun(ctx, nil, runIn{
 		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":[],"oracleExplicit":true}]}`,

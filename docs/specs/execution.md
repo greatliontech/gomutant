@@ -1400,4 +1400,5 @@ policy's prepared command. The linked-set listing and the toolchain sample
 serve the answer a command wrote before exiting cleanly while a descendant
 held its pipe past the policy's wait delay (the listing whole, the sample its
 first line); the environment snapshots and the roots probe read that answer
-through Gofresh, which discards it today.
+through Gofresh's own salvaging forms (the snapshot served whole, the roots
+probe's document parsed whole or refused).

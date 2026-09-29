@@ -317,7 +317,7 @@ func TestUpdateEvictsRevokedRepoRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
 		return []Finding{f}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -333,7 +333,7 @@ func TestUpdateEvictsRevokedRepoRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
+	if _, err := store.Update(context.Background(), func(prior []Finding) ([]Finding, error) {
 		return []Finding{f}, nil
 	}); err != nil {
 		t.Fatal(err)

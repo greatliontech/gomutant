@@ -145,7 +145,7 @@ INV-RESULT-CANDIDATE-CONSERVATION: enforced by
 `TestRunConservesCandidateDiscards`,
 `TestSpliceFindingCountsConservesChangedOutcomes`,
 `TestExtendFindingCountsAppendsSuffixOutcomes`,
-`TestGrowFindingCountsReplacesSurvivorOutcomes`, and
+`TestDriftFindingCountsRescoresRemeasured`, and
 `TestParseFindingsCandidateEvidence`.
 
 **REQ-result-local-signpost** (behavior): A run surface that renders
@@ -154,7 +154,11 @@ with its disqualifier, and state the aggregate when any record stayed
 machine-local — an unchanged repo document after a measuring run
 states its cause on the run face instead of reading as a silent write
 failure (the field shape: healthy counts, an empty committed
-document, and a consumer diagnosing corruption).
+document, and a consumer diagnosing corruption). The layer a run
+surface names for a record it wrote is the layer that write routed the
+record to — the write's own decision under the document lock, served to
+the run's tallies and lines, never the layer predicate re-run over the
+record after the write.
 
 **REQ-result-version-surface** (behavior): The command surface MUST
 report the binary's identity and the findings document versions it

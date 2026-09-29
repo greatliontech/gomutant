@@ -214,7 +214,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if err != nil {
 			return err
 		}
-		renderPromoted(&terminal, outcome)
+		renderDocumentMoves(&terminal, outcome)
 		renderReconcileDrop(&terminal, outcome)
 		return rep.flushProse(terminal.String())
 	}
@@ -435,7 +435,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			// to the machine-local overlay names its disqualifier, so a run
 			// that rendered healthy counts never leaves the repo document
 			// silently missing the record.
-			if l, reason := docStore.Layer(f); l == gomutant.LayerLocal {
+			if l, reason := ledger.Layer(f); l == gomutant.LayerLocal {
 				layer, layerReason = l, reason
 			}
 		}
@@ -559,7 +559,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 		// A record this run carried from the machine-local overlay into
 		// the committed document is a state change git does not see until
 		// committed, so the run says it happened (REQ-mcp-findings-doc).
-		renderPromoted(&terminal, outcome)
+		renderDocumentMoves(&terminal, outcome)
 		renderReconcileDrop(&terminal, outcome)
 		// The aggregate form of the per-record signpost, printed when
 		// any record stayed machine-local: without it a run leaving
@@ -754,13 +754,17 @@ func renderResidueSheds(o runOptions, rep *runReporter, terminal io.Writer, outc
 	}
 }
 
-// renderPromoted states the records the run's writes carried from the
-// machine-local overlay into the committed document — a state change
-// git does not see until committed, so the run says it happened on
-// every path that writes (REQ-mcp-findings-doc).
-func renderPromoted(w io.Writer, outcome gomutant.RunOutcome) {
-	if line := outcome.PromotedText(); line != "" {
-		fmt.Fprintln(w, line)
+// renderDocumentMoves states the records the run's writes moved
+// between the layers — carried from the machine-local overlay into
+// the committed document, or re-judged or re-measured out of it into
+// the overlay — state changes git does not see until committed, so
+// the run says they happened on every path that writes
+// (REQ-mcp-findings-doc).
+func renderDocumentMoves(w io.Writer, outcome gomutant.RunOutcome) {
+	for _, line := range []string{outcome.PromotedText(), outcome.DemotedText()} {
+		if line != "" {
+			fmt.Fprintln(w, line)
+		}
 	}
 }
 

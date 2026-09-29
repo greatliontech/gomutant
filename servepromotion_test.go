@@ -28,9 +28,10 @@ func promoteThroughServe(t *testing.T, target Target, setup func(t *testing.T) (
 	}
 	ctx := context.Background()
 	commit := func(finding Finding) error {
-		return store.Update(ctx, func(current []Finding) ([]Finding, error) {
+		_, err := store.Update(ctx, func(current []Finding) ([]Finding, error) {
 			return mergeOnly(MergeFindings(current, []Finding{finding}, nil)), nil
 		})
+		return err
 	}
 
 	tr, err := Load(tmp)
@@ -45,7 +46,7 @@ func promoteThroughServe(t *testing.T, target Target, setup func(t *testing.T) (
 		t.Fatalf("dirty-born record = dirty %v with %d survivors", first[0].Dirty, len(first[0].Survivors))
 	}
 	s0 := first[0].Survivors[0]
-	if err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
+	if _, err := store.Update(ctx, func(all []Finding) ([]Finding, error) {
 		for i := range all {
 			if all[i].Symbol == target.Symbol {
 				return all, all[i].Attest(s0.Position, s0.Operator, "equivalent by inspection")

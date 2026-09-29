@@ -43,8 +43,8 @@ func TestToolRunKeepsAnalysisPayloadsInlineWithoutAToken(t *testing.T) {
 	// An aborted tokenless run has no response to carry them: the
 	// payloads seen before the abort ride its error.
 	aborted := serverAt(t)
-	aborted.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) error {
-		return errors.New("the document write refused")
+	aborted.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error) {
+		return nil, errors.New("the document write refused")
 	}
 	if _, _, err := aborted.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "analysis payloads seen before this abort: baseline-output example.com/fixture/failing:") {
 		t.Fatalf("aborted tokenless run = %v; want the payloads riding the error", err)
