@@ -25,4 +25,6 @@ scavenger returns it slowly on its own; an explicit return at request end
 would make the idle server's footprint its true working set. A measured
 before/after (VmRSS at idle after a run-class request) is the acceptance.
 
-Lands: the cross-tool train's next triage gate.
+Lands: cross-tool train chunk 233 (MCP campaign observability — the
+server's run-state record; the resident set a finished pass leaves is
+its idle state, slotted as a rider at the 2026-09-29 replan).
