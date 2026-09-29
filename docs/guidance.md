@@ -165,7 +165,9 @@ were measured with; refuses when any package did not load cleanly,
 and each removed record's attested dispositions are echoed in the
 response, never truncated — the reasoning survives the removal.
 Shaped findings (structural targets) are kept unconditionally:
-declaration absence is their normal state, never detachment.
+declaration absence is their normal state, never detachment. The kept
+count is stated per layer — the committed document's rows and the
+machine-local overlay's.
 Prune acts on both layers: a record in the machine-local overlay is
 removed there, and each removed record names its layer.
 **example:** a check preview at a chunk close to lint for dead
@@ -183,17 +185,17 @@ records.
 - `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use retarget after a rename — records whose symbol-bearing
 fields carry the from prefix rewrite, surviving attestations follow
-their mutants by position, operator, and site, never symbol text,
-and each rewritten target must resolve in the current tree under
-this call's selection. Rows cap at 50 with the remainder counted.
-Run a check preview first. Retarget acts on both layers — a record
-in the machine-local overlay rewrites there, each row naming its
-layer, a document row whose new symbol the overlay holds said to be
-shadowed — and refuses while a reviewed exemption entry names a
-subject some record's evidence carries under the old prefix: rewrite
-that record by hand first; the moved subjects no record carries are
-listed for the reviewer. Identity only moves: manifests, ledgers, and
-exemption stamps stay as measured.
+their mutants by position, operator, and site, never symbol text, and
+each rewritten target must resolve in the current tree under this
+call's selection. Rows cap at 50 with the remainder counted. Run a
+check preview first. Retarget acts on both layers — a record in the
+machine-local overlay rewrites there, each row naming its layer, the
+rewritten and touched counts stated per layer, a document row whose
+new symbol the overlay holds said to be shadowed — and refuses while a
+reviewed exemption entry names a subject some record's evidence
+carries under the old prefix: rewrite that record by hand first; the
+moved subjects no record carries are listed for the reviewer. Identity
+only moves: manifests, ledgers, and exemption stamps stay as measured.
 **example:** a check preview of from=example.com/old.
 to=example.com/new. after a package rename, then for real.
 

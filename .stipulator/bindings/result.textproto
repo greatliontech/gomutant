@@ -2040,3 +2040,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "31aaae5bed34f369c813ee53137fca6d3373a11bd9f153628b12a58cff16d994"
 }
+
+bindings {
+  requirement_id: "REQ-result-stale"
+  content_hash: "385f092bdd133307795b9ad093737bcfd2b06522d409496f3ca44e39663d236c"
+  source_hash: "8b2d1a8b0ae988ad5f57e6872e55e25005ee4fd410cfdc507a52b312c9d7a129"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestShapeDigestMovesWithInputs"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7cba59c3fdd9dccbd5305465b0937292d53f222ceb12430653c36062b62e1c7f"
+}
+
+bindings {
+  requirement_id: "REQ-result-stale"
+  content_hash: "385f092bdd133307795b9ad093737bcfd2b06522d409496f3ca44e39663d236c"
+  source_hash: "8b2d1a8b0ae988ad5f57e6872e55e25005ee4fd410cfdc507a52b312c9d7a129"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestShapeDigestTravelsAcrossCheckoutRoots"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "618d9cd0df3c6c896f903d05432c15e127b196ca8464bc0aa8d3566558840665"
+}

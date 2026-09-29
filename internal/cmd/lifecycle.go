@@ -70,7 +70,7 @@ func renderPrune(w io.Writer, result gomutant.PruneResult) {
 			fmt.Fprintf(w, "          attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
 		}
 	}
-	fmt.Fprintf(w, "%s %d record(s), %d kept\n", verb, len(result.Removed), result.Kept)
+	fmt.Fprintf(w, "%s %d record(s), %d kept (%d repo, %d machine-local)\n", verb, len(result.Removed), result.Kept.Total(), result.Kept.Repo, result.Kept.Local)
 }
 
 // staleExemptionRoster bounds the uncarried exemption subjects a
@@ -157,8 +157,8 @@ func renderRetarget(w io.Writer, result gomutant.RetargetResult) {
 		}
 		fmt.Fprintf(w, "note: %d reviewed exemption subject(s) under the old prefix that no record carries - no rewrite reaches them; rewrite or delete them by hand: %s%s\n", n, strings.Join(shown, ", "), more)
 	}
-	if result.Touched > 0 {
-		fmt.Fprintf(w, "%s %d further record(s) whose oracle or killer identities carry the rename\n", verb, result.Touched)
+	if result.Touched.Total() > 0 {
+		fmt.Fprintf(w, "%s %d further record(s) whose oracle or killer identities carry the rename (%d repo, %d machine-local)\n", verb, result.Touched.Total(), result.Touched.Repo, result.Touched.Local)
 	}
-	fmt.Fprintf(w, "%s %d record(s)\n", verb, len(result.Rewritten))
+	fmt.Fprintf(w, "%s %d record(s) (%d repo, %d machine-local)\n", verb, len(result.Rewritten), result.RewrittenCounts.Repo, result.RewrittenCounts.Local)
 }

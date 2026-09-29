@@ -3320,3 +3320,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "8bd36c361f93595acfa0d0d47dcd571a7c0be0a309c83ffbd0c36561b16120b7"
 }
+
+bindings {
+  requirement_id: "REQ-exec-attribution"
+  content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestWindowEvidenceVolatileArms"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fe662d9ebbe7af0eb990cc16bd8f72dd4fce38d22f7d1540cc76b4c8ed91aece"
+}
+
+bindings {
+  requirement_id: "REQ-exec-attribution"
+  content_hash: "67e37ebbdb4cfc5ca51e5376d212f37625ea41c28813a9627f9edba91775f044"
+  source_hash: "7d599511545214c475d35f5ba2e567be117f7074fe2594529ea5409b5f7284d7"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestShapedScratchInfrastructureFaultNeverKills"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7bef0010f24064b61c49a10aaba2750d5011b36107b0efc7d90ee84b46b2dd5e"
+}

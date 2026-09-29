@@ -78,7 +78,7 @@ func TestPruneRemovesOnlyResolvedDeadRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !preview.Check || len(preview.Removed) != 1 || preview.Removed[0].Symbol != "example.com/life.Gone" || preview.Kept != 1 {
+	if !preview.Check || len(preview.Removed) != 1 || preview.Removed[0].Symbol != "example.com/life.Gone" || preview.Kept.Total() != 1 {
 		t.Fatalf("preview = %+v", preview)
 	}
 	if all, err := store.Load(ctx); err != nil || len(all) != 2 {
@@ -89,7 +89,7 @@ func TestPruneRemovesOnlyResolvedDeadRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Removed) != 1 || result.Removed[0].Symbol != "example.com/life.Gone" || result.Kept != 1 {
+	if len(result.Removed) != 1 || result.Removed[0].Symbol != "example.com/life.Gone" || result.Kept.Total() != 1 {
 		t.Fatalf("prune = %+v", result)
 	}
 	// The removal echo carries the dispositions - promote-then-delete,
@@ -170,7 +170,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("killer-only rename refused: %v", err)
 	}
-	if len(touched.Rewritten) != 0 || touched.Touched != 1 {
+	if len(touched.Rewritten) != 0 || touched.Touched.Total() != 1 {
 		t.Fatalf("killer-only rename = %+v, want touched only", touched)
 	}
 	// The touched surface owes no resolution, so its rewrites echo row
@@ -194,7 +194,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("boundary-adjacent rename refused: %v", err)
 	}
-	if len(boundary.Rewritten) != 0 || boundary.Touched != 0 {
+	if len(boundary.Rewritten) != 0 || boundary.Touched.Total() != 0 {
 		t.Fatalf("mid-segment prefix rewrote outside the boundary: %+v", boundary)
 	}
 	if allM, err := storeM.Load(ctx); err != nil || allM[0].Kills[0].Killer != "example.com/goneril.TestHelper" {
@@ -212,7 +212,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("subpackage oracle rename refused: %v", err)
 	}
-	if len(subResult.Rewritten) != 0 || subResult.Touched != 1 {
+	if len(subResult.Rewritten) != 0 || subResult.Touched.Total() != 1 {
 		t.Fatalf("subpackage oracle rename = %+v, want touched only", subResult)
 	}
 	allS, err := storeS.Load(ctx)
@@ -244,7 +244,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sentinel-killer rename refused: %v", err)
 	}
-	if len(sentinelResult.Rewritten) != 0 || sentinelResult.Touched != 1 || len(sentinelResult.TouchedRewrites) != 1 {
+	if len(sentinelResult.Rewritten) != 0 || sentinelResult.Touched.Total() != 1 || len(sentinelResult.TouchedRewrites) != 1 {
 		t.Fatalf("sentinel-killer rename = %+v, want touched only with the move echoed", sentinelResult)
 	}
 	if allP, err := storeP.Load(ctx); err != nil || allP[0].Kills[0].Killer != engine.PackageKillerPrefix+"example.com/moved)" {
@@ -302,7 +302,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dotted in-package rename refused: %v", err)
 	}
-	if dottedResult.Touched != 1 {
+	if dottedResult.Touched.Total() != 1 {
 		t.Fatalf("dotted in-package rename = %+v, want touched", dottedResult)
 	}
 	allD, err := storeD.Load(ctx)
@@ -348,7 +348,7 @@ func TestRetargetRewritesSymbolIdentityAndDispositionsRide(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rename into a dotted package name refused: %v", err)
 	}
-	if intoResult.Touched != 1 {
+	if intoResult.Touched.Total() != 1 {
 		t.Fatalf("rename into a dotted package name = %+v, want touched", intoResult)
 	}
 	if allI, err := storeI.Load(ctx); err != nil || allI[0].OracleEvidence[0].Symbol != "gopkg.in/mylib.v2.TestZ" ||
@@ -451,8 +451,16 @@ func TestPruneActsOnEveryLayer(t *testing.T) {
 	// committed row: both symbols are now two records.
 	deadLocal := storeFinding("example.com/life.Gone", func(f *Finding) { f.Dirty = true; f.BodyHash = "h2" })
 	liveLocal := storeFinding("example.com/life.F", func(f *Finding) { f.Dirty = true; f.BodyHash = "h2" })
+	// A shaped record held in the overlay alone (kept unconditionally —
+	// declaration absence is its normal state): the kept count's two
+	// layers differ, so a count landing in the wrong layer is seen.
+	overlayOnly := storeFinding("structural:local", func(f *Finding) {
+		f.Dirty = true
+		f.Shape = &TargetShape{Structural: &StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}}
+		f.TargetEvidence = SubjectEvidence{} // a shaped record carries no target evidence
+	})
 	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) {
-		return []Finding{deadLocal, liveLocal}, nil
+		return []Finding{deadLocal, liveLocal, overlayOnly}, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -489,8 +497,8 @@ func TestPruneActsOnEveryLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := removals(preview); !reflect.DeepEqual(got, want) || preview.Kept != 2 {
-		t.Fatalf("preview removals = %v (kept %d), want %v (kept 2)", got, preview.Kept, want)
+	if got := removals(preview); !reflect.DeepEqual(got, want) || preview.Kept != (LayerCounts{Repo: 1, Local: 2}) {
+		t.Fatalf("preview removals = %v (kept %+v), want %v (kept one repo, two local)", got, preview.Kept, want)
 	}
 	docAfterCheck, err := os.Stat(store.path)
 	if err != nil || !os.SameFile(docBefore, docAfterCheck) {
@@ -510,8 +518,8 @@ func TestPruneActsOnEveryLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := removals(result); !reflect.DeepEqual(got, want) || result.Kept != 2 {
-		t.Fatalf("prune removals = %v (kept %d), want %v (kept 2)", got, result.Kept, want)
+	if got := removals(result); !reflect.DeepEqual(got, want) || result.Kept != (LayerCounts{Repo: 1, Local: 2}) {
+		t.Fatalf("prune removals = %v (kept %+v), want %v (kept one repo, two local)", got, result.Kept, want)
 	}
 	// The kept overlay record was not rewritten: its entry keeps its
 	// identity.
@@ -527,7 +535,9 @@ func TestPruneActsOnEveryLayer(t *testing.T) {
 	if err != nil || len(repo) != 1 || repo[0].Symbol != "example.com/life.F" {
 		t.Fatalf("document after prune = %+v, %v", repo, err)
 	}
-	if all, err := store.Load(ctx); err != nil || len(all) != 1 || all[0].Symbol != "example.com/life.F" || all[0].BodyHash != "h2" {
+	// The merged view: the live symbol's overlay record and the shaped
+	// overlay record the prune kept.
+	if all, err := store.Load(ctx); err != nil || len(all) != 2 || all[0].Symbol != "example.com/life.F" || all[0].BodyHash != "h2" || all[1].Symbol != "structural:local" {
 		t.Fatalf("merged view after prune = %+v, %v", all, err)
 	}
 }
@@ -556,7 +566,7 @@ func TestPruneOfAnOverlayRecordLeavesTheDocumentUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Removed) != 1 || result.Removed[0].Layer != LayerLocal || result.Kept != 1 {
+	if len(result.Removed) != 1 || result.Removed[0].Layer != LayerLocal || result.Kept.Total() != 1 {
 		t.Fatalf("prune = %+v", result)
 	}
 	after, err := os.Stat(store.path)
@@ -756,7 +766,12 @@ func TestRetargetCountsTouchedRecordsPerLayer(t *testing.T) {
 	}
 	tree, store := lifecycleModule(t, killed(false))
 	ctx := context.Background()
-	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{killed(true)}, nil }); err != nil {
+	// Two overlay records against one committed: the touched count's
+	// layers differ, so a count landing in the wrong layer is seen.
+	other := killed(true)
+	other.Symbol = "example.com/life.G"
+	other.TargetEvidence.Symbol = "example.com/life.G"
+	if _, err := store.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{killed(true), other}, nil }); err != nil {
 		t.Fatal(err)
 	}
 	result, err := tree.RetargetContext(ctx, store, "example.com/gone.", "example.com/moved.", false)
@@ -766,9 +781,10 @@ func TestRetargetCountsTouchedRecordsPerLayer(t *testing.T) {
 	want := []TouchedRewrite{
 		{Record: "example.com/life.F", Layer: LayerRepo, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"},
 		{Record: "example.com/life.F", Layer: LayerLocal, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"},
+		{Record: "example.com/life.G", Layer: LayerLocal, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"},
 	}
-	if result.Touched != 2 || len(result.Rewritten) != 0 || !reflect.DeepEqual(result.TouchedRewrites, want) {
-		t.Fatalf("touched per layer = %+v, want 2 with %v", result, want)
+	if result.Touched != (LayerCounts{Repo: 1, Local: 2}) || len(result.Rewritten) != 0 || !reflect.DeepEqual(result.TouchedRewrites, want) {
+		t.Fatalf("touched per layer = %+v, want one repo and two local with %v", result, want)
 	}
 }
 

@@ -21,11 +21,32 @@ type PrunedRecord struct {
 	Attested []Attestation
 }
 
+// LayerCounts counts records per layer of REQ-result-layers: Repo the
+// committed document's rows, Local the machine-local overlay's — a
+// symbol held in both layers is two records, counted once each.
+type LayerCounts struct {
+	Repo  int
+	Local int
+}
+
+// add counts one record in its layer.
+func (c *LayerCounts) add(layer string) {
+	if layer == LayerLocal {
+		c.Local++
+		return
+	}
+	c.Repo++
+}
+
+// Total is the count over both layers.
+func (c LayerCounts) Total() int { return c.Repo + c.Local }
+
 // PruneResult reports a prune's dispositions: Removed the records
-// removed and Kept the records kept, counted per layer.
+// removed, each naming its layer, and Kept the records kept, counted
+// per layer (REQ-result-lifecycle).
 type PruneResult struct {
 	Removed []PrunedRecord
-	Kept    int
+	Kept    LayerCounts
 	Check   bool
 }
 
@@ -64,7 +85,7 @@ func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check boo
 		// explicit edit of the target set and document
 		// (REQ-target-structural, REQ-target-manual-recipes).
 		if f.Shape != nil || resolves(f.Symbol) {
-			result.Kept++
+			result.Kept.add(layer)
 			return f, true, nil
 		}
 		result.Removed = append(result.Removed, PrunedRecord{Symbol: f.Symbol, Layer: layer, Attested: append([]Attestation(nil), f.AttestedDispositions()...)})
@@ -104,14 +125,16 @@ type TouchedRewrite struct {
 }
 
 // RetargetResult reports a retarget's rewrites: Rewritten names the
-// records whose mutated symbol changed; Touched counts records the
-// rename's closure updated without renaming their own symbol (an
-// oracle or killer in the renamed surface), and TouchedRewrites lists
-// those records' field rewrites - a rewritten record's evidence rides
-// its own rename and is not repeated there.
+// records whose mutated symbol changed, counted per layer in
+// RewrittenCounts; Touched counts, per layer, the records the rename's
+// closure updated without renaming their own symbol (an oracle or
+// killer in the renamed surface), and TouchedRewrites lists those
+// records' field rewrites - a rewritten record's evidence rides its
+// own rename and is not repeated there.
 type RetargetResult struct {
 	Rewritten       []RetargetedRecord
-	Touched         int
+	RewrittenCounts LayerCounts
+	Touched         LayerCounts
 	TouchedRewrites []TouchedRewrite
 	// StaleExemptions lists, sorted, the reviewed exemption subjects
 	// the pair moves that no record's evidence carries: no rewrite
@@ -375,8 +398,9 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 				return Finding{}, false, fmt.Errorf("retarget: %s does not resolve in the current tree - a retarget follows a rename that happened", rewritten.Symbol)
 			}
 			result.Rewritten = append(result.Rewritten, RetargetedRecord{From: f.Symbol, To: rewritten.Symbol, Layer: layer})
+			result.RewrittenCounts.add(layer)
 		case touched:
-			result.Touched++
+			result.Touched.add(layer)
 			for i := range moves {
 				moves[i].Layer = layer
 			}

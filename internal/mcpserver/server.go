@@ -1967,10 +1967,10 @@ type prunedOut struct {
 }
 
 type pruneOut struct {
-	Removed  []prunedOut `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
-	Kept     int         `json:"kept"`
-	Check    bool        `json:"check,omitempty"`
-	Document string      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	Removed  []prunedOut    `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
+	Kept     layerCountsOut `json:"kept" jsonschema:"records kept, counted per layer: repo the committed document's rows, local the machine-local overlay's"`
+	Check    bool           `json:"check,omitempty"`
+	Document string         `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
 }
 
 func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pruneIn) (*mcp.CallToolResult, pruneOut, error) {
@@ -1988,7 +1988,7 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 	if err != nil {
 		return nil, out, err
 	}
-	out.Kept, out.Check = result.Kept, result.Check
+	out.Kept, out.Check = layerCountsRow(result.Kept), result.Check
 	// The removal echo is never truncated: for an overlay-resident
 	// record the response is the disposition reasoning's last home, and
 	// a capped check preview would hide part of what a destructive call
@@ -2024,6 +2024,18 @@ type touchedOut struct {
 	To     string `json:"to"`
 }
 
+// layerCountsOut is LayerCounts on the wire: one integer per layer of
+// REQ-result-layers, the total the reader's sum.
+type layerCountsOut struct {
+	Repo  int `json:"repo" jsonschema:"records in the committed findings document"`
+	Local int `json:"local" jsonschema:"records in the machine-local overlay"`
+}
+
+// layerCountsRow projects LayerCounts field by field.
+func layerCountsRow(c gomutant.LayerCounts) layerCountsOut {
+	return layerCountsOut{Repo: c.Repo, Local: c.Local}
+}
+
 // prunedRow, rewrittenRow, and touchedRow are the lifecycle records'
 // wire projections — every field copied by name, the projection pin
 // comparing values through them.
@@ -2041,7 +2053,8 @@ func touchedRow(m gomutant.TouchedRewrite) touchedOut {
 
 type retargetOut struct {
 	Rewritten              []rewrittenOut `json:"rewritten" jsonschema:"records whose mutated symbol changed, each in its own layer"`
-	Touched                int            `json:"touched,omitempty" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface), counted per layer"`
+	RewrittenCounts        layerCountsOut `json:"rewrittenCounts" jsonschema:"records whose own symbol the rename rewrote, counted per layer (repo, local) - the count leads where the rewrites list is capped"`
+	Touched                layerCountsOut `json:"touched" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface) - counted per layer (repo, local)"`
 	TouchedRewrites        []touchedOut   `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
 	OmittedRewritten       int            `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
 	OmittedTouched         int            `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
@@ -2071,7 +2084,8 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 		return nil, out, err
 	}
 	out.Check = result.Check
-	out.Touched = result.Touched
+	out.RewrittenCounts = layerCountsRow(result.RewrittenCounts)
+	out.Touched = layerCountsRow(result.Touched)
 	for _, r := range result.Rewritten {
 		out.Rewritten = append(out.Rewritten, rewrittenRow(r))
 	}
@@ -2082,7 +2096,7 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 	// A rename that moved nothing is an answer with a next step, not an
 	// empty success: the prefix either mismatches the recorded spelling
 	// or the rewrite already landed (REQ-mcp-envelope).
-	if len(out.Rewritten) == 0 && out.Touched == 0 {
+	if len(result.Rewritten) == 0 && result.Touched.Total() == 0 {
 		out.Note = fmt.Sprintf("prefix %q matched no records; the findings tool lists the recorded symbols", in.From)
 	}
 	out.Rewritten, out.OmittedRewritten = capRows(out.Rewritten)

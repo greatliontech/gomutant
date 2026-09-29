@@ -265,7 +265,7 @@ func TestPruneKeepsShapedFindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Removed) != 1 || result.Removed[0].Symbol != "example.com/life.Gone" || result.Kept != 1 {
+	if len(result.Removed) != 1 || result.Removed[0].Symbol != "example.com/life.Gone" || result.Kept.Total() != 1 {
 		t.Fatalf("prune touched the shaped finding: %+v", result)
 	}
 	kept, err := store.Load(context.Background())

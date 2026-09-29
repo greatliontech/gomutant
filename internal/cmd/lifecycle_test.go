@@ -74,7 +74,8 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 	}
 	// The dirty record sat in the overlay: the row carries the
 	// machine-local marker (REQ-result-layers).
-	if !strings.Contains(retargetOut.String(), "retargeted example.com/old.F -> example.com/life.F  [machine-local]\n") || !strings.Contains(retargetOut.String(), "retargeted example.com/old.G -> example.com/life.G\n") {
+	if !strings.Contains(retargetOut.String(), "retargeted example.com/old.F -> example.com/life.F  [machine-local]\n") || !strings.Contains(retargetOut.String(), "retargeted example.com/old.G -> example.com/life.G\n") ||
+		!strings.Contains(retargetOut.String(), "retargeted 2 record(s) (1 repo, 1 machine-local)\n") {
 		t.Fatalf("retarget output = %q", retargetOut.String())
 	}
 
@@ -102,6 +103,18 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 	renderRetarget(&shadow, gomutant.RetargetResult{Rewritten: []gomutant.RetargetedRecord{{From: "a.F", To: "b.F", Layer: gomutant.LayerRepo, Shadowed: true}, {From: "a.G", To: "b.G", Layer: gomutant.LayerRepo}}, StaleExemptions: []string{"a.TestX"}})
 	if got := shadow.String(); !strings.Contains(got, "retargeted a.F -> b.F  (a machine-local record holds the new symbol and shadows this row)\n") || !strings.Contains(got, "retargeted a.G -> b.G\n") || !strings.Contains(got, "note: 1 reviewed exemption subject(s) under the old prefix that no record carries - no rewrite reaches them; rewrite or delete them by hand: a.TestX\n") {
 		t.Fatalf("retarget rows = %q", got)
+	}
+	// The counts state their split per layer of REQ-result-layers
+	// (REQ-result-lifecycle): the total, then repo and machine-local.
+	var counted bytes.Buffer
+	renderPrune(&counted, gomutant.PruneResult{Removed: []gomutant.PrunedRecord{{Symbol: "a.Gone", Layer: gomutant.LayerLocal}}, Kept: gomutant.LayerCounts{Repo: 2, Local: 1}})
+	if got := counted.String(); !strings.Contains(got, "pruned 1 record(s), 3 kept (2 repo, 1 machine-local)\n") {
+		t.Fatalf("prune count line = %q", got)
+	}
+	var touched bytes.Buffer
+	renderRetarget(&touched, gomutant.RetargetResult{Rewritten: []gomutant.RetargetedRecord{{From: "a.F", To: "b.F", Layer: gomutant.LayerRepo}}, RewrittenCounts: gomutant.LayerCounts{Repo: 1}, Touched: gomutant.LayerCounts{Repo: 2, Local: 1}})
+	if got := touched.String(); !strings.Contains(got, "retargeted 3 further record(s) whose oracle or killer identities carry the rename (2 repo, 1 machine-local)\n") || !strings.Contains(got, "retargeted 1 record(s) (1 repo, 0 machine-local)\n") {
+		t.Fatalf("retarget touched line = %q", got)
 	}
 	// The note is bounded like every roster: the first twenty listed, the
 	// remainder counted.

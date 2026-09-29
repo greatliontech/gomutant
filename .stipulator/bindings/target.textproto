@@ -530,3 +530,63 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "eccedf3236db6c9a34c13d4d1383a884645c56712a69b51622ae240ef6d17938"
 }
+
+bindings {
+  requirement_id: "REQ-target-structural"
+  content_hash: "9b52e5453c771f0adfb6b3c33dac05d8d22e2494f079e538e4b3ad827701f9d8"
+  source_hash: "79195945df2c5b8a30a99c6e29146b80fcb18ba0b5db3272be66b077dec2f123"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestImportProbesSynthesis"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ba32e9b76cbbb0065b670ccfdf912a851abd94e830283e1d34e7cef6b4ba097a"
+}
+
+bindings {
+  requirement_id: "REQ-target-structural"
+  content_hash: "9b52e5453c771f0adfb6b3c33dac05d8d22e2494f079e538e4b3ad827701f9d8"
+  source_hash: "79195945df2c5b8a30a99c6e29146b80fcb18ba0b5db3272be66b077dec2f123"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestShapeDigestPinsForbiddenLinkage"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "81cfe63966916077febd3170f13423a879a18f196479f70367ed32076198cf9c"
+}
+
+bindings {
+  requirement_id: "REQ-target-structural"
+  content_hash: "9b52e5453c771f0adfb6b3c33dac05d8d22e2494f079e538e4b3ad827701f9d8"
+  source_hash: "79195945df2c5b8a30a99c6e29146b80fcb18ba0b5db3272be66b077dec2f123"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestShapeDigestRefusesUnpinnableForbiddenLinkage"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3fdc44f0c56f40d85ebbd82a7f776888e44e4dde0dfa92fe30367e0d404ae3d0"
+}
+
+bindings {
+  requirement_id: "REQ-target-structural"
+  content_hash: "9b52e5453c771f0adfb6b3c33dac05d8d22e2494f079e538e4b3ad827701f9d8"
+  source_hash: "79195945df2c5b8a30a99c6e29146b80fcb18ba0b5db3272be66b077dec2f123"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestMethodProbesRewriteDeclaration"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5e976ad03051bb9bcc0fb5faa1bace41f0f6e9599951291b41135288139cc2b1"
+}
+
+bindings {
+  requirement_id: "REQ-target-structural"
+  content_hash: "9b52e5453c771f0adfb6b3c33dac05d8d22e2494f079e538e4b3ad827701f9d8"
+  source_hash: "79195945df2c5b8a30a99c6e29146b80fcb18ba0b5db3272be66b077dec2f123"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestMethodProbesRefuseMovedDeclaringFile"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "869dd417df0585cc0aca4a39a8f3e7c3cca8b5035ae070f9ed4ea84cbcfcdd7a"
+}
+
+bindings {
+  requirement_id: "REQ-target-structural"
+  content_hash: "9b52e5453c771f0adfb6b3c33dac05d8d22e2494f079e538e4b3ad827701f9d8"
+  source_hash: "79195945df2c5b8a30a99c6e29146b80fcb18ba0b5db3272be66b077dec2f123"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestMethodProbesRefuseContentDriftedDeclaringFile"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "670ec05465d1ea3839f920459959d73eb2aa2edf13b32aa27470588d3b4ca26d"
+}

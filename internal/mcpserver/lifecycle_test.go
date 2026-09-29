@@ -23,7 +23,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod":    "module example.com/life\n\ngo 1.26.4\n",
-		"p.go":      "package life\n\nfunc F() int { return 1 }\n\nfunc G() int { return 2 }\n",
+		"p.go":      "package life\n\nfunc F() int { return 1 }\n\nfunc G() int { return 2 }\n\nfunc H() int { return 3 }\n",
 		"p_test.go": "package life\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { if F() != 1 { t.Fatal() } }\n",
 	}
 	for name, content := range files {
@@ -67,7 +67,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, rOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old.", To: "example.com/life."})
-	if err != nil || len(rOut.Rewritten) != 1 || rOut.Rewritten[0].To != "example.com/life.F" || rOut.Rewritten[0].Layer != gomutant.LayerLocal || !reflect.DeepEqual(rOut.StaleExemptions, []string{"example.com/old.TestUnmeasured"}) {
+	if err != nil || len(rOut.Rewritten) != 1 || rOut.Rewritten[0].To != "example.com/life.F" || rOut.Rewritten[0].Layer != gomutant.LayerLocal || rOut.RewrittenCounts != (layerCountsOut{Local: 1}) || !reflect.DeepEqual(rOut.StaleExemptions, []string{"example.com/old.TestUnmeasured"}) {
 		t.Fatalf("retarget = %+v, %v", rOut, err)
 	}
 	// The shadow statement on the wire: a committed row renamed onto a
@@ -80,7 +80,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, sOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old2.", To: "example.com/life."})
-	if err != nil || len(sOut.Rewritten) != 1 || sOut.Rewritten[0].Layer != gomutant.LayerRepo || !sOut.Rewritten[0].Shadowed {
+	if err != nil || len(sOut.Rewritten) != 1 || sOut.Rewritten[0].Layer != gomutant.LayerRepo || !sOut.Rewritten[0].Shadowed || sOut.RewrittenCounts != (layerCountsOut{Repo: 1}) {
 		t.Fatalf("shadowed retarget = %+v, %v", sOut, err)
 	}
 	// A touched row reaches the wire whole: a record outside the rename
@@ -89,11 +89,32 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	killed.Killed, killed.Mutants, killed.CandidateCount, killed.Generated = 1, 1, 1, 1
 	killed.Kills = []gomutant.Kill{{Position: "p.go:1:1", Operator: "zero return", Killer: "example.com/gone.TestHelper"}}
 	killed.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}
-	if _, err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) { return append(prior, killed), nil }); err != nil {
+	// A committed record whose killer carries the prefix too: the touched
+	// count splits per layer, and the empty-retarget note stays silent
+	// while the repo layer alone was touched.
+	committedKilled := seededFinding("example.com/life.H")
+	committedKilled.Dirty, committedKilled.Commit = false, "abc"
+	committedKilled.TargetEvidence.RuntimeInputs, committedKilled.OracleEvidence[0].RuntimeInputs = "eyJ2IjoxfQ", "eyJ2IjoxfQ"
+	committedKilled.Killed, committedKilled.Mutants, committedKilled.CandidateCount, committedKilled.Generated = 1, 1, 1, 1
+	committedKilled.Kills = []gomutant.Kill{{Position: "p.go:3:3", Operator: "zero return", Killer: "example.com/gone2.TestHelper"}}
+	committedKilled.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}
+	if _, err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) {
+		return append(prior, killed, committedKilled), nil
+	}); err != nil {
 		t.Fatal(err)
 	}
+	// The overlay record's killer alone under one prefix: touched counts
+	// in the local layer; the committed record's killer under another:
+	// a repo-only touch, on which the empty-retarget note stays silent.
+	_, rOnly, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/gone2.", To: "example.com/moved2."})
+	if err != nil || rOnly.Touched != (layerCountsOut{Repo: 1}) || len(rOnly.TouchedRewrites) != 1 || rOnly.TouchedRewrites[0] != (touchedOut{Record: "example.com/life.H", Layer: gomutant.LayerRepo, From: "example.com/gone2.TestHelper", To: "example.com/moved2.TestHelper"}) || strings.Contains(rOnly.Note, "matched no records") {
+		t.Fatalf("repo-only touched retarget = %+v, %v", rOnly, err)
+	}
 	_, tOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/gone.", To: "example.com/moved."})
-	if err != nil || tOut.Touched != 1 || len(tOut.TouchedRewrites) != 1 || tOut.TouchedRewrites[0] != (touchedOut{Record: "example.com/life.G", Layer: gomutant.LayerLocal, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"}) {
+	wantTouched := []touchedOut{
+		{Record: "example.com/life.G", Layer: gomutant.LayerLocal, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"},
+	}
+	if err != nil || tOut.Touched != (layerCountsOut{Local: 1}) || !reflect.DeepEqual(tOut.TouchedRewrites, wantTouched) || tOut.RewrittenCounts != (layerCountsOut{}) || strings.Contains(tOut.Note, "matched no records") {
 		t.Fatalf("touched retarget = %+v, %v", tOut, err)
 	}
 	// The stale roster caps like every row list, the remainder counted
@@ -115,9 +136,9 @@ func TestToolPruneAndRetarget(t *testing.T) {
 		t.Fatalf("prune preview = %+v, %v", pPreview, err)
 	}
 	_, pOut, err := s.toolPrune(ctx, nil, pruneIn{})
-	// Kept counts records per layer: the committed life.F beside the
-	// overlay's, and the touched life.G.
-	if err != nil || len(pOut.Removed) != 1 || pOut.Kept != 3 {
+	// Kept counts records per layer: the committed life.F and life.H
+	// beside the overlay's life.F and life.G.
+	if err != nil || len(pOut.Removed) != 1 || pOut.Kept != (layerCountsOut{Repo: 2, Local: 2}) {
 		t.Fatalf("prune = %+v, %v", pOut, err)
 	}
 	if pOut.Removed[0].Layer != gomutant.LayerLocal {
@@ -127,7 +148,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 		t.Fatalf("prune response lost the disposition echo: %+v", pOut.Removed[0])
 	}
 	all, err := s.loadFindings("")
-	if err != nil || len(all) != 2 || all[0].Symbol != "example.com/life.F" || all[1].Symbol != "example.com/life.G" {
+	if err != nil || len(all) != 3 || all[0].Symbol != "example.com/life.F" || all[1].Symbol != "example.com/life.G" || all[2].Symbol != "example.com/life.H" {
 		t.Fatalf("document after lifecycle verbs = %d records, %v", len(all), err)
 	}
 }
@@ -185,8 +206,8 @@ func TestToolLifecycleEchoBounds(t *testing.T) {
 	}
 
 	_, pOut, err := s.toolPrune(ctx, nil, pruneIn{})
-	if err != nil || len(pOut.Removed) != 60 || pOut.Kept != 60 {
-		t.Fatalf("prune echo = %d rows, kept %d, %v; want every removal echoed, uncapped", len(pOut.Removed), pOut.Kept, err)
+	if err != nil || len(pOut.Removed) != 60 || pOut.Kept.Repo+pOut.Kept.Local != 60 {
+		t.Fatalf("prune echo = %d rows, kept %d, %v; want every removal echoed, uncapped", len(pOut.Removed), pOut.Kept.Repo+pOut.Kept.Local, err)
 	}
 	for i, r := range pOut.Removed {
 		if len(r.Attested) != 1 || r.Attested[0].Reason == "" {
@@ -353,4 +374,7 @@ func TestLifecycleWireRowsProjectEveryRecordField(t *testing.T) {
 	var touched gomutant.TouchedRewrite
 	fill(reflect.ValueOf(&touched).Elem())
 	check(reflect.ValueOf(touched), reflect.ValueOf(touchedRow(touched)))
+	var counts gomutant.LayerCounts
+	fill(reflect.ValueOf(&counts).Elem())
+	check(reflect.ValueOf(counts), reflect.ValueOf(layerCountsRow(counts)))
 }
