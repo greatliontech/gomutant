@@ -17,6 +17,18 @@ func fixtureTree(t *testing.T) *Tree {
 	return tr
 }
 
+// copiedFixture is the fixture module copied under the test's temporary
+// directory: every test that plants a file inside the module works
+// here, never in the tracked tree (which TestMain keeps read-only).
+func copiedFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS("testdata/fixturemod")); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestValidateOracleRejectsAmbiguousTestVariants(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")

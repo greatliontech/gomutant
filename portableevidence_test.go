@@ -23,7 +23,13 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
 	}
-	tree, err := Load("internal/engine/testdata/workspacemod")
+	// The test plants a file inside the workspace, so it works over a
+	// copy: the tracked tree is read in place by other suites.
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS("internal/engine/testdata/workspacemod")); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +39,6 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(subDir, "data.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(filepath.Join(subDir, "data.txt")) })
 
 	// The recorded evidence: a module-relative manifest anchored at the
 	// SUB module — the persisted portable form this era writes.

@@ -38,49 +38,15 @@ func testStore(t *testing.T, dir string) *gomutant.Store {
 	return store
 }
 
-// isolatedFixture copies the shared fixture tree into a temp git repository
-// with one commit. A test asserting on the repo-layer findings document needs
-// both commit provenance and evidence measured on a tree nothing else writes
-// into: concurrent test packages plant input fixtures inside the shared
-// tree's packages, which moves the observation bracket and routes the record
-// to the machine-local overlay. The copy skips dot-prefixed scratch entries
-// and tolerates files vanishing mid-walk — the planted fixtures are
-// dot-prefixed and removed on their test's cleanup, so a plain CopyFS would
-// re-import the same parallel-run race this helper exists to remove.
+// isolatedFixture copies the shared fixture tree into a temp git
+// repository with one commit: a test asserting on the repo-layer
+// findings document needs commit provenance, and a tree of its own to
+// measure on. The tracked tree carries nothing but its members — every
+// suite's TestMain guards it — so the copy is a plain CopyFS.
 func isolatedFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	err := filepath.WalkDir(fixtureDir, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		rel, err := filepath.Rel(fixtureDir, path)
-		if err != nil {
-			return err
-		}
-		if rel != "." && strings.HasPrefix(filepath.Base(rel), ".") {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		target := filepath.Join(dir, rel)
-		if entry.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		data, err := os.ReadFile(path)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, 0o644)
-	})
-	if err != nil {
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
 		t.Fatal(err)
 	}
 	gitCommitAll(t, dir)

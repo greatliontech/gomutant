@@ -156,14 +156,8 @@ func TestObservedRunScoresAgainstStableRuntimeInputs(t *testing.T) {
 		t.Skip("loads the fixture tree")
 	}
 	// The test plants a file inside the oracle package, so it runs over
-	// a copy of the fixture module: the committed fixture is read in
-	// place by other packages' tests running beside this one, and a
-	// file appearing and vanishing there moves their observation
-	// brackets mid-run.
-	dir := t.TempDir()
-	if err := os.CopyFS(dir, os.DirFS("testdata/fixturemod")); err != nil {
-		t.Fatal(err)
-	}
+	// a copy of the fixture module.
+	dir := copiedFixture(t)
 	tr, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -544,7 +538,11 @@ func TestProbeBaselineRecordsRuntimeInputDriftAsUnverifiable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
 	}
-	tr := fixtureTree(t)
+	dir := copiedFixture(t)
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	moduleDir, packageDir, err := tr.PackageContext("example.com/fixture/lib")
 	if err != nil {
 		t.Fatal(err)
@@ -553,9 +551,8 @@ func TestProbeBaselineRecordsRuntimeInputDriftAsUnverifiable(t *testing.T) {
 	if err := os.WriteFile(input, []byte("A"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(input) })
-	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_UNSTABLE_INPUT="+input)
-	ran, passed, _, _, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestUnstableInput$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, OracleBounds{})
+	env := append(GoEnv(dir), "GOMUTANT_UNSTABLE_INPUT="+input)
+	ran, passed, _, _, state, err := TestProbeObservedEnv(context.Background(), dir, "example.com/fixture/lib", "^TestUnstableInput$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, OracleBounds{})
 	// A mid-run mutation of an in-bracket input seals through the
 	// bracket (the stronger signal) or through repeated-baseline drift;
 	// either way the evidence is unverifiable, never silently valid.
@@ -576,18 +573,14 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
 	}
-	moduleDir, err := filepath.Abs("testdata/fixturemod")
-	if err != nil {
-		t.Fatal(err)
-	}
+	moduleDir := copiedFixture(t)
 	packageDir := filepath.Join(moduleDir, "lib")
 	stable := filepath.Join(packageDir, ".stable-input-fixture")
 	if err := os.WriteFile(stable, []byte("stable"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Remove(stable) })
-	env := append(GoEnv("testdata/fixturemod"), "GOMUTANT_STABLE_INPUT="+stable)
-	ran, passed, _, _, state, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, OracleBounds{})
+	env := append(GoEnv(moduleDir), "GOMUTANT_STABLE_INPUT="+stable)
+	ran, passed, _, _, state, err := TestProbeObservedEnv(context.Background(), moduleDir, "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, OracleBounds{})
 	if err != nil || ran != 1 || !passed || !state.OK || state.Unverifiable {
 		t.Fatalf("changing identities = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
 	}
@@ -609,7 +602,7 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	}
 	// The per-run identity makes the evidence stale across runs — the
 	// honest direction: a fresh probe re-measures rather than serving.
-	ran2, passed2, _, _, second, err := TestProbeObservedEnv(context.Background(), "testdata/fixturemod", "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, OracleBounds{})
+	ran2, passed2, _, _, second, err := TestProbeObservedEnv(context.Background(), moduleDir, "example.com/fixture/lib", "^TestChangingIdentity$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, OracleBounds{})
 	if err != nil || ran2 != 1 || !passed2 || !second.OK {
 		t.Fatalf("second changing-identity probe = ran %d, passed %v, state %+v, error %v", ran2, passed2, second, err)
 	}
