@@ -37,7 +37,11 @@ type Store struct {
 	moduleDir  string
 	overlayDir string
 	// exemptions is the committed exemption record loaded from beside
-	// the findings document at open (REQ-result-exemptions).
+	// the findings document at open and adopted again when a retarget
+	// rewrites it (REQ-result-exemptions). Read without the mutex by the
+	// judgments under the document lock and by the retarget: no face
+	// shares one Store across goroutines, and a library consumer may
+	// not either — a Store is one verb's.
 	exemptions []Exemption
 
 	// mu guards the stat-keyed overlay parse cache. The overlay's
@@ -70,8 +74,9 @@ type Store struct {
 	// evidence manifest — and a record that changed back to a judged
 	// content is served too. Written under the document lock only
 	// (Update), like the entries it describes; the exemptions it judges
-	// against are fixed for the store's lifetime, so one content judges
-	// one way.
+	// against change only under a retarget, which rewrites every record
+	// judged under a moved entry (its evidence names the subject), so a
+	// memoized content was judged under the entries in force for it.
 	judged map[string]judgedRecord
 	// overlaid names the symbols whose served record came from the
 	// machine-local overlay at the last Load — a record's placement,
@@ -121,6 +126,10 @@ type storeHooks struct {
 	// shared-overlay interleaving in which another store replaced the
 	// legacy file between this store's read and its write.
 	beforeSideline func(path string)
+	// beforeExemptionWrite runs after a retarget's records are rewritten
+	// and before the exemption record is — the seam for the write that
+	// fails between them.
+	beforeExemptionWrite func() error
 }
 
 // documentCache is the repo document's parse with the hash of the
@@ -243,6 +252,33 @@ func OpenStore(path, moduleDir string) (*Store, error) {
 // Exemptions is the exemption record the store opened beside its
 // document (REQ-result-exemptions).
 func (s *Store) Exemptions() []Exemption { return append([]Exemption(nil), s.exemptions...) }
+
+// rewriteExemptions writes the exemption record beside the document
+// with the given entries and adopts them as the live authority. The
+// committability memo keeps its answers: a record judged under an entry
+// the rename moves carries that entry's subject in its evidence, so the
+// retarget rewrote the record and its persisted form changed — the memo
+// misses on it and re-judges under the entries in force; a record the
+// rename left alone was judged under entries it left alone. The memo is
+// keyed on the records a caller hands Update, not on the stored ones,
+// so that derivation covers a measurement taken before the retarget and
+// committed after it only under the exemptions field's premise: a Store
+// is one verb's, and no Update follows a retarget on one Store
+// (REQ-result-exemptions).
+func (s *Store) rewriteExemptions(ctx context.Context, exemptions []Exemption) error {
+	if s.hooks.beforeExemptionWrite != nil {
+		if err := s.hooks.beforeExemptionWrite(); err != nil {
+			return err
+		}
+	}
+	if err := writeExemptions(ctx, ExemptionsPathFor(s.path), exemptions); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.exemptions = append([]Exemption(nil), exemptions...)
+	s.mu.Unlock()
+	return nil
+}
 
 // portableLineWalk is the one derivation of the portable line
 // (REQ-result-layers): dirty or absent commit provenance, each subject
@@ -834,22 +870,6 @@ func (s *Store) installEntry(f Finding) error {
 	return nil
 }
 
-// Update applies update to the merged layer view and writes the split
-// result: committable records to the repo document, the rest to the
-// overlay. The caller's update runs inside the repo document's lock
-// against the in-lock read merged with the overlay, so membership —
-// which rows survive, which symbols prune — is always decided on the
-// freshest state and a concurrent session's committed rows are never
-// silently evicted; a nested Update on the same document surfaces the
-// lock error instead. A repo row is replaced only by a committable
-// successor for its symbol, so portable truth is never evicted by a
-// local measurement; an overlay entry is deleted the moment its symbol
-// gains a committable record. Overlay writes follow the repo write, so
-// a crash between them leaves at worst a stale overlay entry shadowing
-// the newer repo row — cleared by the symbol's next update, never a
-// lost record. The update callback runs under the document lock and
-// must not call Store or document methods on the same document — a
-// nested writer waits out the lock retries and errors.
 // persistedForm is the write path's cheap key for "the same record":
 // the never-persisted run metadata (Cached, Skipped) zeroed and every
 // list shaped as the encoding round-trips it — an omitted-when-empty

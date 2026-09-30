@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -2256,18 +2255,16 @@ func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 	defer release()
 
 	var prior []Finding
-	mode := os.FileMode(0o644)
+	mode, err := recordFileMode(path)
+	if err != nil {
+		return err
+	}
 	data, err := contextio.ReadFile(ctx, path)
 	switch {
 	case os.IsNotExist(err):
 	case err != nil:
 		return err
 	default:
-		if info, statErr := os.Stat(path); statErr != nil {
-			return statErr
-		} else {
-			mode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
-		}
 		priorData = data
 		if prior, err = parse(data); err != nil {
 			return err
@@ -2290,53 +2287,8 @@ func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 		}
 		return nil
 	}
-	writeTemp := func(contents []byte, mode os.FileMode) (string, error) {
-		tmp, err := os.CreateTemp(filepath.Dir(path), ".gomutant-findings-*")
-		if err != nil {
-			return "", err
-		}
-		tmpPath := tmp.Name()
-		for len(contents) > 0 {
-			if err := ctx.Err(); err != nil {
-				tmp.Close()
-				os.Remove(tmpPath)
-				return "", err
-			}
-			chunk := min(len(contents), 32*1024)
-			n, err := tmp.Write(contents[:chunk])
-			if err != nil {
-				tmp.Close()
-				os.Remove(tmpPath)
-				return "", err
-			}
-			if n == 0 {
-				tmp.Close()
-				os.Remove(tmpPath)
-				return "", io.ErrShortWrite
-			}
-			contents = contents[n:]
-		}
-		if err := tmp.Chmod(mode); err != nil {
-			tmp.Close()
-			os.Remove(tmpPath)
-			return "", err
-		}
-		if err := tmp.Close(); err != nil {
-			os.Remove(tmpPath)
-			return "", err
-		}
-		return tmpPath, nil
-	}
 	written := append(doc, '\n')
-	tmpPath, err := writeTemp(written, mode)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmpPath)
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := writeRecordFile(ctx, path, written, mode); err != nil {
 		return err
 	}
 	if u.after != nil {

@@ -73,9 +73,9 @@ func renderPrune(w io.Writer, result gomutant.PruneResult) {
 	fmt.Fprintf(w, "%s %d record(s), %d kept (%d repo, %d machine-local)\n", verb, len(result.Removed), result.Kept.Total(), result.Kept.Repo, result.Kept.Local)
 }
 
-// staleExemptionRoster bounds the uncarried exemption subjects a
-// retarget's note lists, the remainder counted.
-const staleExemptionRoster = 20
+// rewrittenExemptionRoster bounds the rewritten exemption subjects a
+// retarget lists on this face: the first twenty, the remainder counted.
+const rewrittenExemptionRoster = 20
 
 type retargetOptions struct {
 	dir, findingsFile, from, to string
@@ -146,16 +146,18 @@ func renderRetarget(w io.Writer, result gomutant.RetargetResult) {
 	for _, move := range result.TouchedRewrites {
 		fmt.Fprintf(w, "%s on %s%s: %s -> %s\n", verb, move.Record, layerMarker(move.Layer), move.From, move.To)
 	}
-	if n := len(result.StaleExemptions); n > 0 {
-		// Bounded like every roster: the first staleExemptionRoster
-		// subjects, the remainder counted.
-		shown := result.StaleExemptions
+	if n := len(result.Exemptions); n > 0 {
+		shown := result.Exemptions
 		more := ""
-		if n > staleExemptionRoster {
-			shown = shown[:staleExemptionRoster]
-			more = fmt.Sprintf(" (+%d more)", n-staleExemptionRoster)
+		if n > rewrittenExemptionRoster {
+			shown = shown[:rewrittenExemptionRoster]
+			more = fmt.Sprintf(" (+%d more)", n-rewrittenExemptionRoster)
 		}
-		fmt.Fprintf(w, "note: %d reviewed exemption subject(s) under the old prefix that no record carries - no rewrite reaches them; rewrite or delete them by hand: %s%s\n", n, strings.Join(shown, ", "), more)
+		var moves []string
+		for _, e := range shown {
+			moves = append(moves, e.From+" -> "+e.To)
+		}
+		fmt.Fprintf(w, "%s %d reviewed exemption subject(s) with the records: %s%s\n", verb, n, strings.Join(moves, ", "), more)
 	}
 	if result.Touched.Total() > 0 {
 		fmt.Fprintf(w, "%s %d further record(s) whose oracle or killer identities carry the rename (%d repo, %d machine-local)\n", verb, result.Touched.Total(), result.Touched.Repo, result.Touched.Local)

@@ -2036,6 +2036,12 @@ func layerCountsRow(c gomutant.LayerCounts) layerCountsOut {
 	return layerCountsOut{Repo: c.Repo, Local: c.Local}
 }
 
+// rewrittenExemptionOut is RewrittenExemption on the wire.
+type rewrittenExemptionOut struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 // prunedRow, rewrittenRow, and touchedRow are the lifecycle records'
 // wire projections — every field copied by name, the projection pin
 // comparing values through them.
@@ -2052,17 +2058,17 @@ func touchedRow(m gomutant.TouchedRewrite) touchedOut {
 }
 
 type retargetOut struct {
-	Rewritten              []rewrittenOut `json:"rewritten" jsonschema:"records whose mutated symbol changed, each in its own layer"`
-	RewrittenCounts        layerCountsOut `json:"rewrittenCounts" jsonschema:"records whose own symbol the rename rewrote, counted per layer (repo, local) - the count leads where the rewrites list is capped"`
-	Touched                layerCountsOut `json:"touched" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface) - counted per layer (repo, local)"`
-	TouchedRewrites        []touchedOut   `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
-	OmittedRewritten       int            `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
-	OmittedTouched         int            `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
-	Check                  bool           `json:"check,omitempty"`
-	Document               string         `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
-	StaleExemptions        []string       `json:"staleExemptions,omitempty" jsonschema:"reviewed exemption subjects the pair moves that no record carries - no rewrite reaches them; the reviewer rewrites or deletes them by hand; capped like every row list"`
-	OmittedStaleExemptions int            `json:"omittedStaleExemptions,omitempty" jsonschema:"stale exemption subjects beyond the response cap - counted, not listed"`
-	Note                   string         `json:"note,omitempty" jsonschema:"set when the prefix matched nothing: the rename touched no record, and the findings tool lists the recorded symbols"`
+	Rewritten         []rewrittenOut          `json:"rewritten" jsonschema:"records whose mutated symbol changed, each in its own layer"`
+	RewrittenCounts   layerCountsOut          `json:"rewrittenCounts" jsonschema:"records whose own symbol the rename rewrote, counted per layer (repo, local) - the count leads where the rewrites list is capped"`
+	Touched           layerCountsOut          `json:"touched" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface) - counted per layer (repo, local)"`
+	TouchedRewrites   []touchedOut            `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
+	OmittedRewritten  int                     `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
+	OmittedTouched    int                     `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
+	Check             bool                    `json:"check,omitempty"`
+	Document          string                  `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	Exemptions        []rewrittenExemptionOut `json:"exemptions,omitempty" jsonschema:"reviewed exemption entries whose subjects the rename moved, rewritten with the records - the reason and rationale untouched; capped at 50"`
+	OmittedExemptions int                     `json:"omittedExemptions,omitempty" jsonschema:"rewritten exemption subjects beyond the response cap - counted, not listed"`
+	Note              string                  `json:"note,omitempty" jsonschema:"set when the rename touched nothing: no record and no reviewed exemption subject moved, and the findings tool lists the recorded symbols"`
 }
 
 func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
@@ -2092,11 +2098,14 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 	for _, m := range result.TouchedRewrites {
 		out.TouchedRewrites = append(out.TouchedRewrites, touchedRow(m))
 	}
-	out.StaleExemptions, out.OmittedStaleExemptions = capRows(result.StaleExemptions)
+	for _, e := range result.Exemptions {
+		out.Exemptions = append(out.Exemptions, rewrittenExemptionOut{From: e.From, To: e.To})
+	}
+	out.Exemptions, out.OmittedExemptions = capRows(out.Exemptions)
 	// A rename that moved nothing is an answer with a next step, not an
 	// empty success: the prefix either mismatches the recorded spelling
 	// or the rewrite already landed (REQ-mcp-envelope).
-	if len(result.Rewritten) == 0 && result.Touched.Total() == 0 {
+	if len(result.Rewritten) == 0 && result.Touched.Total() == 0 && len(result.Exemptions) == 0 {
 		out.Note = fmt.Sprintf("prefix %q matched no records; the findings tool lists the recorded symbols", in.From)
 	}
 	out.Rewritten, out.OmittedRewritten = capRows(out.Rewritten)

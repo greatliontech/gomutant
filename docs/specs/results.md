@@ -1144,15 +1144,22 @@ closure the evidence digests is salted with the subject identity,
 which names the import path (gofresh's closure specification, the
 maximal analysis view's salt), so
 the moved package's stored evidence proves nothing about the moved
-code and its retargeted record judges stale until re-measured. A
-reviewed exemption entry
-(REQ-result-exemptions) whose subject a record's evidence names under
-the old prefix refuses the retarget whole, naming the subject: the
-record is the reviewer's, never the tool's to edit, and the subject
-left under the old prefix could never match the rewritten evidence
-again; the moved subjects no record carries are listed in the
-response for the reviewer, since no later measurement can match them
-either. A
+code and its retargeted record judges stale until re-measured. The
+reviewed exemption entries (REQ-result-exemptions) whose subjects the
+prefix pair moves are rewritten with the records — a subject is
+identity, the reason and rationale the reviewed content, which the
+rewrite leaves untouched — and listed in the response; the entries are
+written after the records and never under a check, so a write failing
+between them leaves the records rewritten and the entries as reviewed,
+and a rerun rewrites the entries alone; a reader between the two writes
+sees rewritten records beside the entries as reviewed, and its judgments
+heal at its next read. A rewrite that would give two entries one subject
+and reason refuses whole before any write, naming both; an entry's
+rewritten subject need not resolve in the tree. The record's form is
+the contract: version 1, the entries in their order as two-space JSON
+with a trailing newline, the file's mode kept (a first write's is
+0644), and a key the form does not name, data past the document, or two
+entries for one subject and reason refused at load. A
 verb's write is exactly the change it reports — no record it did not
 report changes, though a parked record's file may move to the record's
 own path (REQ-result-layers): a

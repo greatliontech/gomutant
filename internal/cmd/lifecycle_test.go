@@ -97,11 +97,11 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 		!strings.Contains(pruned.String(), "attested p.go:1:1 zero return  (equivalent by inspection)") {
 		t.Fatalf("prune output lost the disposition echo: %q", pruned.String())
 	}
-	// The shadow statement and the stale-exemption note ride the rows
+	// The shadow statement and the rewritten-exemption line ride the rows
 	// (REQ-result-lifecycle).
 	var shadow bytes.Buffer
-	renderRetarget(&shadow, gomutant.RetargetResult{Rewritten: []gomutant.RetargetedRecord{{From: "a.F", To: "b.F", Layer: gomutant.LayerRepo, Shadowed: true}, {From: "a.G", To: "b.G", Layer: gomutant.LayerRepo}}, StaleExemptions: []string{"a.TestX"}})
-	if got := shadow.String(); !strings.Contains(got, "retargeted a.F -> b.F  (a machine-local record holds the new symbol and shadows this row)\n") || !strings.Contains(got, "retargeted a.G -> b.G\n") || !strings.Contains(got, "note: 1 reviewed exemption subject(s) under the old prefix that no record carries - no rewrite reaches them; rewrite or delete them by hand: a.TestX\n") {
+	renderRetarget(&shadow, gomutant.RetargetResult{Rewritten: []gomutant.RetargetedRecord{{From: "a.F", To: "b.F", Layer: gomutant.LayerRepo, Shadowed: true}, {From: "a.G", To: "b.G", Layer: gomutant.LayerRepo}}, Exemptions: []gomutant.RewrittenExemption{{From: "a.TestX", To: "b.TestX"}}})
+	if got := shadow.String(); !strings.Contains(got, "retargeted a.F -> b.F  (a machine-local record holds the new symbol and shadows this row)\n") || !strings.Contains(got, "retargeted a.G -> b.G\n") || !strings.Contains(got, "retargeted 1 reviewed exemption subject(s) with the records: a.TestX -> b.TestX\n") {
 		t.Fatalf("retarget rows = %q", got)
 	}
 	// The counts state their split per layer of REQ-result-layers
@@ -118,13 +118,13 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 	}
 	// The note is bounded like every roster: the first twenty listed, the
 	// remainder counted.
-	var many []string
+	var many []gomutant.RewrittenExemption
 	for i := 0; i < 23; i++ {
-		many = append(many, fmt.Sprintf("a.Test%02d", i))
+		many = append(many, gomutant.RewrittenExemption{From: fmt.Sprintf("a.Test%02d", i), To: fmt.Sprintf("b.Test%02d", i)})
 	}
 	var bounded bytes.Buffer
-	renderRetarget(&bounded, gomutant.RetargetResult{StaleExemptions: many})
-	if got := bounded.String(); !strings.Contains(got, "note: 23 reviewed exemption subject(s)") || !strings.Contains(got, "a.Test19 (+3 more)\n") || strings.Contains(got, "a.Test20") {
+	renderRetarget(&bounded, gomutant.RetargetResult{Exemptions: many})
+	if got := bounded.String(); !strings.Contains(got, "retargeted 23 reviewed exemption subject(s) with the records: a.Test00 -> b.Test00, ") || !strings.Contains(got, "a.Test19 -> b.Test19 (+3 more)\n") || strings.Contains(got, "a.Test20") {
 		t.Fatalf("bounded note = %q", got)
 	}
 	after, err := loadFindings(dir, gomutant.FindingsPathAt(dir, defaultFindings))

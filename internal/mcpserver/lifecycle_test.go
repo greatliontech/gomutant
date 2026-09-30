@@ -62,12 +62,13 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	if err != nil || !preview.Check || len(preview.Rewritten) != 1 {
 		t.Fatalf("retarget preview = %+v, %v", preview, err)
 	}
-	// A reviewed entry no record carries rides the response as stale.
+	// A reviewed entry the rename moves is rewritten with the records and
+	// rides the response.
 	if err := os.WriteFile(gomutant.ExemptionsPathFor(filepath.Join(dir, gomutant.DefaultFindingsPath)), []byte(`{"version":1,"exemptions":[{"subject":"example.com/old.TestUnmeasured","reason":"r","rationale":"why"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, rOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old.", To: "example.com/life."})
-	if err != nil || len(rOut.Rewritten) != 1 || rOut.Rewritten[0].To != "example.com/life.F" || rOut.Rewritten[0].Layer != gomutant.LayerLocal || rOut.RewrittenCounts != (layerCountsOut{Local: 1}) || !reflect.DeepEqual(rOut.StaleExemptions, []string{"example.com/old.TestUnmeasured"}) {
+	if err != nil || len(rOut.Rewritten) != 1 || rOut.Rewritten[0].To != "example.com/life.F" || rOut.Rewritten[0].Layer != gomutant.LayerLocal || rOut.RewrittenCounts != (layerCountsOut{Local: 1}) || !reflect.DeepEqual(rOut.Exemptions, []rewrittenExemptionOut{{From: "example.com/old.TestUnmeasured", To: "example.com/life.TestUnmeasured"}}) {
 		t.Fatalf("retarget = %+v, %v", rOut, err)
 	}
 	// The shadow statement on the wire: a committed row renamed onto a
@@ -110,6 +111,15 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	if err != nil || rOnly.Touched != (layerCountsOut{Repo: 1}) || len(rOnly.TouchedRewrites) != 1 || rOnly.TouchedRewrites[0] != (touchedOut{Record: "example.com/life.H", Layer: gomutant.LayerRepo, From: "example.com/gone2.TestHelper", To: "example.com/moved2.TestHelper"}) || strings.Contains(rOnly.Note, "matched no records") {
 		t.Fatalf("repo-only touched retarget = %+v, %v", rOnly, err)
 	}
+	// A retarget that rewrites reviewed entries alone — no record under the
+	// prefix — is a write the response owns, never "matched no records".
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(filepath.Join(dir, gomutant.DefaultFindingsPath)), []byte(`{"version":1,"exemptions":[{"subject":"example.com/lonely.TestX","reason":"r","rationale":"why"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, eOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/lonely.", To: "example.com/moved.", Check: true})
+	if err != nil || len(eOut.Rewritten) != 0 || !reflect.DeepEqual(eOut.Exemptions, []rewrittenExemptionOut{{From: "example.com/lonely.TestX", To: "example.com/moved.TestX"}}) || strings.Contains(eOut.Note, "matched no records") {
+		t.Fatalf("entries-only retarget = %+v, %v; want the entry listed and no empty note", eOut, err)
+	}
 	_, tOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/gone.", To: "example.com/moved."})
 	wantTouched := []touchedOut{
 		{Record: "example.com/life.G", Layer: gomutant.LayerLocal, From: "example.com/gone.TestHelper", To: "example.com/moved.TestHelper"},
@@ -117,7 +127,8 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	if err != nil || tOut.Touched != (layerCountsOut{Local: 1}) || !reflect.DeepEqual(tOut.TouchedRewrites, wantTouched) || tOut.RewrittenCounts != (layerCountsOut{}) || strings.Contains(tOut.Note, "matched no records") {
 		t.Fatalf("touched retarget = %+v, %v", tOut, err)
 	}
-	// The stale roster caps like every row list, the remainder counted
+	// The rewritten-exemption roster caps like every row list, the
+	// remainder counted
 	// (REQ-mcp-envelope).
 	var entries []string
 	for i := 0; i < 60; i++ {
@@ -127,8 +138,8 @@ func TestToolPruneAndRetarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, cOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old3.", To: "example.com/life.", Check: true})
-	if err != nil || len(cOut.StaleExemptions) != 50 || cOut.OmittedStaleExemptions != 10 {
-		t.Fatalf("stale roster = %d listed, %d omitted, %v", len(cOut.StaleExemptions), cOut.OmittedStaleExemptions, err)
+	if err != nil || len(cOut.Exemptions) != 50 || cOut.OmittedExemptions != 10 {
+		t.Fatalf("rewritten roster = %d listed, %d omitted, %v", len(cOut.Exemptions), cOut.OmittedExemptions, err)
 	}
 
 	_, pPreview, err := s.toolPrune(ctx, nil, pruneIn{Check: true})

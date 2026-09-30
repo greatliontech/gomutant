@@ -191,11 +191,11 @@ call's selection. Rows cap at 50 with the remainder counted. Run a
 check preview first. Retarget acts on both layers — a record in the
 machine-local overlay rewrites there, each row naming its layer, the
 rewritten and touched counts stated per layer, a document row whose
-new symbol the overlay holds said to be shadowed — and refuses while a
-reviewed exemption entry names a subject some record's evidence
-carries under the old prefix: rewrite that record by hand first; the
-moved subjects no record carries are listed for the reviewer. Identity
-only moves: manifests, ledgers, and exemption stamps stay as measured.
+new symbol the overlay holds said to be shadowed — and rewrites the
+reviewed exemption entries whose subjects the rename moves, with the
+records, listing them; the reason and rationale stay as reviewed.
+Identity only moves: manifests, ledgers, and exemption stamps stay as
+measured.
 **example:** a check preview of from=example.com/old.
 to=example.com/new. after a package rename, then for real.
 

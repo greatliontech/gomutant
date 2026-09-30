@@ -26,7 +26,9 @@ func (c cancelWhenTempWrittenContext) Err() error {
 	}
 	entries, _ := os.ReadDir(c.dir)
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), ".gomutant-findings-") {
+		// The one record-file writer names its temporary so; the document
+		// is one of its callers.
+		if !strings.HasPrefix(entry.Name(), ".gomutant-record-") {
 			continue
 		}
 		info, err := entry.Info()
@@ -245,5 +247,40 @@ func TestLoadTargetsSniffs(t *testing.T) {
 	own, err := LoadTargets([]byte(`{"targets":[{"symbol":"p.F","oracle":["p.TestF"]}]}`))
 	if err != nil || len(own) != 1 || own[0].Oracle[0] != "p.TestF" {
 		t.Fatalf("own document: %+v %v", own, err)
+	}
+}
+
+// The findings document keeps its own mode across the locked write — a
+// reviewer who tightened the committed file to 0600 keeps it so after
+// every update — and a first write lands 0644: the record-file writer's
+// rule, read by the document as by the records beside it
+// (REQ-mcp-findings-doc).
+func TestUpdateDocumentKeepsTheFilesMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "findings.json")
+	evidence := func(symbol string) SubjectEvidence {
+		return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
+	}
+	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
+		TargetEvidence: evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1,
+		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
+		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "zero return"}}}}
+	if err := UpdateDocument(context.Background(), path, func(prior []Finding) ([]Finding, error) {
+		return mergeOnly(MergeFindings(prior, seed, nil)), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("a first write's mode = %v, %v; want 0644", info.Mode(), err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateDocument(context.Background(), path, func(all []Finding) ([]Finding, error) {
+		return all, all[0].Attest("f.go:1:1", "zero return", "equivalent")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("the tightened document's mode after an update = %v, %v; want 0600 kept", info.Mode(), err)
 	}
 }

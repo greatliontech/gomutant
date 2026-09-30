@@ -1,8 +1,11 @@
 package gomutant
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,9 +21,12 @@ import (
 // every read, so deleting an entry revokes it for every later
 // decision - and the matched entries are stamped onto each finding
 // they touch, so a reviewer inheriting the repo document sees the
-// acceptance beside the evidence it excuses — a rename leaves the
-// stamp naming the old subject until the next measurement re-derives
-// it, the retarget rewriting identity only (REQ-result-lifecycle).
+// acceptance beside the evidence it excuses. A subject is identity: a
+// retarget rewrites the entries whose subjects the rename moves, with
+// the records, and leaves the reason and rationale — the reviewed
+// content — untouched; the stamp a record carries names the old
+// subject until the next measurement re-derives it
+// (REQ-result-lifecycle).
 type Exemption struct {
 	Subject   string `json:"subject"`
 	Reason    string `json:"reason"`
@@ -52,13 +58,29 @@ func LoadExemptions(path string) ([]Exemption, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gomutant: reading exemption record: %w", err)
 	}
+	// The record's form is the contract: a key the form does not name,
+	// data past the document, or two entries for one subject and reason
+	// are refused at load, never carried silently past a rewrite — a
+	// second document appended behind the first would otherwise load as
+	// the first alone, and a second acceptance for one subject would be
+	// dead text behind the first (REQ-result-exemptions,
+	// REQ-result-lifecycle).
 	var doc exemptionsDocument
-	if err := json.Unmarshal(data, &doc); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&doc); err != nil {
+		return nil, fmt.Errorf("gomutant: exemption record %s: %w", path, err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("trailing data")
+		}
 		return nil, fmt.Errorf("gomutant: exemption record %s: %w", path, err)
 	}
 	if doc.Version != 1 {
 		return nil, fmt.Errorf("gomutant: exemption record %s: unsupported version %d", path, doc.Version)
 	}
+	seen := map[[2]string]int{}
 	for i, e := range doc.Exemptions {
 		if carriesAttribution(e.Reason) {
 			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d names a reason with its attribution %q — the attribution is fresh per measurement; name the clause alone (a refused path itself spelled like an attribution is matched by the clause before it)", path, i, e.Reason[len(reasonClause(e.Reason)):])
@@ -66,8 +88,35 @@ func LoadExemptions(path string) ([]Exemption, error) {
 		if e.Subject == "" || e.Reason == "" || e.Rationale == "" {
 			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d needs subject, reason, and rationale", path, i)
 		}
+		// Judged after the entry's own refusals, so a malformed pair is
+		// named for its own fault before it is named as a pair.
+		if prior, dup := seen[[2]string{e.Subject, e.Reason}]; dup {
+			return nil, fmt.Errorf("gomutant: exemption record %s: entries %d and %d both accept %s for %q - two acceptances for one subject; delete one", path, prior, i, e.Subject, e.Reason)
+		}
+		seen[[2]string{e.Subject, e.Reason}] = i
 	}
 	return doc.Exemptions, nil
+}
+
+// writeExemptions writes the committed exemption record whole — version
+// 1, the entries in their order, two-space JSON with a trailing newline
+// — atomically beside the findings document, keeping the file's mode:
+// a retarget rewriting the subjects a rename moved leaves the reviewed
+// content as it was, and a torn write never replaces the record
+// (REQ-result-exemptions, REQ-result-lifecycle).
+func writeExemptions(ctx context.Context, path string, exemptions []Exemption) error {
+	data, err := json.MarshalIndent(exemptionsDocument{Version: 1, Exemptions: exemptions}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("gomutant: encoding exemption record: %w", err)
+	}
+	mode, err := recordFileMode(path)
+	if err != nil {
+		return fmt.Errorf("gomutant: exemption record %s: %w", path, err)
+	}
+	if err := writeRecordFile(ctx, path, append(data, '\n'), mode); err != nil {
+		return fmt.Errorf("gomutant: exemption record %s: %w", path, err)
+	}
+	return nil
 }
 
 // exemptionFor returns the entry accepting (subject, reason) exactly,

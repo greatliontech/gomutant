@@ -124,25 +124,31 @@ type TouchedRewrite struct {
 	To    string
 }
 
+// RewrittenExemption names one reviewed exemption entry whose subject
+// the rename moved: From the subject as reviewed, To its rewritten
+// spelling; the reason and rationale stay as reviewed.
+type RewrittenExemption struct {
+	From string
+	To   string
+}
+
 // RetargetResult reports a retarget's rewrites: Rewritten names the
-// records whose mutated symbol changed, counted per layer in
-// RewrittenCounts; Touched counts, per layer, the records the rename's
-// closure updated without renaming their own symbol (an oracle or
-// killer in the renamed surface), and TouchedRewrites lists those
-// records' field rewrites - a rewritten record's evidence rides its
-// own rename and is not repeated there.
+// records whose mutated symbol changed; Touched counts, per layer, the
+// records the rename's closure updated without renaming their own
+// symbol (an oracle or killer in the renamed surface), and
+// TouchedRewrites lists those moves; Exemptions names the reviewed
+// exemption entries whose subjects the rename moved, rewritten with the
+// records (REQ-result-lifecycle).
 type RetargetResult struct {
 	Rewritten       []RetargetedRecord
 	RewrittenCounts LayerCounts
 	Touched         LayerCounts
 	TouchedRewrites []TouchedRewrite
-	// StaleExemptions lists, sorted, the reviewed exemption subjects
-	// the pair moves that no record's evidence carries: no rewrite
-	// reaches them and no later measurement can match them under the
-	// old prefix, so they are the reviewer's to rewrite or delete
-	// (REQ-result-exemptions). The same under check.
-	StaleExemptions []string
-	Check           bool
+	// Exemptions names the reviewed exemption entries whose subjects the
+	// rename moved, rewritten with the records (the same under check,
+	// where nothing is written).
+	Exemptions []RewrittenExemption
+	Check      bool
 }
 
 // retargetSymbol rewrites one symbol identity under the prefix pair;
@@ -356,12 +362,19 @@ func retargetFinding(f Finding, from, to string) (rewritten Finding, symbolChang
 // within a layer (the overlay shadowing the document is no collision),
 // refusing whole before any write. A retarget rewrites identity only:
 // the measured facts a record carries — runtime-input manifests,
-// compartment ledgers, exemption stamps — stay as measured. An
-// exemption entry whose subject a record's evidence names under the
-// old prefix refuses the retarget too: the record is reviewed and the
-// tool never edits it, and the subject left under the old prefix
-// could never match again (REQ-result-exemptions). Under check the
-// store is untouched and the result previews the rewrites.
+// compartment ledgers, exemption stamps — stay as measured. The
+// reviewed exemption entries whose subjects the pair moves are
+// rewritten with the records, after them and never under check — a
+// subject is identity, the reason and rationale the reviewed content;
+// a rewrite that would give two entries one subject and reason refuses
+// whole before any write, naming both, as a record collision does; an
+// entry's rewritten subject need not resolve in the tree (an entry no
+// record names is inert either way). Between the two writes a reader
+// sees rewritten records beside the entries as reviewed; that reader's
+// judgments self-heal at its next read, and a write failing between
+// them is named and recovered by a rerun (REQ-result-exemptions,
+// REQ-result-lifecycle). Under check the store is untouched and the
+// result previews the rewrites.
 func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to string, check bool) (RetargetResult, error) {
 	// The pair's shape is decided before any load by the faces; the
 	// library entry keeps the same judgment for callers that skipped it.
@@ -380,11 +393,31 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 	if err != nil {
 		return RetargetResult{}, err
 	}
-	result := RetargetResult{Check: check}
-	decide := func(layer string, f Finding) (Finding, bool, error) {
-		if err := detachedExemption(f, moved); err != nil {
-			return Finding{}, false, err
+	var result RetargetResult
+	// The entries as they would be rewritten, judged before any write:
+	// two entries meeting on one subject and reason would leave one
+	// acceptance's rationale dead text behind the other — a collision
+	// refused whole, naming both, as a record collision is. The loaded
+	// record carries no such pair (the load refuses it), so a collision
+	// here is one the rewrite makes: a moved entry meeting one the pair
+	// leaves alone.
+	rewrittenEntries := make([]Exemption, 0, len(store.exemptions))
+	seen := map[[2]string]string{}
+	for _, e := range store.exemptions {
+		reviewed := e.Subject
+		if next, ok := moved[e.Subject]; ok {
+			result.Exemptions = append(result.Exemptions, RewrittenExemption{From: e.Subject, To: next})
+			e.Subject = next
 		}
+		key := [2]string{e.Subject, e.Reason}
+		if prior, dup := seen[key]; dup {
+			return RetargetResult{}, fmt.Errorf("retarget: the exemption record would carry %s twice for %q (from %s and %s) - two acceptances for one subject; rewrite or delete one first", e.Subject, e.Reason, prior, reviewed)
+		}
+		seen[key] = reviewed
+		rewrittenEntries = append(rewrittenEntries, e)
+	}
+	result.Check = check
+	decide := func(layer string, f Finding) (Finding, bool, error) {
 		rewritten, symbolChanged, touched, moves, err := retargetFinding(f, from, to)
 		if err != nil {
 			return Finding{}, false, err
@@ -420,13 +453,16 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 		r := &result.Rewritten[i]
 		r.Shadowed = r.Layer == LayerRepo && revision.Overlay[r.To]
 	}
-	// Every moved subject a record carried refused above, so the moved
-	// subjects left are the ones no record carries: the reviewer's to
-	// rewrite or delete.
-	for subject := range moved {
-		result.StaleExemptions = append(result.StaleExemptions, subject)
+	// The reviewed entries whose subjects the rename moved follow the
+	// records: written after them, never under check; a write failing
+	// between them leaves the records rewritten and the entries as they
+	// were — a rerun rewrites the entries alone, since no record then
+	// carries the old prefix (REQ-result-lifecycle, REQ-result-exemptions).
+	if !check && len(result.Exemptions) > 0 {
+		if err := store.rewriteExemptions(ctx, rewrittenEntries); err != nil {
+			return result, fmt.Errorf("retarget: %d record(s) rewritten; the exemption record's %d moved subject(s) were not — a rerun rewrites them alone: %w", len(result.Rewritten)+result.Touched.Total(), len(result.Exemptions), err)
+		}
 	}
-	sort.Strings(result.StaleExemptions)
 	return result, nil
 }
 
@@ -445,22 +481,4 @@ func movedExemptionSubjects(exemptions []Exemption, from, to string) (map[string
 		}
 	}
 	return moved, nil
-}
-
-// detachedExemption refuses a retarget that would rewrite a record
-// whose evidence names a reviewed exemption subject the pair moves: the
-// record beside the document is the reviewer's, never the tool's to
-// edit, and the subject left under the old prefix could never match
-// the rewritten evidence again — the acceptance would die detached
-// exactly as an unrewritten attestation would (REQ-result-exemptions,
-// REQ-result-lifecycle). An entry no record's evidence names is inert
-// either way and blocks nothing.
-func detachedExemption(f Finding, moved map[string]string) error {
-	subjects := append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...)
-	for _, ev := range subjects {
-		if next, ok := moved[ev.Symbol]; ok {
-			return fmt.Errorf("retarget: the reviewed exemption record names %s, a subject of %s's evidence, under the old prefix (%s -> %s) - the tool never edits that record, so rewrite the subject there first or the acceptance dies detached", ev.Symbol, f.Symbol, ev.Symbol, next)
-		}
-	}
-	return nil
 }

@@ -305,23 +305,9 @@ func RecordEphemeralAttestation(ctx context.Context, path string, att EphemeralA
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".ephemeral-attestations-*")
+	mode, err := recordFileMode(path)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return writeRecordFile(ctx, path, append(data, '\n'), mode)
 }
