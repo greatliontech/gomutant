@@ -10,19 +10,21 @@ tasks:
       - go build ./...
 
   vet:
-    desc: Static analysis
+    desc: Static analysis, both build selections
     cmds:
       - go vet ./...
+      - go vet -tags integration ./...
 
   test:short:
-    desc: "The fast tier: the tool's code without go test per mutant (seconds; the inner-loop gate)"
+    desc: "The fast tier: the tool's code without go test per mutant (seconds; the inner-loop gate) — the default build selection's gate-carrying suites run as -short by default (internal/integrationtest)"
     cmds:
-      - go test -short -count=1 ./...
+      - go test -count=1 ./...
+      - go test -tags integration -count=1 ./internal/integrationtest
 
   test:
-    desc: "The full tier: the mutation e2es exceed go test's default 10m package timeout (dev-host budget; the runner-class budget lives in .github/workflows/ci.yaml, measured separately)"
+    desc: "The full tier by the flag: every test, on the default build selection; the mutation e2es exceed go test's default 10m package timeout (dev-host budget; the runner-class budget lives in .github/workflows/ci.yaml, measured separately)"
     cmds:
-      - go test -count=1 -timeout 2700s ./...
+      - go test -short=false -count=1 -timeout 2700s ./...
 
   test:selfhost-plan:
     desc: "The self-host preparation pass over the tool's own tree: resolution, oracle derivation, views, candidates, decisions — no probe, no mutant (keeps the self-host path from bit-rotting)"

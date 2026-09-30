@@ -9,6 +9,12 @@ invocations {
   go {
     packages: "./..."
     args: "-test.timeout=40m"
+    # The full tier by the flag, on the default build selection: every
+    # gate-carrying suite runs as -short unless told otherwise
+    # (internal/integrationtest), and the `integration` build tag, which
+    # also lifts the default, is a selection gofresh has not walked —
+    # under it observation proofs strip and nothing serves.
+    args: "-test.short=false"
     # Reviewed race-free admission: the standing testing rule keeps the
     # race detector off without explicit authorization, and this
     # invocation's plain evidence is deliberately accepted as witness
