@@ -678,11 +678,14 @@ func TestRunServesDriftedKillsKeyedToUnmovedOracles(t *testing.T) {
 }
 
 // The generalized drift gate: a removed oracle identity stays the general
-// rule's domain, a grown set under an explicit oracle on either side is the
-// caller's selection, and incomplete kill attribution refuses — each before
-// any evidence check. Candidate evidence no longer disqualifies at the gate;
-// it composes downstream as re-executed flagged candidates
-// (REQ-result-stale's killer-drift carve-out).
+// rule's domain, a grown set under a MODE mismatch (an explicit request
+// over a derived record) is a changed selection, and incomplete kill
+// attribution refuses — each before any evidence check. Candidate evidence
+// no longer disqualifies at the gate; it composes downstream as re-executed
+// flagged candidates (REQ-result-stale's killer-drift carve-out). A grown
+// set with the mode pinned equal — explicit on both sides included —
+// passes the gate (its composition is pinned end to end by
+// TestRunServesExplicitGrownOracleMeasuringOnlySurvivors).
 func TestEvidenceSetCoversKillerDriftEarlyGate(t *testing.T) {
 	ledger := &CompartmentLedger{}
 	base := Finding{
@@ -695,9 +698,8 @@ func TestEvidenceSetCoversKillerDriftEarlyGate(t *testing.T) {
 		oracle   []*subjectView
 		explicit bool
 	}{
-		"removed oracle identity": {prior: base, oracle: make([]*subjectView, 1)},
-		"grown set under an explicit oracle": {prior: func() Finding { f := base; f.OracleExplicit = true; return f }(),
-			oracle: make([]*subjectView, 3), explicit: true},
+		"removed oracle identity":         {prior: base, oracle: make([]*subjectView, 1)},
+		"grown set under a mode mismatch": {prior: base, oracle: []*subjectView{{symbol: "p.TestA"}, {symbol: "p.TestB"}, {symbol: "p.TestC"}}, explicit: true},
 		"incomplete kill attribution": {prior: func() Finding {
 			f := base
 			f.Killed = 2
@@ -720,11 +722,8 @@ func TestEvidenceSetCoversKillerDriftEarlyGate(t *testing.T) {
 			return f
 		}(), oracle: []*subjectView{{symbol: "p.TestA"}, {symbol: "p.TestB"}}},
 	} {
-		// The head pins the explicit flags equal, so the grown-explicit
-		// refusal is exercised with both sides explicit — the only state
-		// the pin admits.
-		moved, added, ok, err := evidenceSetCoversKillerDriftContext(ctx, tc.prior, nil, tc.oracle, tc.explicit, "go/12", "1m0s", false, 0, "")
-		if err != nil || ok || moved != nil || added != nil {
+		moved, added, ok, uncomposable, err := evidenceSetCoversKillerDriftContext(ctx, tc.prior, nil, tc.oracle, tc.explicit, "go/12", "1m0s", false, 0, "")
+		if err != nil || ok || moved != nil || added != nil || uncomposable != nil {
 			t.Fatalf("%s: drift gate = %v %v %v %v, want a refusal before any evidence check", name, moved, added, ok, err)
 		}
 	}

@@ -1870,10 +1870,13 @@ func (r *compartmentReach) walk(seeds []int) bool {
 // equal; the recorded oracle identity set is a subset of the current one — a
 // removed identity stays the general rule's domain, while an added identity
 // composes: it has no recorded evidence, joins every re-measure's oracle, and
-// by the growth keystone cannot un-kill a standing kill; when the set grew,
-// the grown-set non-explicit rule binds on both sides (a grown set is a
-// derived-oracle claim — an explicit request that supersets the recorded set
-// is the caller's selection). Candidate evidence composes rather than
+// by the growth keystone cannot un-kill a standing kill — under a derived
+// request as derived growth, under an explicit request as the caller's
+// grown selection, the mode pinned equal on both sides and the added test
+// a declaration the recorded compartment never carried either way (the
+// record keeps no explicit list, so a pre-existing test newly listed is
+// indistinguishable from a dropped evidence row and re-measures whole).
+// Candidate evidence composes rather than
 // disqualifying: the
 // flagged candidates join the re-measure set downstream under the
 // candidate-splice discipline. The compartment delta is attributable; and the
@@ -1885,27 +1888,21 @@ func (r *compartmentReach) walk(seeds []int) bool {
 // other subject as recorded — its own package's compartment pin is untouched
 // by this target's delta) or when its reference walk over the current ledger
 // reaches a delta declaration. Returns the moved and added oracle symbols,
-// each sorted.
-func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (moved, added []string, drifts bool, err error) {
+// each sorted; a refusal by the added-test rule alone returns the
+// uncomposable identities (sorted), every other refusal none — the caller's
+// decision names the rule's refusal and no other.
+func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (moved, added []string, drifts bool, uncomposable []string, err error) {
 	if prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
 		prior.OperatorSet != operatorSet || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime ||
 		len(prior.OracleEvidence) > len(oracle) ||
 		len(prior.Kills) != prior.Killed {
-		return nil, nil, false, nil
-	}
-	if len(prior.OracleEvidence) < len(oracle) && oracleExplicit {
-		// A grown set serves only as a derived-oracle claim on both sides
-		// (the grown-set rule): an explicit request that supersets the
-		// recorded set is the caller's selection, never a derived grown
-		// set. The head
-		// pinned the explicit flags equal, so one operand speaks for both.
-		return nil, nil, false, nil
+		return nil, nil, false, nil, nil
 	}
 	bySymbol := make(map[string]SubjectEvidence, len(prior.OracleEvidence))
 	for _, evidence := range prior.OracleEvidence {
 		if _, duplicate := bySymbol[evidence.Symbol]; duplicate {
-			return nil, nil, false, nil
+			return nil, nil, false, nil, nil
 		}
 		bySymbol[evidence.Symbol] = evidence
 	}
@@ -1918,7 +1915,7 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 			// no drift signal to classify it by: standing it would trust a
 			// ghost the walk cannot see (the flattering direction), so the
 			// whole target re-measures.
-			return nil, nil, false, nil
+			return nil, nil, false, nil, nil
 		}
 	}
 	seenCurrent := make(map[string]bool, len(oracle))
@@ -1926,18 +1923,18 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 		if seenCurrent[subject.symbol] {
 			// A duplicated current oracle symbol would let a removal hide
 			// behind the repeat in the retained count; refuse.
-			return nil, nil, false, nil
+			return nil, nil, false, nil, nil
 		}
 		seenCurrent[subject.symbol] = true
 	}
 	currentLedger, err := target.view.TestVariantLedger(target.subject)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, false, nil, err
 	}
 	recordedLedger := prior.CompartmentLedger.ledger()
 	delta := gofresh.DiffTestVariantLedgers(recordedLedger, currentLedger)
 	if !killerDriftAttributable(delta, recordedLedger, currentLedger) {
-		return nil, nil, false, nil
+		return nil, nil, false, nil, nil
 	}
 	refreshed := func(subject *subjectView, evidence SubjectEvidence) SubjectEvidence {
 		if subject.subject.Package == target.subject.Package && subject.fp.TestVariantClosure != "" {
@@ -1948,14 +1945,14 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 	memo := newCurrentRuntimeMemo()
 	ok, err := evidencePairsValid(ctx, []evidencePair{{subject: target, evidence: refreshed(target, prior.TargetEvidence), accept: acceptValidVerdict}}, memo.once)
 	if err != nil || !ok {
-		return nil, nil, false, err
+		return nil, nil, false, nil, err
 	}
 	reach := newCompartmentReach(currentLedger, delta)
 	if reach.unconditionalRootReaches() {
 		// An unchanged var initializer, init function, or TestMain reaching
 		// the delta runs changed code around every test: no per-oracle
 		// partition is sound, so the whole target re-measures.
-		return nil, nil, false, nil
+		return nil, nil, false, nil, nil
 	}
 	recordedFuncs := make(map[string]bool, len(recordedLedger.Declarations))
 	for _, decl := range recordedLedger.Declarations {
@@ -1977,10 +1974,19 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 			// compartment variants, fail-closed: a same-named declaration
 			// in the sibling variant refuses too, because oracle symbols
 			// collapse the variants onto one identity and a name-keyed
-			// acceptance would be exactly the laundering channel.
+			// acceptance would be exactly the laundering channel. The
+			// ledger is the TARGET package's: an oracle outside it has no
+			// recorded declaration list to certify its newness against, so
+			// an out-of-package addition refuses — the same fail-closed
+			// ground (a dropped cross-package row would otherwise compose
+			// as growth).
 			_, fn := splitTestSymbol(subject.symbol)
-			if fn == "" || recordedFuncs[fn] {
-				return nil, nil, false, nil
+			if fn == "" || recordedFuncs[fn] || subject.subject.Package != target.subject.Package {
+				// The rule's own refusal, named: every uncomposable
+				// addition is collected so the caller can say which
+				// identities re-measure the target whole.
+				uncomposable = append(uncomposable, subject.symbol)
+				continue
 			}
 			added = append(added, subject.symbol)
 			continue
@@ -1988,14 +1994,14 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 		retained++
 		valid, err := evidencePairsValid(ctx, []evidencePair{{subject: subject, evidence: refreshed(subject, evidence), accept: acceptValidVerdict}}, memo.once)
 		if err != nil {
-			return nil, nil, false, err
+			return nil, nil, false, nil, err
 		}
 		movedHere := !valid
 		if !movedHere && subject.subject.Package == target.subject.Package {
 			_, fn := splitTestSymbol(subject.symbol)
 			reachesDelta, known := reach.reaches(fn)
 			if !known {
-				return nil, nil, false, nil
+				return nil, nil, false, nil, nil
 			}
 			movedHere = reachesDelta
 		}
@@ -2005,15 +2011,21 @@ func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, tar
 	}
 	if retained != len(prior.OracleEvidence) {
 		// A recorded oracle absent from the current set is a removal — the
-		// general rule's domain, never drift's.
-		return nil, nil, false, nil
+		// general rule's domain, never drift's — and it is named as the
+		// cause ahead of any uncomposable addition: a swap did not grow
+		// the set.
+		return nil, nil, false, nil, nil
+	}
+	if len(uncomposable) > 0 {
+		sort.Strings(uncomposable)
+		return nil, nil, false, uncomposable, nil
 	}
 	if ok, err := memo.verify(ctx); err != nil || !ok {
-		return nil, nil, false, err
+		return nil, nil, false, nil, err
 	}
 	sort.Strings(moved)
 	sort.Strings(added)
-	return moved, added, true, nil
+	return moved, added, true, nil, nil
 }
 
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (bool, error) {

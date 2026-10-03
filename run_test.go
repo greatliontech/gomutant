@@ -2423,7 +2423,7 @@ func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 		views.bySymbol["example.com/driftgate.TestSmall"],
 		views.bySymbol["example.com/driftgate.TestMore"],
 	}
-	moved, added, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleTimeoutDerived, prior[0].OracleMemoryBytes, "")
+	moved, added, ok, _, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleTimeoutDerived, prior[0].OracleMemoryBytes, "")
 	if err != nil || !ok || len(moved) != 0 || len(added) != 1 || added[0] != "example.com/driftgate.TestMore" {
 		t.Fatalf("intact pins refused the drift gate: moved=%v added=%v ok=%v err=%v", moved, added, ok, err)
 	}
@@ -2432,14 +2432,173 @@ func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	// refuses even though the compartment delta classifies attributable.
 	tampered := prior[0]
 	tampered.TargetEvidence.Guards.Toolchain = "go0.0-never"
-	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleTimeoutDerived, tampered.OracleMemoryBytes, ""); err != nil || ok {
+	if _, _, ok, _, err := evidenceSetCoversKillerDriftContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleTimeoutDerived, tampered.OracleMemoryBytes, ""); err != nil || ok {
 		t.Fatalf("a moved toolchain hid behind the compartment verdict: ok=%v err=%v", ok, err)
 	}
-	// A grown set is a derived-oracle claim on both sides: an explicit
-	// request supersetting the recorded derived set is the caller's
-	// selection, never derived growth.
-	if _, _, ok, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleTimeoutDerived, prior[0].OracleMemoryBytes, ""); err != nil || ok {
-		t.Fatalf("an explicit request rode the derived-growth composition: ok=%v err=%v", ok, err)
+	// The oracle mode is a pin: an explicit request over a DERIVED record
+	// is a changed selection, never growth — the explicit composition
+	// needs the mode equal on both sides.
+	if _, _, ok, _, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleTimeoutDerived, prior[0].OracleMemoryBytes, ""); err != nil || ok {
+		t.Fatalf("an explicit request rode a derived record's growth composition: ok=%v err=%v", ok, err)
+	}
+}
+
+// TestRunServesExplicitGrownOracleMeasuringOnlySurvivors pins the
+// killer-drift carve-out under an EXPLICIT oracle (REQ-result-stale): a
+// record measured against the caller's list, then a request listing one
+// more test the caller just wrote, serves the standing kills and
+// re-measures only the open survivors against the added test — the
+// derived route's own shape, named in the explicit mode; a newly listed
+// test whose declaration the recorded compartment already carried is
+// indistinguishable from a dropped evidence row and re-measures whole.
+func TestRunServesExplicitGrownOracleMeasuringOnlySurvivors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":        "module example.com/grown\n\ngo 1.26\n",
+		"gated.go":      "package gated\n\nfunc Gated(x int) int {\n\ty := x + 1\n\tif y > 100 {\n\t\treturn y * 3\n\t}\n\treturn y\n}\n",
+		"gated_test.go": "package gated\n\nimport \"testing\"\n\nfunc TestSmall(t *testing.T) {\n\tif Gated(5) != 6 {\n\t\tt.Fail()\n\t}\n}\n\nfunc TestOld(t *testing.T) {\n\tif Gated(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The caller's explicit list names TestSmall alone; TestOld exists
+	// but is deliberately not listed.
+	target := Target{Symbol: "example.com/grown.Gated", Oracle: []string{"example.com/grown.TestSmall"}}
+	first, err := tr.Run(ctx, []Target{target}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := first[0]
+	if !f.OracleExplicit || len(f.Survivors) < 2 || f.Killed == 0 || f.CompartmentLedger == nil {
+		t.Fatalf("baseline fixture = %+v, want an explicit record with survivors, kills, and a ledger", f)
+	}
+	doc, err := Export(first, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := ParseFindings(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	survivorCount := len(prior[0].Survivors)
+
+	// A newly written test, listed beside the prior oracle: the explicit
+	// set grew by a declaration the recorded compartment never carried.
+	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(files["gated_test.go"]+"\nfunc TestBig(t *testing.T) {\n\tif Gated(200) != 603 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grownTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grownTarget := Target{Symbol: "example.com/grown.Gated", Oracle: []string{"example.com/grown.TestSmall", "example.com/grown.TestBig"}}
+	var decisions []RunDecision
+	var dispatched []int
+	var executedScopes [][]string
+	grownFindings, err := grownTree.Run(ctx, []Target{grownTarget}, Options{
+		Prior:         prior,
+		Decision:      func(d RunDecision) { decisions = append(decisions, d) },
+		dispatched:    func(_ string, mi int) { dispatched = append(dispatched, mi) },
+		executedScope: func(_, _ string, scope []string) { executedScopes = append(executedScopes, scope) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An explicit oracle reports no derivation suffix — the oracle is
+	// the caller's statement, never a derivation that ran.
+	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (explicit oracle grew by 1 test)",
+		killNoun(prior[0].Killed), candidateNoun(survivorCount), survivorNoun(survivorCount))
+	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != survivorCount {
+		t.Fatalf("explicit grown-set decision = %+v, want %q over %d survivors", decisions, wantReason, survivorCount)
+	}
+	if len(dispatched) != survivorCount {
+		t.Fatalf("dispatched %d candidates, want exactly the %d recorded survivors", len(dispatched), survivorCount)
+	}
+	for _, scope := range executedScopes {
+		if !slices.Equal(scope, []string{"^(TestBig)$"}) {
+			t.Fatalf("execution ran scope %v, want the survivors narrowed to the added test", scope)
+		}
+	}
+	grown := grownFindings[0]
+	if !grown.OracleExplicit || grown.Killed <= prior[0].Killed || len(grown.Survivors) >= survivorCount {
+		t.Fatalf("explicit growth measured nothing: explicit %v, killed %d->%d, survivors %d->%d", grown.OracleExplicit, prior[0].Killed, grown.Killed, survivorCount, len(grown.Survivors))
+	}
+	oracleSymbols := make([]string, 0, len(grown.OracleEvidence))
+	for _, evidence := range grown.OracleEvidence {
+		oracleSymbols = append(oracleSymbols, evidence.Symbol)
+	}
+	if !slices.Equal(oracleSymbols, []string{"example.com/grown.TestBig", "example.com/grown.TestSmall"}) {
+		t.Fatalf("grown explicit oracle evidence = %v, want both listed tests recorded", oracleSymbols)
+	}
+
+	// A pre-existing test newly listed (TestOld, declared before the
+	// record) is indistinguishable from a dropped evidence row — the
+	// record keeps no explicit list — and the target re-measures whole,
+	// the decision naming the grown identity; on the grown tree, so the
+	// delta is attributable and the refusal is the rule's own.
+	var wholeDecisions []RunDecision
+	oldTarget := Target{Symbol: "example.com/grown.Gated", Oracle: []string{"example.com/grown.TestSmall", "example.com/grown.TestOld"}}
+	if _, err := grownTree.Run(ctx, []Target{oldTarget}, Options{Prior: prior, Decision: func(d RunDecision) { wholeDecisions = append(wholeDecisions, d) }}); err != nil {
+		t.Fatal(err)
+	}
+	if len(wholeDecisions) != 1 || wholeDecisions[0].Action != "measure" || !strings.HasPrefix(wholeDecisions[0].Reason, "stale: the oracle set grew by 1 test the carve-out cannot compose") || !strings.Contains(wholeDecisions[0].Reason, "example.com/grown.TestOld") || wholeDecisions[0].Candidates != prior[0].Generated {
+		t.Fatalf("a pre-existing test newly listed = %+v, want a whole re-measure naming TestOld", wholeDecisions)
+	}
+
+	// A grown set the gate refuses on ANOTHER pin — here the oracle
+	// timeout, explicit where the record's was derived — keeps the
+	// inspection's own text: the newly written test is admissible and
+	// is never blamed.
+	var otherPin []RunDecision
+	if _, err := grownTree.Run(ctx, []Target{grownTarget}, Options{Prior: prior, OracleTimeout: 2 * time.Minute, Decision: func(d RunDecision) { otherPin = append(otherPin, d) }}); err != nil {
+		t.Fatal(err)
+	}
+	if len(otherPin) != 1 || otherPin[0].Action != "measure" || !strings.HasPrefix(otherPin[0].Reason, "stale:") || strings.Contains(otherPin[0].Reason, "cannot compose") || otherPin[0].Candidates != prior[0].Generated {
+		t.Fatalf("a grown set refused on the timeout pin = %+v, want the inspection's own stale text, never the added test blamed", otherPin)
+	}
+
+	// A SWAP — a recorded oracle dropped for a pre-existing test — is a
+	// removal, the general rule's domain: the set did not grow, and the
+	// decision keeps the inspection's text, never the growth note.
+	var swapDecisions []RunDecision
+	swapTarget := Target{Symbol: "example.com/grown.Gated", Oracle: []string{"example.com/grown.TestOld"}}
+	if _, err := grownTree.Run(ctx, []Target{swapTarget}, Options{Prior: prior, Decision: func(d RunDecision) { swapDecisions = append(swapDecisions, d) }}); err != nil {
+		t.Fatal(err)
+	}
+	if len(swapDecisions) != 1 || swapDecisions[0].Action != "measure" || !strings.HasPrefix(swapDecisions[0].Reason, "stale:") || strings.Contains(swapDecisions[0].Reason, "cannot compose") || swapDecisions[0].Candidates != prior[0].Generated {
+		t.Fatalf("a swapped oracle = %+v, want the inspection's stale text — a removal is never reported as growth", swapDecisions)
+	}
+
+	// An added oracle OUTSIDE the target package has no recorded ledger
+	// to certify its newness against and re-measures whole the same way,
+	// however new its declaration.
+	if err := os.MkdirAll(filepath.Join(dir, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "other", "other_test.go"), []byte("package other\n\nimport (\n\t\"testing\"\n\n\tgated \"example.com/grown\"\n)\n\nfunc TestFar(t *testing.T) {\n\tif gated.Gated(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	farTree, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var farDecisions []RunDecision
+	farTarget := Target{Symbol: "example.com/grown.Gated", Oracle: []string{"example.com/grown.TestSmall", "example.com/grown/other.TestFar"}}
+	if _, err := farTree.Run(ctx, []Target{farTarget}, Options{Prior: prior, Decision: func(d RunDecision) { farDecisions = append(farDecisions, d) }}); err != nil {
+		t.Fatal(err)
+	}
+	if len(farDecisions) != 1 || farDecisions[0].Action != "measure" || !strings.HasPrefix(farDecisions[0].Reason, "stale: the oracle set grew by 1 test the carve-out cannot compose") || !strings.Contains(farDecisions[0].Reason, "example.com/grown/other.TestFar") || farDecisions[0].Candidates != prior[0].Generated {
+		t.Fatalf("an out-of-package test newly listed = %+v, want a whole re-measure naming TestFar", farDecisions)
 	}
 }
 

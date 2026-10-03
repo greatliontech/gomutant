@@ -1259,8 +1259,9 @@ type work struct {
 	// attributable delta, driftMoved names the oracles whose evidence or
 	// reference walk observed it, and only the candidate indexes in
 	// driftRemeasure — every survivor when the set grew or anything moved
-	// (driftAdded names the current derived oracles with no recorded
-	// evidence: the grown-set composition, whose added tests join the
+	// (driftAdded names the current oracles — derived or the caller's
+	// explicit list — with no recorded evidence: the grown-set
+	// composition, whose added tests join the
 	// re-measure oracle and cannot un-kill a standing kill), every
 	// candidate carrying recorded candidate evidence, every kill whose
 	// killer moved, and
@@ -2249,7 +2250,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			return nil, err
 		}
 		f := &findings[i]
-		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.OracleExplicit || len(tg.Oracle) != 0, OracleTimeout: opts.OracleTimeout.String(), OracleMemoryBytes: oracleMemoryPin}
+		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.explicitOracle(), OracleTimeout: opts.OracleTimeout.String(), OracleMemoryBytes: oracleMemoryPin}
 		if deriveOracleBudgets {
 			// The derived record's bound starts at the floor and raises
 			// to the loosest budget any verdict runs under
@@ -3097,12 +3098,12 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			}
 			if !matches {
 				// A mismatch may be exactly the drift the carve-out serves:
-				// the compartment moved attributably — a purely grown
-				// derived set included, its added tests being attributable
-				// additions with nothing moved — so kills keyed to unmoved
-				// oracles stand and the rest re-measures
+				// the compartment moved attributably — a purely grown set,
+				// derived or explicit, included, its added tests being
+				// attributable additions with nothing moved — so kills
+				// keyed to unmoved oracles stand and the rest re-measures
 				// (REQ-result-stale's killer-drift carve-out).
-				if moved, addedOracles, drifts, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime); derr != nil {
+				if moved, addedOracles, drifts, uncomposable, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime); derr != nil {
 					if ctx.Err() != nil {
 						return nil, ctx.Err()
 					}
@@ -3122,9 +3123,17 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					// build a supplementary view for a recorded oracle the
 					// current resolution lacks — analysis-pass work gated
 					// shared exactly like the union build above.
-					probeGate.RLock()
-					reason = t.movedPinAttribution(ctx, *rec, mv.views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
-					probeGate.RUnlock()
+					if len(uncomposable) > 0 {
+						// The added-test rule's own refusal — a pre-existing
+						// or out-of-package declaration newly listed — and
+						// the caller is told which; every other refusal
+						// keeps the inspection's own class and text.
+						reason = uncomposableNote(uncomposable)
+					} else {
+						probeGate.RLock()
+						reason = t.movedPinAttribution(ctx, *rec, mv.views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
+						probeGate.RUnlock()
+					}
 				}
 			}
 			if matches && len(rec.CandidateEvidence) == 0 {
@@ -3363,7 +3372,13 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					reason += fmt.Sprintf(" (%s narrowed to the added and moved tests)", survivorNoun(len(survivorScoped)))
 				}
 				if len(w.driftAdded) != 0 {
-					reason += fmt.Sprintf(" (derived oracle grew by %s)", testNoun(len(w.driftAdded)))
+					// The grown set is named in its mode: the derivation's
+					// growth, or the caller's grown explicit selection.
+					mode := "derived"
+					if targets[w.target].explicitOracle() {
+						mode = "explicit"
+					}
+					reason += fmt.Sprintf(" (%s oracle grew by %s)", mode, testNoun(len(w.driftAdded)))
 				}
 				if flagged != 0 {
 					reason += fmt.Sprintf("; %s re-execute%s flagged evidence", candidateNoun(flagged), map[bool]string{true: "s"}[flagged == 1])
@@ -6732,4 +6747,17 @@ func deepestResolvedAncestor(p string) (ancestor, remainder string, ok bool) {
 		rest = filepath.Join(filepath.Base(dir), rest)
 		dir = parent
 	}
+}
+
+// explicitOracle reports the target's oracle mode: a stated list, or an
+// explicitly empty statement, is the caller's oracle; neither is a
+// derivation (REQ-result-stale pins the mode on both sides of a serve).
+func (tg Target) explicitOracle() bool { return tg.OracleExplicit || len(tg.Oracle) != 0 }
+
+// uncomposableNote names the identities the drift gate's added-test rule
+// refused — a pre-existing or out-of-package declaration newly listed —
+// so a caller who grew the oracle sees why the target re-measures whole
+// (REQ-result-stale); bounded.
+func uncomposableNote(ids []string) string {
+	return fmt.Sprintf("stale: the oracle set grew by %s the carve-out cannot compose — a pre-existing or out-of-package declaration newly listed re-measures whole (%s)", testNoun(len(ids)), cappedJoin(ids, 4))
 }

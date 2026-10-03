@@ -190,7 +190,7 @@ func TestRunSurvivorFlipsOnInPlaceOracleEditAlone(t *testing.T) {
 	// The in-place edit takes the killer-drift carve-out WITHOUT its
 	// growth clause - pinned so this arm cannot drift into the
 	// growth-flavoured neighbour it exists to distinguish.
-	if len(decisionsB) != 1 || !strings.Contains(decisionsB[0].Reason, "re-measuring") || strings.Contains(decisionsB[0].Reason, "derived oracle grew") {
+	if len(decisionsB) != 1 || !strings.Contains(decisionsB[0].Reason, "re-measuring") || strings.Contains(decisionsB[0].Reason, "oracle grew") {
 		t.Fatalf("run B decision = %+v, want the growth-free killer-drift re-measure", decisionsB)
 	}
 	for _, s := range second[0].Survivors {

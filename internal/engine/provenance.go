@@ -23,7 +23,10 @@ import (
 // same one: one ladder is one process, and the sample it reads is the
 // sample that passed.
 func toolchainProvenance(ctx context.Context, sampler gofresh.ToolchainSampler, dir string, env []string) (string, error) {
-	check := gofresh.ToolchainProvenance{Sampler: sampler}
+	check, err := gofresh.NewToolchainProvenance(sampler)
+	if err != nil {
+		return "", err
+	}
 	return check.Check(ctx, dir, env)
 }
 

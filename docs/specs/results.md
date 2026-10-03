@@ -418,10 +418,20 @@ could hide a removal in the retained count). An added
 oracle has no recorded evidence and joins every re-measure's oracle; by the
 growth keystone it cannot un-kill anything — a grown set only extends the
 recorded set's behavior — so it never moves a standing kill, set-wide kills
-included. A grown set serves only when the finding and the request are both
-non-explicit — a grown set is a derived-oracle claim on both sides: an
-explicit request that supersets the recorded set is the caller's
-selection, never derived growth. Candidate
+included. A grown set serves under a derived request as the derivation's
+growth and under an explicit request as the caller's grown selection — the
+oracle mode pinned equal on both sides, the added test a declaration of the
+TARGET package the recorded compartment never carried under either mode: the
+record keeps no explicit list and the ledger is the target package's, so a
+pre-existing test newly listed, or an added oracle outside the target package,
+is indistinguishable from a dropped evidence row and re-measures whole — the
+decision then names the identities that rule refused ("stale: the oracle set
+grew by K tests the carve-out cannot compose … (<identities>)"), and only
+that rule's refusal: a grown set the carve-out refuses on any other pin keeps
+the inspection's own class and text — so the caller sees why
+(the record's claim "survived X" is true, the request's "survived X ∪ Y" was
+never measured, and only the added tests need to run against the open
+survivors). Candidate
 evidence composes rather than disqualifying: every flagged candidate joins
 the re-measure set and re-executes against the full current oracle — the
 candidate-local splice's own discipline, under this carve-out's baselines —
@@ -483,7 +493,8 @@ oracle" (count-aware nouns), appending " (S survivors narrowed to the added
 and moved tests)" when any survivor narrows — S counts the narrowed
 survivors; a re-measure whose survivors are all flagged (each keeping the
 full oracle) appends nothing — " (derived oracle grew by K
-tests)" when the set grew, and "; F candidates re-execute flagged evidence"
+tests)" or " (explicit oracle grew by K tests)" when the set grew, in the
+request's oracle mode, and "; F candidates re-execute flagged evidence"
 when evidence is flagged (count-aware nouns and verb) (a delta reaching no oracle with nothing added or
 flagged reports "served:
 compartment delta reaches no recorded oracle; nothing re-measures") with
