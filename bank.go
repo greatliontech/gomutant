@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -37,8 +38,10 @@ import (
 
 // bankVersion is the bank file's format version; a mismatched or
 // unreadable file is discarded whole (a bank is pure cache — the
-// re-measure IS the recovery path).
-const bankVersion = 1
+// re-measure IS the recovery path). Version 2: the coverage entry is
+// per batch — each batch carries its position in the group's plan,
+// the entry its plan size and its failed batches.
+const bankVersion = 2
 
 // bankFileCeiling bounds the bank read: keys embed oracle patterns,
 // so membership churn orphans entries and the file only grows — a
@@ -73,18 +76,71 @@ type bankedBaseline struct {
 
 // bankedCoverage is one (group, cover package) coverage probe: the
 // content pins (the group's oracle-subject rows AND the covered
-// package's own row — coverage speaks about both sides), and the
-// probed batches with their coverage and wall-clocks.
+// package's own row — coverage speaks about both sides), the plan's
+// batch count, the probed batches with their coverage and wall-clocks
+// — each at its position in the plan, deposited as it lands — and the
+// batches whose probe failed, by position, so a later run whose pins
+// hold resumes the entry: the banked batches serve, the failed and the
+// unprobed ones probe (REQ-result-baseline-bank).
 type bankedCoverage struct {
-	Evidence []closureRow  `json:"evidence"`
-	CoverRow closureRow    `json:"coverRow"`
-	Batches  []bankedBatch `json:"batches"`
+	Evidence []closureRow    `json:"evidence"`
+	CoverRow closureRow      `json:"coverRow"`
+	Plan     int             `json:"plan"`
+	Batches  []bankedBatch   `json:"batches"`
+	Failed   []bankedFailure `json:"failed,omitempty"`
 }
 
 type bankedBatch struct {
+	Index     int                      `json:"index"`
 	Fns       []string                 `json:"fns"`
 	DurMillis int64                    `json:"durMillis"`
 	Coverage  engine.PersistedCoverage `json:"coverage"`
+}
+
+// bankedFailure records one batch whose coverage probe failed — its
+// position, its tests, and the probe's refusal — so the next run's
+// retry names the prior failure (a deterministic failure then costs
+// one batch per run, never the unit).
+type bankedFailure struct {
+	Index  int      `json:"index"`
+	Fns    []string `json:"fns"`
+	Reason string   `json:"reason"`
+}
+
+// resume matches a banked entry against the current plan: the banked
+// batches whose position and tests equal the plan's, keyed by
+// position, and the prior failures by position. A banked batch or
+// failure whose tests differ from the plan's at its position, or lie
+// outside it, discards the entry (ok false) — fail-closed over a plan
+// that moved, so a retry never names a prior failure of other tests.
+func (c bankedCoverage) resume(plan [][]string) (banked map[int]scheduleBatch, failed map[int]string, ok bool) {
+	if c.Plan != len(plan) {
+		return nil, nil, false
+	}
+	banked = make(map[int]scheduleBatch, len(c.Batches))
+	for _, b := range c.Batches {
+		if b.Index < 0 || b.Index >= len(plan) || !slices.Equal(b.Fns, plan[b.Index]) {
+			return nil, nil, false
+		}
+		if _, dup := banked[b.Index]; dup {
+			return nil, nil, false
+		}
+		banked[b.Index] = scheduleBatch{fns: b.Fns, cov: b.Coverage.Restore(), dur: time.Duration(b.DurMillis) * time.Millisecond}
+	}
+	failed = make(map[int]string, len(c.Failed))
+	for _, f := range c.Failed {
+		if f.Index < 0 || f.Index >= len(plan) || !slices.Equal(f.Fns, plan[f.Index]) {
+			return nil, nil, false
+		}
+		failed[f.Index] = f.Reason
+	}
+	return banked, failed, true
+}
+
+// complete reports whether every batch of the plan holds a passing
+// probe — the entry serves whole.
+func (c bankedCoverage) complete() bool {
+	return c.Plan > 0 && len(c.Batches) == c.Plan
 }
 
 // baselineBank is the in-memory bank for one run: loaded once, each

@@ -1,6 +1,7 @@
 package gomutant
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/greatliontech/gomutant/internal/windowcost"
@@ -30,6 +31,13 @@ type windowEstimate struct {
 	// full counts whole-group candidates; unknown counts candidates
 	// with any unpriced part (excluded from the projection).
 	narrowed, full, unknown int
+	// noSignal names every oracle group of the window that carries no
+	// schedule signal, with the reason it carries none — "<oracle
+	// package>: <reason>", distinct, in window order — so "N full"
+	// never reads unexplained (REQ-exec-run-status). The roster is per
+	// GROUP: a candidate a present signal cannot judge (an unsound
+	// coverage file over its extent) counts whole-group without a line.
+	noSignal []string
 	// auditProjected prices the audit at the SAME savings-derived cap
 	// the executed audit uses (every narrowed candidate modeled as a
 	// would-be survivor — the conservative upper bound), each re-run
@@ -47,7 +55,40 @@ type windowEstimate struct {
 func estimateWindow(window []work, store *scheduleStore, baselineDur func(group) (time.Duration, bool), auditCeiling int) windowEstimate {
 	var est windowEstimate
 	var maxFull, modelSavings time.Duration
+	seen := map[string]bool{}
+	name := func(pkg, reason string) {
+		line := pkg + ": " + reason
+		if !seen[line] {
+			seen[line] = true
+			est.noSignal = append(est.noSignal, line)
+		}
+	}
 	for _, w := range window {
+		// The roster is a schedule fact: a store-less pricing (the
+		// pre-probe window order) names nothing and prices as before.
+		if store != nil {
+			for _, g := range w.groups {
+				switch {
+				case w.shaped:
+					name(g.pkgs[0], "a shaped target's explicit oracle runs whole")
+				case w.targetView == nil:
+					// An unshaped work is built from its resolved target
+					// view; this arm is the nil guard alone and names
+					// nothing (no clause reason exists for it).
+				default:
+					entry := store.get(coverageKey(g, w.targetView.subject.Package))
+					switch {
+					case entry == nil:
+						// The plan's candidate gate: a target executing
+						// too few candidates to amortize a probe reserves
+						// no key.
+						name(g.pkgs[0], fmt.Sprintf("fewer than %d executing candidates for the target", windowcost.ScheduleMinCandidates))
+					case entry.unscheduled != "":
+						name(g.pkgs[0], entry.unscheduled)
+					}
+				}
+			}
+		}
 		wf, wfOK := workFullPrice(w, baselineDur)
 		if wfOK && wf > maxFull {
 			maxFull = wf
@@ -156,6 +197,18 @@ func (e windowEstimate) projectedString() string {
 	}
 	return roundedDuration(e.projected)
 }
+
+// noSignalList bounds the no-signal roster for the event: the first
+// noSignalBound lines, the remainder counted.
+func (e windowEstimate) noSignalList() []string {
+	if len(e.noSignal) <= noSignalBound {
+		return e.noSignal
+	}
+	return append(append([]string(nil), e.noSignal[:noSignalBound]...), fmt.Sprintf("+%d more", len(e.noSignal)-noSignalBound))
+}
+
+// noSignalBound caps the estimate's no-signal roster.
+const noSignalBound = 8
 
 // auditString renders the audit projection; empty when no audit is
 // priced.

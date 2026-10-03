@@ -513,6 +513,14 @@ type ExecutionEvent struct {
 	EstimateNarrowed  int    `json:"estimateNarrowed,omitempty"`
 	EstimateFull      int    `json:"estimateFull,omitempty"`
 	EstimateUnknown   int    `json:"estimateUnknown,omitempty"`
+	// EstimateNoSignal names, on the estimate event, every oracle
+	// group of the window carrying no schedule signal with the reason
+	// it carries none — "<oracle package>: <reason>" (a failed probe
+	// batch by position, too few tests, too few executing candidates
+	// for the target, a shaped target's explicit oracle, an unvouched
+	// covering-phase kill), bounded with the remainder counted — so a
+	// whole-group count is never unexplained (REQ-exec-run-status).
+	EstimateNoSignal []string `json:"estimateNoSignal,omitempty"`
 	// ProbesDone/ProbesTotal ride the `probing` phase: the window's
 	// coverage-probe batches paid so far and in all, announced with the
 	// projected cost before the first batch and ticked per batch
@@ -3785,6 +3793,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			Symbol:         targets[window[0].target].Symbol,
 			CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
 			EstimateNarrowed: est.narrowed, EstimateFull: est.full, EstimateUnknown: est.unknown,
+			EstimateNoSignal:  est.noSignalList(),
 			EstimateProjected: est.projectedString(), EstimateAudit: est.auditString(),
 		})
 		jobCh := make(chan job)

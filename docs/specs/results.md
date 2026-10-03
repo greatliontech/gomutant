@@ -903,14 +903,26 @@ an earlier discarded candidate can therefore reserve an occurrence number.
 **REQ-result-baseline-bank** (behavior): Baseline and coverage-probe
 measurements MUST bank machine-local — a killed or finished
 campaign's measurement is never discarded by the calendar — in a
-versioned bank file (`baselines.json`, version 1) beside the findings
+versioned bank file (`baselines.json`, version 2) beside the findings
 overlay under the same resolved-tree key, never in the repo document
 (durations and probe identities are one machine's facts). A banked
 baseline entry carries the group's oracle-subject evidence rows as
 its content pins, the passing observation's persisted manifest and
 digest, and the raw wall-clock; a banked coverage entry additionally
 pins the covered package's own closure pin and carries each batch's
-test names, coverage spans, and wall-clock. Serving re-verifies,
+test names, coverage spans, and wall-clock. A coverage entry deposits
+BATCH BY BATCH — each batch is its own passing probe, deposited as it
+lands with its position in the group's batch plan and the plan's size
+— and records a batch whose probe failed by its position, its tests,
+and the probe's refusal, so a later run whose pins hold RESUMES the
+entry: the banked batches serve, only the failed and the unprobed
+batches probe, and the retry names the prior failure; an entry every
+batch of whose plan holds a passing probe is complete and serves
+whole, and a banked batch whose tests differ from the plan's at its
+position discards the entry. The bank's granularity leaves the run's
+own schedule signal unchanged: a group any batch of which failed THIS
+run carries no signal this run (REQ-exec-oracle-run's every-batch
+rule). Serving re-verifies,
 each entry class at the strength its reuse requires: a BASELINE's
 rows validate against the current subject views through the same
 evidence discipline finding serves use (per-pair prechecks, the
@@ -931,8 +943,10 @@ unreadable, malformed,
 version-skewed, or over-ceiling bank reads as empty (the bank is
 cache with a fixed size ceiling; the
 re-measure is the recovery path). Only a clean, verifiable, PASSING
-probe deposits — an unverifiable observation would re-enter
-unverifiable evidence — and a completed deposit PERSISTS
+probe deposits MEASUREMENT — an unverifiable observation would
+re-enter unverifiable evidence — a failed coverage-probe batch
+deposits its failure record alone (its position, its tests, the
+refusal), never spans, and a completed deposit PERSISTS
 immediately: the bank exists to survive killed campaigns, and
 persistence deferred to process exit dies with the process. A
 BASELINE deposit completes when its finding COMMITS: the pins are

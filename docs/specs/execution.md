@@ -829,7 +829,10 @@ as their own fields on every structured face — while a
 payload-bearing event (the per-subject analysis-unavailable provenance,
 the unlisted-toolchain notice, a failing baseline's own output — a
 reported failure or a result drifting between its discovery and
-measurement runs — beside its skip decision) is a distinct fact that no
+measurement runs — beside its skip decision, a failed coverage-probe
+batch — its position in the group's plan, its tests, and the probe's
+own output, one event per failed batch while the probe continues to
+the plan's remaining batches) is a distinct fact that no
 face may throttle, fold, or discard at the source — transport-level
 advisory delivery is unchanged — its package kept a package and its
 payload its own field on every structured face. Subscribing to the class
@@ -859,7 +862,13 @@ estimate — a projection of scheduled oracle time at measured-baseline
 pace, derived entirely from measurements the run already made
 (passing-baseline wall-clocks and coverage-probe batch wall-clocks), the
 executing candidates classified as narrowed, whole-group, or unpriced,
-and the narrowed-survivor audit priced separately — an unpriced
+every oracle group carrying no schedule signal named with the reason it
+carries none (a failed probe batch by position, too few tests, too few
+executing candidates for the target to amortize a probe, a shaped
+target's explicit oracle, an unvouched covering-phase kill — per group:
+a candidate a present signal cannot judge, an unsound coverage file over
+its extent, counts whole-group without a line), and the
+narrowed-survivor audit priced separately — an unpriced
 candidate is counted and NEVER folded into the projection: the model
 fabricates no duration; the projection is a pace anchor, not a bound in
 either direction — its named exclusions are a timing-out candidate

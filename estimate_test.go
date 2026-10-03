@@ -317,3 +317,42 @@ func TestEstimateRenderStringsFabricateNothing(t *testing.T) {
 		t.Fatalf("audit rendered %q, want 1m0s", s)
 	}
 }
+
+// The estimate names every group of the window carrying no schedule
+// signal with its reason — a whole-group count is never unexplained —
+// distinct per group, bounded with the remainder counted; a scheduled
+// group names nothing (REQ-exec-run-status).
+func TestEstimateWindowNamesEveryNoSignalGroup(t *testing.T) {
+	const pkg, coverPkg = "example.com/p", "example.com/p"
+	w := scheduleTestWork(pkg, coverPkg, []string{"TestA", "TestB"})
+	w.candidates = []engine.Candidate{{Symbol: "S", Operator: "op", Position: "f.go:10:2", Extent: "10:2-12:3", Replacements: []engine.Replacement{{File: "f.go"}}}}
+	store := newScheduleStore()
+	store.byKey[coverageKey(w.groups[0], coverPkg)] = &groupSchedule{unscheduled: "coverage probe batch 2/3 failed"}
+	est := estimateWindow([]work{w, w}, store, nil, 4)
+	if len(est.noSignal) != 1 || est.noSignal[0] != pkg+": coverage probe batch 2/3 failed" || est.full != 0 || est.unknown != 2 {
+		t.Fatalf("no-signal roster = %v (full %d, unknown %d), want the one group named once", est.noSignal, est.full, est.unknown)
+	}
+	store.byKey[coverageKey(w.groups[0], coverPkg)] = &groupSchedule{batches: []scheduleBatch{{fns: []string{"TestA"}, cov: engine.CoverageForTest(nil), dur: time.Second}, {fns: []string{"TestB"}, cov: engine.CoverageForTest(nil), dur: time.Second}}}
+	if est := estimateWindow([]work{w}, store, nil, 4); len(est.noSignal) != 0 {
+		t.Fatalf("a scheduled group named a reason: %v", est.noSignal)
+	}
+	// A window too small for the plan's candidate gate reserved no key —
+	// the group is named with the gate's reason; a shaped target's
+	// groups never schedule and say so.
+	gated := newScheduleStore()
+	if est := estimateWindow([]work{w}, gated, nil, 4); len(est.noSignal) != 1 || est.noSignal[0] != pkg+fmt.Sprintf(": fewer than %d executing candidates for the target", windowcost.ScheduleMinCandidates) {
+		t.Fatalf("gated group named %v", est.noSignal)
+	}
+	shaped := w
+	shaped.shaped = true
+	if est := estimateWindow([]work{shaped}, gated, nil, 4); len(est.noSignal) != 1 || est.noSignal[0] != pkg+": a shaped target's explicit oracle runs whole" {
+		t.Fatalf("shaped group named %v", est.noSignal)
+	}
+	many := windowEstimate{}
+	for i := 0; i < noSignalBound+2; i++ {
+		many.noSignal = append(many.noSignal, fmt.Sprintf("example.com/p%d: fewer than 2 tests", i))
+	}
+	if list := many.noSignalList(); len(list) != noSignalBound+1 || list[noSignalBound] != "+2 more" {
+		t.Fatalf("bounded roster = %v", list)
+	}
+}

@@ -30,8 +30,9 @@ func TestGrammarsRenderOnceForEveryClass(t *testing.T) {
 			e.EstimateNarrowed = 4
 			e.EstimateFull = 5
 			e.EstimateUnknown = 1
+			e.EstimateNoSignal = []string{"q: coverage probe batch 2/3 failed", "r: fewer than 2 tests"}
 			e.EstimateAudit = "9s"
-		}), "estimate", []string{"window ~3m", "4 narrowed, 5 full, 1 unpriced", "audit ~9s"}, "estimating a.F"},
+		}), "estimate", []string{"window ~3m", "4 narrowed, 5 full, 1 unpriced; no signal: q: coverage probe batch 2/3 failed; r: fewer than 2 tests)", "audit ~9s"}, "estimating a.F"},
 		{with(base, func(e *ExecutionEvent) { e.Phase = "audit-flip"; e.FlipPosition = "f.go:1:1"; e.FlipKiller = "a.TestF" }), "audit", []string{"FLIP: a.F f.go:1:1", "killed by a.TestF under the full oracle"}, ""},
 		{with(base, func(e *ExecutionEvent) { e.Phase = "audit"; e.AuditedNarrowed = 3; e.AuditDisagreed = 1 }), "audit", []string{"3 narrowed survivor(s)", "1 disagreed"}, ""},
 		{with(base, func(e *ExecutionEvent) {

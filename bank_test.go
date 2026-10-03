@@ -2,6 +2,7 @@ package gomutant
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,14 +36,14 @@ func TestBaselineBankRoundTripAndCorruptionReadsEmpty(t *testing.T) {
 	if !ok || got.Manifest != "m" || got.RawMillis != 1234 {
 		t.Fatalf("the baseline deposit did not persist immediately: %+v ok=%v", got, ok)
 	}
-	b.putCoverage("c", bankedCoverage{Batches: []bankedBatch{{Fns: []string{"TestA"}, DurMillis: 7}}})
+	b.putCoverage("c", bankedCoverage{Plan: 2, Batches: []bankedBatch{{Index: 1, Fns: []string{"TestA"}, DurMillis: 7}}, Failed: []bankedFailure{{Index: 0, Fns: []string{"TestZ"}, Reason: "exit status 1"}}})
 	again := openBaselineBank(moduleDir)
 	if _, ok := again.baseline("k"); !ok {
 		t.Fatal("the coverage deposit dropped the persisted baseline")
 	}
 	cov, ok := again.coverage("c")
-	if !ok || len(cov.Batches) != 1 || cov.Batches[0].DurMillis != 7 {
-		t.Fatalf("the coverage deposit did not persist immediately: %+v ok=%v", cov, ok)
+	if !ok || cov.Plan != 2 || len(cov.Batches) != 1 || cov.Batches[0].Index != 1 || cov.Batches[0].DurMillis != 7 || len(cov.Failed) != 1 || cov.Failed[0].Index != 0 || cov.Failed[0].Reason != "exit status 1" {
+		t.Fatalf("the coverage deposit did not persist immediately in the per-batch form: %+v ok=%v", cov, ok)
 	}
 
 	path, err := bankPath(moduleDir)
@@ -314,5 +315,259 @@ func TestRunServesBankedBaselinesAcrossRuns(t *testing.T) {
 	}
 	if baselineProbes.Load() == 0 {
 		t.Fatal("an oracle membership change did not miss the bank key — stale measurement served")
+	}
+}
+
+// A banked coverage entry resumes against the current plan by
+// position: matching batches serve, prior failures are reported by
+// position, and a plan the entry does not match — a different batch
+// count, tests differing at a position, a position outside the plan,
+// a duplicated position — discards the entry whole
+// (REQ-result-baseline-bank).
+func TestBankedCoverageResumeMatchesThePlan(t *testing.T) {
+	plan := [][]string{{"TestA", "TestB"}, {"TestC", "TestD"}, {"TestE"}}
+	batch := func(i int) bankedBatch { return bankedBatch{Index: i, Fns: plan[i], DurMillis: int64(i + 1)} }
+	complete := bankedCoverage{Plan: 3, Batches: []bankedBatch{batch(0), batch(1), batch(2)}}
+	banked, failed, ok := complete.resume(plan)
+	if !ok || len(banked) != 3 || len(failed) != 0 || !complete.complete() || banked[1].dur != 2*time.Millisecond {
+		t.Fatalf("complete entry: ok=%v banked=%d failed=%d complete=%v", ok, len(banked), len(failed), complete.complete())
+	}
+	partial := bankedCoverage{Plan: 3, Batches: []bankedBatch{batch(0), batch(2)}, Failed: []bankedFailure{{Index: 1, Fns: plan[1], Reason: "exit status 1"}}}
+	banked, failed, ok = partial.resume(plan)
+	if !ok || len(banked) != 2 || banked[2].fns[0] != "TestE" || failed[1] != "exit status 1" || partial.complete() {
+		t.Fatalf("partial entry: ok=%v banked=%v failed=%v complete=%v", ok, banked, failed, partial.complete())
+	}
+	for name, entry := range map[string]bankedCoverage{
+		"plan size moved":     {Plan: 2, Batches: []bankedBatch{batch(0)}},
+		"tests moved":         {Plan: 3, Batches: []bankedBatch{{Index: 1, Fns: []string{"TestC", "TestX"}}}},
+		"position outside":    {Plan: 3, Batches: []bankedBatch{{Index: 3, Fns: []string{"TestE"}}}},
+		"duplicated":          {Plan: 3, Batches: []bankedBatch{batch(0), batch(0)}},
+		"failure outside":     {Plan: 3, Failed: []bankedFailure{{Index: 5}}},
+		"failure tests moved": {Plan: 3, Batches: []bankedBatch{batch(0)}, Failed: []bankedFailure{{Index: 1, Fns: []string{"TestC", "TestX"}, Reason: "exit status 1"}}},
+		"version-1 shape":     {Plan: 0, Batches: []bankedBatch{{Fns: plan[0]}, {Fns: plan[1]}, {Fns: plan[2]}}},
+	} {
+		if _, _, ok := entry.resume(plan); ok {
+			t.Fatalf("%s: a mismatched entry resumed", name)
+		}
+	}
+}
+
+// A coverage probe's bank entry is per batch: a run whose batch fails
+// banks the passing batches and the failure by position; the next run
+// probes exactly the failed batch, its retry naming the prior failure;
+// a run on which it passes completes the entry; and the run after
+// probes nothing. A run cancelled mid-unit leaves its completed
+// batches banked, so the rerun probes only the remainder
+// (REQ-result-baseline-bank's resume; REQ-exec-run-status's
+// failed-batch event).
+func TestBankResumesAPartialCoverageProbe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines across campaigns")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	restoreCov := seams.coveredPositions
+	restoreMinT := windowcost.ScheduleMinTests
+	restoreMinC := windowcost.ScheduleMinCandidates
+	windowcost.ScheduleMinTests = 2
+	windowcost.ScheduleMinCandidates = 1
+	t.Cleanup(func() {
+		seams.coveredPositions = restoreCov
+		windowcost.ScheduleMinTests = restoreMinT
+		windowcost.ScheduleMinCandidates = restoreMinC
+	})
+	var probes atomic.Int64
+	var failing, failingFirst, failingThird, cancelAfterFirst, cancelAtThird atomic.Bool
+	var cancel context.CancelFunc
+	seams.coveredPositions = func(ctx context.Context, dir, testPkg, runRegex, coverPkg string, timeout time.Duration, flags []string, env []string, view engine.DirectiveCoverageView, bounds engine.OracleBounds) (engine.Coverage, error) {
+		// The survivor bucket's advisory probe rides the same seam under
+		// the whole group's pattern; only the batch probes (a third of
+		// the nine tests each) are the schedule's.
+		if strings.Contains(runRegex, "TestAdd1") && strings.Contains(runRegex, "TestAdd9") {
+			return engine.CoverageForTest(nil), nil
+		}
+		n := probes.Add(1)
+		if failing.Load() && strings.Contains(runRegex, "TestAdd4") {
+			return engine.Coverage{}, fmt.Errorf("probe refused: exit status 1")
+		}
+		if failingFirst.Load() && strings.Contains(runRegex, "TestAdd1") {
+			return engine.Coverage{}, fmt.Errorf("probe refused: exit status 1")
+		}
+		if cancelAfterFirst.Load() && n == 1 {
+			cancel()
+		}
+		if cancelAtThird.Load() && strings.Contains(runRegex, "TestAdd7") {
+			cancel()
+			return engine.Coverage{}, ctx.Err()
+		}
+		if failingThird.Load() && strings.Contains(runRegex, "TestAdd7") {
+			return engine.Coverage{}, fmt.Errorf("probe refused: exit status 1")
+		}
+		return engine.CoverageForTest(nil), nil
+	}
+
+	dir := t.TempDir()
+	var tests strings.Builder
+	tests.WriteString("package a\n\nimport \"testing\"\n\n")
+	for i := 1; i <= 9; i++ {
+		fmt.Fprintf(&tests, "func TestAdd%d(t *testing.T) {\n\tif Add(%d, 1) != %d {\n\t\tt.Fatal()\n\t}\n}\n\n", i, i, i+1)
+	}
+	files := map[string]string{
+		"go.mod": "module example.com/bankmod\n\ngo 1.26\n",
+		// A body with several operators, so six budget extensions each
+		// find an unmeasured candidate.
+		"a/a.go":      "package a\n\nfunc Add(a, b int) int {\n\tx := a + b\n\tif x < 0 {\n\t\tx = -x\n\t}\n\tif x > 1000 {\n\t\tx = x - 1\n\t}\n\treturn x\n}\n",
+		"a/a_test.go": tests.String(),
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	load := func() *Tree {
+		tr, err := Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tr
+	}
+	target := []Target{{Symbol: "example.com/bankmod/a.Add"}}
+	own := RunOwnWrites(filepath.Join(dir, ".gomutant", "findings.json"))
+	var events []AnalysisEvent
+	var emu sync.Mutex
+	// Every run is a BUDGET EXTENSION of the one before — a forced run
+	// would rightly bypass the bank (REQ-result-baseline-bank) — so each
+	// run re-measures one more candidate and pays the probe phase.
+	opts := func(budget int) Options {
+		return Options{Budget: budget, OwnWrites: own, AnalysisEvent: func(e AnalysisEvent) {
+			if e.Phase != "probe-failed" {
+				return
+			}
+			emu.Lock()
+			events = append(events, e)
+			emu.Unlock()
+		}}
+	}
+	entry := func() bankedCoverage {
+		bank := openBaselineBank(dir)
+		if len(bank.file.Coverage) != 1 {
+			t.Fatalf("bank holds %d coverage entries, want the one group", len(bank.file.Coverage))
+		}
+		for _, e := range bank.file.Coverage {
+			return e
+		}
+		return bankedCoverage{}
+	}
+	run := func(ctx context.Context, budget int, wantProbes int64) ([]Finding, error) {
+		probes.Store(0)
+		emu.Lock()
+		events = nil
+		emu.Unlock()
+		findings, err := load().Run(ctx, target, opts(budget))
+		if got := probes.Load(); got != wantProbes {
+			t.Fatalf("run (budget %d) probed %d coverage batches, want %d (err %v)", budget, got, wantProbes, err)
+		}
+		return findings, err
+	}
+
+	// Run 1: batch 2 of 3 fails — every batch probes once, the two
+	// passing ones bank at their positions, the failure by its position.
+	failing.Store(true)
+	findings, err := run(context.Background(), 1, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].CandidateCount < 6 {
+		t.Fatalf("the fixture must enumerate at least six candidates for the extensions below: %+v", findings)
+	}
+	first := entry()
+	if first.Plan != 3 || len(first.Batches) != 2 || first.Batches[0].Index != 0 || first.Batches[1].Index != 2 || len(first.Failed) != 1 || first.Failed[0].Index != 1 || !strings.Contains(first.Failed[0].Reason, "probe refused") {
+		t.Fatalf("after the failing run the bank holds %+v", first)
+	}
+	if len(events) != 1 || !strings.Contains(events[0].Detail, "batch 2/3 over example.com/bankmod/a (TestAdd4, TestAdd5, TestAdd6): ") || strings.Contains(events[0].Detail, "previous run") {
+		t.Fatalf("failing run reported %+v", events)
+	}
+	// Run 2: only the failed batch probes; still failing, the retry
+	// names the prior failure.
+	if _, err := run(context.Background(), 2, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || !strings.Contains(events[0].Detail, "failed in the previous run too: probe refused") {
+		t.Fatalf("retry reported %+v, want the prior failure named", events)
+	}
+	// Run 3: the batch passes — the entry completes.
+	failing.Store(false)
+	if _, err := run(context.Background(), 3, 1); err != nil {
+		t.Fatal(err)
+	}
+	if done := entry(); !done.complete() || len(done.Failed) != 0 || len(events) != 0 {
+		t.Fatalf("after the passing retry the bank holds %+v (events %d)", done, len(events))
+	}
+	// Run 4: nothing probes.
+	if _, err := run(context.Background(), 4, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh bank, a run cancelled after its first batch: the batch
+	// stays banked and the rerun probes the remaining two.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	var ctx context.Context
+	ctx, cancel = context.WithCancel(context.Background())
+	defer func() { cancel() }()
+	cancelAfterFirst.Store(true)
+	if _, err := run(ctx, 5, 1); err == nil {
+		t.Fatal("a run cancelled mid-probe returned no error")
+	}
+	cancelAfterFirst.Store(false)
+	if cut := entry(); cut.Plan != 3 || len(cut.Batches) != 1 || cut.Batches[0].Index != 0 {
+		t.Fatalf("after the cancelled run the bank holds %+v, want the one completed batch", cut)
+	}
+	if _, err := run(context.Background(), 5, 2); err != nil {
+		t.Fatal(err)
+	}
+	if resumed := entry(); !resumed.complete() {
+		t.Fatalf("the rerun did not complete the entry: %+v", resumed)
+	}
+
+	// A fresh bank again, protodb's own shape: deterministic failures
+	// at batches 1 and 3, then a deadline. Run A banks batch 2 and the
+	// two failures. Run B retries batch 1 (fails again), serves batch 2
+	// from the bank, and is cut during batch 3 — every deposit its
+	// retry writes must still carry batch 2, which this run never
+	// re-probed, AND the failure at 3, which this run never reached: a
+	// resumed unit's partial deposits never shrink the entry below what
+	// the bank held. Run C completes it with two probes.
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	failingFirst.Store(true)
+	failingThird.Store(true)
+	if _, err := run(context.Background(), 6, 3); err != nil {
+		t.Fatal(err)
+	}
+	if a := entry(); a.Plan != 3 || len(a.Batches) != 1 || a.Batches[0].Index != 1 || len(a.Failed) != 2 || a.Failed[0].Index != 0 || a.Failed[1].Index != 2 {
+		t.Fatalf("after run A the bank holds %+v", a)
+	}
+	failingThird.Store(false)
+	cancelAtThird.Store(true)
+	ctx, cancel = context.WithCancel(context.Background())
+	if _, err := run(ctx, 6, 2); err == nil {
+		t.Fatal("run B: a run cancelled mid-probe returned no error")
+	}
+	cancel()
+	if b := entry(); b.Plan != 3 || len(b.Batches) != 1 || b.Batches[0].Index != 1 || len(b.Failed) != 2 || b.Failed[0].Index != 0 || b.Failed[1].Index != 2 {
+		t.Fatalf("after run B the bank holds %+v — the served batch or the unreached failure was dropped by a partial deposit", b)
+	}
+	if len(events) != 1 || !strings.Contains(events[0].Detail, "failed in the previous run too") {
+		t.Fatalf("run B reported %+v", events)
+	}
+	failingFirst.Store(false)
+	cancelAtThird.Store(false)
+	if _, err := run(context.Background(), 6, 2); err != nil {
+		t.Fatal(err)
+	}
+	if c := entry(); !c.complete() || len(c.Failed) != 0 {
+		t.Fatalf("after run C the bank holds %+v", c)
 	}
 }

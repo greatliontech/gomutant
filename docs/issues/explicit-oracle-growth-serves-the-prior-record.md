@@ -26,7 +26,27 @@ OPEN survivors against the added tests (a kill commits, a survival keeps
 the record with its oracle list grown), kills stand — the same shape as
 the grown-set arm, with the explicit list as the set.
 
-Lands: cross-tool train chunk 304 (its open triages this beside the
-derived-oracle report; the reuse posture's channel naming — "not
-reusable as it stands; what lifts it: the new oracle" — is 183's
-vocabulary and lands with the rule).
+Triage (304.1, 2026-10-03): the SERVE claim does not hold at HEAD — the
+serve gate (freshness.go evidenceSetMatchesContextWithCurrent) refuses a
+request whose oracle count differs from the record's and requires every
+current oracle to hold a recorded row, and the killer-drift arm refuses a
+grown set under an explicit oracle on either side; both are pinned
+(run_test.go "an explicit request rode the derived-growth composition",
+killerdrift_test.go "grown set under an explicit oracle"). An explicit
+superset therefore re-measures WHOLE today, never serves; what the report
+observed cannot be reproduced from it (a targets document whose
+oracleExplicit list did not grow would serve, the new tests then being
+outside the request). The cost ask stands and derives: with every pin
+holding and the request's explicit set a superset of the record's, only
+the open survivors need to run, and only against the ADDED tests — each
+unmoved oracle's recorded pass stands exactly as a standing kill does,
+the keystone REQ-result-stale already rests on; the compartment-ledger
+"added = a new declaration" rule is not needed because there is no delta
+— the added tests are simply unmeasured against the survivors. Kills
+stand; a kill by an added test commits; a survival keeps the record with
+its oracle list grown. REQ-result-stale's sentence "a grown set serves
+only when the finding and the request are both non-explicit" gives a
+scoping reason, not a soundness one, and is amended with the arm.
+
+Lands: cross-tool train chunk 306 (gomutant, directly after 304 and
+gofresh 305 in the lane).

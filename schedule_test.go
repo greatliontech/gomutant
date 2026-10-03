@@ -127,6 +127,16 @@ func TestScheduledGroupsPartitionAndOrder(t *testing.T) {
 	degraded.byKey[key] = entry
 	degraded.unschedule(key)
 	unordered("unscheduled after degrade", runOptions{scheduleStore: degraded}, m, w)
+	// The degrade names itself to the window estimate — the
+	// unvouched covering-phase kill is a stated no-signal reason
+	// (REQ-exec-run-status).
+	if got := degraded.get(key).unscheduled; got != unscheduledDegraded {
+		t.Fatalf("degrade reason = %q", got)
+	}
+	w.candidates = []engine.Candidate{{Symbol: "S", Operator: "op", Position: m.Position, Extent: m.Extent, Replacements: []engine.Replacement{{File: "f.go"}}}}
+	if est := estimateWindow([]work{w}, degraded, nil, 4); len(est.noSignal) != 1 || est.noSignal[0] != pkg+": "+unscheduledDegraded {
+		t.Fatalf("estimate after degrade names %v", est.noSignal)
+	}
 }
 
 // The narrowed survivor end to end, on the canonical residual-risk
@@ -673,8 +683,11 @@ func TestNarrowedSurvivorSkipsNonCoveringRemainder(t *testing.T) {
 // The probe gate counts the candidates that will EXECUTE — a served
 // record's flagged indexes, an extension's suffix, a drift serve's
 // re-measure set — so a near-empty window never pays a probe pass it
-// cannot amortize; and a probe failure stores an empty signal that is
-// never re-probed.
+// cannot amortize; a failed batch does not stop the unit (every batch
+// probes once), is named on the analysis channel with its position and
+// tests, and leaves the group an empty signal carrying the reason,
+// never re-probed within the run (REQ-exec-run-status;
+// REQ-exec-oracle-run's every-batch rule).
 func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
@@ -715,23 +728,64 @@ func TestProbeScheduleCoverageGatesAndDegrades(t *testing.T) {
 		t.Fatalf("a one-candidate serve paid %d probes", calls.Load())
 	}
 
-	// A fresh work probes — ceil(sqrt(9)) = 3 batches — and the
-	// failure stores an empty signal exactly once.
-	if err := probeWork(ctx, tr, w, runOptions{scheduleStore: store}); err != nil {
+	// A fresh work probes — ceil(sqrt(9)) = 3 batches, every batch
+	// once though each fails — names each failed batch on the
+	// analysis channel, and stores an empty signal with the reason,
+	// never re-probed within the run.
+	var events []AnalysisEvent
+	collect := Options{AnalysisEvent: func(e AnalysisEvent) { events = append(events, e) }}
+	if err := probeWork(ctx, tr, w, runOptions{Options: collect, scheduleStore: store}); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 1 {
-		t.Fatalf("failed probe retried within one pass: %d calls (first batch fails, probe stops)", calls.Load())
+	if calls.Load() != 3 {
+		t.Fatalf("a failed batch stopped the unit: %d calls, want every batch probed once (3)", calls.Load())
 	}
-	if err := probeWork(ctx, tr, w, runOptions{scheduleStore: store}); err != nil {
+	if len(events) != 3 || events[0].Phase != "probe-failed" || events[0].Package != pkg || !strings.Contains(events[0].Detail, "batch 1/3 over "+pkg+" (TestA, TestB, TestC): ") || !strings.Contains(events[0].Detail, "probe refused") {
+		t.Fatalf("failed batches reported as %+v, want one probe-failed event per batch naming its position, tests, and error", events)
+	}
+	if err := probeWork(ctx, tr, w, runOptions{Options: collect, scheduleStore: store}); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 1 {
+	if calls.Load() != 3 {
 		t.Fatalf("failed probe re-probed on a later window: %d calls", calls.Load())
 	}
-	if entry := store.get(coverageKey(w.groups[0], pkg)); entry == nil || len(entry.batches) != 0 {
-		t.Fatalf("failed probe stored a usable signal: %+v", entry)
+	if entry := store.get(coverageKey(w.groups[0], pkg)); entry == nil || len(entry.batches) != 0 || entry.unscheduled != "coverage probe batch 1/3, 2/3, 3/3 failed" {
+		t.Fatalf("failed probe stored %+v, want no batches and the failed positions as the reason", entry)
 	}
+
+	// One failing batch among three: the other two carry their
+	// coverage into the unit, the group still has no signal this run
+	// (every batch's verdict is the rule), and the reason names the
+	// one position.
+	calls.Store(0)
+	events = nil
+	seams.coveredPositions = func(_ context.Context, _, _, runRegex, _ string, _ time.Duration, _ []string, _ []string, _ engine.DirectiveCoverageView, _ engine.OracleBounds) (engine.Coverage, error) {
+		calls.Add(1)
+		if strings.Contains(runRegex, "TestD") {
+			return engine.Coverage{}, fmt.Errorf("probe refused")
+		}
+		return engine.CoverageForTest(nil), nil
+	}
+	partial := newScheduleStore()
+	if err := probeWork(ctx, tr, w, runOptions{Options: collect, scheduleStore: partial}); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 3 || len(events) != 1 || !strings.Contains(events[0].Detail, "batch 2/3 over "+pkg+" (TestD, TestE, TestF): ") {
+		t.Fatalf("one failing batch: %d calls, events %+v", calls.Load(), events)
+	}
+	if entry := partial.get(coverageKey(w.groups[0], pkg)); entry == nil || len(entry.batches) != 0 || entry.unscheduled != "coverage probe batch 2/3 failed" {
+		t.Fatalf("one failing batch stored %+v, want no signal naming batch 2/3", entry)
+	}
+	// The size gate's reason is stored too.
+	windowcost.ScheduleMinTests = 100
+	small := newScheduleStore()
+	if err := probeWork(ctx, tr, w, runOptions{scheduleStore: small}); err != nil {
+		t.Fatal(err)
+	}
+	if entry := small.get(coverageKey(w.groups[0], pkg)); entry == nil || entry.unscheduled != "fewer than 100 tests" {
+		t.Fatalf("size-gated group stored %+v", entry)
+	}
+	windowcost.ScheduleMinTests = 2
 
 	// A healthy probe records one coverage run per batch.
 	calls.Store(0)
@@ -875,6 +929,15 @@ func TestProbePlanCostCountsUnpricedBatches(t *testing.T) {
 	if probePlanBatches(plan) != 5 {
 		t.Fatalf("plan batches = %d", probePlanBatches(plan))
 	}
+	// A resumed unit announces and prices only the batches it will
+	// probe — the banked ones are served, never counted.
+	plan[1].banked = map[int]scheduleBatch{0: {fns: []string{"TestC"}}, 2: {fns: []string{"TestE"}}}
+	if probePlanBatches(plan) != 3 {
+		t.Fatalf("resumed plan batches = %d, want 3 (two banked of five)", probePlanBatches(plan))
+	}
+	if priced, unpriced := probePlanCost(plan, func(group) (time.Duration, bool) { return time.Second, true }); priced != 3*time.Second || unpriced != 0 {
+		t.Fatalf("resumed plan priced %s, unpriced %d; want 3s and 0", priced, unpriced)
+	}
 	// Nothing priced renders no projection — never a zero.
 	if probeProjection(0) != "" || probeProjection(6*time.Second) != "6s" {
 		t.Fatalf("projection = %q / %q", probeProjection(0), probeProjection(6*time.Second))
@@ -894,4 +957,26 @@ func probeWork(ctx context.Context, tr *Tree, w work, opts runOptions) error {
 		}
 	}
 	return nil
+}
+
+// A failed batch's payload names its position, the covered package,
+// at most eight of its tests with the remainder counted, the probe's
+// error, and the prior run's failure when the bank recorded one
+// (REQ-exec-run-status).
+func TestProbeFailureDetailBoundsItsNames(t *testing.T) {
+	var names []string
+	for i := 0; i < probeFailureNames+2; i++ {
+		names = append(names, fmt.Sprintf("Test%02d", i))
+	}
+	got := probeFailureDetail(22, 40, "example.com/q", names, "", fmt.Errorf("exit status 1: tail"))
+	want := "batch 23/40 over example.com/q (Test00, Test01, Test02, Test03, Test04, Test05, Test06, Test07, +2 more): exit status 1: tail"
+	if got != want {
+		t.Fatalf("detail = %q\nwant     %q", got, want)
+	}
+	if got := probeFailureDetail(0, 3, "example.com/q", names[:2], "exit status 2", fmt.Errorf("exit status 1")); got != "batch 1/3 over example.com/q (Test00, Test01): exit status 1; failed in the previous run too: exit status 2" {
+		t.Fatalf("detail with a prior failure = %q", got)
+	}
+	if boundedNames(names[:probeFailureNames], probeFailureNames) != strings.Join(names[:probeFailureNames], ", ") {
+		t.Fatal("a list at the bound was cut")
+	}
 }

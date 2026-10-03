@@ -2,7 +2,9 @@ package gomutant
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -63,10 +65,26 @@ type scheduleBatch struct {
 
 // groupSchedule is one oracle group's probed schedule signal: fewer
 // than two batches (a failed or skipped probe stores none) means no
-// signal — the group runs unordered and is not re-probed.
+// signal — the group runs unordered and is not re-probed — and
+// unscheduled then names WHY the group carries none, in the window
+// estimate's words (REQ-exec-run-status): the plan's size gate, a
+// failed probe batch by position, or an unvouched covering-phase kill
+// (the reservation's pending marker reaches no estimate). Empty when
+// the group is scheduled.
 type groupSchedule struct {
-	batches []scheduleBatch
+	batches     []scheduleBatch
+	unscheduled string
 }
+
+// Reasons a group carries no schedule signal. The pending marker is
+// the reservation's value between the plan and the unit's own store —
+// no estimate reads it (the plan probes every reserved unit before the
+// window's estimate, or the run returns); it keeps a reserved key
+// distinguishable from a scheduled one.
+const (
+	unscheduledPending  = "coverage probe pending"
+	unscheduledDegraded = "an unvouched covering-phase kill"
+)
 
 // scheduleStore is the run-scoped schedule state. The signal map is
 // written only by the serial per-window probe pass (before that
@@ -89,6 +107,16 @@ func newScheduleStore() *scheduleStore {
 	return &scheduleStore{byKey: map[string]*groupSchedule{}, phaseBaselines: map[scopedBaselineKey]*phaseBaseline{}}
 }
 
+// setUnscheduled records why a reserved group carries no signal.
+func (s *scheduleStore) setUnscheduled(key, reason string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byKey[key] = &groupSchedule{unscheduled: reason}
+}
+
 func (s *scheduleStore) get(key string) *groupSchedule {
 	if s == nil {
 		return nil
@@ -100,15 +128,8 @@ func (s *scheduleStore) get(key string) *groupSchedule {
 
 // unschedule clears a group's signal so every later mutant runs
 // unordered — the degrade for an order-dependent suite (an unvouched
-// covering-phase kill).
-func (s *scheduleStore) unschedule(key string) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.byKey[key] = &groupSchedule{}
-}
+// covering-phase kill), named as such to the window estimate.
+func (s *scheduleStore) unschedule(key string) { s.setUnscheduled(key, unscheduledDegraded) }
 
 // phaseBaselinePasses reports whether a phase pattern passes ALONE on
 // the unmutated tree — the shape-symmetric ground a narrowed phase
@@ -227,11 +248,21 @@ type probeUnit struct {
 	key      string
 	g        group
 	coverPkg string
-	batches  [][]string
-	bankable bool
-	evidence []closureRow
-	coverRow closureRow
+	// batches is the group's whole plan; banked holds the batches a
+	// partial bank entry already carries, by plan position, and
+	// failedBefore the prior run's failures by position — the loop
+	// serves the former and names the latter on its retry.
+	batches      [][]string
+	banked       map[int]scheduleBatch
+	failedBefore map[int]string
+	bankable     bool
+	evidence     []closureRow
+	coverRow     closureRow
 }
+
+// toProbe counts the batches the unit will probe — the plan less the
+// banked ones — the number the announcement and the ticks speak of.
+func (u probeUnit) toProbe() int { return len(u.batches) - len(u.banked) }
 
 // scheduleProbePlan decides which of the work's oracle groups the probe
 // phase pays for — an unseen group with enough tests whose banked probe
@@ -259,31 +290,43 @@ func (t *Tree) scheduleProbePlan(ctx context.Context, w work, opts runOptions) (
 		}
 		// Reserve the key before the long probe: the write marks the
 		// group attempted even if the probe below fails partway.
-		store.byKey[key] = &groupSchedule{}
+		store.byKey[key] = &groupSchedule{unscheduled: unscheduledPending}
 		store.mu.Unlock()
 
 		fns := groupTestFns(w.oracle, g.pkgs[0])
 		if len(fns) < windowcost.ScheduleMinTests {
+			store.setUnscheduled(key, fmt.Sprintf("fewer than %d tests", windowcost.ScheduleMinTests))
 			continue
 		}
+		batches := scheduleBatches(fns)
+		unit := probeUnit{key: key, g: g, coverPkg: coverPkg, batches: batches}
 		// The bank consult (REQ-result-baseline-bank): a banked probe
 		// whose pins — the group's oracle subjects AND the covered
 		// package's own row, coverage speaking about both sides —
 		// re-verify serves its batches without probing; any failure
 		// falls through to the probe.
+		// A complete entry serves whole; a partial one — a prior run
+		// cut by its deadline or a failed batch — seeds the unit, which
+		// probes only the failed and the unprobed batches
+		// (REQ-result-baseline-bank's resume); a plan the entry does
+		// not match discards it (resume's own fail-closed rule).
 		if banked, hit := opts.baselineBank.coverage(key); !opts.Force && hit && w.targetView != nil {
 			if closurePinsHold(banked.Evidence, groupOracleViews(w, g)) && banked.CoverRow == closureRowOf(w.targetView) {
-				entry := &groupSchedule{}
-				for _, b := range banked.Batches {
-					entry.batches = append(entry.batches, scheduleBatch{fns: b.Fns, cov: b.Coverage.Restore(), dur: time.Duration(b.DurMillis) * time.Millisecond})
+				if seed, failed, ok := banked.resume(batches); ok {
+					if banked.complete() {
+						entry := &groupSchedule{}
+						for i := range batches {
+							entry.batches = append(entry.batches, seed[i])
+						}
+						store.mu.Lock()
+						store.byKey[key] = entry
+						store.mu.Unlock()
+						continue
+					}
+					unit.banked, unit.failedBefore = seed, failed
 				}
-				store.mu.Lock()
-				store.byKey[key] = entry
-				store.mu.Unlock()
-				continue
 			}
 		}
-		unit := probeUnit{key: key, g: g, coverPkg: coverPkg, batches: scheduleBatches(fns)}
 		if views := groupOracleViews(w, g); len(views) > 0 {
 			unit.bankable, unit.evidence, unit.coverRow = true, closureRows(views), closureRowOf(w.targetView)
 		}
@@ -292,11 +335,12 @@ func (t *Tree) scheduleProbePlan(ctx context.Context, w work, opts runOptions) (
 	return plan, nil
 }
 
-// probePlanBatches counts the batches a plan will probe.
+// probePlanBatches counts the batches a plan will probe — the banked
+// batches of a resumed unit are served, never counted.
 func probePlanBatches(plan []probeUnit) int {
 	total := 0
 	for _, unit := range plan {
-		total += len(unit.batches)
+		total += unit.toProbe()
 	}
 	return total
 }
@@ -311,50 +355,114 @@ func probePlanCost(plan []probeUnit, baselineDur func(group) (time.Duration, boo
 	for _, unit := range plan {
 		if baselineDur != nil {
 			if dur, ok := baselineDur(unit.g); ok {
-				priced += dur * time.Duration(len(unit.batches))
+				priced += dur * time.Duration(unit.toProbe())
 				continue
 			}
 		}
-		unpriced += len(unit.batches)
+		unpriced += unit.toProbe()
 	}
 	return priced, unpriced
 }
 
-// probeScheduleUnit probes one planned group batch by batch, calling
-// tick after each batch, and stores the group's schedule; a batch that
-// fails leaves the group unscheduled (its key stays reserved).
+// probeScheduleUnit probes one planned group batch by batch — every
+// batch of the plan exactly once, a banked batch served in place —
+// calling tick after each batch paid, deposits the unit after every
+// paid batch (the bank persists per deposit, so a deadline or a kill
+// keeps what completed), and stores the group's schedule. The deposit
+// is seeded with the banked batches and the prior failures BEFORE the
+// loop, so a deposit written partway never drops a batch or a failure
+// the plan has not reached yet. A batch whose probe fails does not
+// stop the unit: it is named on the analysis channel with its
+// position, its tests, and the probe's own output (one payload-bearing
+// event per failed batch, REQ-exec-run-status), recorded in the bank
+// by position so the next run retries exactly it, and the group
+// carries no signal THIS run — the narrowed-survivor rule wants every
+// batch's verdict (REQ-exec-oracle-run); its key stays reserved with
+// the reason.
 func (t *Tree) probeScheduleUnit(ctx context.Context, unit probeUnit, opts runOptions, runEnv []string, tick func()) error {
 	store := opts.scheduleStore
 	entry := &groupSchedule{}
-	for _, batch := range unit.batches {
+	deposit := bankedCoverage{Evidence: unit.evidence, CoverRow: unit.coverRow, Plan: len(unit.batches)}
+	for i, served := range unit.banked {
+		deposit.Batches = append(deposit.Batches, bankedBatchOf(i, served))
+	}
+	for i, reason := range unit.failedBefore {
+		deposit.Failed = append(deposit.Failed, bankedFailure{Index: i, Fns: unit.batches[i], Reason: reason})
+	}
+	var failed []string
+	for i, batch := range unit.batches {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if served, ok := unit.banked[i]; ok {
+			entry.batches = append(entry.batches, served)
+			continue
+		}
+		// This run's verdict on the batch replaces the prior run's.
+		deposit.Failed = slices.DeleteFunc(deposit.Failed, func(f bankedFailure) bool { return f.Index == i })
 		probeStart := time.Now()
 		cov, err := seams.coveredPositions(ctx, t.dir, unit.g.pkgs[0], testRunRegex(batch), unit.coverPkg, opts.advisoryLeash(unit.g), unit.g.flags, runEnv, t.eng.DirectiveCoverage(), opts.bounds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			entry = &groupSchedule{}
-			break
+			failed = append(failed, fmt.Sprintf("%d/%d", i+1, len(unit.batches)))
+			deposit.Failed = append(deposit.Failed, bankedFailure{Index: i, Fns: batch, Reason: err.Error()})
+			if opts.AnalysisEvent != nil {
+				opts.AnalysisEvent(AnalysisEvent{Phase: "probe-failed", Package: unit.g.pkgs[0], Detail: probeFailureDetail(i, len(unit.batches), unit.coverPkg, batch, unit.failedBefore[i], err)})
+			}
+		} else {
+			probed := scheduleBatch{fns: batch, cov: cov, dur: time.Since(probeStart)}
+			entry.batches = append(entry.batches, probed)
+			deposit.Batches = append(deposit.Batches, bankedBatchOf(i, probed))
 		}
-		entry.batches = append(entry.batches, scheduleBatch{fns: batch, cov: cov, dur: time.Since(probeStart)})
+		// Deposit (REQ-result-baseline-bank): the unit banks after each
+		// paid batch — every passing batch a clean probe of its own,
+		// every failure a record by position — so a run cut before the
+		// unit completes resumes from here.
+		if unit.bankable {
+			slices.SortFunc(deposit.Batches, func(a, b bankedBatch) int { return a.Index - b.Index })
+			slices.SortFunc(deposit.Failed, func(a, b bankedFailure) int { return a.Index - b.Index })
+			opts.baselineBank.putCoverage(unit.key, deposit)
+		}
 		tick()
+	}
+	if len(failed) > 0 {
+		entry = &groupSchedule{unscheduled: "coverage probe batch " + boundedNames(failed, probeFailureNames) + " failed"}
 	}
 	store.mu.Lock()
 	store.byKey[unit.key] = entry
 	store.mu.Unlock()
-	// Deposit (REQ-result-baseline-bank): only a complete healthy
-	// probe banks — a failed pass stored the empty no-signal entry.
-	if len(entry.batches) > 0 && unit.bankable {
-		banked := bankedCoverage{Evidence: unit.evidence, CoverRow: unit.coverRow}
-		for _, b := range entry.batches {
-			banked.Batches = append(banked.Batches, bankedBatch{Fns: b.fns, DurMillis: b.dur.Milliseconds(), Coverage: b.cov.Persist()})
-		}
-		opts.baselineBank.putCoverage(unit.key, banked)
-	}
 	return nil
+}
+
+// bankedBatchOf is the persisted form of one probed batch at its plan
+// position.
+func bankedBatchOf(index int, b scheduleBatch) bankedBatch {
+	return bankedBatch{Index: index, Fns: b.fns, DurMillis: b.dur.Milliseconds(), Coverage: b.cov.Persist()}
+}
+
+// probeFailureDetail composes a failed batch's payload: its position,
+// the covered package, its tests (bounded), the prior run's failure
+// of the same batch when the bank recorded one, and the probe's own
+// error — which carries the oracle's output tail.
+func probeFailureDetail(index, plan int, coverPkg string, fns []string, before string, err error) string {
+	detail := fmt.Sprintf("batch %d/%d over %s (%s): %v", index+1, plan, coverPkg, boundedNames(fns, probeFailureNames), err)
+	if before != "" {
+		detail += "; failed in the previous run too: " + before
+	}
+	return detail
+}
+
+// probeFailureNames bounds the test names a failed batch's payload
+// spells; the remainder is counted.
+const probeFailureNames = 8
+
+func boundedNames(names []string, bound int) string {
+	if len(names) <= bound {
+		return strings.Join(names, ", ")
+	}
+	return strings.Join(names[:bound], ", ") + fmt.Sprintf(", +%d more", len(names)-bound)
 }
 
 // probeProjection renders a plan's priced cost for the announcement:

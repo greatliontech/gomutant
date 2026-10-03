@@ -68,6 +68,9 @@ func (e ExecutionEvent) Text(selectionNote, suffix string) (label, rest string, 
 		if e.EstimateUnknown > 0 {
 			rest += fmt.Sprintf(", %d unpriced", e.EstimateUnknown)
 		}
+		if len(e.EstimateNoSignal) > 0 {
+			rest += "; no signal: " + strings.Join(e.EstimateNoSignal, "; ")
+		}
 		rest += ")"
 		if e.EstimateAudit != "" {
 			rest += fmt.Sprintf("  audit ~%s", e.EstimateAudit)
@@ -208,6 +211,7 @@ var analysisVocabulary = map[string]string{
 	"observe":              "observing oracle runtime inputs (freshness evidence)",
 	"runtime":              "validating runtime-input evidence (oracle freshness)",
 	"prove":                "proving oracle closure freshness (gofresh hash proof)",
+	"probe-failed":         "coverage probe batch failed for",
 	"served":               "served from the persistent memo",
 	"baseline-output":      "oracle baseline output for",
 }

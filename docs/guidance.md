@@ -49,7 +49,10 @@ events ride the response, capped. Long campaigns exceed MCP client timeouts —
 raise the timeout or use the cli.
 A window's coverage-probe phase announces its cost's upper bound
 before its first batch and reports the batches paid after each, before
-the window's estimate; a
+the window's estimate; a failed probe batch is named on the analysis
+stream with its tests and output while the plan's other batches bank
+and a later run resumes from them, and the estimate names each group
+without a schedule signal and why; a
 target skipped on a failing oracle baseline carries the oracle's own
 output as an analysis line beside its decision. Execution proceeds in
 windows that commit as they close: a window closes at a candidate

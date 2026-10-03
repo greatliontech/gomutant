@@ -99,9 +99,10 @@ func TestProgressLinePaceAndEstimateRendering(t *testing.T) {
 		Phase: "estimate", TargetIndex: 1, TargetCount: 2, Symbol: "p.F",
 		EstimateProjected: "12m30s", EstimateAudit: "1h24m0s",
 		EstimateNarrowed: 280, EstimateFull: 40, EstimateUnknown: 3,
+		EstimateNoSignal: []string{"q: coverage probe batch 23/40 failed"},
 	}, " (of 85 selected)", "")
 	line = out.String()
-	for _, want := range []string{"estimate", "p.F", "(of 85 selected)", "window ~12m30s", "280 narrowed", "40 full", "3 unpriced", "audit ~1h24m0s"} {
+	for _, want := range []string{"estimate", "p.F", "(of 85 selected)", "window ~12m30s", "280 narrowed", "40 full", "3 unpriced; no signal: q: coverage probe batch 23/40 failed)", "audit ~1h24m0s"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("estimate line %q missing %q", line, want)
 		}
