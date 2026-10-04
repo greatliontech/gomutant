@@ -25,6 +25,6 @@ scavenger returns it slowly on its own; an explicit return at request end
 would make the idle server's footprint its true working set. A measured
 before/after (VmRSS at idle after a run-class request) is the acceptance.
 
-Lands: cross-tool train chunk 233 (MCP campaign observability — the
-server's run-state record; the resident set a finished pass leaves is
-its idle state, slotted as a rider at the 2026-09-29 replan).
+Lands: cross-tool train chunk 308 (the server's and the pass's resident
+set released — the 233 rider promoted to its own chunk at the
+2026-10-04 replan, directly after stipulator 307).
