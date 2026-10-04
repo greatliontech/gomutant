@@ -36,9 +36,7 @@ the proof pass, could have caused it. On this host and this union the
 pass pays no resident cost worth a slice, so neither slice shape can be
 measured for a wall benefit here and no shape lands on this evidence.
 
-Lands: a proof pass observed to reach memory trouble — a consumer's
-report of a pass whose peak resident set exceeds half the host's
-MemTotal, or a pass the host stopped for memory — carrying the union's
-subject and package counts and the host's RAM, which decide the slice
-shape (a fixed count beside the budget, or a share of the host's
-memory).
+Lands: cross-tool train chunk 311 (the observation-proof pass per
+group — the unit loop's vertical; the measured trigger retired
+2026-10-04 by the user's ruling that the loop's deviations take
+priority: the slice is the group, not a count or a memory share).
