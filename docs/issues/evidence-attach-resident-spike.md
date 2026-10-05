@@ -18,5 +18,16 @@ withCandidateEvidence, or gofresh's runtimeinput ingest — and whether
 it bounds (the oracle memory ceiling bounds the oracle processes, not
 the parent's ingest of their observations).
 
-Lands: cross-tool train chunk 308 (the resident set released — the
-attach's cost measured and bounded beside the idle server's).
+Measured 2026-10-05 at 308's open (the same target alone, the parent
+sampled every five seconds): warm, the attach raised the high-water
+mark by 0.05 GB and the fold after it by 0.1 GB over a 0.54 GB run;
+cold (a fresh gofresh cache home), the same run reached 3.47 GB inside
+the proof pass before any attach. The attach's own cost is small; the
+spike is gofresh's cold analysis holding every program a pass loads
+until the pass ends — the campaign's 8.4 GB was the first target's cold
+observation and fold under the state the run already held.
+
+Lands: gofresh cross-tool train chunk 314 (the pass's program retention
+bounded; gofresh docs/issues/cold-analysis-pass-program-retention.md
+carries the measurement); gomutant's own half — the heap returned and
+the server bounded — is chunk 308's.

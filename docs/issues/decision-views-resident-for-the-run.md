@@ -19,6 +19,14 @@ validation re-shaped (it validates the views the decisions read; a
 per-unit decision view is released before the run ends) — a design of
 its own, beside the attach spike and the idle server's set.
 
-Lands: cross-tool train chunk 308 (the resident set released — the
-decision views' residency measured and bounded beside the attach's and
-the idle server's).
+Measured 2026-10-05 at 308's open: a gofresh View retains facts alone
+(digests, string maps) — the Hasher that loads programs is built per
+capture call and dropped after it — and the one-target run that built
+views over 796 subjects sat at 0.39 GB warm after them; the 1.4 GB was
+the cold views pass's working set, not retained state (the cold
+one-target run returned to 0.41 GB at its end). The decision's typed
+load is gomutant's Tree (every package of the module), resident for the
+run by construction.
+
+Lands: cross-tool train chunk 308 (closes with this verdict; the cold
+pass's own retention is gofresh 314's).
