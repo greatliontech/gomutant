@@ -316,11 +316,24 @@ contributes its completed or incomplete observation even when compilation reject
 classifies the candidate as discarded rather than measured.
 
 **REQ-exec-analysis-budget** (behavior): A campaign's freshness-proof passes —
-the observed union's proof capture and every producer validation — MUST run
+each proof unit's capture and every producer validation — MUST run
 under the caller's analysis budget when one is given (0, the default, is
 unbounded; a negative budget is refused before the load): the budget bounds
-each pass's precise analysis by wall clock and never cancels the run. The
-bound is per pass: a run of N measured targets pays the union's pass and up
+each pass's precise analysis by wall clock and never cancels the run. A
+proof unit is the targets of one mode sharing an oracle package set, its
+union their own symbols and their oracles, proven together as siblings of
+the mode's decision views when its first target reaches the proof and
+released — union and faults — when its last target reaches a terminal
+disposition: no two units prove at once (preparation is serial), a unit's
+proofs are held only while a target of it stands, and a later unit's pass
+runs on the preparation goroutine while earlier windows execute — a
+window's commits wait for the next window's preparation, a later unit's
+pass included, since preparation runs ahead of execution without bound
+(the execution window is a pure function of the tree, the target order
+and the worker count, REQ-exec-oracle-run) — so the proofs of every
+prepared, not yet committed unit stay held, over the mode's decision
+views, which stay for the run. The
+bound is per pass: a run of N measured targets pays each unit's pass and up
 to N validation passes, each entitled to the whole budget, and a pass's
 bracket construction ahead of its analysis lies outside the bound. A
 subject the budget left unproven carries an unavailable observation proof
@@ -774,10 +787,10 @@ paid after each, before the window's `estimate`; the shared runner
 reports `resolving` before each target's target and oracle resolution,
 `freshness` before constructing and checking that target's subject
 views, `views` before each present mode's decision-view build and
-`proofs` before that mode's observed union's proof pass — each PRICING
+`proofs` before each proof unit's pass — each PRICING
 the pass it precedes with the distinct subjects it covers and the
 distinct packages they span (the requested subjects for the build, the
-subjects holding a decision view for the union), so the run's two
+unit's subjects for its pass), so the run's two
 longest stretches are named and sized before they are paid — `mutants` before enumerating a target that requires measurement,
 and `baseline` before each package-scoped oracle group actually probed
 rather than reused within the run — a group served from the

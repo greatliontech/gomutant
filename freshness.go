@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -290,10 +292,10 @@ func (t *Tree) newSubjectViews(ctx context.Context, symbols []string, packagePro
 // to resolve, or a module group whose engine, view, or capture fails,
 // records the fault for each affected symbol instead of aborting the
 // set — target-local evidence faults (REQ-exec-quiescence); only the
-// run's own cancellation aborts. The decision set is this set; the
-// observed union captures its proofs on these same views (observed);
-// the strict callers promote the faults (newStrictSubjectViews,
-// newStrictObservedViews).
+// run's own cancellation aborts. The decision set is this set; each
+// proof unit's union captures its proofs on these same views
+// (observedFor); the strict callers promote the faults
+// (newStrictSubjectViews, newStrictObservedViews).
 func (t *Tree) buildSubjectViews(ctx context.Context, symbols []string, packageContext func(context.Context, string) (string, string, error), engines *subjectEngines) (*subjectViewSet, map[string]error, error) {
 	faults := map[string]error{}
 	groups, err := t.resolveModuleGroups(ctx, symbols, packageContext, func(symbol string, err error) error {
@@ -565,6 +567,42 @@ func (s *subjectViewSet) groupByModule(symbols []string) []*moduleMembers {
 	return order
 }
 
+// proofUnit is the observation-proof pass's unit — the unit loop's
+// vertical for the derived oracle: the targets of one mode sharing an
+// oracle package set, their own symbols and their oracles. Its union
+// builds when its first target reaches the proof, as siblings of the
+// mode's decision views (no construction of its own), and releases its
+// union and faults when its last target reaches a terminal disposition
+// (committed, cached, skipped, refused or discarded), so a unit's
+// proofs are held only while a target of it stands; a later unit's pass
+// runs on the preparation goroutine while earlier windows execute, and
+// a window's commits wait for the next window's preparation, that pass
+// included (REQ-exec-analysis-budget).
+type proofUnit struct {
+	key string
+	// packages is the unit's oracle package set — the name the proof
+	// hook reports for the unit's pass.
+	packages  []string
+	symbols   []string
+	remaining int
+	built     bool
+	// decision and engines are the mode's: the union derives from the
+	// decision views, and the bounded per-target rebuild runs on the
+	// mode's engines.
+	decision *subjectViewSet
+	engines  *subjectEngines
+	union    *observedViewSet
+	faults   map[string]error
+}
+
+// release drops what the unit's pass held and reports it to the seam.
+func (u *proofUnit) release() {
+	u.union, u.faults = nil, nil
+	if seams.proofUnitReleased != nil {
+		seams.proofUnitReleased(u.key)
+	}
+}
+
 // observedViewSet is a view set whose fingerprints carry the
 // observation proof: the producer union. It is the only set a
 // per-target narrowing derives from, so a narrowing over uncaptured
@@ -585,13 +623,20 @@ type observedViewSet struct {
 // per-target rebuild path directly (REQ-exec-quiescence). A capture
 // fault faults that module's symbols, never the union.
 func (s *subjectViewSet) observed(ctx context.Context) (*observedViewSet, map[string]error, error) {
+	return s.observedFor(ctx, slices.Sorted(maps.Keys(s.bySymbol)))
+}
+
+// observedFor derives the producer union of one proof unit — the
+// members among the set's symbols — exactly as observed does for the
+// whole set. Every member has a decision view (the callers pass the
+// set's own keys or a unit's symbols, which the decision-fault filter
+// left standing); were one absent, groupByModule would skip it and
+// its narrowing (forTarget) would refuse the missing subject, so no
+// smaller union is ever served quietly.
+func (s *subjectViewSet) observedFor(ctx context.Context, members []string) (*observedViewSet, map[string]error, error) {
 	faults := map[string]error{}
-	union := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(s.bySymbol)), width: s.width, packageProcess: s.packageProcess}
-	symbols := make([]string, 0, len(s.bySymbol))
-	for symbol := range s.bySymbol {
-		symbols = append(symbols, symbol)
-	}
-	sort.Strings(symbols)
+	union := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(members)), width: s.width, packageProcess: s.packageProcess}
+	symbols := slices.Sorted(slices.Values(members))
 	if seams.observedUnion != nil {
 		seams.observedUnion(symbols)
 	}

@@ -966,6 +966,12 @@ func TestRunValidatesBatchedProducerBeforeFindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The unit loop's release at a REFUSE terminal: the refused target's
+	// unit releases with the refusal (REQ-exec-analysis-budget).
+	var released atomic.Int64
+	prior := seams.proofUnitReleased
+	seams.proofUnitReleased = func(string) { released.Add(1) }
+	t.Cleanup(func() { seams.proofUnitReleased = prior })
 	findings, err := tr.Run(context.Background(), []Target{{
 		Symbol: "example.com/fixture/lib.Add",
 		Oracle: []string{"example.com/fixture/lib.TestAdd"},
@@ -979,6 +985,9 @@ func TestRunValidatesBatchedProducerBeforeFindings(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "analysis view changed") || len(findings) != 0 {
 		t.Fatalf("producer drift = findings %+v, error %v", findings, err)
+	}
+	if released.Load() != 1 {
+		t.Fatalf("the refused target's unit released %d times, want once at the refusal", released.Load())
 	}
 }
 
@@ -3562,10 +3571,11 @@ func TestRunStaleReasonReusesTheRunsViews(t *testing.T) {
 
 // A per-target freshness-proof failure is target-local (the exact rule
 // drift refusal follows, REQ-exec-quiescence): a broken package faults
-// its module group out of the shared union pass instead of failing the
+// its module group out of its proof unit's pass instead of failing the
 // campaign, every faulted target funnels into its own bounded retry,
 // and the target whose breakage persists skips with the cause on its
-// decision line while a recovered sibling measures — one target's
+// decision line while a sibling in another unit — whose pass never
+// observes the broken package — measures; one target's
 // broken evidence never exits the run.
 func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 	if testing.Short() {
@@ -3590,6 +3600,12 @@ func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 	}
 	var decisions []RunDecision
 	var attempts []string
+	// The unit loop's release at a SKIP terminal: lib's unit releases
+	// after lib.Add's skipped decision (REQ-exec-analysis-budget).
+	log := &unitLog{}
+	prior := seams.proofUnitReleased
+	seams.proofUnitReleased = func(key string) { log.add("release " + key) }
+	t.Cleanup(func() { seams.proofUnitReleased = prior })
 	findings, err := tr.Run(context.Background(), targets, Options{
 		Budget: 1,
 		// Decisions emit after the prepare loop: restoring here puts the
@@ -3597,6 +3613,7 @@ func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 		// so the induced failure stays scoped to proof construction.
 		Decision: func(d RunDecision) {
 			decisions = append(decisions, d)
+			log.add("decision " + d.Symbol + " " + d.Action)
 			if d.Symbol == targets[1].Symbol {
 				if wErr := os.WriteFile(libPath, libSource, 0o644); wErr != nil {
 					t.Fatal(wErr)
@@ -3606,22 +3623,20 @@ func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 		proofAttempt: func(symbol string, attempt int) {
 			attempts = append(attempts, fmt.Sprintf("%s@%d", symbol, attempt))
 			switch {
-			case symbol == "" && attempt == 1:
-				// Break one package before the union pass: the fixture
-				// is one module, so the whole group faults and both
-				// targets funnel into their bounded retries.
+			case symbol == "example.com/fixture/lib" && attempt == 1:
+				// Break the lib package before ITS unit's pass. The pass
+				// runs per unit — two targets over two packages are two
+				// units, each named by its oracle package — so the plain
+				// unit's pass, which never observes lib, measures plain
+				// without a retry, and the lib unit's pass faults and
+				// funnels lib's target into its bounded retry.
 				if rmErr := os.Remove(libPath); rmErr != nil {
 					t.Fatal(rmErr)
 				}
-			case symbol == targets[0].Symbol && attempt == 2:
-				// The healthy target's retry finds the transient gone...
-				if wErr := os.WriteFile(libPath, libSource, 0o644); wErr != nil {
-					t.Fatal(wErr)
-				}
 			case symbol == targets[1].Symbol && attempt == 2:
-				// ...and the broken target's breakage persists through
-				// its retry.
-				if rmErr := os.Remove(libPath); rmErr != nil {
+				// The broken target's breakage persists through its
+				// retry: the file its unit's pass removed stays gone.
+				if rmErr := os.Remove(libPath); rmErr != nil && !os.IsNotExist(rmErr) {
 					t.Fatal(rmErr)
 				}
 			}
@@ -3630,9 +3645,23 @@ func TestFreshnessProofFailureSkipsTargetLocally(t *testing.T) {
 	if err != nil {
 		t.Fatalf("one target's proof failure escalated to a campaign abort: %v", err)
 	}
-	wantAttempts := []string{"@1", targets[0].Symbol + "@2", targets[1].Symbol + "@2"}
+	wantAttempts := []string{"example.com/fixture/plain@1", "example.com/fixture/lib@1", targets[1].Symbol + "@2"}
 	if !slices.Equal(attempts, wantAttempts) {
-		t.Fatalf("proof attempts = %v, want %v (union, then each faulted target's retry)", attempts, wantAttempts)
+		t.Fatalf("proof attempts = %v, want %v (each unit's pass, then the faulted target's retry alone)", attempts, wantAttempts)
+	}
+	skipped := log.index("decision " + targets[1].Symbol + " skipped")
+	released := -1
+	releases := 0
+	for i, e := range log.events {
+		if strings.HasPrefix(e, "release ") {
+			releases++
+			if strings.Contains(e, "example.com/fixture/lib") {
+				released = i
+			}
+		}
+	}
+	if releases != 2 || skipped < 0 || released < skipped {
+		t.Fatalf("events %v; want both units released, lib's after its target's skipped decision", log.events)
 	}
 	bySym := map[string]Finding{}
 	for _, f := range findings {
@@ -3707,16 +3736,17 @@ func TestFreshnessProofRetriesOnceBeforeSkipping(t *testing.T) {
 // Cancellation of the campaign itself during proof construction stays
 // an abort with a legible name (REQ-exec-quiescence's legibility arm;
 // the skip degrade is only for target-local conditions under a live
-// campaign): the shared union pass names the union and its subject
-// count — every subject is in flight — and a faulted target's bounded
-// retry names the exact subject whose view was being built.
+// campaign): a proof unit's pass names the unit and its subject
+// count — every subject of the unit is in flight — and a faulted
+// target's bounded retry names the exact subject whose view was being
+// built.
 func TestFreshnessProofCancellationAbortsWithNamedTarget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds producer views")
 	}
 	target := Target{Symbol: "example.com/fixture/plain.Ok", Oracle: []string{"example.com/fixture/plain.TestPlain"}}
 
-	// Cancellation at the union pass names the union.
+	// Cancellation at the unit's pass names the unit.
 	tr := fixtureTree(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	findings, err := tr.Run(ctx, []Target{target}, Options{
@@ -3729,8 +3759,8 @@ func TestFreshnessProofCancellationAbortsWithNamedTarget(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error class lost: %v", err)
 	}
-	if !strings.Contains(err.Error(), "freshness proofs (union over") {
-		t.Fatalf("cancellation during the union pass lost its union-naming wrap: %v", err)
+	if !strings.Contains(err.Error(), "freshness proofs (unit over") {
+		t.Fatalf("cancellation during the unit's pass lost its unit-naming wrap: %v", err)
 	}
 
 	// Cancellation inside a faulted target's retry names the target.
@@ -3792,12 +3822,13 @@ func TestFreshnessProofSkipDoesNotEnrollItsModules(t *testing.T) {
 	}
 	findings, err := tr.Run(context.Background(), targets, Options{
 		Budget: 1,
-		// Break the SECOND target's module before the union pass — and
-		// never restore: its own module group faults while the sibling
-		// member's group builds, and with the broken module never
+		// Break the SECOND target's module before ITS unit's pass — and
+		// never restore: its own unit's pass faults after the sibling
+		// member's unit has built, and with the broken module never
 		// enrolled, final validation covers only the measured member.
+		// The pass runs per unit, named by its oracle package.
 		proofAttempt: func(symbol string, attempt int) {
-			if symbol == "" && attempt == 1 {
+			if symbol == "example.com/ws" && attempt == 1 {
 				if rmErr := os.Remove(filepath.Join(tmp, "root.go")); rmErr != nil {
 					t.Fatal(rmErr)
 				}
@@ -6304,6 +6335,12 @@ func TestRunGracefulInterruptDiscardsServeWorkWhole(t *testing.T) {
 	softStop := make(chan struct{})
 	dispatched := 0
 	var committed []Finding
+	// The unit loop's release at a DISCARD terminal: the discarded
+	// work's unit releases with the discard (REQ-exec-analysis-budget).
+	var released atomic.Int64
+	prior := seams.proofUnitReleased
+	seams.proofUnitReleased = func(string) { released.Add(1) }
+	t.Cleanup(func() { seams.proofUnitReleased = prior })
 	_, err = tr.Run(ctx, target, Options{Jobs: 1, SoftStop: softStop, Prior: first,
 		Commit: func(f Finding) error { committed = append(committed, cloneFinding(f)); return nil },
 		dispatched: func(string, int) {
@@ -6317,6 +6354,9 @@ func TestRunGracefulInterruptDiscardsServeWorkWhole(t *testing.T) {
 	}
 	if len(committed) != 0 {
 		t.Fatalf("interrupted serve work committed %d records — a partially re-executed serve must discard whole, leaving the prior record as the only truth", len(committed))
+	}
+	if released.Load() != 1 {
+		t.Fatalf("the discarded work's unit released %d times, want once at the discard", released.Load())
 	}
 }
 

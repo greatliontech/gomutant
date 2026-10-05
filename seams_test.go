@@ -35,7 +35,7 @@ func TestSeamsDefaultToTheEngine(t *testing.T) {
 	same("baselineProbe", d.baselineProbe, engine.TestProbeObservedEnv)
 	same("advisoryProbe", d.advisoryProbe, engine.TestProbeObservedEnv)
 	same("killGround", d.killGround, engine.TestProbeObservedEnv)
-	if d.probeGateInstalled != nil || d.subjectViewBuild != nil || d.observedUnion != nil || d.inspectionSupplementaryView != nil {
+	if d.probeGateInstalled != nil || d.subjectViewBuild != nil || d.observedUnion != nil || d.proofUnitReleased != nil || d.inspectionSupplementaryView != nil {
 		t.Fatal("an observer is installed by default")
 	}
 	if d.windowCandidates != 0 || d.waitPreparedBeforePick || d.truncateAfterItems != 0 || d.truncateErr != nil {

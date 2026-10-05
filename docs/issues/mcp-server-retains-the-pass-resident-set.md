@@ -15,8 +15,13 @@ server on the same host held 1.3 GB the same way. The sibling
 `stipulator mcp` server on the same host sat at 15 MB RSS, so the retention is
 this server's, not the transport's.
 
-This is distinct from `observed-union-memory-slicing`, which bounds the
-resident set *during* a pass: here the pass is over and the set stays. Two
+This is distinct from the proof pass's own bound — the pass runs per
+proof unit — a slice of the mode's decision views — and releases the
+unit's union at its last target's terminal disposition (chunk 311; the
+earlier filing's history:
+`git log --all -- docs/issues/observed-union-memory-slicing.md`) — which
+bounds the resident set *during* a pass: here the pass is over and the
+set stays. Two
 shapes, the tool's to choose: release the pass's programs and memo at the end
 of each request (the memo's persistent layer already serves shared folds
 across passes, so an in-memory residue buys the next request little), and

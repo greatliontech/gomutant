@@ -89,6 +89,11 @@ type runSeams struct {
 	// capture-time fault routes (a tree moving between a strict build's
 	// construction and its proof capture).
 	observedUnion func(symbols []string)
+	// proofUnitReleased observes each proof unit's release — its union
+	// and faults dropped at its last target's terminal disposition —
+	// with the unit's key: a seam so a test pins the unit loop's
+	// release against the targets' terminals.
+	proofUnitReleased func(key string)
 	// validateProducers stands in for a view set's producer validation
 	// — a test hands the run the engine's own analysis-unavailable
 	// verdict, which no fixture reaches deterministically once the

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	iofs "io/fs"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -362,9 +361,10 @@ type Options struct {
 	aggregate      func()
 	producer       func(string)
 	// proofAttempt observes each freshness-proof construction attempt —
-	// ("", 1) before the shared union pass, then (symbol, 2) before a
-	// faulted target's bounded per-target retry — a test seam pinning
-	// the union/retry split, like producer above.
+	// (unit, 1) before a proof unit's pass, the unit named by its oracle
+	// packages joined with ",", then (symbol, 2) before a faulted
+	// target's bounded per-target retry — a test seam pinning the
+	// unit/retry split, like producer above.
 	proofAttempt func(symbol string, attempt int)
 	// Contradiction receives each attested survivor a drift serve's added
 	// or moved tests killed: the attestation is shed — evidence beats
@@ -2091,10 +2091,16 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// (the pipeline runs preparation ahead of execution).
 	var driftedMu sync.Mutex
 	var drifted []TargetDrift
-	refuseTarget := func(symbol, reason string) {
+	// targetDone records a target's terminal disposition for its proof
+	// unit — committed, cached, skipped, refused or discarded — once per
+	// target; the unit releases at its last. Assigned once the units
+	// exist; a terminal reached before then belongs to no unit.
+	targetDone := func(int) {}
+	refuseTarget := func(i int, reason string) {
 		driftedMu.Lock()
-		drifted = append(drifted, TargetDrift{Symbol: symbol, Reason: reason})
+		drifted = append(drifted, TargetDrift{Symbol: targets[i].Symbol, Reason: reason})
 		driftedMu.Unlock()
+		targetDone(i)
 	}
 
 	preparation := newRunPreparation(t)
@@ -2217,6 +2223,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if emit && opts.Decision != nil {
 			opts.Decision(decisions[i])
 		}
+		targetDone(i)
 	}
 	// refuseSkipped is a preparation-phase drift refusal: the refused
 	// registry entry (the run fails operationally with the refused set,
@@ -2228,7 +2235,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// the once-per-target decision discipline.
 	refuseSkipped := func(i int, reason string, emit bool) {
 		full := reason + residue()
-		refuseTarget(targets[i].Symbol, full)
+		refuseTarget(i, full)
 		skipTarget(i, full, emit)
 	}
 	// cacheTarget records a wholesale cached serve's decision, always
@@ -2240,6 +2247,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if opts.Decision != nil {
 			opts.Decision(decisions[i])
 		}
+		targetDone(i)
 	}
 	for i, tg := range targets {
 		if err := ctx.Err(); err != nil {
@@ -2384,13 +2392,10 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// coupling that made an unrelated cross-package target re-measure a
 	// same-package sibling's verifiable records.
 	type modeViews struct {
-		engines        *subjectEngines
-		symbols        []string
-		views          *subjectViewSet
-		viewFaults     map[string]error
-		producerUnion  *observedViewSet
-		producerFaults map[string]error
-		producerBuilt  bool
+		engines    *subjectEngines
+		symbols    []string
+		views      *subjectViewSet
+		viewFaults map[string]error
 	}
 	modes := map[bool]*modeViews{}
 	// eachMode walks the modes present in a fixed order (cross-package
@@ -2411,11 +2416,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		mv, ok := modes[attested]
 		if !ok {
 			mv = &modeViews{
-				engines:        t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds.Width, opts.AnalysisBudget),
-				views:          &subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width, packageProcess: attested},
-				viewFaults:     map[string]error{},
-				producerUnion:  &observedViewSet{&subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width, packageProcess: attested}},
-				producerFaults: map[string]error{},
+				engines:    t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds.Width, opts.AnalysisBudget),
+				views:      &subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width, packageProcess: attested},
+				viewFaults: map[string]error{},
 			}
 			modes[attested] = mv
 		}
@@ -2484,43 +2487,94 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	if seams.probeGateInstalled != nil {
 		seams.probeGateInstalled(&probeGate)
 	}
-	// One observed union over every target and oracle replaces the
-	// per-target proof builds the campaign previously paid (the measured
-	// ~270 observation passes per warm campaign): per-subject evidence is
-	// identical by gofresh's batch-equivalence contract, per-symbol
-	// faults stay target-local, and the per-target build survives only
-	// as the bounded retry (REQ-exec-quiescence). The union is built at
-	// the first target that needs a proof: a fully-cached warm run —
-	// every target served — pays no observation pass at all.
-	// The union build runs observed captures (test processes) under the
-	// probe gate held shared, exactly like the per-target retry builds:
-	// with one union per MODE present, a later mode's first measure target
-	// prepares while earlier targets' windows execute (preparation is
-	// pipelined with execution), so a serial confirmation can be in
-	// flight — the gate, not any ordering premise, is what keeps the
-	// build's processes out of a confirmation's isolation window.
-	buildProducerUnion := func(mv *modeViews) error {
-		if mv.producerBuilt {
+	// The proof units — the targets of one mode sharing an oracle
+	// package set — are the unit loop's vertical for the derived
+	// oracle: a unit's union proves its targets' own symbols and their
+	// oracles together, as siblings of the mode's decision views (one
+	// observation per module group serves the decision and the proof
+	// roles; per-subject evidence is identical by gofresh's
+	// batch-equivalence contract; the per-target build survives only as
+	// the bounded retry, REQ-exec-quiescence), when its first target
+	// reaches the proof, and releases its union and faults when its
+	// last target reaches a terminal disposition. A fully-cached warm
+	// run — every target served — pays no pass at all. Preparation is
+	// serial, so no two units prove at once, and it runs ahead of
+	// execution without bound (the window gatherer blocks for its
+	// budget: the execution window is a pure function of the tree, the
+	// target order and the worker count, REQ-exec-oracle-run), so a
+	// window's commits wait for the next window's preparation — a later
+	// unit's pass included — and the proofs of every prepared, not yet
+	// committed unit are held until their units release
+	// (REQ-exec-analysis-budget). The pass runs its observed captures
+	// (test processes) under the probe gate held shared, exactly like
+	// the per-target retry builds: a later target prepares while
+	// earlier targets' windows execute, so a serial confirmation can be
+	// in flight — the gate, not any ordering premise, is what keeps the
+	// pass's processes out of a confirmation's isolation window. Built
+	// over the targets a decision fault left standing: a skipped target
+	// belongs to no unit.
+	unitOf := make([]*proofUnit, len(targets))
+	proofUnits := map[string]*proofUnit{}
+	for _, resolved := range resolvedTargets {
+		var pkgs []string
+		for _, run := range pkgRuns(resolved.oracle) {
+			pkgs = append(pkgs, run.pkg)
+		}
+		key := fmt.Sprintf("%t\x00%s", resolved.attested, strings.Join(pkgs, "\x00"))
+		u, ok := proofUnits[key]
+		if !ok {
+			mv := modes[resolved.attested]
+			u = &proofUnit{key: key, packages: pkgs, decision: mv.views, engines: mv.engines}
+			proofUnits[key] = u
+		}
+		if resolved.shaped == nil {
+			u.symbols = append(u.symbols, targets[resolved.index].Symbol)
+		}
+		u.symbols = append(u.symbols, resolved.oracle...)
+		u.remaining++
+		unitOf[resolved.index] = u
+	}
+	for _, u := range proofUnits {
+		sort.Strings(u.symbols)
+		u.symbols = slices.Compact(u.symbols)
+	}
+	var unitMu sync.Mutex
+	unitDone := make([]bool, len(targets))
+	targetDone = func(i int) {
+		unitMu.Lock()
+		defer unitMu.Unlock()
+		if unitDone[i] {
+			return
+		}
+		unitDone[i] = true
+		if u := unitOf[i]; u != nil {
+			u.remaining--
+			if u.remaining == 0 {
+				u.release()
+			}
+		}
+	}
+	buildProofUnit := func(u *proofUnit) error {
+		if u.built {
 			return nil
 		}
-		mv.producerBuilt = true
+		u.built = true
 		if opts.proofAttempt != nil {
-			opts.proofAttempt("", 1)
+			opts.proofAttempt(strings.Join(u.packages, ","), 1)
 		}
-		// The union is priced before it is paid: the subjects with a
-		// decision view — the proof pass's exact population — and the
-		// packages they span (REQ-exec-run-status).
-		reportPreparation(opts.Progress, pricedPass(PreparationProofs, slices.Collect(maps.Keys(mv.views.bySymbol)), t.PackageOf))
+		// The unit's pass is priced before it is paid: its subjects and
+		// the packages they span (REQ-exec-run-status).
+		reportPreparation(opts.Progress, pricedPass(PreparationProofs, u.symbols, t.PackageOf))
 		probeGate.RLock()
 		defer probeGate.RUnlock()
-		var err error
-		// Every symbol a surviving target needs has a decision view
-		// (a decision fault skipped its targets before this point), so
-		// the union's faults are the proof captures' alone.
-		mv.producerUnion, mv.producerFaults, err = mv.views.observed(ctx)
+		// Every symbol a standing target needs has a decision view (a
+		// decision fault skipped its targets before this point), so the
+		// unit's faults are its proof captures' alone.
+		union, faults, err := u.decision.observedFor(ctx, u.symbols)
 		if err != nil {
-			return fmt.Errorf("freshness proofs (union over %d subjects): %w", len(mv.views.bySymbol), err)
+			return fmt.Errorf("freshness proofs (unit over %d subjects): %w", len(u.symbols), err)
 		}
+		u.union, u.faults = union, faults
 		return nil
 	}
 	var oraclePackages []string
@@ -2551,9 +2605,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		}
 		return preflightBracket()
 	}
-	// producerViewsFor builds a target's observed producer views: the
-	// shared union's subset for the target or, on a fault the campaign
-	// has not cancelled, one bounded per-target rebuild — the field
+	// producerViewsFor builds a target's observed producer views: its
+	// proof unit's union narrowed to the target or, on a fault the
+	// campaign has not cancelled, one bounded per-target rebuild — the field
 	// failure mode is transient pressure faulting one symbol or module
 	// group out of the shared union, gone by the time anyone reads the
 	// fault, so a transient union fault costs one extra pass for one
@@ -2561,18 +2615,18 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// reported to the proof hook. A union that cannot build at all is
 	// the campaign's failure (err); a per-target fault is the caller's
 	// to route (fault).
-	producerViewsFor := func(mv *modeViews, target string, oracle []string, rebuild []string) (views *subjectViewSet, fault, err error) {
-		if err := buildProducerUnion(mv); err != nil {
+	producerViewsFor := func(u *proofUnit, target string, oracle []string, rebuild []string) (views *subjectViewSet, fault, err error) {
+		if err := buildProofUnit(u); err != nil {
 			return nil, nil, err
 		}
-		views, fault = mv.producerUnion.forTarget(target, oracle, mv.producerFaults)
+		views, fault = u.union.forTarget(target, oracle, u.faults)
 		if fault != nil && ctx.Err() == nil {
 			if opts.proofAttempt != nil {
 				opts.proofAttempt(target, 2)
 			}
 			probeGate.RLock()
 			var rebuilt *observedViewSet
-			rebuilt, fault = t.newStrictObservedViews(ctx, rebuild, preparation.packageContext, mv.engines)
+			rebuilt, fault = t.newStrictObservedViews(ctx, rebuild, preparation.packageContext, u.engines)
 			if fault == nil {
 				views = rebuilt.subjectViewSet
 			}
@@ -2909,7 +2963,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// (REQ-exec-plan-only).
 		var producerViews *subjectViewSet
 		if !opts.PlanOnly {
-			views, fault, err := producerViewsFor(mv, oracle[0], oracle[1:], oracle)
+			views, fault, err := producerViewsFor(unitOf[i], oracle[0], oracle[1:], oracle)
 			if err != nil {
 				return nil, err
 			}
@@ -3233,7 +3287,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// union only attaches execution evidence (REQ-exec-plan-only).
 		var producerViews *subjectViewSet
 		if !opts.PlanOnly {
-			views, fault, err := producerViewsFor(mv, tg.Symbol, oracle, append([]string{tg.Symbol}, oracle...))
+			views, fault, err := producerViewsFor(unitOf[i], tg.Symbol, oracle, append([]string{tg.Symbol}, oracle...))
 			if err != nil {
 				return nil, err
 			}
@@ -3658,6 +3712,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			return err
 		}
 		committed[w.target] = true
+		targetDone(w.target)
 		// Complete pending bank deposits (REQ-result-baseline-bank):
 		// the committed finding's OracleEvidence rows are the pins —
 		// the exact observation-bearing rows finding freshness
@@ -4181,6 +4236,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// committable, the prior record stands, and the
 				// interrupt error names the truncation
 				// (REQ-exec-cancellation's graceful-interrupt clause).
+				targetDone(window[wi].target)
 				continue
 			}
 			w := window[wi]
@@ -4204,7 +4260,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if !errors.Is(err, errEvidenceFinalization) {
 						return err
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+					refuseTarget(w.target, err.Error()+residue())
 					continue
 				}
 				// The aggregated work item's retained observations are dead past
@@ -4215,7 +4271,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+					refuseTarget(w.target, err.Error()+residue())
 					continue
 				} else if unavailable != "" {
 					stampUnverifiable(&spliced, unavailable)
@@ -4240,7 +4296,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, nil, &spliced); err != nil {
 					return err
 				} else if stagedDrift != "" {
-					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+					refuseTarget(w.target, stagedDrift+residue())
 					continue
 				}
 				spliced.Run = opts.RunID
@@ -4265,7 +4321,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if !errors.Is(err, errEvidenceFinalization) {
 						return err
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+					refuseTarget(w.target, err.Error()+residue())
 					continue
 				}
 				observations[wi] = nil
@@ -4273,7 +4329,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+					refuseTarget(w.target, err.Error()+residue())
 					continue
 				} else if unavailable != "" {
 					stampUnverifiable(&spliced, unavailable)
@@ -4299,7 +4355,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, nil, &spliced); err != nil {
 					return err
 				} else if stagedDrift != "" {
-					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+					refuseTarget(w.target, stagedDrift+residue())
 					continue
 				}
 				spliced.Run = opts.RunID
@@ -4347,7 +4403,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if !errors.Is(err, errEvidenceFinalization) {
 						return err
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+					refuseTarget(w.target, err.Error()+residue())
 					continue
 				}
 				// Same release as the served branch: the splice is computed, the
@@ -4357,7 +4413,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+					refuseTarget(w.target, err.Error()+residue())
 					continue
 				} else if unavailable != "" {
 					stampUnverifiable(&extended, unavailable)
@@ -4393,7 +4449,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, nil, &extended); err != nil {
 					return err
 				} else if stagedDrift != "" {
-					refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+					refuseTarget(w.target, stagedDrift+residue())
 					continue
 				}
 				extended.Run = opts.RunID
@@ -4444,7 +4500,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if !errors.Is(err, errEvidenceFinalization) {
 						return err
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+					refuseTarget(w.target, err.Error()+residue())
 					continue
 				}
 				f.OracleEvidence = oracleEvidence
@@ -4457,7 +4513,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if !errors.Is(err, errEvidenceFinalization) {
 						return err
 					}
-					refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+					refuseTarget(w.target, err.Error()+residue())
 					continue
 				}
 				f.TargetEvidence = targetEvidence
@@ -4468,7 +4524,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				refuseTarget(targets[w.target].Symbol, err.Error()+residue())
+				refuseTarget(w.target, err.Error()+residue())
 				continue
 			} else if unavailable != "" {
 				stampUnverifiable(f, unavailable)
@@ -4476,7 +4532,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, w.shapedFiles, f); err != nil {
 				return err
 			} else if stagedDrift != "" {
-				refuseTarget(targets[w.target].Symbol, stagedDrift+residue())
+				refuseTarget(w.target, stagedDrift+residue())
 				continue
 			}
 			f.Run = opts.RunID
