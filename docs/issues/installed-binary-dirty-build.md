@@ -27,7 +27,8 @@ build stamp; the 2026-09-21 installed-binary-skew doc closed at chunk
 282's install and is gone. No doc covers binary provenance, so the
 rows are disjoint and no scheduled trigger is duplicated.
 
-Lands: cross-tool train chunk 311 (gomutant's next chunk, heading its
-remainder directly after stipulator 307.B) — its close-out `go install`
-from the committed tree; an earlier gomutant session's clean install
-closes it sooner.
+Lands: the fleet sweep's next binary-provenance line reading `match`
+without the modified flag (the clean install happened at chunk 311's
+close, 2026-10-05: the one uncommitted tracked file — the tool's own
+findings document, rewritten to version 14 on read — committed, the
+binary rebuilt from the clean tree and installed to both bins).
