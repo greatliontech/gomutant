@@ -22,5 +22,6 @@ with windows-native fixtures (cmd.exe equivalents of the three exit
 states, plus a ctx-driven kill exercising the `cancelled` flag) and
 `TestParentDeadlineIsCancellationNotTimeoutKill`.
 
-Lands: when a windows runner enters the CI matrix (chunk 107's
-workflow surface owns the runner set).
+Lands: when greatliontech/actions' go-gate.yml gains a runner input
+and a caller passes a windows runner (the fleet's gate owns the runner
+set; today `ubuntu-latest` is fixed in the called workflow).

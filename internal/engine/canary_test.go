@@ -14,7 +14,7 @@ import (
 // load, enumerate, and generate AT LEAST ONE candidate — a frontend
 // that silently skips an unrecognized shape (zero candidates, no
 // error: the likeliest breakage for an AST walker) is exactly as red
-// as one that errors. Runs under the CI matrix's next-rc leg like
+// as one that errors. Runs under next.yaml's next-rc leg like
 // every test; the inline-interface parse failure cost one field
 // session already.
 func TestLanguageShapeCanaries(t *testing.T) {

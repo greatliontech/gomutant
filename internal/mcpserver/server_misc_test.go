@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,36 +35,51 @@ func TestWithHeartbeatNotifiesDuringTheStretch(t *testing.T) {
 	prior := seams.heartbeatInterval
 	seams.heartbeatInterval = 5 * time.Millisecond
 	defer func() { seams.heartbeatInterval = prior }()
-	var beats atomic.Int64
-	notify := func(string) { beats.Add(1) }
+	// Beats are OBSERVED, never clocked: each beat walks /proc for its
+	// resident suffix, which on a loaded host costs more than the
+	// cadence (the ticker then drops ticks), so a stretch that sleeps a
+	// fixed span may see one beat or none. The stretch instead ends
+	// once the beat it waits for has landed — bounded, so a missing
+	// beat fails by assertion and not by the oracle's timeout.
+	beat := make(chan string, 64)
+	notify := func(m string) {
+		select {
+		case beat <- m:
+		default:
+		}
+	}
+	await := func(want string) {
+		deadline := time.After(10 * time.Second)
+		for {
+			select {
+			case m := <-beat:
+				if strings.Contains(m, want) {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("no beat carrying %q within 10s", want)
+			}
+		}
+	}
 	got, err := withHeartbeatLabel(context.Background(), notify, func() string { return "probe" }, func(context.Context) (int, error) {
-		time.Sleep(60 * time.Millisecond)
+		await("still working: probe")
 		return 7, nil
 	})
 	if err != nil || got != 7 {
 		t.Fatalf("withHeartbeat = %d, %v", got, err)
 	}
-	if beats.Load() == 0 {
-		t.Fatal("no still-working notification during a slow stretch")
-	}
-	// A labelled stretch names the phase current at each beat.
-	var labels []string
-	var mu sync.Mutex
+	// A labelled stretch names the phase current at each beat: the
+	// stretch moves its label only after a beat carried the earlier
+	// one, and ends only after a beat carried the later one.
 	label := atomic.Value{}
 	label.Store("baseline")
-	if _, err := withHeartbeatLabel(context.Background(), func(m string) { mu.Lock(); labels = append(labels, m); mu.Unlock() }, func() string { return label.Load().(string) }, func(context.Context) (int, error) {
-		time.Sleep(4 * seams.heartbeatInterval)
+	if _, err := withHeartbeatLabel(context.Background(), notify, func() string { return label.Load().(string) }, func(context.Context) (int, error) {
+		await("still working: baseline")
 		label.Store("mutant-run 1/1")
-		time.Sleep(4 * seams.heartbeatInterval)
+		await("still working: mutant-run 1/1")
 		return 1, nil
 	}); err != nil {
 		t.Fatal(err)
-	}
-	mu.Lock()
-	joined := strings.Join(labels, "\n")
-	mu.Unlock()
-	if !strings.Contains(joined, "still working: baseline") || !strings.Contains(joined, "still working: mutant-run 1/1") {
-		t.Fatalf("heartbeat labels = %q", labels)
 	}
 	if _, err := withHeartbeatLabel(context.Background(), nil, func() string { return "probe" }, func(context.Context) (int, error) { return 1, nil }); err != nil {
 		t.Fatalf("nil-notifier stretch failed: %v", err)

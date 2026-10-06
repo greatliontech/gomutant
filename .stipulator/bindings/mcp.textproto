@@ -960,3 +960,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "1ea70c9e5e65cbec449890733516adb9e22f3fd8ece07b95958cdfb5a74afde3"
 }
+
+bindings {
+  requirement_id: "REQ-mcp-envelope"
+  content_hash: "dbe470256129f53d694ab502277151726140adc804aa73ac2e99906cc8288b59"
+  source_hash: "a4177d177bcfc893040b39d96a24c0bc8d79df28b38cf9e187e666d6c4112cd6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestWithHeartbeatNotifiesDuringTheStretch"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "deafb542a44c1d044d4859a9fe80452ae8c05dfa999dc0a460ec1832d5df1957"
+}

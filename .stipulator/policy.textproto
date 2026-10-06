@@ -11,9 +11,15 @@ invocations {
     args: "-test.timeout=40m"
     # The full tier by the flag, on the default build selection: every
     # gate-carrying suite runs as -short unless told otherwise
-    # (internal/integrationtest), and the `integration` build tag, which
-    # also lifts the default, is a selection gofresh has not walked —
-    # under it observation proofs strip and nothing serves.
+    # (internal/integrationtest). The `integration` build tag also lifts
+    # the default; the invocation stays on the default selection because
+    # the tag selects the integration build — every test, the oracle of
+    # gomutant's own campaign under it — not the unit suite. A tagged
+    # invocation would be judged with the reader's pinned gofresh:
+    # before v0.109.0 it fails a selection closed until its
+    # standard-library delta is walked (proofs strip, nothing serves);
+    # from v0.109.0 a tag constraining no standard-library file is
+    # admitted by content on a listed toolchain.
     args: "-test.short=false"
     # Reviewed race-free admission: the standing testing rule keeps the
     # race detector off without explicit authorization, and this
