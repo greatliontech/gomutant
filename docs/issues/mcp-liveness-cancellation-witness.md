@@ -28,7 +28,4 @@ no probe running — must stay served or fail with a stated reason (the
 exit log names every end's class and cause once the session reached
 the serve loop; the idle liveness itself is unwitnessed).
 
-Lands: when a transport-seam fault injection lands in the mcpserver
-test harness (the lifecycle_test in-process pair growing a
-failing-writer arm), the idle-session arm and the last-failure capture
-for the exit line beside it.
+Lands: cross-tool train chunk 219 (the test surface; the transport-seam fault injection is a chunk's work, never a passive trigger — audit 317).

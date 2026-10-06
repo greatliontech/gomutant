@@ -22,4 +22,4 @@ that first carries the file at the recorded digest (or the record
 carries the edit's content hash of the file as the anchor, commit
 optional), so prune/retarget have something to walk.
 
-Lands: with the next change to prune or retarget's record surfaces.
+Lands: cross-tool train chunk 256 (the attestation history's lifecycle: the ephemeral record's rows — Files, TestPkg, Run — followed by prune and retarget as 283.C follows the exemption record's; the trigger fired at 282/283, triaged at audit 317).

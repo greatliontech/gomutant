@@ -1,7 +1,6 @@
 # A campaign over gomutant's own root package pays a day of oracle time
 
-Lands: cross-tool train chunk 284 (self-campaign oracles gomutant can
-afford, then chunk 277's close-out campaign over the result)
+Lands: cross-tool train chunk 302's close (284 dissolved at audit 317: its layout half landed at 284.A; its parked campaign prefix is void — bank v1 empty since 304, the records predate the selection and audit keys — so the self-campaign is 302's close measure, run once over records that will persist).
 
 Chunk 277's close-out campaign (`gomutant run --changed 9753a5e`)
 selects 46 targets: 35 in the root package, 5 in `internal/engine`, 4

@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-mcp-resident-set"
-reason: "the clause's process memory limit (the fleet rule installed where the server and every command start) and its measured acceptance beside the per-phase resident line both faces carry land with gomutant's bump to the gofresh release carrying gofresh/resident's explicit-GOMEMLIMIT ceiling rule; the heap return and the idle release landed first"
-content_hash: "cbc2ffaf2da0b67f195b8e006435153db0d859ec4c9df06e4df5f4d3aba1368c"
-source_hash: "54a34c3589512c1e665b0a85e0741b0fdd9131ca8c593809b2931bd1e37aceae"
-lands { manual { condition: "gomutant's bump to the gofresh release carrying the explicit-GOMEMLIMIT ceiling rule installs the limit at every start and measures the idle resident set" fired: true } }

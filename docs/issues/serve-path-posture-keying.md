@@ -11,4 +11,4 @@ captures), so no verdict moves; the collapse is one posture rule for
 the serve path and the judgment — the finding's — or the run passing
 both postures' sets.
 
-Lands: the next change to the run's serve-path view keying.
+Lands: cross-tool train chunk 302's open gate (plausibly fired at 311 — the proof units keyed by the resolved posture; judged there; audit 317).

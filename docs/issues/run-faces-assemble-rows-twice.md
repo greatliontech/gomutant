@@ -12,5 +12,4 @@ make the row-level disagreement class (the kind chunk 244's face
 audit found) unrepresentable. The findings faces' twin is
 findings-row-projections-one-shape.
 
-Lands: cross-tool train chunk 220 (the named smalls; the findings
-faces' twin lands with it).
+Lands: cross-tool train chunk 267 (one row projection carrying layer, reason and delta on both faces; the faces read ledger.Layer/Routing.Of since 283, not Store.Layer — audit 317).

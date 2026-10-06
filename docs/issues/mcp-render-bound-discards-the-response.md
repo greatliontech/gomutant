@@ -14,5 +14,4 @@ layer discards is lost. The render bound wants the same shape — the
 rows built so far banked, the bound named in the result's exit — so a
 committed run's response is never an error text alone.
 
-Lands: cross-tool train chunk 233 (the run-state record and the MCP
-preflight — the recoverable run state this belongs to).
+Lands: cross-tool train chunk 233 (re-aimed at audit 317: the run-state record lives in the tree's state home as the exit log does since 312, never beside the findings document; its path on the run's boundary lines).

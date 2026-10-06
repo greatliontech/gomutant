@@ -13,4 +13,4 @@ Collapse: the table entries decode through the same known-object walk
 the inline findings use (decodeKnownObject over each entry, then the
 typed decode), so one duplicate rule covers every record shape.
 
-Lands: 217
+Lands: cross-tool train chunk 217.

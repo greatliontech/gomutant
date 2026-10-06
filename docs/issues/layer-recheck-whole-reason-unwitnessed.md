@@ -20,4 +20,4 @@ directory, stamp again — the record is dirty with the evidence fault
 naming the identity; the same run with the link untouched keeps the
 repo layer.
 
-Lands: 219
+Lands: cross-tool train chunk 219.
