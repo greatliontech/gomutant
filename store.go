@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -195,24 +196,88 @@ func (r Routing) Of(store *Store, f Finding) (layer, reason string) {
 	return store.Layer(f)
 }
 
-// machineLocalDir derives this machine's per-tree cache home — the
-// user cache directory keyed by the resolved tree — shared by the
-// findings overlay and the baseline bank so every machine-local
-// artifact of one tree lives under one key. It returns the resolved
-// canonical module dir alongside, refusing a root that does not resolve.
-func machineLocalDir(moduleDir string) (abs, dir string, err error) {
+// treeKey is the one key every machine-local artifact of a tree lives
+// under, whatever its home — the cache home's overlay and bank, the
+// state home's exit log: the resolved tree's digest, so an operator
+// correlates a tree's artifacts across the homes by the key alone.
+func treeKey(abs string) string {
+	key := sha256.Sum256([]byte(abs))
+	return hex.EncodeToString(key[:12])
+}
+
+// machineLocalHome derives this machine's per-tree directory under a
+// user home — the home keyed by the resolved tree — the one shape the
+// cache home (the findings overlay, the baseline bank) and the state
+// home (the server's exit log) share, so every machine-local artifact
+// of one tree lives under one key. It returns the resolved canonical
+// module dir alongside, refusing a root that does not resolve.
+func machineLocalHome(moduleDir string, home func() (string, error)) (abs, dir string, err error) {
 	abs, err = gotool.CanonicalDir(moduleDir)
 	if err != nil {
 		// A fail-safe: every caller has the root's own refusal ahead of
 		// this resolution, so a root CheckTreeRoot admitted resolves.
 		return "", "", fmt.Errorf("gomutant: resolve tree root %s: %w", moduleDir, err)
 	}
-	cache, err := os.UserCacheDir()
+	base, err := home()
 	if err != nil {
-		return "", "", fmt.Errorf("gomutant: no user cache directory for machine-local artifacts: %w", err)
+		return "", "", err
 	}
-	key := sha256.Sum256([]byte(abs))
-	return abs, filepath.Join(cache, "gomutant", "repos", hex.EncodeToString(key[:12])), nil
+	return abs, filepath.Join(base, "gomutant", "repos", treeKey(abs)), nil
+}
+
+// machineLocalDir is the per-tree cache home (REQ-result-layers).
+func machineLocalDir(moduleDir string) (abs, dir string, err error) {
+	return machineLocalHome(moduleDir, func() (string, error) {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			return "", fmt.Errorf("gomutant: no user cache directory for machine-local artifacts: %w", err)
+		}
+		return cache, nil
+	})
+}
+
+// machineLocalStateDir is the per-tree state home, where the server's
+// exit log lives (REQ-mcp-exit-log): a log is state, never cache — a
+// cache sweep keeps it wherever the host keeps a state home apart from
+// its cache, every host but Windows — and never a tree fact, so the
+// served tree holds no trace of a session.
+func machineLocalStateDir(moduleDir string) (string, error) {
+	_, dir, err := machineLocalHome(moduleDir, userStateDir)
+	return dir, err
+}
+
+// userStateDir is the user's state directory: $XDG_STATE_HOME when it
+// is defined (honored on every platform; a relative one refused), else
+// $HOME/.local/state — the XDG specification's default — on every host
+// but Windows, the one whose cache home HOME does not root (it has no
+// state/cache split: its per-user cache directory, %LocalAppData%,
+// stands in), so a session is diagnosable on every host the tool
+// serves. The standard library has no accessor for the state home;
+// stateHome is the rule, this its reading.
+func userStateDir() (string, error) {
+	return stateHome(runtime.GOOS, os.Getenv("XDG_STATE_HOME"), os.Getenv("HOME"), os.UserCacheDir)
+}
+
+// stateHome is userStateDir's pure rule over its inputs: the GOOS, the
+// two variables, and the platform cache home's reader.
+func stateHome(goos, xdg, home string, platformCache func() (string, error)) (string, error) {
+	if xdg != "" {
+		if !filepath.IsAbs(xdg) {
+			return "", errors.New("gomutant: path in $XDG_STATE_HOME is relative")
+		}
+		return xdg, nil
+	}
+	if goos == "windows" {
+		dir, err := platformCache()
+		if err != nil {
+			return "", fmt.Errorf("gomutant: no user state directory for the exit log: %w", err)
+		}
+		return dir, nil
+	}
+	if home == "" {
+		return "", errors.New("gomutant: neither $XDG_STATE_HOME nor $HOME are defined")
+	}
+	return filepath.Join(home, ".local", "state"), nil
 }
 
 // overlayEntryCeiling is the overlay's evidence-size ceiling

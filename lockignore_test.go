@@ -4,6 +4,7 @@ package gomutant
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,8 +24,8 @@ func TestCampaignLockIgnoreMinted(t *testing.T) {
 	}
 	release()
 	content, err := os.ReadFile(filepath.Join(owned, ".gitignore"))
-	if err != nil || !strings.Contains(string(content), "*.campaign") || !strings.Contains(string(content), "*.lock") || !strings.Contains(string(content), ExitLogName+"\n") || !strings.Contains(string(content), ExitLogRotatedName+"\n") {
-		t.Fatalf("minted ignore = %q, %v; want both persistent-lock patterns and the exit log with its kept generation", content, err)
+	if err != nil || string(content) != "*.campaign\n*.lock\n" {
+		t.Fatalf("minted ignore = %q, %v; want exactly the two persistent-lock patterns (the exit log lives outside the tree)", content, err)
 	}
 
 	seeded := filepath.Join(t.TempDir(), ".gomutant")
@@ -67,8 +68,8 @@ func TestCampaignLockIgnoreMinted(t *testing.T) {
 	}
 	release()
 	content, err = os.ReadFile(filepath.Join(partial, ".gitignore"))
-	if err != nil || strings.Count(string(content), "*.campaign") != 1 || strings.Count(string(content), "*.lock") != 1 || strings.Count(string(content), ExitLogName+"\n") != 1 || strings.Count(string(content), ExitLogRotatedName+"\n") != 1 {
-		t.Fatalf("partial ignore = %q, %v; want the missing patterns appended once without duplicating the present ones", content, err)
+	if err != nil || strings.Count(string(content), "*.campaign") != 1 || strings.Count(string(content), "*.lock") != 1 || strings.Contains(string(content), ExitLogName) {
+		t.Fatalf("partial ignore = %q, %v; want the missing pattern appended once without duplicating the present one, and no exit log line", content, err)
 	}
 
 	foreign := t.TempDir()
@@ -97,17 +98,90 @@ func TestCampaignLockIgnoreMinted(t *testing.T) {
 	}
 }
 
-// The server's exit log and its kept generation live beside the default
-// findings document under the tree root, whatever document a run
-// serves — the paths the run adds to its own writes (REQ-mcp-exit-log).
-func TestExitLogPathsSitBesideTheDefaultDocument(t *testing.T) {
+// The server's exit log and its kept generation live under the tree's
+// machine-local state home — $XDG_STATE_HOME/gomutant/repos/ keyed as
+// the cache home is, the one key both homes share — never under the
+// tree; a relative state home is refused, an unset one is
+// $HOME/.local/state on this host (the rule's platform table is
+// TestStateHomeRuleCoversEveryPlatform), an unresolvable root refused;
+// the store's own paths are the minted ignore alone; the decision map
+// states the home's rule whole (REQ-mcp-exit-log).
+func TestExitLogPathsLiveUnderTheStateHome(t *testing.T) {
 	dir := t.TempDir()
-	paths := ExitLogPaths(dir)
-	if len(paths) != 2 || filepath.Base(paths[0]) != ExitLogName || filepath.Base(paths[1]) != ExitLogRotatedName || filepath.Dir(paths[0]) != filepath.Dir(FindingsPathAt(dir, "")) || filepath.Dir(paths[1]) != filepath.Dir(paths[0]) {
-		t.Fatalf("exit log paths = %v; want the log and its generation beside the default document", paths)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	paths, err := ExitLogPaths(dir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// The store's own paths are those two and the minted ignore.
-	if own := StoreOwnPaths(dir); len(own) != 3 || own[0] != paths[0] || own[1] != paths[1] || own[2] != filepath.Join(filepath.Dir(paths[0]), ".gitignore") {
-		t.Fatalf("store own paths = %v", own)
+	_, cacheDir, err := machineLocalDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(state, "gomutant", "repos", filepath.Base(cacheDir))
+	if len(paths) != 2 || filepath.Dir(paths[0]) != want || filepath.Base(paths[0]) != ExitLogName || filepath.Dir(paths[1]) != want || filepath.Base(paths[1]) != ExitLogRotatedName {
+		t.Fatalf("exit log paths = %v; want the log and its generation under %s", paths, want)
+	}
+	if rel, err := filepath.Rel(dir, paths[0]); err == nil && !strings.HasPrefix(rel, "..") {
+		t.Fatalf("the exit log %s lies under the served tree %s", paths[0], dir)
+	}
+	t.Setenv("XDG_STATE_HOME", "relative/state")
+	if _, err := ExitLogPaths(dir); err == nil || !strings.Contains(err.Error(), "relative") {
+		t.Fatalf("a relative state home: err = %v, want the refusal", err)
+	}
+	t.Setenv("XDG_STATE_HOME", "")
+	t.Setenv("HOME", state)
+	if paths, err := ExitLogPaths(dir); err != nil || filepath.Dir(filepath.Dir(filepath.Dir(paths[0]))) != filepath.Join(state, ".local", "state", "gomutant") {
+		t.Fatalf("an unset state home = %v, %v; want $HOME/.local/state", paths, err)
+	}
+	// A tree root that does not resolve refuses the paths.
+	if paths, err := ExitLogPaths(filepath.Join(dir, "absent")); err == nil {
+		t.Fatalf("an unresolvable tree root answered %v, want the refusal", paths)
+	}
+	if own := StoreOwnPaths(dir); len(own) != 1 || own[0] != filepath.Join(filepath.Dir(FindingsPathAt(dir, "")), ".gitignore") {
+		t.Fatalf("store own paths = %v, want the minted ignore alone", own)
+	}
+	// The decision map the served instructions carry states the home's
+	// rule (REQ-mcp-guidance keeps the instructions the map verbatim).
+	if o := Guidance().Orientation(); !strings.Contains(o, "$XDG_STATE_HOME/gomutant/repos/") || !strings.Contains(o, "`~/.local/state` where the variable is unset; on Windows") {
+		t.Fatal("the decision map does not state the exit log's home rule whole")
+	}
+}
+
+// The state home's rule over every platform: $XDG_STATE_HOME when set
+// (absolute, on every platform), else $HOME/.local/state on every host
+// but Windows — refused where HOME is unset — and on Windows, the one
+// host whose cache home HOME does not root, the platform's own
+// per-user cache directory, its failure refused (REQ-mcp-exit-log).
+func TestStateHomeRuleCoversEveryPlatform(t *testing.T) {
+	cache := func() (string, error) { return "/platform/cache", nil }
+	noCache := func() (string, error) { return "", errors.New("no cache") }
+	for _, tc := range []struct {
+		goos, xdg, home string
+		cache           func() (string, error)
+		want, refusal   string
+	}{
+		{"linux", "/state", "/home/u", cache, "/state", ""},
+		{"windows", "/state", "", noCache, "/state", ""},
+		{"linux", "rel/state", "/home/u", cache, "", "relative"},
+		{"linux", "", "/home/u", cache, "/home/u/.local/state", ""},
+		{"freebsd", "", "/home/u", cache, "/home/u/.local/state", ""},
+		{"linux", "", "", cache, "", "neither"},
+		{"darwin", "", "/Users/u", cache, "/Users/u/.local/state", ""},
+		{"darwin", "", "", cache, "", "neither"},
+		{"windows", "", "", cache, "/platform/cache", ""},
+		{"windows", "", "/home/u", cache, "/platform/cache", ""},
+		{"windows", "", "", noCache, "", "no user state directory"},
+	} {
+		got, err := stateHome(tc.goos, tc.xdg, tc.home, tc.cache)
+		if tc.refusal != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.refusal) {
+				t.Fatalf("%+v: err = %v, want %q", tc, err, tc.refusal)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Fatalf("%+v: = %q, %v; want %q", tc, got, err, tc.want)
+		}
 	}
 }

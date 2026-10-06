@@ -91,15 +91,21 @@ the caps mean.
 
 **REQ-mcp-exit-log** (behavior): The server MUST leave one diagnosable
 line behind whatever ends a session, so a disconnect the host reports
-without a cause is attributable afterwards: an exit log beside the
-default findings document it serves (`.gomutant/mcp.log` under the
-server's directory, whatever a call's own `findings` names; appended
-across sessions; moved to `mcp.log.1`, one generation kept, by any write
-that would carry it past one megabyte, within a session as between them)
-— a machine-local file: minted into the tool-owned directory's ignore
-as the lock files are, and among a run's own writes, never measurement
-residue — carries the protocol layer's own server lines and a final
-`exit` line naming the class — `cancelled` (the serve context had ended when the
+without a cause is attributable afterwards: an exit log under the served
+tree's machine-local state home — `$XDG_STATE_HOME/gomutant/repos/<tree
+key>/mcp.log` (the variable honored on every platform; where it is
+unset, `~/.local/state` on every host but Windows, whose per-user cache
+directory stands in — the one supported host whose cache home `HOME`
+does not root), the key the findings overlay's under the cache home, whatever a call's own
+`findings` names; appended across sessions; moved to `mcp.log.1`, one
+generation kept, by any write that would carry it past one megabyte,
+within a session as between them — never a file under the served tree:
+the server itself writes nothing there, and `.gomutant/` appears only
+through a committing verb's own act (its locks at preparation, its
+records). The log's serve-start line and its final `exit` line each
+name the log's own path; the decision map the served instructions
+carry states the home's rule. The log carries the protocol layer's own
+server lines and a final `exit` line naming the class — `cancelled` (the serve context had ended when the
 serve returned, whatever the protocol layer answered first: a host that
 closes the transport and signals together races the two, and the
 recorded fact is the context's), `host-closed` (a clean return under a
@@ -122,7 +128,8 @@ call's method and cause, and answers the call with an error — counted as
 answered — serving on. An unwritable log never fails serving: the server
 says so on stderr and serves without it. A session that vanishes with no
 line and no such stderr notice is a session that never reached the serve
-loop — the host's own failure to spawn.
+loop — the host's own failure to spawn. A log whose home does not
+resolve degrades exactly as an unwritable one.
 
 **REQ-mcp-resident-set** (behavior): The server MUST hold no more of the
 host's memory than its working set, never its largest request's: when its
@@ -167,7 +174,7 @@ surface-table pin).
 | retarget | mcp, cli | the rewrites, each row's layer, a shadowed row said, the rewritten exemption subjects noted (twenty, the rest counted), the rewritten and touched counts per layer; `--check` previews | the rewrites capped at 50, the touched rewrites and the rewritten exemption subjects each capped alike, the rewritten and touched counts per layer (objects); `check` previews | `from` and `to` terminated alike |
 | ephemeral | mcp, cli | `--file` with a `--replacement` path, or `--batch` a JSON file `{"edits":[{"file","old_string","new_string"},…]}`; a progress line on the shared cadence; the command timeout unlimited | inline `replacement`, `edits`, or `batch_edits`; notifications and a heartbeat under a token; the command timeout 300 seconds | exactly one mutation form; runs 1–10; oracle timeout 0 derives the budget; `attest` records a judged equivalence |
 | guidance | mcp, cli | a verb's section, or the orientation | the same | — |
-| mcp | cli | serves the tools over stdio; the exit log `.gomutant/mcp.log` beside the findings document, its serve-start line stating the fleet ceiling installed (re-derived at every tool call that begins with none in flight); the heap returned when the last in-flight call ends, the cached tree released after sixty idle seconds | — | per-server vouches; the exit classes |
+| mcp | cli | serves the tools over stdio, writing nothing under the served tree; the exit log under the tree's machine-local state home (`$XDG_STATE_HOME/gomutant/repos/<tree key>/mcp.log`), its serve-start line naming the log's path and stating the fleet ceiling installed (re-derived at every tool call that begins with none in flight); the heap returned when the last in-flight call ends, the cached tree released after sixty idle seconds | — | per-server vouches; the exit classes |
 | version | cli | the binary and document versions | — | — |
 
 **REQ-mcp-guidance** (behavior): Tool-level served prose MUST be the

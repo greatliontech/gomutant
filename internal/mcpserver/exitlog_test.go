@@ -112,9 +112,21 @@ func hostCloses(_ context.Context, _ context.CancelFunc, client *mcp.ClientSessi
 	_ = client.Close()
 }
 
+// exitLogPath is the log's home as the server resolves it — the test
+// side's own derivation over the one production rule (ExitLogPaths),
+// so a server's lines are compared against a path the test computed.
+func exitLogPath(t *testing.T, s *Server) string {
+	t.Helper()
+	paths, err := gomutant.ExitLogPaths(s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return paths[0]
+}
+
 func exitLog(t *testing.T, s *Server) string {
 	t.Helper()
-	data, err := os.ReadFile(s.ExitLogPath())
+	data, err := os.ReadFile(exitLogPath(t, s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,11 +139,11 @@ func exitLog(t *testing.T, s *Server) string {
 // ends — its close, its signal — return no error, and a torn wire
 // returns the transport class carrying exit code 2 (REQ-mcp-exit-log).
 func TestExitLogNamesEveryEndOfASession(t *testing.T) {
-	// The log is `.gomutant/mcp.log` under the server's directory,
-	// whatever a call's own findings names; the notice writer is stderr.
+	// The log is `mcp.log` under the tree's state home, whatever a
+	// call's own findings names; the notice writer is stderr.
 	s := serverAt(t)
-	if s.ExitLogPath() != filepath.Join(s.dir, ".gomutant", "mcp.log") {
-		t.Fatalf("exit log at %s", s.ExitLogPath())
+	if path := exitLogPath(t, s); filepath.Base(path) != "mcp.log" || !strings.HasPrefix(path, filepath.Join(os.Getenv("XDG_STATE_HOME"), "gomutant", "repos")+string(filepath.Separator)) {
+		t.Fatalf("exit log at %s, want it under the suite's state home", path)
 	}
 	// The process's standard error stream by descriptor: under `go test
 	// -json` the testing package points os.Stderr at stdout after
@@ -323,16 +335,16 @@ func TestHandlerPanicIsLoggedAndAnsweredAsAnError(t *testing.T) {
 // says so on the notice writer (REQ-mcp-exit-log).
 func TestExitLogRotatesAndDegrades(t *testing.T) {
 	s := serverAt(t)
-	if err := os.MkdirAll(filepath.Dir(s.ExitLogPath()), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(exitLogPath(t, s)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(s.ExitLogPath(), make([]byte, exitLogMaxBytes), 0o644); err != nil {
+	if err := os.WriteFile(exitLogPath(t, s), make([]byte, exitLogMaxBytes), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := serveOnce(t, s, hostCloses); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(s.ExitLogPath() + ".1"); err != nil || info.Size() != exitLogMaxBytes {
+	if info, err := os.Stat(exitLogPath(t, s) + ".1"); err != nil || info.Size() != exitLogMaxBytes {
 		t.Fatalf("rotated generation = %v, %v", info, err)
 	}
 	if log := exitLog(t, s); !strings.Contains(log, "msg=exit class=host-closed") || len(log) > 4096 {
@@ -361,7 +373,7 @@ func TestExitLogRotatesAndDegrades(t *testing.T) {
 	// A directory at the log path is unwritable: serving proceeds, the
 	// notice names the path.
 	s = serverAt(t)
-	if err := os.MkdirAll(s.ExitLogPath(), 0o755); err != nil {
+	if err := os.MkdirAll(exitLogPath(t, s), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	var notice bytes.Buffer
@@ -371,33 +383,60 @@ func TestExitLogRotatesAndDegrades(t *testing.T) {
 	if err := serveOnce(t, s, hostCloses); err != nil {
 		t.Fatalf("unwritable log failed serving: %v", err)
 	}
-	if !strings.Contains(notice.String(), "exit log "+s.ExitLogPath()+" unwritable") {
+	if !strings.Contains(notice.String(), "exit log "+exitLogPath(t, s)+" unwritable") {
 		t.Fatalf("notice = %q", notice.String())
 	}
 	var _ io.Writer = seams.exitLogNotice
 }
 
-// Opening the exit log mints the store's ignore first, so a read-only
-// session — one that takes no lock — leaves no unignored file behind
-// for an add-everything staging loop to commit (REQ-mcp-exit-log).
-func TestExitLogIsMintedIntoTheStoreIgnore(t *testing.T) {
-	s := serverAt(t)
-	_, closeLog := s.exitLogger()
-	closeLog()
-	ignore := filepath.Join(filepath.Dir(s.ExitLogPath()), ".gitignore")
-	content, err := os.ReadFile(ignore)
-	if err != nil || !strings.Contains(string(content), gomutant.ExitLogName+"\n") || !strings.Contains(string(content), gomutant.ExitLogRotatedName+"\n") {
-		t.Fatalf("store ignore after the log opened = %q, %v; want the exit log and its generation covered", content, err)
-	}
-	// A consumer's ignore minted before the log existed — the lock
-	// patterns alone — gains the log's names once at the next session.
-	if err := os.WriteFile(ignore, []byte("*.campaign\n*.lock\n"), 0o644); err != nil {
+// A server session writes nothing under the served tree — a server
+// over an empty directory leaves it empty, no `.gomutant/` minted — and
+// its log under the state home carries the serve-start and exit lines,
+// each naming the log's own path; a state home that does not resolve
+// degrades as an unwritable log does, the notice naming the cause
+// (REQ-mcp-exit-log).
+func TestServerSessionLeavesTheServedTreeUntouched(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	if err := serveOnce(t, s, hostCloses); err != nil {
 		t.Fatal(err)
 	}
-	_, closeLog = s.exitLogger()
-	closeLog()
-	content, err = os.ReadFile(ignore)
-	if err != nil || strings.Count(string(content), gomutant.ExitLogName+"\n") != 1 || strings.Count(string(content), gomutant.ExitLogRotatedName+"\n") != 1 || strings.Count(string(content), "*.lock\n") != 1 {
-		t.Fatalf("upgraded store ignore = %q, %v; want the log's names appended once", content, err)
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("the served directory after a session = %v, %v; want it untouched", entries, err)
+	}
+	path := exitLogPath(t, s)
+	log := exitLog(t, s)
+	for _, want := range []string{`msg="serve start"`, "msg=exit class=host-closed"} {
+		if !strings.Contains(log, want) || strings.Count(log, "log="+path) < 2 {
+			t.Fatalf("log at %s = %q; want the serve-start and exit lines each naming the path", path, log)
+		}
+	}
+	// The state home unresolvable: a relative XDG_STATE_HOME.
+	t.Setenv("XDG_STATE_HOME", "relative/state")
+	var notice bytes.Buffer
+	prior := seams.exitLogNotice
+	seams.exitLogNotice = &notice
+	t.Cleanup(func() { seams.exitLogNotice = prior })
+	s = New(dir)
+	if err := serveOnce(t, s, hostCloses); err != nil {
+		t.Fatalf("an unresolvable log home failed serving: %v", err)
+	}
+	if !strings.Contains(notice.String(), "exit log home unresolvable") || !strings.Contains(notice.String(), "relative") {
+		t.Fatalf("notice = %q, want the unresolvable home named", notice.String())
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("the served directory after a logless session = %v, %v; want it untouched", entries, err)
+	}
+	// A served directory that does not exist (the host's cwd deleted)
+	// resolves no home either: the notice, serving, nothing written.
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	notice.Reset()
+	s = New(filepath.Join(dir, "absent"))
+	if err := serveOnce(t, s, hostCloses); err != nil {
+		t.Fatalf("an unresolvable tree root failed serving: %v", err)
+	}
+	if _, err := gomutant.ExitLogPaths(s.dir); !strings.Contains(notice.String(), "exit log home unresolvable") || err == nil {
+		t.Fatalf("notice = %q, paths err = %v; want the unresolvable root named and no path", notice.String(), err)
 	}
 }

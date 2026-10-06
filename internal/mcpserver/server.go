@@ -160,24 +160,21 @@ func (e *ExitError) Unwrap() error { return e.Cause }
 // rides every exec.ExitError the tree wraps).
 func (e *ExitError) MCPExitCode() int { return 2 }
 
-// ExitLogPath is the exit log's home: beside the findings document the
-// server serves, appended across sessions (REQ-mcp-exit-log).
-func (s *Server) ExitLogPath() string {
-	return gomutant.ExitLogPaths(s.dir)[0]
-}
-
 // runOn is Run over any transport — the in-memory one in tests — and
 // the one place the exit line is written. The served count lives here,
 // per session, so a Server run twice reports each session's own.
 func (s *Server) runOn(ctx context.Context, transport mcp.Transport) (err error) {
-	logger, closeLog := s.exitLogger()
+	// Both boundary lines name the log's own path — the file the logger
+	// opened — so an operator who finds either finds the file
+	// (REQ-mcp-exit-log).
+	logger, logPath, closeLog := s.exitLogger()
 	defer closeLog()
 	start := time.Now()
 	var served atomic.Int64
 	exitLine := func(level slog.Level, class ExitClass, cause string, extra ...any) {
-		logger.Log(context.Background(), level, "exit", append([]any{"class", string(class), "cause", cause, "served", served.Load(), "uptime", time.Since(start).Round(time.Second).String()}, extra...)...)
+		logger.Log(context.Background(), level, "exit", append([]any{"class", string(class), "cause", cause, "served", served.Load(), "uptime", time.Since(start).Round(time.Second).String(), "log", logPath}, extra...)...)
 	}
-	logger.Info("serve start", "dir", s.dir, "memory-limit", installCeiling())
+	logger.Info("serve start", "dir", s.dir, "log", logPath, "memory-limit", installCeiling())
 	defer s.stopIdle()
 	defer func() {
 		if r := recover(); r != nil {
@@ -232,22 +229,28 @@ func exitClass(err, ctxErr error) (ExitClass, string) {
 const exitLogMaxBytes = 1 << 20
 
 // exitLogger opens the exit log for appending under its size bound and
-// returns the logger the protocol layer and the exit line share; an
-// unwritable log degrades to a discarding logger with the reason on
-// seams.exitLogNotice.
-func (s *Server) exitLogger() (*slog.Logger, func()) {
-	path := s.ExitLogPath()
-	f, err := openRotatingFile(path, gomutant.ExitLogPaths(s.dir)[1], exitLogMaxBytes)
-	if err != nil {
-		fmt.Fprintf(seams.exitLogNotice, "gomutant mcp: exit log %s unwritable (%v); serving without it\n", path, err)
-		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}
+// returns the logger the protocol layer and the exit line share with
+// the path it opened; a log whose home does not resolve, or that is
+// unwritable, degrades to a discarding logger with the reason on
+// seams.exitLogNotice and no path. The log lives under the tree's
+// state home (its directory created by the writer); the server itself
+// writes nothing under the served tree — `.gomutant/` appears only
+// through a committing verb's own act (REQ-mcp-exit-log).
+func (s *Server) exitLogger() (*slog.Logger, string, func()) {
+	discard := func() (*slog.Logger, string, func()) {
+		return slog.New(slog.NewTextHandler(io.Discard, nil)), "", func() {}
 	}
-	// The log is a machine-local file beside the document: minted into
-	// the store's ignore as soon as its directory stands, as the locks
-	// are — a read-only session takes no lock and would otherwise leave
-	// it unignored.
-	gomutant.EnsureStoreIgnore(filepath.Dir(path))
-	return slog.New(slog.NewTextHandler(f, nil)), func() { _ = f.Close() }
+	paths, err := gomutant.ExitLogPaths(s.dir)
+	if err != nil {
+		fmt.Fprintf(seams.exitLogNotice, "gomutant mcp: exit log home unresolvable (%v); serving without it\n", err)
+		return discard()
+	}
+	f, err := openRotatingFile(paths[0], paths[1], exitLogMaxBytes)
+	if err != nil {
+		fmt.Fprintf(seams.exitLogNotice, "gomutant mcp: exit log %s unwritable (%v); serving without it\n", paths[0], err)
+		return discard()
+	}
+	return slog.New(slog.NewTextHandler(f, nil)), paths[0], func() { _ = f.Close() }
 }
 
 // rotatingFile is the exit log's writer: append-only, bounded at every

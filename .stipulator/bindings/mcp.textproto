@@ -333,8 +333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "b87d4da39fd21f645a2d930150ea251001ee39329b27b7e111574f39e2f9cf9a"
-  source_hash: "32efaf76e8d47037dbb976856a563a65eac65ffa1085006c130a611104be8fbc"
+  content_hash: "36b300a251ea16b068a8cb5fff320e8a751d0476aa7b06d980b4f909f4e043f1"
+  source_hash: "d0dd35f81920820809e0082d9c111db07c7c63599a14aa37df3c0979783b14a2"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableTracksTheGuidanceVerbs"
   role: BINDING_ROLE_TESTS
@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "b87d4da39fd21f645a2d930150ea251001ee39329b27b7e111574f39e2f9cf9a"
-  source_hash: "32efaf76e8d47037dbb976856a563a65eac65ffa1085006c130a611104be8fbc"
+  content_hash: "36b300a251ea16b068a8cb5fff320e8a751d0476aa7b06d980b4f909f4e043f1"
+  source_hash: "d0dd35f81920820809e0082d9c111db07c7c63599a14aa37df3c0979783b14a2"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableStatesTheHeldBounds"
   role: BINDING_ROLE_TESTS
@@ -423,8 +423,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestExitLogNamesEveryEndOfASession"
   role: BINDING_ROLE_TESTS
@@ -433,8 +433,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestHandlerPanicIsLoggedAndAnsweredAsAnError"
   role: BINDING_ROLE_TESTS
@@ -443,8 +443,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestExitLogRotatesAndDegrades"
   role: BINDING_ROLE_TESTS
@@ -453,8 +453,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/cmd/gomutant.TestExitCodeIsTheTreesOwn"
   role: BINDING_ROLE_TESTS
@@ -463,8 +463,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestExitClassIsDecidedByTheContextFirst"
   role: BINDING_ROLE_TESTS
@@ -473,8 +473,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestServePathPanicIsLoggedAndReraised"
   role: BINDING_ROLE_TESTS
@@ -483,8 +483,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestServeErrorRidesTheLineOnlyWhenTheClassDiscardedIt"
   role: BINDING_ROLE_TESTS
@@ -493,8 +493,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestCancelledServeKeepsTheWireErrorOnTheLine"
   role: BINDING_ROLE_TESTS
@@ -673,8 +673,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "b87d4da39fd21f645a2d930150ea251001ee39329b27b7e111574f39e2f9cf9a"
-  source_hash: "32efaf76e8d47037dbb976856a563a65eac65ffa1085006c130a611104be8fbc"
+  content_hash: "36b300a251ea16b068a8cb5fff320e8a751d0476aa7b06d980b4f909f4e043f1"
+  source_hash: "d0dd35f81920820809e0082d9c111db07c7c63599a14aa37df3c0979783b14a2"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestSurfaceTableStatesTheCLIBounds"
   role: BINDING_ROLE_TESTS
@@ -759,36 +759,6 @@ bindings {
   symbol: "github.com/greatliontech/gomutant.TestSelectionEmptiedNoteSpellsTheFacesInput"
   role: BINDING_ROLE_TESTS
   shape_hash: "c87d870ca1192be61a948406d80eadc329fabea92d5508e2450b49f3ee03c2f9"
-}
-
-bindings {
-  requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
-  backend: "go"
-  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestExitLogIsMintedIntoTheStoreIgnore"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "275584d3a405fd8ae61a5fa2314d32f1366c00aaaeb1f3c4634230011ff012df"
-}
-
-bindings {
-  requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
-  backend: "go"
-  symbol: "github.com/greatliontech/gomutant.TestExitLogPathsSitBesideTheDefaultDocument"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "395b507e545c0cd724659e1d1418a009bf6c8a95042a31decbe98dad61091055"
-}
-
-bindings {
-  requirement_id: "REQ-mcp-exit-log"
-  content_hash: "d9ca43b8e5bf5529d63fde64ab0dcabf40769ca5c734444e3ba361e53931fc0b"
-  source_hash: "7c8506aa6f6011a647f25efac5f1dcf9427c75ac2ef66123837ced0391b58b0f"
-  backend: "go"
-  symbol: "github.com/greatliontech/gomutant.TestRunDriftNamesMeasurementResidue"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "7b7077a9cb165a693aa4dff28f4511f69770c6000ece09b0801c1a4a9ed36088"
 }
 
 bindings {
@@ -959,4 +929,34 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestEveryToolCallReinstallsTheFleetCeiling"
   role: BINDING_ROLE_TESTS
   shape_hash: "e1399a8e2a64d006f2a3123110dc416fe41d514ad2a88b11f338a02521b309dd"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-exit-log"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestExitLogPathsLiveUnderTheStateHome"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "86185461f8f98393fd8ab9178c6c2c23da47c2737c264eeafe068cfea3aecec7"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-exit-log"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestServerSessionLeavesTheServedTreeUntouched"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "52495b74991d771dd04512b3133ad0d5e76b06aa7b2c6a18d171c8210c477a6a"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-exit-log"
+  content_hash: "39eebe96ec59b878e194014fec6ffc565caf7cbdf39dd0677e9cb91a2eaf409e"
+  source_hash: "1dcec700fe92a0c1b0255f15a67fbeec96d53a2ad2aecff49ec0ef9ba6eb7524"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestStateHomeRuleCoversEveryPlatform"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1ea70c9e5e65cbec449890733516adb9e22f3fd8ece07b95958cdfb5a74afde3"
 }

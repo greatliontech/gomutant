@@ -281,9 +281,14 @@ run naming the test that must notice.
 - `vouch` — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable): every tool call's analysis judges under the server's set — the tree root's `vouches` file extended by these — a per-server input because the loaded tree is shared across calls.
 **when:** use mcp as the server entry point for an MCP client;
 selection (tags, toolchain) is per-call on the served tools, while
-vouches bind at the server. Every session leaves `.gomutant/mcp.log`
-beside the findings document (a machine-local file the store's minted
-ignore covers): the protocol layer's lines and a final
+vouches bind at the server. The server itself writes nothing under the
+served tree (`.gomutant/` appears only through a committing verb's own
+act — its locks and records); every session leaves its exit log under
+the tree's machine-local state home, `$XDG_STATE_HOME/gomutant/repos/<tree
+key>/mcp.log` (`~/.local/state` where the variable is unset; on Windows
+the per-user cache directory; the key the findings overlay's), named on
+the serve-start and exit lines: the
+protocol layer's lines and a final
 `exit` line naming the class (host-closed, cancelled, transport,
 panic) with the cause, the calls answered, and the uptime — plus the
 serve's own error as `serve-error` where the class discarded it — and a
@@ -356,4 +361,8 @@ on disk is always complete. MCP-only: explain and inline edit forms;
 CLI-only: mcp itself, version, plan preflight, the run verb's JSON-lines
 output, and per-call vouches (per-server on mcp). The guidance verb
 serves any verb's full section — knobs, when-to-use, example — from the
-tool's own embedded document.
+tool's own embedded document. A server session's exit log lives under
+the machine-local state home, `$XDG_STATE_HOME/gomutant/repos/<tree
+key>/mcp.log` (`~/.local/state` where the variable is unset; on Windows
+the per-user cache directory), never under the served tree; the
+session's serve-start and exit lines name its path.

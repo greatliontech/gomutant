@@ -12,6 +12,7 @@ package testsuite
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/greatliontech/gomutant/internal/fixtureguard"
@@ -27,6 +28,9 @@ func Main(m *testing.M, fixtureRoot string) {
 		panic(err)
 	}
 	os.Setenv("XDG_CACHE_HOME", tmp)
+	// The exit log's state home likewise: a suite's server sessions
+	// never write the user's own ~/.local/state.
+	os.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
 	// The fleet ceiling's consumer obligation: an environment carrying
 	// GOMEMLIMIT suppresses the derivation for the whole process — and
 	// an oracle running this binary sets it — so the suites clear it
