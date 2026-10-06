@@ -333,8 +333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "88524b750ec052106179ecac5416311d4b7b8ada0d48928d46a2adc3ca9c754c"
-  source_hash: "bd79d9656cd1b66ce6386740e1dd8f3f42204070672a4ec18746b25aef98df35"
+  content_hash: "a7fbe4b4e1539910130906195a35c4d2507740e385e6770fdd756fc1ced18d6b"
+  source_hash: "759f3134d17e161d97e1a822683d3cf937c44b970bc022eb2dd2e0840bd01c71"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableTracksTheGuidanceVerbs"
   role: BINDING_ROLE_TESTS
@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "88524b750ec052106179ecac5416311d4b7b8ada0d48928d46a2adc3ca9c754c"
-  source_hash: "bd79d9656cd1b66ce6386740e1dd8f3f42204070672a4ec18746b25aef98df35"
+  content_hash: "a7fbe4b4e1539910130906195a35c4d2507740e385e6770fdd756fc1ced18d6b"
+  source_hash: "759f3134d17e161d97e1a822683d3cf937c44b970bc022eb2dd2e0840bd01c71"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestSurfaceTableStatesTheHeldBounds"
   role: BINDING_ROLE_TESTS
@@ -673,8 +673,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-surfaces"
-  content_hash: "88524b750ec052106179ecac5416311d4b7b8ada0d48928d46a2adc3ca9c754c"
-  source_hash: "bd79d9656cd1b66ce6386740e1dd8f3f42204070672a4ec18746b25aef98df35"
+  content_hash: "a7fbe4b4e1539910130906195a35c4d2507740e385e6770fdd756fc1ced18d6b"
+  source_hash: "759f3134d17e161d97e1a822683d3cf937c44b970bc022eb2dd2e0840bd01c71"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestSurfaceTableStatesTheCLIBounds"
   role: BINDING_ROLE_TESTS
@@ -889,4 +889,24 @@ bindings {
   symbol: "github.com/greatliontech/gomutant.TestUpdateDocumentKeepsTheFilesMode"
   role: BINDING_ROLE_TESTS
   shape_hash: "0f4c52a62da1474a837ac07b0167b5232f11a34179206e5efb1e38f6ddf623bd"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-resident-set"
+  content_hash: "e76d879d925b30714809ad35073b2a2151b7c062bef3c08bd56cb1319a50cb95"
+  source_hash: "0c7182d205608f1fba5c1ed34cc714492f644652c6f2ff539764ce8c560023fb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestIdleServerReleasesItsTree"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "63c2df9b6d2c063647debf402b94f0ffa8eaebe1b1561a84060329d74433ac7c"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-resident-set"
+  content_hash: "e76d879d925b30714809ad35073b2a2151b7c062bef3c08bd56cb1319a50cb95"
+  source_hash: "0c7182d205608f1fba5c1ed34cc714492f644652c6f2ff539764ce8c560023fb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestLastInFlightCallEndReturnsTheHeap"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f029f9a48d5298247f90b46dbbfda0feb8556726fe95c2bb566c3e60fb77f8c8"
 }

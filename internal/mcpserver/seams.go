@@ -42,6 +42,14 @@ type serverSeams struct {
 	// replacement (gomutant.PostCommitRenderBound in production): a seam
 	// so the error exits the bound gates are reachable by a test.
 	postCommitRenderBound time.Duration
+	// idleRelease is the idle window after which the cached tree is
+	// released (idleTreeRelease in production); treeReleased and
+	// heapReleased observe the release and every heap return, naming
+	// the server, so a test pins the policy without a sixty-second
+	// wait (REQ-mcp-resident-set).
+	idleRelease  time.Duration
+	treeReleased func(*Server)
+	heapReleased func(*Server)
 }
 
 // seams is the one variable tests write; defaultSeams is what
@@ -53,5 +61,6 @@ func defaultSeams() serverSeams {
 		heartbeatInterval:     gomutant.ProgressCadence,
 		exitLogNotice:         os.Stderr,
 		postCommitRenderBound: gomutant.PostCommitRenderBound,
+		idleRelease:           idleTreeRelease,
 	}
 }

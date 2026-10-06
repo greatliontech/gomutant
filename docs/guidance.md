@@ -290,7 +290,10 @@ serve's own error as `serve-error` where the class discarded it — and a
 `handler panic` line for a tool call that panicked (answered as an
 error, the session serving on) — read it when a host reports a
 disconnect without a cause; the host-initiated ends (host-closed,
-cancelled) exit 0, a transport end 2.
+cancelled) exit 0, a transport end 2. The server's memory is its working
+set: the freed heap is returned to the host when the last in-flight call
+ends, and the tree it caches across calls is released after sixty idle
+seconds.
 **example:** mcp --vouch pgregory.net/rapid:anyRuneGen under an MCP
 client configuration.
 

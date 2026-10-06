@@ -42,7 +42,10 @@ var errNoCoherentSignal = errors.New("mcpserver: tree state has no coherent in-t
 // type information from outside the tree). The key is recomputed on every
 // call and a tree is cached only when the post-load fingerprint equals the
 // pre-load one, so a hit proves the loader's inputs are byte-identical now —
-// an edit racing a load, even one later reverted, is never served.
+// an edit racing a load, even one later reverted, is never served. The cache
+// lives while calls keep coming: once the server has been idle for the idle
+// window it is released (resident.go), and the next call reloads under the
+// same rule.
 func (s *Server) loadTreeContext(ctx context.Context, sel gomutant.Selection) (*gomutant.Tree, error) {
 	// A malformed declaration refuses before any identity derives from
 	// it: without the boundary check, a comma-carrying tag would alias

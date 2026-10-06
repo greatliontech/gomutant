@@ -124,6 +124,25 @@ says so on stderr and serves without it. A session that vanishes with no
 line and no such stderr notice is a session that never reached the serve
 loop — the host's own failure to spawn.
 
+**REQ-mcp-resident-set** (behavior): The server MUST hold no more of the
+host's memory than its working set, never its largest request's: when its
+last in-flight tool call ends (a panicked call ends as any other) a return
+of the freed heap to the host begins — off the reply path, begun when no
+call is in flight, at most one in progress and one pending at any moment
+(ends under a return in progress fold into the pending one, and a last end
+is always followed by a return), never on the scavenger's own schedule —
+and the tree it caches across calls is released once no call has been in
+flight for sixty seconds, a stated constant (a burst of calls reuses one
+load; a call that begins inside the window keeps the tree; the next call
+after the window reloads under the cache's own fingerprint rule), the
+policy ending with the serve. The process's own memory limit is the
+fleet's one rule (gofresh/resident's ceiling — the host's available memory
+halved, floored at 1 GiB, an explicit operator GOMEMLIMIT replacing it),
+installed where the server and every command start; the acceptance is
+measured — a server's resident set at idle after a run-class request is
+the runtime's floor, not the request's peak — beside the per-phase
+resident line both faces carry from the same sampler.
+
 **REQ-mcp-surfaces** (behavior): Each verb's default behaviour, output,
 and values MUST be the ones its surface's reader is served by — the MCP
 face an agent paying per token, the CLI face a person at a terminal — as
@@ -143,7 +162,7 @@ surface-table pin).
 | retarget | mcp, cli | the rewrites, each row's layer, a shadowed row said, the rewritten exemption subjects noted (twenty, the rest counted), the rewritten and touched counts per layer; `--check` previews | the rewrites capped at 50, the touched rewrites and the rewritten exemption subjects each capped alike, the rewritten and touched counts per layer (objects); `check` previews | `from` and `to` terminated alike |
 | ephemeral | mcp, cli | `--file` with a `--replacement` path, or `--batch` a JSON file `{"edits":[{"file","old_string","new_string"},…]}`; a progress line on the shared cadence; the command timeout unlimited | inline `replacement`, `edits`, or `batch_edits`; notifications and a heartbeat under a token; the command timeout 300 seconds | exactly one mutation form; runs 1–10; oracle timeout 0 derives the budget; `attest` records a judged equivalence |
 | guidance | mcp, cli | a verb's section, or the orientation | the same | — |
-| mcp | cli | serves the tools over stdio; the exit log `.gomutant/mcp.log` beside the findings document | — | per-server vouches; the exit classes |
+| mcp | cli | serves the tools over stdio; the exit log `.gomutant/mcp.log` beside the findings document; the heap returned when the last in-flight call ends, the cached tree released after sixty idle seconds | — | per-server vouches; the exit classes |
 | version | cli | the binary and document versions | — | — |
 
 **REQ-mcp-guidance** (behavior): Tool-level served prose MUST be the

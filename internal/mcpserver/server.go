@@ -42,6 +42,16 @@ type Server struct {
 	tree    *gomutant.Tree
 	treeKey string
 	vouches []string
+
+	// idleMu guards the in-flight call count and the pending idle
+	// release (resident.go): the cached tree is dropped once no call
+	// has been in flight for the idle window.
+	idleMu    sync.Mutex
+	inFlight  int
+	idle      *time.Timer
+	stopped   bool
+	returning bool
+	trailing  bool
 }
 
 // New builds a server rooted at dir.
@@ -168,6 +178,7 @@ func (s *Server) runOn(ctx context.Context, transport mcp.Transport) (err error)
 		logger.Log(context.Background(), level, "exit", append([]any{"class", string(class), "cause", cause, "served", served.Load(), "uptime", time.Since(start).Round(time.Second).String()}, extra...)...)
 	}
 	logger.Info("serve start", "dir", s.dir)
+	defer s.stopIdle()
 	defer func() {
 		if r := recover(); r != nil {
 			exitLine(slog.LevelError, ExitPanic, fmt.Sprint(r))
@@ -435,8 +446,13 @@ func (s *Server) mcpWith(logger *slog.Logger, served *atomic.Int64) *mcp.Server 
 			// error, the session continuing (REQ-mcp-exit-log). Only a
 			// panic on the serve path itself ends the session. Every
 			// tool call answered — the panicked one as an error — then
-			// counts once for the exit line: a receiving middleware, so
-			// no handler carries the duty.
+			// counts once for the exit line and ends as a call for the
+			// resident-set policy (the last in-flight call's end returns
+			// the heap and arms the idle release — REQ-mcp-resident-set):
+			// a receiving middleware, so no handler carries either duty.
+			if method == "tools/call" {
+				s.callBegan()
+			}
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("handler panic", "method", method, "cause", fmt.Sprint(r))
@@ -444,6 +460,7 @@ func (s *Server) mcpWith(logger *slog.Logger, served *atomic.Int64) *mcp.Server 
 				}
 				if method == "tools/call" {
 					served.Add(1)
+					s.callEnded()
 				}
 			}()
 			return next(ctx, method, req)
