@@ -293,7 +293,11 @@ disconnect without a cause; the host-initiated ends (host-closed,
 cancelled) exit 0, a transport end 2. The server's memory is its working
 set: the freed heap is returned to the host when the last in-flight call
 ends, and the tree it caches across calls is released after sixty idle
-seconds.
+seconds. The process runs under the fleet's memory ceiling (half the
+host's available memory, floored at 1 GiB; an explicit GOMEMLIMIT
+replaces it), installed at serve start — the serve-start line states it
+— and re-derived at every tool call that begins with none in flight;
+every heartbeat ends with the process's resident reading.
 **example:** mcp --vouch pgregory.net/rapid:anyRuneGen under an MCP
 client configuration.
 

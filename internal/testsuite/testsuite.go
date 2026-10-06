@@ -27,6 +27,14 @@ func Main(m *testing.M, fixtureRoot string) {
 		panic(err)
 	}
 	os.Setenv("XDG_CACHE_HOME", tmp)
+	// The fleet ceiling's consumer obligation: an environment carrying
+	// GOMEMLIMIT suppresses the derivation for the whole process — and
+	// an oracle running this binary sets it — so the suites clear it
+	// before the process's first derivation. Clearing the variable
+	// does not undo the limit the runtime read at startup: the first
+	// derivation then runs capped at that prior limit, which is a
+	// derivation still, where the operator's word would have been none.
+	os.Unsetenv("GOMEMLIMIT")
 	integrationtest.DefaultToShort()
 	code := fixtureguard.Guard(os.Stderr, fixtureRoot, m.Run)
 	os.RemoveAll(tmp)

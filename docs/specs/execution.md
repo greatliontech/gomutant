@@ -765,7 +765,11 @@ served summary, a cancellation, a budget cut) or a diagnostic — so a
 proof pass in flight is never a line of unchanged tallies — and the
 structured face's progress record carries the phase and elapsed
 time before that point and the tallies, with the same stretch and age,
-after; the MCP heartbeat names
+after — and both faces' progress lines, the CLI's cadenced line and the
+MCP heartbeat, end with the process's resident reading in the fleet's
+one spelling (gofresh/resident: the moment, the set and peak, the
+descendants, the ceiling in force), omitted where the host answers no
+reading; the MCP heartbeat names
 the same stretch in the same words — the stretch in flight is named
 from one vocabulary both faces read: the preparation before the load, a
 preparation event's stage under one lead (the load's own event

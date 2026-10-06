@@ -177,7 +177,7 @@ func (s *Server) runOn(ctx context.Context, transport mcp.Transport) (err error)
 	exitLine := func(level slog.Level, class ExitClass, cause string, extra ...any) {
 		logger.Log(context.Background(), level, "exit", append([]any{"class", string(class), "cause", cause, "served", served.Load(), "uptime", time.Since(start).Round(time.Second).String()}, extra...)...)
 	}
-	logger.Info("serve start", "dir", s.dir)
+	logger.Info("serve start", "dir", s.dir, "memory-limit", installCeiling())
 	defer s.stopIdle()
 	defer func() {
 		if r := recover(); r != nil {
@@ -418,7 +418,7 @@ func withHeartbeatLabel[T any](ctx context.Context, notify func(string), label f
 			case <-stop:
 				return
 			case <-ticker.C:
-				notify(fmt.Sprintf("still working: %s (%s elapsed)", label(), time.Since(started).Round(time.Second)))
+				notify(fmt.Sprintf("still working: %s (%s elapsed)%s", label(), time.Since(started).Round(time.Second), residentSuffix()))
 			}
 		}
 	}()

@@ -138,10 +138,15 @@ after the window reloads under the cache's own fingerprint rule), the
 policy ending with the serve. The process's own memory limit is the
 fleet's one rule (gofresh/resident's ceiling — the host's available memory
 halved, floored at 1 GiB, an explicit operator GOMEMLIMIT replacing it),
-installed where the server and every command start; the acceptance is
-measured — a server's resident set at idle after a run-class request is
-the runtime's floor, not the request's peak — beside the per-phase
-resident line both faces carry from the same sampler.
+installed at serve start (the serve-start line states it) and again at
+every tool call that begins with none in flight (a derivation under an
+in-flight call would count that call's own working set against the
+process), so a long-lived server's ceiling rises or falls with the
+host, and by every command's shared preamble before the verb runs — a
+soft limit never cuts a request. A server's resident set at idle after a
+run-class request is the runtime's floor — the heap returned at the last
+in-flight call's end, the tree released at the idle window — never the
+request's peak.
 
 **REQ-mcp-surfaces** (behavior): Each verb's default behaviour, output,
 and values MUST be the ones its surface's reader is served by — the MCP
@@ -153,7 +158,7 @@ surface-table pin).
 
 | verb | faces | CLI default | MCP default | shared values |
 | --- | --- | --- | --- | --- |
-| run | mcp, cli | a human progress line on the shared cadence, then the report with each record's reuse posture beside its row and the summary's reuse line and its not-reusable roster and the coverage-bound line's unreached roster (at 20 each); `--json` the JSON-lines stream (a posture object per record, the audit rate on the summary event); `--plan` the preflight; the command timeout unlimited | counts lead, the summary's reusable count and its not-reusable roster at 20 beside them; finding rows capped at 50 with open survivors at 20 per record, each row carrying its reuse, reasons, and analysis; preparation events and decisions as notifications under a progress token (a heartbeat on the shared cadence naming the current stretch — the load, the selection and its signposts, each execution phase, the merge, the rendering), inline and capped without one — the payload-bearing analysis events likewise, inline at 50 without one; the command timeout 300 seconds; a cancellation after measurement began returns the banked state (summary.banked, exit) as a succeeding result | oracle timeout 0 derives each group's budget from its measured baseline; vouches per call on the CLI, per server on MCP |
+| run | mcp, cli | a human progress line on the shared cadence ending with the process's resident reading in the fleet's words, then the report with each record's reuse posture beside its row and the summary's reuse line and its not-reusable roster and the coverage-bound line's unreached roster (at 20 each); `--json` the JSON-lines stream (a posture object per record, the audit rate on the summary event); `--plan` the preflight; the command timeout unlimited | counts lead, the summary's reusable count and its not-reusable roster at 20 beside them; finding rows capped at 50 with open survivors at 20 per record, each row carrying its reuse, reasons, and analysis; preparation events and decisions as notifications under a progress token (a heartbeat on the shared cadence naming the current stretch — the load, the selection and its signposts, each execution phase, the merge, the rendering — and ending with the process's resident reading in the fleet's words), inline and capped without one — the payload-bearing analysis events likewise, inline at 50 without one; the command timeout 300 seconds; a cancellation after measurement began returns the banked state (summary.banked, exit) as a succeeding result | oracle timeout 0 derives each group's budget from its measured baseline; vouches per call on the CLI, per server on MCP |
 | discover | mcp, cli | a human table; `--json` the target document | counts lead; target, oracle-set, and residue rows capped at 50 unless `detail`; oracle sets referenced by id | one target source: the tree, `changed`, or a targets document |
 | findings | mcp, cli | a human summary with the ephemeral-attestation count and the layer counts; `--json` the complete finding rows (the ephemeral-attestation record is the file beside the document, which a CLI reader has) | one summary row per record capped at 50; the ephemeral attestations inline (an MCP reader has no file) capped at 50; the layer counts | `detail` for full rows on both faces; `judge` re-derives freshness (a state filter or a selection implies it); filters by state, symbol, label, and run identity |
 | explain | mcp | — | a symbol's causal record, or the document's promotion triage; groups capped at 50, symbols per group at 10, open survivors and clauses at 20 | — |
@@ -162,7 +167,7 @@ surface-table pin).
 | retarget | mcp, cli | the rewrites, each row's layer, a shadowed row said, the rewritten exemption subjects noted (twenty, the rest counted), the rewritten and touched counts per layer; `--check` previews | the rewrites capped at 50, the touched rewrites and the rewritten exemption subjects each capped alike, the rewritten and touched counts per layer (objects); `check` previews | `from` and `to` terminated alike |
 | ephemeral | mcp, cli | `--file` with a `--replacement` path, or `--batch` a JSON file `{"edits":[{"file","old_string","new_string"},…]}`; a progress line on the shared cadence; the command timeout unlimited | inline `replacement`, `edits`, or `batch_edits`; notifications and a heartbeat under a token; the command timeout 300 seconds | exactly one mutation form; runs 1–10; oracle timeout 0 derives the budget; `attest` records a judged equivalence |
 | guidance | mcp, cli | a verb's section, or the orientation | the same | — |
-| mcp | cli | serves the tools over stdio; the exit log `.gomutant/mcp.log` beside the findings document; the heap returned when the last in-flight call ends, the cached tree released after sixty idle seconds | — | per-server vouches; the exit classes |
+| mcp | cli | serves the tools over stdio; the exit log `.gomutant/mcp.log` beside the findings document, its serve-start line stating the fleet ceiling installed (re-derived at every tool call that begins with none in flight); the heap returned when the last in-flight call ends, the cached tree released after sixty idle seconds | — | per-server vouches; the exit classes |
 | version | cli | the binary and document versions | — | — |
 
 **REQ-mcp-guidance** (behavior): Tool-level served prose MUST be the

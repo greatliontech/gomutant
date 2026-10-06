@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/greatliontech/gofresh/resident"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -50,6 +51,14 @@ type serverSeams struct {
 	idleRelease  time.Duration
 	treeReleased func(*Server)
 	heapReleased func(*Server)
+	// residentSample is the reading the heartbeat carries
+	// (resident.Sample in production): a seam so a pin supplies a
+	// reading on any host; nil in production.
+	residentSample func() (resident.Set, bool)
+	// memoryLimitInstalled observes every ceiling the server installs
+	// — at serve start and at each tool call's start
+	// (REQ-mcp-resident-set); nil in production.
+	memoryLimitInstalled func(int64)
 }
 
 // seams is the one variable tests write; defaultSeams is what

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/gofresh/resident"
 	"github.com/greatliontech/gomutant"
 )
 
@@ -28,6 +29,11 @@ func TestAnalysisBudgetFlagDefaultsUnbounded(t *testing.T) {
 // moves on. A payload-bearing diagnostic names no stretch
 // (REQ-exec-run-status).
 func TestProgressLineNamesTheAnalysisStretch(t *testing.T) {
+	// The reading is the line's tail on a host that answers one; this
+	// pin reads the stretch, so the host answers none here.
+	prior := seams
+	t.Cleanup(func() { seams = prior })
+	seams.residentSample = func() (resident.Set, bool) { return resident.Set{}, false }
 	var out bytes.Buffer
 	rep := newRunReporter(&out, false, 0)
 	t0 := time.Now()

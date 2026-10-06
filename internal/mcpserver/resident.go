@@ -3,6 +3,9 @@ package mcpserver
 import (
 	"runtime/debug"
 	"time"
+
+	"github.com/greatliontech/gofresh/resident"
+	gomutant "github.com/greatliontech/gomutant"
 )
 
 // The server's resident set is its working set, never its largest
@@ -18,11 +21,18 @@ import (
 // load; an idle server drops it (REQ-mcp-resident-set).
 const idleTreeRelease = 60 * time.Second
 
-// callBegan records a tool call's start: the pending idle release is
-// cancelled while any call is in flight.
+// callBegan records a tool call's start: a call that begins with none
+// in flight re-derives the fleet ceiling first — a derivation under an
+// in-flight call would count that call's own working set and oracle
+// trees as the host's unavailable memory and lower the limit the call
+// collects against — and the pending idle release is cancelled while
+// any call is in flight.
 func (s *Server) callBegan() {
 	s.idleMu.Lock()
 	defer s.idleMu.Unlock()
+	if s.inFlight == 0 {
+		installCeiling()
+	}
 	s.inFlight++
 	if s.idle != nil {
 		s.idle.Stop()
@@ -107,6 +117,30 @@ func (s *Server) releaseIdle() {
 	if seams.treeReleased != nil {
 		seams.treeReleased(s)
 	}
+}
+
+// residentSuffix is the process's reading as the heartbeat's tail, in
+// the words the CLI's progress line carries (gomutant.ResidentReading
+// over the seam's sampler, resident.Sample otherwise —
+// REQ-exec-run-status); nothing where the host answers no reading.
+func residentSuffix() string {
+	sample := resident.Sample
+	if seams.residentSample != nil {
+		sample = seams.residentSample
+	}
+	return gomutant.ResidentTail(gomutant.ResidentReading(sample))
+}
+
+// installCeiling installs the fleet ceiling for the process — at serve
+// start and at every tool call that begins with none in flight, so a
+// long-lived server's ceiling rises or falls with the host
+// (REQ-mcp-resident-set) — and reports it to the seam's observer.
+func installCeiling() int64 {
+	limit := resident.InstallCeiling()
+	if seams.memoryLimitInstalled != nil {
+		seams.memoryLimitInstalled(limit)
+	}
+	return limit
 }
 
 // releaseHeap returns freed heap to the host now, instead of on the

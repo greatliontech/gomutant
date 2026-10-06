@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/greatliontech/gofresh/resident"
 	gomutant "github.com/greatliontech/gomutant"
 
 	"github.com/spf13/pflag"
@@ -309,6 +310,9 @@ type progressPayload struct {
 	// the sequence moved on since.
 	Analysis    string `json:"analysis,omitempty"`
 	AnalysisAge string `json:"analysisAge,omitempty"`
+	// Resident is the process's reading in the fleet's words at the
+	// line (gofresh/resident), absent where the host answers none.
+	Resident string `json:"resident,omitempty"`
 	// EstRemaining extrapolates the measured execution pace (first
 	// completion tick to the latest) over the remaining prepared
 	// candidates — advisory, absent until at least one candidate
@@ -373,14 +377,20 @@ func (r *runReporter) estRemainingLocked() string {
 }
 
 func (r *runReporter) progressLine() {
+	reading := gomutant.ResidentReading(residentSample())
 	if label := r.phaseInFlight(); label != "" {
 		elapsed := time.Since(r.start).Round(time.Second)
-		r.line("progress", map[string]string{"phase": label, "elapsed": elapsed.String()}, func(w io.Writer) {
-			fmt.Fprintf(w, "progress  %s, elapsed %s\n", label, elapsed)
+		payload := map[string]string{"phase": label, "elapsed": elapsed.String()}
+		if reading != "" {
+			payload["resident"] = reading
+		}
+		r.line("progress", payload, func(w io.Writer) {
+			fmt.Fprintf(w, "progress  %s, elapsed %s%s\n", label, elapsed, gomutant.ResidentTail(reading))
 		})
 		return
 	}
 	p := r.progressSnapshot()
+	p.Resident = reading
 	r.line("progress", p, func(w io.Writer) {
 		line := fmt.Sprintf("progress  %d/%d targets committed (%d machine-local, %d served, %d skipped), candidates %d/%d, %d killed, %d open, elapsed %s",
 			p.TargetsDone, p.Selected, p.TargetsLocal, p.Served, p.Skipped,
@@ -391,8 +401,17 @@ func (r *runReporter) progressLine() {
 		if p.Analysis != "" {
 			line += ", " + p.Analysis + " (" + p.AnalysisAge + " ago)"
 		}
-		fmt.Fprintln(w, line)
+		fmt.Fprintln(w, line+gomutant.ResidentTail(reading))
 	})
+}
+
+// residentSample is the sampler the progress line reads: the seam's
+// where a pin installed one, resident.Sample otherwise.
+func residentSample() func() (resident.Set, bool) {
+	if seams.residentSample != nil {
+		return seams.residentSample
+	}
+	return resident.Sample
 }
 
 // startCadence emits the compact progress line on a fixed cadence

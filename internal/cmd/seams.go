@@ -3,6 +3,7 @@ package cmd
 import (
 	"time"
 
+	"github.com/greatliontech/gofresh/resident"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -19,6 +20,12 @@ type commandSeams struct {
 	// stretchObserver sees every stretch a reporter names, in order, so
 	// a test pins the sequence whatever the cadence; nil in production.
 	stretchObserver func(label string)
+	// memoryLimitInstalled observes the ceiling the preamble installs
+	// (REQ-mcp-resident-set); residentSample is the reading the progress
+	// line carries (resident.Sample in production) — a seam so a pin
+	// supplies a reading on any host; nil in production.
+	memoryLimitInstalled func(int64)
+	residentSample       func() (resident.Set, bool)
 	// progressInterval is the cadence of the phase-naming progress
 	// line on the verbs whose cost is one call (a load, a judged
 	// record, a prune, a retarget): the run and ephemeral verbs expose
