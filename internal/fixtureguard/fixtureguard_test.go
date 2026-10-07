@@ -3,11 +3,12 @@ package fixtureguard
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gomutant/internal/gitfixture"
 )
 
 // A committed git work tree holding the fixture members the tests
@@ -23,23 +24,23 @@ func committedTree(t *testing.T, stamp time.Time, members map[string]string) str
 			t.Fatal(err)
 		}
 	}
-	for _, args := range [][]string{{"init", "-q"}, {"add", "-A"}, {"-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "fixture"}} {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
+	if err := gitfixture.Init(dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "fixture"}} {
+		if out, err := gitfixture.Command(dir, args...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
-	if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Name() == ".git" {
-			return filepath.SkipDir
-		}
-		return os.Chtimes(path, stamp, stamp)
-	}); err != nil {
+	// The members are the walk's own rows, so the store stays untouched.
+	members, err := Take(dir)
+	if err != nil {
 		t.Fatal(err)
+	}
+	for rel := range members {
+		if err := os.Chtimes(filepath.Join(dir, rel), stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return dir
 }
@@ -166,5 +167,107 @@ func TestGuardRefusesAResidueWhateverTheSuiteAnswered(t *testing.T) {
 	out.Reset()
 	if code := Guard(&out, t.TempDir(), func() int { return 0 }); code != 1 || !strings.Contains(out.String(), "git status over") {
 		t.Fatalf("outside a work tree = %d, %q; want 1 naming git", code, out.String())
+	}
+}
+
+// The repository's own store is outside the walk: nothing under .git
+// is a member, and a .git the walk cannot read — an object store git
+// is maintaining, a lock file appearing under it — never faults the
+// snapshot, which is the race the runner's auto-maintenance (git 2.29
+// and later) exposed: its maintenance.lock vanished between readdir
+// and lstat. A store below the root is a residue the walk refuses,
+// naming it, and the guard refuses before the run — `git status`
+// reports neither a nested repository nor a linked work tree's file.
+func TestGitStoreIsOutsideTheWalk(t *testing.T) {
+	dir := committedTree(t, stamp, map[string]string{"lib/keep.go": "package lib\n", "other/keep.go": "package other\n"})
+	quiet, err := Take(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for member := range quiet {
+		if member == ".git" || strings.HasPrefix(member, ".git/") {
+			t.Fatalf("the store is a member: %q", member)
+		}
+	}
+	lock := filepath.Join(dir, ".git", "objects", "maintenance.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	objects := filepath.Join(dir, ".git", "objects")
+	if err := os.Chmod(objects, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(objects, 0o755) })
+	busy, err := Take(dir)
+	if err != nil {
+		t.Fatalf("a busy store faulted the walk: %v", err)
+	}
+	if rows := quiet.Diff(busy); len(rows) != 0 {
+		t.Fatalf("the store's churn moved the snapshot: %v", rows)
+	}
+	if err := os.Chmod(objects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A linked work tree's .git file in a tracked directory, and a
+	// repository initialised in another: each refused naming it, the
+	// suite not run (git status reports neither).
+	for _, residue := range []struct{ rel, plant string }{{"lib/.git", "file"}, {"other/.git", "repository"}} {
+		path := filepath.Join(dir, filepath.FromSlash(residue.rel))
+		if residue.plant == "file" {
+			if err := os.WriteFile(path, []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := gitfixture.Init(filepath.Dir(path)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Take(dir); err == nil || !strings.Contains(err.Error(), "a repository store below the guarded root: "+residue.rel+" is a residue") {
+			t.Fatalf("a nested %s %s: Take err = %v; want the residue named", residue.plant, residue.rel, err)
+		}
+		var out bytes.Buffer
+		ran := false
+		if code := Guard(&out, dir, func() int { ran = true; return 0 }); code != 1 || ran || !strings.Contains(out.String(), residue.rel+" is a residue") {
+			t.Fatalf("a nested %s: guard = %d, ran %v, %q; want 1 naming it, the suite not run", residue.plant, code, ran, out.String())
+		}
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A fixture repository is hermetic to the host's git: the developer's
+// global and the system configuration — a hook path whose post-commit
+// hook writes into the work tree (git runs a hook from the work tree's
+// root), the shape of a writer racing the temporary tree's removal —
+// never reach it, and its own configuration carries the
+// no-maintenance rule and the identity.
+func TestFixtureRepositoriesAreHermetic(t *testing.T) {
+	hooks := t.TempDir()
+	hook := filepath.Join(hooks, "post-commit")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch hooked\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The same configuration planted as the global and as the system
+	// one: each half of the hermetic environment is witnessed alone.
+	for _, scope := range []string{"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"} {
+		file := filepath.Join(t.TempDir(), "gitconfig")
+		if err := os.WriteFile(file, []byte("[core]\n\thooksPath = "+hooks+"\n[maintenance]\n\tauto = true\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(scope, file)
+	}
+	for name, build := range map[string]func() string{
+		"committedTree":      func() string { return committedTree(t, stamp, map[string]string{"lib/keep.go": "package lib\n"}) },
+		"gitfixture.Changed": func() string { return gitfixture.Changed(t) },
+	} {
+		dir := build()
+		if _, err := os.Stat(filepath.Join(dir, "hooked")); err == nil {
+			t.Fatalf("%s: the host's post-commit hook ran in the fixture", name)
+		}
+		for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0", "user.name": "t"} {
+			out, err := gitfixture.Command(dir, "config", "--get", key).Output()
+			if err != nil || strings.TrimSpace(string(out)) != want {
+				t.Fatalf("%s: config %s = %q, %v; want %q", name, key, out, err, want)
+			}
+		}
 	}
 }

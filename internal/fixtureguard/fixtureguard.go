@@ -8,6 +8,19 @@
 // residue in the tracked tree, or a member appearing and vanishing
 // there, moves the observation brackets of every other package's tests
 // reading the tree in place in the same run.
+//
+// The walk's scope is the work tree: the `.git` at its root — the
+// repository's own store, which git itself rewrites under a commit
+// (background maintenance, its lock files, the index) — is never a
+// fixture member and is not descended into, so a maintenance run that
+// overlaps the walk cannot fault it. A `.git` below the root is a
+// residue the walk refuses: git tracks no `.git` path component, so no
+// tracked tree holds one, and `git status` reports neither a nested
+// repository's store nor a linked work tree's `.git` file, so the
+// untracked-member refusal cannot see it; a test that read the fixture
+// in place would resolve its repository root to the residue. A member
+// vanishing under the walk anywhere else is a fault the guard names
+// rather than a difference it judges.
 package fixtureguard
 
 import (
@@ -30,7 +43,10 @@ import (
 // symbolic link's target. The tree's root is the "." member.
 type Snapshot map[string]string
 
-// Take walks dir and records every member.
+// Take walks dir and records every member of the work tree: the
+// root's `.git` is skipped whole (a directory, or a linked work tree's
+// file naming its store); a `.git` below the root is refused naming it
+// — a residue, never a member (the package doc states both).
 func Take(dir string) (Snapshot, error) {
 	snap := Snapshot{}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -40,6 +56,15 @@ func Take(dir string) (Snapshot, error) {
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
+		}
+		if d.Name() == ".git" {
+			if rel != ".git" {
+				return fmt.Errorf("a repository store below the guarded root: %s is a residue, never a fixture member", rel)
+			}
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		info, err := os.Lstat(path)
 		if err != nil {
