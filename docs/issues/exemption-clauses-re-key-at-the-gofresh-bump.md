@@ -14,7 +14,11 @@ standing acceptance that never fires, which the record's dead-acceptance
 refusal does not see (it judges attribution-bearing entries, not stale
 spellings). The bump rewrites the entries it can derive — a clause
 whose path lies under the tree's root becomes its module-relative
-spelling — and refuses the rest, naming them. The same release
-publishes the moved-bracket split through RefusalClause, so
-exemptions.go's bracketClause (the fleet's second attribution grammar)
-deletes there.
+spelling — and the record's load refuses any entry whose clause still
+spells a path under the tree's root absolutely (an extension of the
+dead-acceptance refusal: such an entry can match no measurement from
+this release on), naming it. The same release publishes the
+moved-bracket split through RefusalClause — a member carrying the
+list's framing travels quoted, so the split holds where the
+last-bracket strip did — and exemptions.go's bracketClause (the fleet's
+second attribution grammar) deletes there.
