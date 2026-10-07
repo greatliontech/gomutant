@@ -1,7 +1,7 @@
 # A campaign silent past its deadline, killed by the shell
 
-Lands: awaiting triage (gomutant 313's open; filed from the train's
-fifth re-audit, chunk 319, 2026-10-06).
+Lands: cross-tool train chunk 267 (slotted at audit 333: the stopped-reporting half is 267's own rep.stop()-before-ledger.Finish ordering, cmd/run.go:375 vs :398; 267 opens by reproducing the deadline half against REQ-exec-cancellation — fixed there or refuted with the reproduction; pew docs/issues/mutation-oracle-observation.md is the same campaign's other half).
+
 
 pew's `mutation-oracle-observation.md` (pew 044f7d8) reports a
 changed-code campaign over newStatCmd, validateOptions and Compare that

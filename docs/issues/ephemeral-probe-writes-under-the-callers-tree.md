@@ -1,12 +1,13 @@
 # An ephemeral probe's tests write under the caller's tree
 
-Lands: cross-tool train chunk 187 — the isolation shape is a fork the spec's own
-cost accounting owns: routing every probe's oracle through the scratch
-channel REQ-mut-overlay already runs shaped candidates through (a
-disposable copy of the tree per probe, its cost stated per probe, the
-tree promise kept whole), or narrowing REQ-mut-overlay's run-time
-purity to the reproducer clause it enforces today (the promise reads
-"a mutant run disables reproducer persistence", never "never writes").
+Lands: cross-tool train chunk 187 — derived at audit 317 (no fork): containment —
+every probe's oracle through the scratch channel REQ-mut-overlay already
+runs shaped candidates through (a disposable copy of the tree per probe,
+its cost stated per probe, the tree promise kept whole); the spec wins
+over a narrowing of its run-time purity. Audit 333: containment moves the
+oracle's working directory, against which gofresh's observation resolves
+relative inputs — observation construction, so 187 is reported to the
+evidence-model owner before it is implemented.
 
 ## The live half: any relative write of a probed test lands in the tree
 

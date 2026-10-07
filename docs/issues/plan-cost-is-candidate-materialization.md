@@ -21,6 +21,4 @@ per package, not per candidate). Invariants preserved: the candidate
 set, its identities and extents (REQ-target-model), the mutated
 source that executes.
 
-Lands: with the next change set touching candidate materialization
-(`internal/engine` materializeCandidates or the mutation table's
-rendering).
+Lands: cross-tool train chunk 214 (audit 333: the catalog-table fold is the change set touching candidate materialization).
