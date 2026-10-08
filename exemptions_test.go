@@ -447,4 +447,39 @@ func TestExemptionRecordRefusesAnAttributedReason(t *testing.T) {
 	if _, err := LoadExemptions(path); err != nil {
 		t.Fatalf("the clause alone: %v", err)
 	}
+	// A root name itself carrying a bracketed segment stays in the
+	// clause: Gofresh's split is label-aware, so the entry loads, the
+	// moved-bracket reason over that root matches it, and a sibling
+	// root without the segment does not — one strip, Gofresh's, never a
+	// second over the root's own name.
+	bracketed := `{"version":1,"exemptions":[{"subject":"example.com/m.TestF","reason":"observation bracket moved: fixtures [data]","rationale":"reviewed"}]}`
+	if err := os.WriteFile(path, []byte(bracketed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := LoadExemptions(path)
+	if err != nil {
+		t.Fatalf("a root name carrying a bracketed segment: %v", err)
+	}
+	if reasonClause("observation bracket moved: fixtures [data] [recently touched: data/a.txt (2026-09-05T10:00:00Z)]") != "observation bracket moved: fixtures [data]" {
+		t.Fatalf("the clause over a bracketed root = %q", reasonClause("observation bracket moved: fixtures [data] [recently touched: data/a.txt (2026-09-05T10:00:00Z)]"))
+	}
+	if exemptionFor(entries, "example.com/m.TestF", "observation bracket moved: fixtures [data] [recently touched: data/a.txt (2026-09-05T10:00:00Z)]") == nil {
+		t.Fatal("the entry over the bracketed root does not match its own move")
+	}
+	if exemptionFor(entries, "example.com/m.TestF", "observation bracket moved: fixtures [recently touched: a.txt (2026-09-05T10:00:00Z)]") != nil {
+		t.Fatal("the entry over the bracketed root matches the sibling root's move")
+	}
+	// And the sibling root's entry never accepts the bracketed root's
+	// move: a second strip over the root's own name would fold the two.
+	sibling := `{"version":1,"exemptions":[{"subject":"example.com/m.TestF","reason":"observation bracket moved: fixtures","rationale":"reviewed"}]}`
+	if err := os.WriteFile(path, []byte(sibling), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = LoadExemptions(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exemptionFor(entries, "example.com/m.TestF", "observation bracket moved: fixtures [data] [recently touched: data/a.txt (2026-09-05T10:00:00Z)]") != nil {
+		t.Fatal("the sibling root's entry accepts the bracketed root's move")
+	}
 }

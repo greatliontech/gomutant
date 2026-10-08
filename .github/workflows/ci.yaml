@@ -48,13 +48,22 @@ concurrency:
 # REQ-closure-observability-toolchain-key). full-args asks for every
 # test by the flag, on the default selection.
 #
-# full-timeout: the suite budget measured 2026-08-27 on the 24-core dev
-# host under upstream stock go1.27.0 (fork-vs-stock measured at n=1 per
-# arm: noise-class at that length): slowest package the root at 966s,
-# whole run 971s; headroom ~3.7x. Core count is a measured non-factor
-# (24 -> 4 cores cost ~4% on the child-process-serialized workload); a
-# cold cache lands on the job ceiling, not this flag. An overrun is a
-# real finding — re-measure before raising the number.
+# full-timeout: -timeout bounds one test binary, so the binding figure
+# is the slowest package — the root, 1714.5s (28m35s) in the last green
+# gate run before this edit (37688646357, 2026-10-07, the 4-vCPU
+# runner); 60m holds ~2x. The whole test job (the fast tier, the
+# integrationtest leg and the full tier) took 30m01s there, so the
+# job's 90m holds ~3x; a cold cache lands on the job ceiling, not this
+# flag. An overrun is a real finding — re-measure before raising the
+# number.
+#
+# pre: the platform vet — gofresh's unix-tagged sources once read a
+# stat field darwin, freebsd and netbsd spell differently (Ctimespec)
+# and the dependency did not build there at the pin; the loop vets
+# those three, openbsd and windows (gofresh's own gate's shape) and
+# plan9, a GOOS reaching the engine's !unix && !windows process arm
+# (js/wasm and wasip1/wasm reach it too), so each platform arm of the
+# tree stays visible on every push.
 #
 # race: off — the policy's one invocation is plain_witness
 # (.stipulator/policy.textproto: the standing no-race rule), so no race
@@ -66,6 +75,8 @@ jobs:
     uses: greatliontech/actions/.github/workflows/go-gate.yml@main
     with:
       go-version: "1.27.1"
+      pre: |
+        for os in darwin freebsd netbsd openbsd windows plan9; do GOOS=$os go vet -tags integration ./...; done
       vet-tags: integration
       short: true
       short-args: ""
@@ -76,4 +87,7 @@ jobs:
       test-job-minutes: 90
       race: false
       records: true
-      stipulator-version: v0.66.1
+      # The records tier reads this tree's bindings with the release that
+      # writes them — the fleet's current stipulator; a reader behind the
+      # writer could refuse a record form it predates.
+      stipulator-version: v0.73.4

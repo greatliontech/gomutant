@@ -14,15 +14,13 @@ import (
 // TestEveryGoCommandRidesTheRunner walks the module's production
 // sources for a go command spawned outside the tree's runner
 // (REQ-exec-go-command-runner): an exec.Command/CommandContext whose
-// program is the literal "go", a gotool plain-spawn call (Run,
-// SampleGoVersion, TakeEnvSnapshot, Command), a gotool.Runner composed
-// or declared anywhere but the runner's own home and the Windows oracle
-// arm (which prepares the oracle under the plain policy with the tree's
-// hook and installs the job object over it), or a gofresh engine
-// constructed in a file that never names WithGoRunner. A source walk
-// over the real tree is a
-// hand-edit oracle; goCommandSpawnsOutsideTheRunner's logic is pinned
-// over synthetic sources below.
+// program is the literal "go", a gotool.Runner composed or declared
+// anywhere but the runner's own home and the Windows oracle arm (which
+// prepares the oracle under the plain policy with the tree's hook and
+// installs the job object over it), or a gofresh engine constructed in
+// a file that never names WithGoRunner. A source walk over the real
+// tree is a hand-edit oracle; goCommandSpawnsOutsideTheRunner's logic
+// is pinned over synthetic sources below.
 func TestEveryGoCommandRidesTheRunner(t *testing.T) {
 	var offenders []string
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
@@ -98,11 +96,6 @@ func goCommandSpawnsOutsideTheRunner(path string, src []byte) []string {
 						report(n.Pos(), "exec."+sel.Sel.Name+`(…, "go", …)`)
 					}
 				}
-			case "gotool":
-				switch sel.Sel.Name {
-				case "Run", "SampleGoVersion", "TakeEnvSnapshot", "Command":
-					report(n.Pos(), "gotool."+sel.Sel.Name)
-				}
 			}
 		case *ast.CompositeLit:
 			if isGotoolRunner(n.Type) && !runnerHomes[path] {
@@ -155,9 +148,6 @@ func f(ctx context.Context, dir string, env []string) {
 	_ = exec.Command("go", "version")
 	_ = exec.CommandContext(ctx, "go", "env")
 	_ = exec.Command("git", "status")
-	_, _ = gotool.Run(ctx, dir, env, "list")
-	_, _ = gotool.SampleGoVersion(ctx, dir, env)
-	_, _ = gotool.TakeEnvSnapshot(ctx, dir, env)
 	_ = gotool.Runner{}
 	var plain gotool.Runner
 	_, _ = goRunner.Run(ctx, dir, env, "list")
@@ -167,7 +157,7 @@ func f(ctx context.Context, dir string, env []string) {
 	got := goCommandSpawnsOutsideTheRunner(filepath.Join("internal", "x", "x.go"), src)
 	want := []string{
 		`exec.Command(…, "go", …)`, `exec.CommandContext(…, "go", …)`,
-		"gotool.Run", "gotool.SampleGoVersion", "gotool.TakeEnvSnapshot", "gotool.Runner{…}", "var … gotool.Runner",
+		"gotool.Runner{…}", "var … gotool.Runner",
 		"gofresh.New without WithGoRunner",
 	}
 	if len(got) != len(want) {

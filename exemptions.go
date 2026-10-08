@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -137,40 +136,24 @@ func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
 	return nil
 }
 
-// movedBracketClause prefixes the one reason the producer attributes
-// in the bracket form: a moved observation bracket, whose trailing
-// " [...]" names the members that moved. Every other reason ends in a
-// path, and a path may legitimately end in a bracketed segment, so the
-// strip is gated on this prefix and touches no other clause.
-const movedBracketClause = "observation bracket moved: "
-
 // reasonClause is a recorded reason without the attribution after
-// gofresh's separator — a resolved-target refusal's recorded-path
-// spelling and target, and the operation, logged name and directory
-// a classification refusal carried before gofresh moved its
-// attribution off the reason onto the observation — split by
-// gofresh's one implementation (runtimeinput.RefusalClause), and the
-// moved-bracket clause's trailing bracketed member list, which
-// gofresh publishes no split for. The exemption record's readers —
-// the match and the dead-acceptance refusal — key on it; the freshness
-// judgments of recorded evidence compare a reason whole, the
-// attribution included, since there the attribution (a recorded
-// path's resolved target) is part of the state being reproduced
-// (REQ-result-layers).
+// Gofresh's separator — a resolved-target refusal's recorded-path
+// spelling and target, the operation, logged name and directory a
+// classification refusal carried before Gofresh moved its attribution
+// off the reason onto the observation, and the moved-bracket clause's
+// trailing bracketed member list — split by Gofresh's one
+// implementation (runtimeinput.RefusalClause; a root name itself
+// carrying a bracketed segment keeps it unless the segment, read with
+// what follows it to the reason's end, parses as a labelled member
+// list — Gofresh's split is prefix-first, and a root spelled so
+// collides with the root before the segment).
+// The exemption record's readers — the match and the dead-acceptance
+// refusal — key on it; the freshness judgments of
+// recorded evidence compare a reason whole, the attribution included,
+// since there the attribution (a recorded path's resolved target) is
+// part of the state being reproduced (REQ-result-layers).
 func reasonClause(reason string) string {
-	return bracketClause(runtimeinput.RefusalClause(reason))
-}
-
-// bracketClause strips the moved-bracket clause's trailing bracketed
-// attribution, present only on that clause.
-func bracketClause(reason string) string {
-	if !strings.HasPrefix(reason, movedBracketClause) || !strings.HasSuffix(reason, "]") {
-		return reason
-	}
-	if i := strings.LastIndex(reason, " ["); i > len(movedBracketClause) {
-		return reason[:i]
-	}
-	return reason
+	return runtimeinput.RefusalClause(reason)
 }
 
 // carriesAttribution reports whether an entry's reason is a clause

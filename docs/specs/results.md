@@ -570,12 +570,16 @@ resolved-target refusal's recorded-path spelling and target (state,
 reproduced by every derivation), or a classification refusal's
 operation, logged name, and directory (diagnostic detail, fresh per
 measurement; it rides the observation, off the reason, and rode the
-reason on records measured before Gofresh moved it) — split by
-Gofresh's one implementation of that split, or the moved-bracket
-clause's trailing bracketed member list, which files moved the bracket
-and when, is not part of the clause; an entry naming any of them
+reason on records measured before Gofresh moved it) — and the
+moved-bracket clause's trailing bracketed member list, which files
+moved the bracket and when, are not part of the clause, both split by
+Gofresh's one implementation of that split; an entry naming either
 could never match, so the record refuses it (a refused path itself
-spelled like an attribution is matched by the clause before it). Every
+spelled like an attribution is matched by the clause before it, and a
+moved-bracket root whose own name carries a bracketed segment keeps it
+unless the segment, read with what follows it to the reason's end,
+parses as a labelled member list — Gofresh's split is prefix-first, and
+a root spelled so collides with the root before the segment). Every
 other clause ends in a path and is matched whole, a bracketed segment
 of the path included.
 

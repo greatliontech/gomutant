@@ -222,7 +222,7 @@ to=example.com/new. after a package rename, then for real.
 - `progress-interval` (cli) — cadence of the progress line naming the stretch in flight (preparing, then prepare loading, prepare baseline, prepare mutant-run, prepare coverage) and the elapsed time; 0 disables.
 - `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document, `ephemeral-attestations.json` (a blank reasoning refuses before any load or probe; a probe that killed, was mixed, or could not establish that it reached the edit refuses after it); a never-reached plain survivor is refused by the probe itself.
 - `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes and a surviving probe is matched against (default .gomutant/findings.json); an attested survivor's verdict names its attestation instead of a bare SURVIVED.
-- `reattest` (mcp, cli) — with `attest`: replace an existing attestation of the same mutant instead of refusing (default false).
+- `reattest` (mcp, cli) — with `attest`: replace an existing attestation of the same mutant instead of refusing.
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
 - `dir` (cli) — tree root (module or workspace).
