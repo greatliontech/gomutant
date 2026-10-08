@@ -3470,3 +3470,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "88cadfe3774259cd1ce53e03ba805a877d8ccf0b9941a3ada900f0f15b6766fe"
 }
+
+bindings {
+  requirement_id: "REQ-exec-provenance"
+  content_hash: "0ea678224ea52c037eaf15bf0245918aad953ed21f21d259ddf363c431d4c68b"
+  source_hash: "08df00ecac441d8c89c94e77cf8892a1fb7ff846eda8325bbaaa460b4f0d5241"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestBuildEventsFloorReadsTheToolchainSeries"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "254919c1b984abc8595deaa1ffead5864d481c61426e0eb8d9342eb762d6905a"
+}

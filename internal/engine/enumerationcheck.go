@@ -13,6 +13,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // VerifyTestEnumerationContext proves the derived test enumeration fresh
@@ -145,10 +147,14 @@ func (t *Tree) buildMatchContext(ctx context.Context, dir string) (build.Context
 			matcher.BuildTags = strings.Split(tags, ",")
 		}
 	}
-	if tags := releaseTags(snapshot.Value("GOVERSION")); tags != nil {
+	if tags := gotool.ReleaseTags(snapshot.Value("GOVERSION")); tags != nil {
 		// Release tags follow the tree's toolchain, not the one that
 		// compiled this binary: a //go:build go1.N constraint must be
-		// evaluated against the go that builds the test binary. ToolTags
+		// evaluated against the go that builds the test binary — the
+		// ladder gotool derives as go/build does, so a release candidate
+		// or a development build of go1.N sets go1.N as its release
+		// does; nil — a sample the grammar refuses, or a ladder past
+		// gotool's bound — leaves the host's defaults in place. ToolTags
 		// (goexperiment) keep the host defaults — a goexperiment-gated
 		// test file under toolchain skew is the accepted residual, and it
 		// refuses loudly in every case but a brand-new such file.
@@ -163,33 +169,6 @@ func (t *Tree) buildMatchContext(ctx context.Context, dir string) (build.Context
 		t.derivedMu.Unlock()
 	}
 	return matcher, nil
-}
-
-// releaseTags derives go/build release tags ("go1.1" … "go1.N") from a
-// GOVERSION value like "go1.26.5", or nil when the version is unparseable
-// (leaving the host defaults in place).
-func releaseTags(version string) []string {
-	rest, ok := strings.CutPrefix(version, "go1.")
-	if !ok {
-		return nil
-	}
-	minorText, _, _ := strings.Cut(rest, ".")
-	minor := 0
-	for _, r := range minorText {
-		if r < '0' || r > '9' {
-			minor = 0
-			break
-		}
-		minor = minor*10 + int(r-'0')
-	}
-	if minor == 0 {
-		return nil
-	}
-	tags := make([]string, 0, minor)
-	for i := 1; i <= minor; i++ {
-		tags = append(tags, fmt.Sprintf("go1.%d", i))
-	}
-	return tags
 }
 
 // parseTestFunctionNames parses one _test.go file from disk, syntax only,

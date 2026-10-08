@@ -96,7 +96,9 @@ file landing after the load is exactly the lag a contribution-only check
 would miss — every on-disk test file the effective
 build configuration selects, the configuration resolved from the tree's own
 environment (a persisted go-env value or a GOFLAGS tag changes which files
-the test binary compiles), snapshot-present files re-matched exactly like
+the test binary compiles) with the release tags the tree toolchain's
+language series sets, as go/build derives them, snapshot-present files
+re-matched exactly like
 new ones (a constraint edit after the load is itself a lag) — under the
 same runnable-test shape, and refuse the run on any disagreement,
 naming the differing test identities in both directions. A derived set that

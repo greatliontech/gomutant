@@ -8,23 +8,30 @@ import (
 // The build-failure classification's toolchain floor: versions below go1.24
 // lack the harness's build-fail events, so loading refuses them rather than
 // letting uncompilable mutants fall through to the differential probe and
-// score as kills; devel strings are modern by construction and pass
-// (candidate evidence term's harness-witness sentence).
-func TestParseGoVersionFloorsBuildEventToolchains(t *testing.T) {
+// score as kills. The floor reads the sample the ladder hands it — the
+// trimmed GOVERSION — through gotool's canonical series: a vendor flavor,
+// an experiment suffix, a release candidate and the development-build
+// spelling read as their series; the legacy "devel" spelling the grammar
+// refuses is modern by construction and passes (REQ-exec-provenance).
+func TestBuildEventsFloorReadsTheToolchainSeries(t *testing.T) {
 	cases := []struct {
-		version      string
-		major, minor int
-		ok           bool
+		version string
+		refused bool
 	}{
-		{"go version go1.23.4 linux/amd64", 1, 23, true},
-		{"go version go1.24.0 linux/amd64", 1, 24, true},
-		{"go version go1.26.5-X:nodwarf5 linux/amd64", 1, 26, true},
-		{"go version devel +abc123 linux/amd64", 0, 0, false},
+		{"go1.23.4", true},
+		{"go1.24.0", false},
+		{"go1.26.5-X:nodwarf5", false},
+		{"go1.27.1-dst.13", false},
+		{"go1.28rc1", false},
+		{"go1.28-devel_abc123", false},
+		{"go1.23rc1", true},
+		{"go1.24rc1", false},
+		{"devel +abc123", false},
 	}
 	for _, c := range cases {
-		major, minor, ok := parseGoVersion(c.version)
-		if major != c.major || minor != c.minor || ok != c.ok {
-			t.Fatalf("parseGoVersion(%q) = %d, %d, %v; want %d, %d, %v", c.version, major, minor, ok, c.major, c.minor, c.ok)
+		err := toolchainSupportsBuildEvents(c.version)
+		if (err != nil) != c.refused {
+			t.Fatalf("toolchainSupportsBuildEvents(%q) = %v; want refused=%v", c.version, err, c.refused)
 		}
 	}
 	if err := toolchainSupportsBuildEvents(runtime.Version()); err != nil {
