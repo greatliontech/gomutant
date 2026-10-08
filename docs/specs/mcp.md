@@ -143,14 +143,16 @@ flight for sixty seconds, a stated constant (a burst of calls reuses one
 load; a call that begins inside the window keeps the tree; the next call
 after the window reloads under the cache's own fingerprint rule), the
 policy ending with the serve. The process's own memory limit is the
-fleet's one rule (gofresh/resident's ceiling — the host's available memory
-halved, floored at 1 GiB, an explicit operator GOMEMLIMIT replacing it),
-installed at serve start (the serve-start line states it) and again at
-every tool call that begins with none in flight (a derivation under an
-in-flight call would count that call's own working set against the
-process), so a long-lived server's ceiling rises or falls with the
-host, and by every command's shared preamble before the verb runs — a
-soft limit never cuts a request. A server's resident set at idle after a
+fleet's one rule — gofresh's resident-readings clause: the ceiling over
+the family's room, the family's own held set added back, an explicit
+operator GOMEMLIMIT replacing it — installed at serve start (the
+serve-start line states it) and again at every tool call's start (the
+rule counts nothing of an in-flight call's held set against the host;
+what its walk cannot see of the call's memory reads as the host's, so
+the room errs low, never cutting a request), so a long-lived server's
+ceiling rises or falls with the host, and by
+every command's shared preamble before the verb runs — a soft limit
+never cuts a request. A server's resident set at idle after a
 run-class request is the runtime's floor — the heap returned at the last
 in-flight call's end, the tree released at the idle window — never the
 request's peak.

@@ -20,7 +20,7 @@ type pruneOptions struct {
 
 func newPruneCommand() *cobra.Command {
 	o := pruneOptions{}
-	cmd := &cobra.Command{Use: "prune", Short: guidanceShort("prune"), Long: guidanceHelp("prune"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "prune", Short: guidanceShort("prune"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return pruneCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()
@@ -89,7 +89,7 @@ type retargetOptions struct {
 
 func newRetargetCommand() *cobra.Command {
 	o := retargetOptions{}
-	cmd := &cobra.Command{Use: "retarget", Short: guidanceShort("retarget"), Long: guidanceHelp("retarget"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "retarget", Short: guidanceShort("retarget"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return retargetCommand(cmd.Context(), o, os.Stdout)
 	}}
 	f := cmd.Flags()

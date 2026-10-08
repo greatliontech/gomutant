@@ -29,7 +29,7 @@ type discoveryView struct {
 
 func newDiscoverCommand() *cobra.Command {
 	o := discoverOptions{}
-	cmd := &cobra.Command{Use: "discover", Short: guidanceShort("discover"), Long: guidanceHelp("discover"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "discover", Short: guidanceShort("discover"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return discoverCommand(cmd.Context(), o)
 	}}
 	f := cmd.Flags()

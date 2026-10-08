@@ -21,23 +21,34 @@ import (
 // load; an idle server drops it (REQ-mcp-resident-set).
 const idleTreeRelease = 60 * time.Second
 
-// callBegan records a tool call's start: a call that begins with none
-// in flight re-derives the fleet ceiling first — a derivation under an
-// in-flight call would count that call's own working set and oracle
-// trees as the host's unavailable memory and lower the limit the call
-// collects against — and the pending idle release is cancelled while
-// any call is in flight.
+// callBegan records a tool call's start: every call re-derives the
+// fleet ceiling first — the fleet rule derives over the family's room,
+// the family's own held set added back, so a derivation under an
+// in-flight call counts nothing of that call's held set against the
+// host; what the walk cannot see of the call's memory (its oracles'
+// tmpfs work directories, the kernel's allocations on its behalf)
+// reads as the host's and the room errs low, and a child caught
+// between its clone and its exec shares the server's memory map and
+// reads as a second copy of the server's held set, so the room can
+// err high by that much until the next derivation (gofresh/resident's
+// stated blind spots; a soft limit cuts nothing either way) — the
+// call is COUNTED before the walk, under the server's lock, which
+// guards only the counter and the idle timer: the pending idle
+// release is cancelled while any call is in flight, and a call that
+// begins inside the window keeps the tree whatever the walk takes
+// (counted after it, the window could elapse during the walk and drop
+// the tree the call then reloads). The walk runs past the lock; two
+// calls beginning together walk twice and the last install wins — the
+// two readings differ by what moved between them, milliseconds.
 func (s *Server) callBegan() {
 	s.idleMu.Lock()
-	defer s.idleMu.Unlock()
-	if s.inFlight == 0 {
-		installCeiling()
-	}
 	s.inFlight++
 	if s.idle != nil {
 		s.idle.Stop()
 		s.idle = nil
 	}
+	s.idleMu.Unlock()
+	installCeiling()
 }
 
 // callEnded records a tool call's end: when it was the last in flight
@@ -132,9 +143,9 @@ func residentSuffix() string {
 }
 
 // installCeiling installs the fleet ceiling for the process — at serve
-// start and at every tool call that begins with none in flight, so a
-// long-lived server's ceiling rises or falls with the host
-// (REQ-mcp-resident-set) — and reports it to the seam's observer.
+// start and at every tool call's start, so a long-lived server's
+// ceiling rises or falls with the host (REQ-mcp-resident-set) — and
+// reports it to the seam's observer.
 func installCeiling() int64 {
 	limit := resident.InstallCeiling()
 	if seams.memoryLimitInstalled != nil {

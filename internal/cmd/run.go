@@ -47,7 +47,7 @@ type runOptions struct {
 
 func newRunCommand() *cobra.Command {
 	o := runOptions{}
-	cmd := &cobra.Command{Use: "run", Short: guidanceShort("run"), Long: guidanceHelp("run"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "run", Short: guidanceShort("run"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		return runCommand(cmd.Context(), o)
 	}}
 	f := cmd.Flags()

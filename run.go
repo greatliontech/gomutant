@@ -5657,7 +5657,7 @@ func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding
 // driftFindingCounts replaces each re-measured candidate's disposition with
 // its fresh outcome — per operator and in the finding totals — while every
 // standing candidate keeps its recorded one
-// (INV-RESULT-CANDIDATE-CONSERVATION). The kill list is rebuilt in candidate
+// (REQ-result-candidate-conservation). The kill list is rebuilt in candidate
 // order: standing kills carry their recorded killer, re-measured candidates
 // that die again (or a re-measured survivor a moved or added test now kills)
 // record their fresh killer. A re-measured candidate neither killed nor
@@ -5957,7 +5957,7 @@ func applyDisposition(summary *OperatorSummary, disposition string, delta int) {
 }
 
 // sumOperatorTotals reconciles a finding's totals from its operator
-// summaries (INV-RESULT-CANDIDATE-CONSERVATION's per-operator ↔ totals
+// summaries (REQ-result-candidate-conservation's per-operator ↔ totals
 // equations have one derivation).
 func sumOperatorTotals(operators []OperatorSummary) (killed, discarded, survived int) {
 	for _, summary := range operators {
@@ -6085,7 +6085,7 @@ func extendedPrefixStands(generation engine.Generation, rec Finding) bool {
 // measured prefix keeps its recorded outcomes, dispositions, and attestations
 // while each suffix candidate's fresh outcome and evidence are appended,
 // conserving candidate accounting over the merged record
-// (INV-RESULT-CANDIDATE-CONSERVATION). The suffix processes' completed union
+// (REQ-result-candidate-conservation). The suffix processes' completed union
 // is reconciled with the record's persisted union folded in: a suffix that
 // read only inputs the record already pinned leaves the evidence untouched,
 // while a read beyond the record's pins is runtime information it never
@@ -6200,7 +6200,7 @@ func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding,
 // extendFindingCounts appends each suffix candidate's fresh outcome to the
 // record — per operator and in the finding totals — while every prefix
 // candidate keeps its recorded disposition, survivor identity, and
-// attestation (INV-RESULT-CANDIDATE-CONSERVATION; the prefix pins did not
+// attestation (REQ-result-candidate-conservation; the prefix pins did not
 // move, so its attestations ride unchanged per REQ-attest-survivor). Suffix
 // survivors are appended in candidate order, the suffix run's candidate
 // evidence becomes the record's (an extendable record carries none), and the
@@ -6288,7 +6288,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 // is candidate-local: covered candidates keep their recorded outcomes while
 // each flagged candidate's fresh outcome and evidence replace its recorded
 // ones, conserving per-operator and total candidate accounting
-// (REQ-result-stale, INV-RESULT-CANDIDATE-CONSERVATION). The fresh completed
+// (REQ-result-stale, REQ-result-candidate-conservation). The fresh completed
 // union must agree with the record's completed-process union so the spliced
 // evidence covers the re-executed processes without shedding any served
 // process's pinned runtime inputs; fresh observations that diverge are runtime
@@ -6511,7 +6511,7 @@ func splicedUnionDiverged(state runtimeinput.State, prior SubjectEvidence) bool 
 // spliceFindingCounts replaces each flagged candidate's recorded disposition
 // with its fresh outcome — per operator and in the finding totals — while
 // every covered candidate keeps its recorded one
-// (INV-RESULT-CANDIDATE-CONSERVATION). Survivor identities are rebuilt in
+// (REQ-result-candidate-conservation). Survivor identities are rebuilt in
 // candidate order carrying their recorded advisory buckets — exact under the
 // pins the serve verified — an attestation rides only a survivor that
 // survives again at the same position and operator (REQ-attest-survivor),

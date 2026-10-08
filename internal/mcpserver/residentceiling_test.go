@@ -56,12 +56,12 @@ func TestServeStartInstallsAndStatesTheFleetCeiling(t *testing.T) {
 	}
 }
 
-// A tool call that begins with none in flight re-derives the fleet
-// ceiling, so a long-lived server's ceiling follows the host: the
-// serve's own install, then one per such call (the harness's findings
-// call included), each a derived ceiling; a call beginning under
-// another in flight derives nothing — its own working set would count
-// as the host's unavailable memory (REQ-mcp-resident-set).
+// Every tool call re-derives the fleet ceiling at its start, so a
+// long-lived server's ceiling follows the host: the serve's own
+// install, then one per call (the harness's findings call included),
+// each a derived ceiling — an overlapping call derives too, since the
+// fleet rule adds the family's own held set back and counts nothing of
+// the in-flight call's set against the host (REQ-mcp-resident-set).
 func TestEveryToolCallReinstallsTheFleetCeiling(t *testing.T) {
 	if _, ok := resident.HostMemory(); !ok {
 		t.Skip("the host answers no memory reading: the fleet rule installs no ceiling here")
@@ -99,21 +99,20 @@ func TestEveryToolCallReinstallsTheFleetCeiling(t *testing.T) {
 	if got := count(); got != 4 {
 		t.Fatalf("installs = %d, want the serve's and one per call (four)", got)
 	}
-	// An overlapping pair derives once, at the first; a serial pair
-	// derives at each.
+	// An overlapping pair derives at each, as a serial pair does.
 	s.callBegan()
 	s.callBegan()
 	s.callEnded()
 	s.callEnded()
-	if got := count(); got != 5 {
-		t.Fatalf("installs after an overlapping pair = %d, want five (one for the pair)", got)
+	if got := count(); got != 6 {
+		t.Fatalf("installs after an overlapping pair = %d, want six (one per call)", got)
 	}
 	s.callBegan()
 	s.callEnded()
 	s.callBegan()
 	s.callEnded()
-	if got := count(); got != 7 {
-		t.Fatalf("installs after a serial pair = %d, want seven", got)
+	if got := count(); got != 8 {
+		t.Fatalf("installs after a serial pair = %d, want eight", got)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -159,4 +158,41 @@ func TestHeartbeatCarriesTheReadingInTheFleetsWords(t *testing.T) {
 	if joined := heartbeats(); joined == "" || strings.Contains(joined, "resident") {
 		t.Fatalf("a host without a reading: heartbeat lines = %q", joined)
 	}
+}
+
+// A call is counted before its ceiling walk: a call beginning inside
+// the idle window, whose walk outlasts the window, keeps the tree — the
+// release finds the call in flight — where a walk counted after would
+// let the window elapse during it and drop the tree the call then
+// reloads (REQ-mcp-resident-set). The observer stands in for a long
+// walk; the window is a fifth of it, wide enough that a loaded runner's
+// scheduling stall between the call's end and the next count never
+// spends it.
+func TestACallIsCountedBeforeItsCeilingWalk(t *testing.T) {
+	if _, ok := resident.HostMemory(); !ok {
+		t.Skip("the host answers no memory reading: the fleet rule installs no ceiling here")
+	}
+	prior := seams
+	t.Cleanup(func() { seams = prior })
+	priorLimit := debug.SetMemoryLimit(math.MaxInt64)
+	t.Cleanup(func() { debug.SetMemoryLimit(priorLimit) })
+	s := serverAt(t)
+	t.Cleanup(s.stopIdle)
+	released := make(chan struct{}, 8)
+	seams.idleRelease = 200 * time.Millisecond
+	seams.treeReleased = func(of *Server) {
+		if of == s {
+			released <- struct{}{}
+		}
+	}
+	seams.memoryLimitInstalled = func(int64) { time.Sleep(time.Second) }
+	s.callBegan()
+	s.callEnded() // the idle window armed
+	s.callBegan() // inside the window; the walk outlasts it
+	select {
+	case <-released:
+		t.Fatal("the idle release dropped the tree under a call whose walk outlasted the window: the call was counted after its walk")
+	case <-time.After(600 * time.Millisecond):
+	}
+	s.callEnded()
 }

@@ -365,7 +365,7 @@ type Kill struct {
 // serves the covered candidates and re-executes exactly the flagged ones
 // under a passing current baseline probe (REQ-result-stale); Disposition
 // records the measured outcome ("killed", "survived", or "discarded") so the
-// re-execution splice conserves INV-RESULT-CANDIDATE-CONSERVATION.
+// re-execution splice conserves REQ-result-candidate-conservation.
 type CandidateEvidence struct {
 	Position    string `json:"position"`
 	Operator    string `json:"operator"`

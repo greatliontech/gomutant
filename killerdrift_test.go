@@ -304,7 +304,7 @@ func TestDriftRemeasureIndexesSelectsMovedEvidence(t *testing.T) {
 // a re-measured kill that survives moves to the open set, a re-measured
 // survivor a test now kills records its fresh killer, counts conserve, and a
 // newly killed attested survivor sheds its attestation
-// (INV-RESULT-CANDIDATE-CONSERVATION, REQ-attest-survivor).
+// (REQ-result-candidate-conservation, REQ-attest-survivor).
 func TestDriftFindingCountsRescoresRemeasured(t *testing.T) {
 	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
 	candidates := []engine.Candidate{

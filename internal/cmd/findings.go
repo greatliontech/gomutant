@@ -65,7 +65,7 @@ type findingView struct {
 
 func newFindingsCommand() *cobra.Command {
 	o := findingsOptions{}
-	cmd := &cobra.Command{Use: "findings", Short: guidanceShort("findings"), Long: guidanceHelp("findings"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "findings", Short: guidanceShort("findings"), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		o.errOut = os.Stderr
 		return findingsCommand(cmd.Context(), o, os.Stdout)
 	}}

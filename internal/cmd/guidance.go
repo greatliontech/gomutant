@@ -18,6 +18,10 @@ func guidanceShort(verb string) string {
 	return gomutant.GuidanceRegistration("cli", verb).Description
 }
 
+// guidanceHelp is the knobless help of a verb — the long help of the
+// verbs that register no knob (version, guidance), which never reach
+// knobbedFlags; a knobbed verb's long help is the registration's whole
+// projection, set there.
 func guidanceHelp(verb string) string {
 	return gomutant.GuidanceRegistration("cli", verb).Help
 }
@@ -27,8 +31,10 @@ func guidanceHelp(verb string) string {
 // grammar for pflag (code spans unquoted, the default parenthetical
 // cobra prints itself dropped), never a second literal — at the
 // command's construction, so every constructor's command serves the
-// document whether or not it hangs under the root, and appends the
-// registration's pointer to the knobs' whole prose; a flag the
+// document whether or not it hangs under the root, and sets the long
+// help to the registration's own projection (the knobless help, a
+// blank line, the pointer to the knobs' whole prose — gofresh's one
+// join, never a second spelling of it here); a flag the
 // document does not carry refuses at construction with the package's
 // wording. The command's own set, not LocalFlags: a parentless
 // command's LocalFlags absorbs pflag.CommandLine, which this face
@@ -37,11 +43,11 @@ func knobbedFlags(cmd *cobra.Command, verb string) *cobra.Command {
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
 		f.Usage = gomutant.GuidanceKnob("cli", verb, f.Name).Usage()
 	})
-	// Every caller registers flags and has set Long (the knobless
-	// help) before this call, so the pointer rides here: a knobless
-	// verb (version, guidance) never reaches it, and the Long-vs-Help
+	// Every caller registers flags before this call; the long help is
+	// the registration's LongHelp projection whole: a knobless verb
+	// (version, guidance) never reaches it, and the Long-vs-Help
 	// judgment refuses a constructor that sets Long afterwards.
-	cmd.Long += "\n\n" + gomutant.GuidanceRegistration("cli", verb).ProsePointer
+	cmd.Long = gomutant.GuidanceRegistration("cli", verb).LongHelp
 	return cmd
 }
 

@@ -231,8 +231,8 @@ REQ-exec-cancellation requires. A run that fails in any
 other way — a build error the overlay should have prevented, a killer test
 outside the oracle, output that does not parse — aborts without recording a
 finding, because a corrupted measurement read as a sound one inflates kills
-in the flattering direction. Under INV-RESULT-CANDIDATE-CONSERVATION in
-[results.md](results.md), compiler rejection of a selected
+in the flattering direction. Under REQ-result-candidate-conservation,
+compiler rejection of a selected
 candidate before any oracle test runs is instead a discard only after the same
 package-scoped baseline passed and source/build inputs remained coherent;
 generator, overlay, and malformed
@@ -1062,7 +1062,7 @@ observed union cannot build — keeps surfacing at execution, and a plan
 refuses on the same tree-motion evidence (producer drift) an executing
 run's epilogue refuses on.
 
-Under INV-RESULT-CANDIDATE-CONSERVATION in [results.md](results.md), a measure
+Under REQ-result-candidate-conservation, a measure
 decision reports its selected candidate count as
 `candidates`, including candidates later discarded; `budget` means the current
 request needs a longer candidate prefix than the prior finding records and the

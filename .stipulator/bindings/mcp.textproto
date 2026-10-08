@@ -863,8 +863,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-resident-set"
-  content_hash: "cbc2ffaf2da0b67f195b8e006435153db0d859ec4c9df06e4df5f4d3aba1368c"
-  source_hash: "54a34c3589512c1e665b0a85e0741b0fdd9131ca8c593809b2931bd1e37aceae"
+  content_hash: "eb01ed55ecdd8bb8590bdaae1870a93921c58605e08336e944a5aacc3eb41330"
+  source_hash: "3fccc9f50d410c2093e11a75279d8f481955419c3ff44f45aa702cabc091be7f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestIdleServerReleasesItsTree"
   role: BINDING_ROLE_TESTS
@@ -873,8 +873,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-resident-set"
-  content_hash: "cbc2ffaf2da0b67f195b8e006435153db0d859ec4c9df06e4df5f4d3aba1368c"
-  source_hash: "54a34c3589512c1e665b0a85e0741b0fdd9131ca8c593809b2931bd1e37aceae"
+  content_hash: "eb01ed55ecdd8bb8590bdaae1870a93921c58605e08336e944a5aacc3eb41330"
+  source_hash: "3fccc9f50d410c2093e11a75279d8f481955419c3ff44f45aa702cabc091be7f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestLastInFlightCallEndReturnsTheHeap"
   role: BINDING_ROLE_TESTS
@@ -883,8 +883,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-resident-set"
-  content_hash: "cbc2ffaf2da0b67f195b8e006435153db0d859ec4c9df06e4df5f4d3aba1368c"
-  source_hash: "54a34c3589512c1e665b0a85e0741b0fdd9131ca8c593809b2931bd1e37aceae"
+  content_hash: "eb01ed55ecdd8bb8590bdaae1870a93921c58605e08336e944a5aacc3eb41330"
+  source_hash: "3fccc9f50d410c2093e11a75279d8f481955419c3ff44f45aa702cabc091be7f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestServeStartInstallsAndStatesTheFleetCeiling"
   role: BINDING_ROLE_TESTS
@@ -893,8 +893,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-resident-set"
-  content_hash: "cbc2ffaf2da0b67f195b8e006435153db0d859ec4c9df06e4df5f4d3aba1368c"
-  source_hash: "54a34c3589512c1e665b0a85e0741b0fdd9131ca8c593809b2931bd1e37aceae"
+  content_hash: "eb01ed55ecdd8bb8590bdaae1870a93921c58605e08336e944a5aacc3eb41330"
+  source_hash: "3fccc9f50d410c2093e11a75279d8f481955419c3ff44f45aa702cabc091be7f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestSuitesClearTheOperatorsMemoryLimit"
   role: BINDING_ROLE_TESTS
@@ -903,8 +903,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-resident-set"
-  content_hash: "cbc2ffaf2da0b67f195b8e006435153db0d859ec4c9df06e4df5f4d3aba1368c"
-  source_hash: "54a34c3589512c1e665b0a85e0741b0fdd9131ca8c593809b2931bd1e37aceae"
+  content_hash: "eb01ed55ecdd8bb8590bdaae1870a93921c58605e08336e944a5aacc3eb41330"
+  source_hash: "3fccc9f50d410c2093e11a75279d8f481955419c3ff44f45aa702cabc091be7f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestEveryCommandInstallsTheFleetCeilingBeforeTheVerb"
   role: BINDING_ROLE_TESTS
@@ -913,8 +913,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-resident-set"
-  content_hash: "cbc2ffaf2da0b67f195b8e006435153db0d859ec4c9df06e4df5f4d3aba1368c"
-  source_hash: "54a34c3589512c1e665b0a85e0741b0fdd9131ca8c593809b2931bd1e37aceae"
+  content_hash: "eb01ed55ecdd8bb8590bdaae1870a93921c58605e08336e944a5aacc3eb41330"
+  source_hash: "3fccc9f50d410c2093e11a75279d8f481955419c3ff44f45aa702cabc091be7f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/cmd.TestProgressLineCarriesTheReadingInTheFleetsWords"
   role: BINDING_ROLE_TESTS
@@ -923,8 +923,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mcp-resident-set"
-  content_hash: "cbc2ffaf2da0b67f195b8e006435153db0d859ec4c9df06e4df5f4d3aba1368c"
-  source_hash: "54a34c3589512c1e665b0a85e0741b0fdd9131ca8c593809b2931bd1e37aceae"
+  content_hash: "eb01ed55ecdd8bb8590bdaae1870a93921c58605e08336e944a5aacc3eb41330"
+  source_hash: "3fccc9f50d410c2093e11a75279d8f481955419c3ff44f45aa702cabc091be7f"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestEveryToolCallReinstallsTheFleetCeiling"
   role: BINDING_ROLE_TESTS
@@ -969,4 +969,14 @@ bindings {
   symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestWithHeartbeatNotifiesDuringTheStretch"
   role: BINDING_ROLE_TESTS
   shape_hash: "deafb542a44c1d044d4859a9fe80452ae8c05dfa999dc0a460ec1832d5df1957"
+}
+
+bindings {
+  requirement_id: "REQ-mcp-resident-set"
+  content_hash: "eb01ed55ecdd8bb8590bdaae1870a93921c58605e08336e944a5aacc3eb41330"
+  source_hash: "3fccc9f50d410c2093e11a75279d8f481955419c3ff44f45aa702cabc091be7f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestACallIsCountedBeforeItsCeilingWalk"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9e43c9e2f1450c1d032c499e8220173257b9c367c9b554b4a179b76046cda826"
 }

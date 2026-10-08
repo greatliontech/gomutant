@@ -43,7 +43,7 @@ func TestGuidanceCoversTheCLISurface(t *testing.T) {
 				// The registration carries whether cobra prints a default for
 				// the flag — the fact the coverage judgment scopes its
 				// default-spelling rule by.
-				flags[f.Name] = !zeroDefault(f)
+				flags[f.Name] = guidance.PrintsDefault(f.Value.Type(), f.DefValue)
 				// Every usage string is the document's rendering — the
 				// knob's usage projection, gofresh's grammar for pflag —
 				// never a second literal; the served bytes are judged
@@ -194,26 +194,6 @@ func TestKnobbedFlagsRefusesAnUndocumentedFlag(t *testing.T) {
 		}
 	}()
 	knobbedFlags(cmd, "run")
-}
-
-// zeroDefault is pflag's own per-type zero: the defaults cobra prints
-// nothing for. A string is zero only when empty (a "0" or "false"
-// string prints), and an unknown type answers false so its usage is
-// checked.
-func zeroDefault(f *pflag.Flag) bool {
-	switch f.Value.Type() {
-	case "string":
-		return f.DefValue == ""
-	case "bool":
-		return f.DefValue == "false"
-	case "int", "int64":
-		return f.DefValue == "0"
-	case "duration":
-		return f.DefValue == "0" || f.DefValue == "0s"
-	case "stringArray", "stringSlice":
-		return f.DefValue == "[]"
-	}
-	return false
 }
 
 // The guidance line carries the refusal's attribution after the reason,

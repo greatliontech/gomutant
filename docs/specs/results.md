@@ -122,8 +122,8 @@ view mode the record's evidence re-derives under, at every site that reads it:
 a view built under the other mode is never served to a record, whichever
 symbols it holds.
 
-**INV-RESULT-CANDIDATE-CONSERVATION** (project invariant): Every finding
-produced by a candidate-accounted active basis carries required `candidateCount` and
+**REQ-result-candidate-conservation** (invariant): Every finding
+produced by a candidate-accounted active basis MUST carry `candidateCount` and
 `generated` fields. `candidateCount` is the total applicable catalog candidates
 before a budget; `generated` is the selected exhaustive set or positive-budget
 prefix. The existing `mutants` field is the measured count after discards.
@@ -138,14 +138,12 @@ min(budget, candidateCount)` when budget is positive. A record merged from a
 served prefix and a measured remainder — the candidate re-execution splice or
 the budget extension per REQ-result-stale — satisfies the same equations over
 its merged totals: conservation is single-run and merged-provenance alike. A
-document violating a
-count equation or budget relation is malformed and refused.
-
-INV-RESULT-CANDIDATE-CONSERVATION: enforced by
+document violating a count equation or budget relation is malformed and
+refused. Enforced by
 `TestRunConservesCandidateDiscards`,
 `TestSpliceFindingCountsConservesChangedOutcomes`,
 `TestExtendFindingCountsAppendsSuffixOutcomes`,
-`TestDriftFindingCountsRescoresRemeasured`, and
+`TestDriftFindingCountsRescoresRemeasured`,
 `TestParseFindingsCandidateEvidence`.
 
 **REQ-result-local-signpost** (behavior): A run surface that renders
@@ -499,7 +497,7 @@ when evidence is flagged (count-aware nouns and verb) (a delta reaching no oracl
 flagged reports "served:
 compartment delta reaches no recorded oracle; nothing re-measures") with
 `candidates` counting the re-measured candidates. When
-INV-RESULT-CANDIDATE-CONSERVATION applies, a zero-budget request requires
+REQ-result-candidate-conservation applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
 serve a weaker request without remeasurement. Every serve rewrite — the
@@ -925,7 +923,7 @@ into one disposition. A survivor additionally carries a site anchor - a
 bounded hash of the mutated range's line window (the range extended to full
 line bounds plus one line each side) in the original source, stamped at
 generation: an attestation anchor only, never a measurement pin.
-Under INV-RESULT-CANDIDATE-CONSERVATION, occurrence suffixes are assigned over
+Under REQ-result-candidate-conservation, occurrence suffixes are assigned over
 the complete globally ordered candidate set before budget selection or discard;
 an earlier discarded candidate can therefore reserve an occurrence number.
 

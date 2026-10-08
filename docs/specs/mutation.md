@@ -27,30 +27,25 @@ site with no such counterpart, including a result type with no context-free
 zero expression, yields no `go/12` candidate. A selected candidate
 that fails to compile, does not differ from the baseline, or renders identically
 to an earlier selected candidate is discarded; a timed-out oracle run is a kill under
-REQ-exec-attribution. When INV-MUT-COMPREHENSIVE lands, its catalog supersedes
-the active list under a new identifier. Before then, a transitional basis may
-activate only when the same change updates this clause with its exact identifier
-and membership, lands complete catalog families rather than partial mappings,
-and satisfies the candidate, accounting, stale-pin, and grammar contracts for
-every active family.
+REQ-exec-attribution. The basis is the catalog REQ-mut-comprehensive-basis
+states; a change to it receives a new operator-set identifier, stated in
+this clause with the family list in the same change.
 
 The active `go/12` basis uses the exact catalog labels below.
 
-**INV-MUT-COMPREHENSIVE** (project invariant): The comprehensive automatic
-basis is exactly the finite first-order catalog below. Every mapping applies once
+**REQ-mut-comprehensive-basis** (invariant): The comprehensive automatic
+basis MUST be exactly the finite first-order catalog below. Every mapping applies once
 at every applicable original source site, with static type information used to
 admit the site but without adding an import, identifier, helper declaration,
 temporary, or named type expression. One candidate changes one catalog site;
 deterministic formatting and pruning imports made unused by that change are
 normalization, not additional mutation sites. Any change to catalog membership,
 mapping, applicability, ordering, or deduplication receives a new operator-set
-identifier before its findings can be reused.
-
-INV-MUT-COMPREHENSIVE: enforced by `TestComprehensiveCatalogInventory`,
-`TestComparisonCatalog`, `TestArithmeticCatalog`, `TestBitwiseCatalog`,
-`TestUnaryAssignmentCatalog`, `TestControlCatalog`, `TestLoopControlLegality`,
-`TestScalarLiteralCatalog`, `TestReturnSubstitutionCatalog`, and
-`TestStatementCatalogContexts`.
+identifier before its findings can be reused. Enforced by
+`TestComprehensiveCatalogInventory`, `TestComparisonCatalog`,
+`TestArithmeticCatalog`, `TestBitwiseCatalog`, `TestUnaryAssignmentCatalog`,
+`TestControlCatalog`, `TestLoopControlLegality`, `TestScalarLiteralCatalog`,
+`TestReturnSubstitutionCatalog`, `TestStatementCatalogContexts`.
 
 The token-replacement families and their ordered variants are:
 
@@ -232,7 +227,7 @@ finding's target evidence and operator set — a capped record whose every
 other REQ-result-stale pin holds remains exact evidence for the candidate
 prefix `[0, generated)`, and a wider request measures only the unmeasured
 suffix, splicing it onto the recorded prefix under REQ-result-stale's
-budget-extension carve-out. Under INV-RESULT-CANDIDATE-CONSERVATION, zero is the exhaustive
+budget-extension carve-out. Under REQ-result-candidate-conservation, zero is the exhaustive
 request and positive `N` requests the first
 `min(N, candidateCount)` candidates. The budget component of coverage holds
 when either the prior finding's `generated` equals `candidateCount`, or its

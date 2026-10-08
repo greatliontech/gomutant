@@ -2250,7 +2250,7 @@ func TestParseFindingsCandidateEvidence(t *testing.T) {
 }
 
 // TestSpliceFindingCountsConservesChangedOutcomes pins splice accounting
-// under INV-RESULT-CANDIDATE-CONSERVATION: each flagged candidate's fresh
+// under REQ-result-candidate-conservation: each flagged candidate's fresh
 // outcome replaces its recorded disposition per operator and in the totals, a
 // flagged kill that now survives opens a survivor, a flagged survivor that
 // now dies sheds its attestation (REQ-attest-survivor), and covered
@@ -4255,7 +4255,7 @@ func TestBucketSurvivorExecutionKeepsCarriedPrefixBuckets(t *testing.T) {
 }
 
 // TestExtendFindingCountsAppendsSuffixOutcomes pins the budget-extension
-// splice accounting under INV-RESULT-CANDIDATE-CONSERVATION: every prefix
+// splice accounting under REQ-result-candidate-conservation: every prefix
 // candidate keeps its recorded disposition, survivor identity, and
 // attestation, each suffix outcome is appended per operator and in the totals
 // (including an operator the record never saw and a pre-execution discard),
