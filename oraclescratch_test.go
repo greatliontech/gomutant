@@ -3,19 +3,73 @@ package gomutant
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/engine"
 )
+
+// Check the per-process state before an across-process union can discard
+// disagreeing environment values. This keeps sweep order and root coverage
+// observable even when each process legitimately has a different TMPDIR.
+func assertScratchProcessesFinalize(t *testing.T, tree *Tree, dir string) {
+	t.Helper()
+	mutants, err := tree.eng.Mutants("example.com/scratch.F", 1)
+	if err != nil || len(mutants) == 0 {
+		t.Fatalf("mutants: %v %v", mutants, err)
+	}
+	for _, baseline := range []bool{true, false} {
+		var env []string
+		restore := engine.ObserveGoCommandsForTest(func(cmd *exec.Cmd) {
+			if len(cmd.Args) > 1 && cmd.Args[1] == "test" {
+				env = slices.Clone(cmd.Env)
+			}
+		})
+		var observation runtimeinput.Observation
+		if baseline {
+			var ran int
+			var passed bool
+			ran, passed, _, _, observation, err = engine.TestProbeObservedEnv(context.Background(), dir, "example.com/scratch", "^TestF$", 2*time.Minute, nil, dir, dir, nil, nil, tree.eng.GoEnv(), engine.OracleBounds{})
+			if err == nil && (ran != 1 || !passed) {
+				t.Fatalf("baseline ran=%d passed=%v", ran, passed)
+			}
+		} else {
+			var incomplete string
+			_, _, _, observation, incomplete, _, err = engine.RunMutantObserved(context.Background(), dir, mutants[0], []string{"example.com/scratch"}, "^TestF$", 2*time.Minute, nil, dir, dir, nil, nil, engine.OracleBounds{})
+			if incomplete != "" {
+				t.Fatalf("mutant capture incomplete: %s", incomplete)
+			}
+		}
+		restore()
+		if err != nil || !observation.OK || observation.Unverifiable || len(env) == 0 {
+			t.Fatalf("baseline=%v observation=%+v err=%v", baseline, observation, err)
+		}
+		paths, err := runtimeinput.Paths(observation.Manifest, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range paths {
+			if strings.Contains(path, "gomutant-oracle-") {
+				t.Fatalf("scratch identity escaped its root declaration: %s", path)
+			}
+		}
+		state, err := runtimeinput.Current(context.Background(), observation.Manifest, dir, env)
+		if err != nil || state.Unverifiable || state.Digest != observation.Digest {
+			t.Fatalf("baseline=%v post-sweep state=%+v observation=%+v err=%v", baseline, state, observation, err)
+		}
+	}
+}
 
 // Every oracle process runs with its own scratch TMPDIR, its contents
 // swept - with permissions restored - as soon as the process ends, so a
 // killed oracle's leaked temp directories are bounded to one run
 // instead of accumulating tmpfs-backed RAM for the campaign
-// (REQ-exec-oracle-scratch). The recordless manifest proves the
+// (REQ-exec-oracle-scratch). Per-process path guards prove the
 // admission covered the scratch; the empty temp root after the run
 // proves the remove stage descends 0500 residue.
 func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
@@ -42,22 +96,15 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertScratchProcessesFinalize(t, tree, dir)
 	findings, err := tree.Run(context.Background(), []Target{{Symbol: "example.com/scratch.F", Oracle: []string{"example.com/scratch.TestF"}, OracleExplicit: true}}, Options{Budget: 1, OracleTimeout: 2 * time.Minute})
 	if err != nil || len(findings) != 1 {
 		t.Fatalf("measure = %+v, %v", findings, err)
 	}
-	// Sites that sweep only after finalization record content digests
-	// of files the sweep deletes; the evidence union then reads such
-	// inputs moved and replaces the manifest with the merge-failure
-	// sentinel (demonstrated when every site regressed together; a
-	// lone late site can be masked by the union's incomplete-evidence
-	// exclusions). An external scratch read is inherently
-	// bracket-uncoverable (its own unverifiable reason) - the sentinel,
-	// not unverifiability itself, is the sweep-ordering regression.
-	if strings.Contains(findings[0].TargetEvidence.RuntimeReason, "could not be merged") ||
-		strings.Contains(findings[0].OracleEvidence[0].RuntimeReason, "could not be merged") {
-		t.Fatalf("evidence union collapsed: target %q, oracle %q - an observation input moved between finalization and the union",
-			findings[0].TargetEvidence.RuntimeReason, findings[0].OracleEvidence[0].RuntimeReason)
+	// Root coverage and sweep order were checked before union. The actual
+	// TMPDIR reads differ across processes and must not become a stable value.
+	if !findings[0].TargetEvidence.RuntimeUnverifiable || !findings[0].OracleEvidence[0].RuntimeUnverifiable {
+		t.Fatal("different delivered scratch names acquired reusable union evidence")
 	}
 	// Containment leaves no record: the minted root is declared as an
 	// ephemeral temp root and the swept scratch reads beneath it are
@@ -75,9 +122,6 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 				p, findings[0].OracleEvidence[0].RuntimeInputs)
 		}
 	}
-	if findings[0].OracleEvidence[0].RuntimeUnverifiable {
-		t.Fatalf("swept scratch left the evidence unverifiable: %q", findings[0].OracleEvidence[0].RuntimeReason)
-	}
 	// Sweep: nothing of the oracle scratch survives the run - the
 	// 0500 directory included.
 	leftovers, err := filepath.Glob(filepath.Join(hostScratch, "gomutant-oracle-*"))
@@ -87,14 +131,10 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 	if len(leftovers) != 0 {
 		t.Fatalf("oracle scratch leaked: %q", leftovers)
 	}
-	// The recorded evidence revalidates stably AFTER the sweep: the
-	// sweep-before-finalization ordering finalizes the swept truth -
-	// admitted scratch reads leave no record to move - where sweeping
-	// after finalization would record content digests of files the
-	// sweep deletes, evidence that reads moved forever
-	// (REQ-exec-oracle-scratch-order).
+	// The union's explicit refusal survives revalidation; per-process sweep
+	// ordering was checked against each process's actual environment above.
 	state, err := runtimeinput.Current(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
-	if err != nil || !state.OK {
+	if err != nil || !state.OK || !state.Unverifiable {
 		t.Fatalf("post-sweep revalidation = %+v, %v", state, err)
 	}
 	if state.Digest != findings[0].OracleEvidence[0].RuntimeDigest {
@@ -107,9 +147,9 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 // declares the minted scratch root as an ephemeral temp root, so the
 // root's stat (temp-tree creation machinery minting the per-test
 // subtree) records nothing instead of sealing the evidence as an
-// uncovered runtime input (REQ-exec-oracle-scratch-declared). Without
-// the declaration every such oracle's findings are machine-local and
-// its survivors unbucketed.
+// uncovered runtime input (REQ-exec-oracle-scratch-declared). This checks
+// each process's state under its delivered environment; differing TMPDIR
+// values can independently prevent an across-process reusable union.
 func TestTempTouchingOracleFinalizesVerifiable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -134,24 +174,5 @@ func TestTempTouchingOracleFinalizesVerifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings, err := tree.Run(context.Background(), []Target{{Symbol: "example.com/scratch.F", Oracle: []string{"example.com/scratch.TestF"}, OracleExplicit: true}}, Options{Budget: 1, OracleTimeout: 2 * time.Minute})
-	if err != nil || len(findings) != 1 {
-		t.Fatalf("measure = %+v, %v", findings, err)
-	}
-	if findings[0].OracleEvidence[0].RuntimeUnverifiable {
-		t.Fatalf("temp-touching oracle evidence is unverifiable: %q\nmanifest: %s",
-			findings[0].OracleEvidence[0].RuntimeReason, findings[0].OracleEvidence[0].RuntimeInputs)
-	}
-	if findings[0].TargetEvidence.RuntimeUnverifiable {
-		t.Fatalf("target evidence is unverifiable: %q", findings[0].TargetEvidence.RuntimeReason)
-	}
-	// The evidence is reuse-ready: it revalidates against the current
-	// tree after the scratch sweep.
-	state, err := runtimeinput.Current(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
-	if err != nil || !state.OK || state.Unverifiable {
-		t.Fatalf("post-run revalidation = %+v, %v", state, err)
-	}
-	if state.Digest != findings[0].OracleEvidence[0].RuntimeDigest {
-		t.Fatal("post-run revalidation moved")
-	}
+	assertScratchProcessesFinalize(t, tree, dir)
 }

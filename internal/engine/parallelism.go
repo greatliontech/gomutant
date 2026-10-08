@@ -7,17 +7,17 @@ import (
 )
 
 // OracleEvidenceEnv is the environment oracle evidence digests under:
-// the frozen tree environment with the inner-parallelism cap applied -
+// the frozen tree environment with the resource bounds applied -
 // exactly the ingest mirror's composition (PWD is per-package and
-// recordless; the minted TMPDIR and the memory ceiling stay out by the
-// mirror's stated contract). Serve-side revalidation, merge-time
+// recordless; the minted TMPDIR is the separate scratch declaration).
+// Serve-side revalidation, merge-time
 // re-evaluation, and the analysis engines' declared producer env must
 // all use this same environment: a stand-in without the injected width
 // makes a width-reading oracle's evidence unreproducible - perpetual
 // re-measure - or, when an ambient value matches an old record, serves
 // stale across a width change (REQ-exec-oracle-parallelism).
-func OracleEvidenceEnv(env []string, width int) []string {
-	return oracleCPUEnv(env, width)
+func OracleEvidenceEnv(env []string, bounds OracleBounds) []string {
+	return oracleEnv(env, bounds)
 }
 
 // oracleEnv composes the per-oracle resource bounds onto a spawn

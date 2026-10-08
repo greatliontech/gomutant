@@ -29,7 +29,7 @@ func TestAnalysisEnginesRideTheTreesRunner(t *testing.T) {
 		seen = append(seen, dir+" "+cmd.Args[1])
 	})
 	defer restore()
-	if _, err := tr.newSubjectEngines(nil, false, 0, 0).engineFor(moduleDir); err != nil {
+	if _, err := tr.newSubjectEngines(nil, false, engine.OracleBounds{}, 0).engineFor(moduleDir); err != nil {
 		t.Fatal(err)
 	}
 	want, _ := filepath.Abs(moduleDir)

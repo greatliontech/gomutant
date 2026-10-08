@@ -20,7 +20,7 @@ func relManifest(paths ...string) string {
 	for i, p := range paths {
 		entries[i] = fmt.Sprintf(`{"k":"rel","p":%q,"d":"0123456789abcdef0123456789abcdef"}`, p)
 	}
-	return base64.RawURLEncoding.EncodeToString([]byte(`{"v":1,"paths":[` + strings.Join(entries, ",") + `]}`))
+	return base64.RawURLEncoding.EncodeToString([]byte(`{"v":2,"paths":[` + strings.Join(entries, ",") + `]}`))
 }
 
 // A record from before evidence anchored at the tree carries its

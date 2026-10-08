@@ -29,7 +29,7 @@ func TestObservedUnionSharesTheDecisionViews(t *testing.T) {
 		if e.Phase == "observe" {
 			observes.Add(1)
 		}
-	}, false, 0, 0)
+	}, false, engine.OracleBounds{}, 0)
 	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, engines)
 	if err != nil || len(faults) != 0 {
 		t.Fatalf("decision build: %v %v", faults, err)
@@ -161,7 +161,7 @@ func TestObservedUnionRoutesACaptureFaultToTheModulesSymbols(t *testing.T) {
 	}
 	ctx := context.Background()
 	symbols := []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}
-	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0, 0))
+	set, faults, err := tr.buildSubjectViews(ctx, symbols, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, engine.OracleBounds{}, 0))
 	if err != nil || len(faults) != 0 {
 		t.Fatalf("decision build: %v %v", faults, err)
 	}
@@ -226,7 +226,7 @@ func TestStrictObservedBuildPromotesACaptureFault(t *testing.T) {
 		}
 	}
 	defer func() { seams.observedUnion = prior }()
-	union, err := tr.newStrictObservedViews(context.Background(), []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 0, 0))
+	union, err := tr.newStrictObservedViews(context.Background(), []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, engine.OracleBounds{}, 0))
 	if err == nil {
 		t.Fatalf("strict observed build over a tree that moved at the proof capture returned a union of %d symbols, want the capture fault", len(union.bySymbol))
 	}
@@ -239,7 +239,7 @@ func TestStrictObservedBuildPromotesACaptureFault(t *testing.T) {
 }
 
 // A supplementary view built beside a campaign's set carries the set's
-// width in its evidence environment: a width-reading oracle the set
+// resource bounds in its evidence environment: a resource-reading oracle the set
 // lacks (the moved-pin attribution's case) is judged under the same
 // environment as its siblings, never named moved because a standalone
 // inspection's unbounded width crept in (REQ-exec-oracle-parallelism).
@@ -248,11 +248,16 @@ func TestStrictObservedBuildPromotesACaptureFault(t *testing.T) {
 func TestSupplementaryViewsCarryThePrebuiltSetsWidth(t *testing.T) {
 	tr := fixtureTree(t)
 	ctx := context.Background()
-	set, faults, err := tr.buildSubjectViews(ctx, []string{"example.com/fixture/lib.Add"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, 3, 0))
+	bounds := engine.OracleBounds{Width: 3, MemoryBytes: 3 << 30}
+	set, faults, err := tr.buildSubjectViews(ctx, []string{"example.com/fixture/lib.Add"}, tr.eng.PackageContextContext, tr.newSubjectEngines(nil, false, bounds, 0))
 	if err != nil || len(faults) != 0 {
 		t.Fatalf("build: %v %v", faults, err)
 	}
-	views, err := tr.viewsFor(ctx, []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, set, false)
+	union, faults, err := set.observed(ctx)
+	if err != nil || len(faults) != 0 {
+		t.Fatalf("observed union: %v %v", faults, err)
+	}
+	narrowed, err := union.forTarget("example.com/fixture/lib.Add", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,21 +266,29 @@ func TestSupplementaryViewsCarryThePrebuiltSetsWidth(t *testing.T) {
 	// self-host check's own witness width, say) nothing is injected on
 	// either side and the two compositions agree; under a wider ambient
 	// the set's width is injected and the standalone's is not.
-	want := strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), 3), " ")
-	for _, symbol := range []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"} {
-		if env := strings.Join(views[symbol].env, " "); env != want {
-			t.Fatalf("%s judges under %q, want the set's evidence environment %q", symbol, env, want)
+	want := strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), bounds), " ")
+	for name, prebuilt := range map[string]*subjectViewSet{"decision": set, "observed": union.subjectViewSet, "narrowed": narrowed} {
+		for _, mode := range []bool{false, true} {
+			views, err := tr.viewsFor(ctx, []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"}, prebuilt, mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, symbol := range []string{"example.com/fixture/lib.Add", "example.com/fixture/lib.TestAdd"} {
+				if env := strings.Join(views[symbol].env, " "); env != want {
+					t.Fatalf("%s mode=%v: %s did not retain the prebuilt set's evidence environment", name, mode, symbol)
+				}
+			}
 		}
 	}
 	standalone, err := tr.viewsFor(ctx, []string{"example.com/fixture/lib.TestAdd"}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env, plain := strings.Join(standalone["example.com/fixture/lib.TestAdd"].env, " "), strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), 0), " "); env != plain {
-		t.Fatalf("a standalone inspection's view judges under %q, want the width-free environment %q", env, plain)
+	if env, plain := strings.Join(standalone["example.com/fixture/lib.TestAdd"].env, " "), strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), engine.OracleBounds{}), " "); env != plain {
+		t.Fatal("a standalone inspection's view did not retain its own evidence environment")
 	}
 	if ambient, ok := engineGOMAXPROCS(tr.eng.GoEnv()); !ok || ambient > 3 {
-		if want == strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), 0), " ") {
+		if want == strings.Join(engine.OracleEvidenceEnv(tr.eng.GoEnv(), engine.OracleBounds{}), " ") {
 			t.Fatal("the set's width was not injected over a wider ambient — the pin would be vacuous")
 		}
 	}

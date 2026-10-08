@@ -22,13 +22,13 @@ import (
 // storeManifest builds a canonical runtimeinput manifest (the wire form
 // gofresh's runtimeinput package decodes) over absolute path inputs.
 func storeManifest(paths ...string) string {
-	doc := `{"v":1}`
+	doc := `{"v":2}`
 	if len(paths) > 0 {
 		entries := make([]string, len(paths))
 		for i, p := range paths {
 			entries[i] = fmt.Sprintf(`{"k":"abs","p":%q,"d":"0123456789abcdef0123456789abcdef"}`, p)
 		}
-		doc = `{"v":1,"paths":[` + strings.Join(entries, ",") + `]}`
+		doc = `{"v":2,"paths":[` + strings.Join(entries, ",") + `]}`
 	}
 	return base64.RawURLEncoding.EncodeToString([]byte(doc))
 }

@@ -129,7 +129,7 @@ func TestMergePreservesWidthReadingEvidence(t *testing.T) {
 			env = append(env, kv)
 		}
 	}
-	obs, err := runtimeinput.FromTestLog([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env, bounds.Width), runtimeinput.WithCompletedProcess("width"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	obs, err := runtimeinput.FromTestLog([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env, bounds), runtimeinput.WithCompletedProcess("width"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}

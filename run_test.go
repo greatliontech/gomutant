@@ -2423,7 +2423,7 @@ func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	}
 	views, err := grown.newSubjectViews(context.Background(), []string{
 		"example.com/driftgate.Value", "example.com/driftgate.TestSmall", "example.com/driftgate.TestMore",
-	}, false, 0)
+	}, false, engine.OracleBounds{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2863,6 +2863,8 @@ func TestRunExtensionDivergenceStampsAndAttributes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	assertFixturePurity(t, dir, "gated.go", "Gated")
+	assertFixturePurity(t, dir, "gated_test.go", "TestGated")
 	tr, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -3861,7 +3863,7 @@ func TestStrictViewBuildRefusesUnresolvableSymbol(t *testing.T) {
 		t.Skip("builds views")
 	}
 	tr := fixtureTree(t)
-	if _, err := tr.newSubjectViews(context.Background(), []string{"example.com/fixture/nosuchpackage.F"}, false, 0); err == nil {
+	if _, err := tr.newSubjectViews(context.Background(), []string{"example.com/fixture/nosuchpackage.F"}, false, engine.OracleBounds{}); err == nil {
 		t.Fatal("strict view build tolerated an unresolvable symbol, want refusal")
 	}
 }

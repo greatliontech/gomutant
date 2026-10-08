@@ -309,6 +309,14 @@ baseline and mutant processes all run under this observation boundary. Cached or
 historical evidence is never upgraded without rerunning the measurement. Reuse and
 inspection explicitly check the persisted proof selection rather than inferring it
 from the presence of a runtime manifest.
+Process completion and operation-outcome support are independent premises:
+normal completion includes an ordinarily completed failing test, but neither a
+passing baseline nor the unmutated tree's static inventory supplies outcome
+support for an overlaid or structurally transformed executable. Where support
+for the actual contributing execution is absent, observations remain identity-only
+input guards and cannot authorize observation-based reuse; ordinary source/input
+guards and explicit purity remain separate. Historical pre-v2 runtime manifests
+are not upgraded to the execution-bound protocol and require remeasurement.
 Every producer view that can receive one shared baseline observation is captured
 before that baseline process starts; a completed observation is never attached to
 proof evidence captured after the observed process. A launched candidate process
@@ -1287,6 +1295,11 @@ ephemeral. Every other classification root (the toolchain, the module
 and build caches) the facade resolves from the process environment
 gomutant hands it, so an oracle's reads beneath them record no identity
 and seal nothing.
+The filesystem-root declaration does not hide an environment-variable read:
+a logged `TMPDIR` read records the value actually delivered to that process.
+Different per-process values can therefore prevent a coherent reusable union;
+the owned root's path-classification exemption is not an assertion that its name
+has a stable environment value.
 
 **REQ-exec-scratch-namespace** (behavior): gomutant MUST accept caller
 scratch-namespace declarations - a tree-relative directory (resolved against
@@ -1317,10 +1330,16 @@ halved default is the headroom for exactly that). The default derives total RAM 
 at 1 GiB — a ceiling that broke in-oracle link steps would convert every
 measurement into a discard — configurable per run and disablable; an
 unreadable RAM total disables the derived default rather than guessing.
+When an oracle reads `GOMEMLIMIT`, its runtime-input observation binds the
+delivered soft-limit value, not a parent value overwritten at spawn. Capture,
+merge and freshness revalidation use the same resource-bound environment;
+supplementary views inherit those bounds from the set they supplement.
 The derived default moves with RAM and the job count — machine
 circumstance — so the recorded ceiling serves DIRECTIONALLY
 (REQ-result-stale's oracle-memory clause) rather than by exact bytes,
-except where the ceiling decided a verdict. A
+except where the ceiling decided a verdict. This budget comparison does not
+waive a logged environment-value guard: a changed delivered value remeasures
+an oracle that read it even when the new ceiling is larger. A
 mutant that dies on its ceiling classifies through the same attribution
 rules as any other oracle death — ordinarily a kill with its
 incompleteness reason; a legitimate oracle whose baseline also dies on

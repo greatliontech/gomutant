@@ -76,7 +76,12 @@ func TestWorkspaceMemberBracketPathResolvesAgainstTheTreeRoot(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant over a workspace fixture")
 	}
-	root, _, _ := workspaceFixture(t)
+	root, _, commit := workspaceFixture(t)
+	// The override licenses file outcomes; the raw runtime disposition below
+	// independently pins bracket coverage and the tree-relative identity.
+	assertFixturePurity(t, root, "tools/t.go", "F")
+	assertFixturePurity(t, root, "tools/t_test.go", "TestF")
+	commit()
 	tr, err := Load(root)
 	if err != nil {
 		t.Fatal(err)

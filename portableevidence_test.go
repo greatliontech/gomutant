@@ -34,7 +34,7 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	env := engine.OracleEvidenceEnv(tree.eng.GoEnv(), 0)
+	env := engine.OracleEvidenceEnv(tree.eng.GoEnv(), engine.OracleBounds{})
 	subDir := filepath.Join(tree.dir, "sub")
 	if err := os.WriteFile(filepath.Join(subDir, "data.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)

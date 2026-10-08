@@ -103,7 +103,7 @@ func TestCount(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":1}`))
+	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":2}`))
 	current, err := runtimeinput.Current(ctx, emptyManifest, dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
@@ -773,7 +773,7 @@ func TestTreeReadsTheRootVouchesFile(t *testing.T) {
 	if got := workspace.DynamicStateVouches(); !slices.Equal(got, []string{"example.com/root.Standing"}) {
 		t.Fatalf("workspace set = %v, want the root's file alone — a member's file is never read", got)
 	}
-	if _, err := workspace.newSubjectEngines(nil, false, 1, 0).engineFor(filepath.Join(root, "tools")); err != nil {
+	if _, err := workspace.newSubjectEngines(nil, false, engine.OracleBounds{Width: 1}, 0).engineFor(filepath.Join(root, "tools")); err != nil {
 		t.Fatalf("the member's engine read the member's own file: %v", err)
 	}
 }

@@ -94,7 +94,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	shadowed := seededFinding("example.com/old2.F")
 	shadowed.TargetEvidence.ObservationProof.Subject.Package = "example.com/old2"
 	shadowed.Dirty, shadowed.Commit = false, "abc"
-	shadowed.TargetEvidence.RuntimeInputs, shadowed.OracleEvidence[0].RuntimeInputs = "eyJ2IjoxfQ", "eyJ2IjoxfQ"
+	shadowed.TargetEvidence.RuntimeInputs, shadowed.OracleEvidence[0].RuntimeInputs = "eyJ2IjoyfQ", "eyJ2IjoyfQ"
 	if _, err := seed.Update(context.Background(), func(prior []gomutant.Finding) ([]gomutant.Finding, error) { return append(prior, shadowed), nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	// while the repo layer alone was touched.
 	committedKilled := seededFinding("example.com/life.H")
 	committedKilled.Dirty, committedKilled.Commit = false, "abc"
-	committedKilled.TargetEvidence.RuntimeInputs, committedKilled.OracleEvidence[0].RuntimeInputs = "eyJ2IjoxfQ", "eyJ2IjoxfQ"
+	committedKilled.TargetEvidence.RuntimeInputs, committedKilled.OracleEvidence[0].RuntimeInputs = "eyJ2IjoyfQ", "eyJ2IjoyfQ"
 	committedKilled.Killed, committedKilled.Mutants, committedKilled.CandidateCount, committedKilled.Generated = 1, 1, 1, 1
 	committedKilled.Kills = []gomutant.Kill{{Position: "p.go:3:3", Operator: "zero return", Killer: "example.com/gone2.TestHelper"}}
 	committedKilled.Operators = []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}
@@ -283,7 +283,7 @@ func TestToolExplainRollsUpSameRootInputs(t *testing.T) {
 	for i := range entries {
 		entries[i] = fmt.Sprintf(`{"k":"abs","p":"/leaked/tmp%d/f","d":"0123456789abcdef0123456789abcdef"}`, i)
 	}
-	manifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":1,"paths":[` + strings.Join(entries, ",") + `]}`))
+	manifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":2,"paths":[` + strings.Join(entries, ",") + `]}`))
 	f := seededFinding("example.com/roll.Value")
 	f.Commit = "abc"
 	f.TargetEvidence.RuntimeInputs = manifest

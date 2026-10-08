@@ -19,7 +19,7 @@ import (
 
 func observedSubjectViews(t *testing.T, tree *Tree, symbols []string) *subjectViewSet {
 	t.Helper()
-	views, err := tree.newStrictObservedViews(context.Background(), symbols, tree.eng.PackageContextContext, tree.newSubjectEngines(nil, false, 0, 0))
+	views, err := tree.newStrictObservedViews(context.Background(), symbols, tree.eng.PackageContextContext, tree.newSubjectEngines(nil, false, engine.OracleBounds{}, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestSubjectViewsBatchByModule(t *testing.T) {
 		"example.com/fixture/lib.TestAdd",
 		"example.com/fixture/methods.Counter.Inc",
 	}
-	views, err := tr.newSubjectViews(context.Background(), symbols, false, 0)
+	views, err := tr.newSubjectViews(context.Background(), symbols, false, engine.OracleBounds{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestSubjectViewsPartitionWorkspaceModules(t *testing.T) {
 		"example.com/ws/sub.Nested",
 		"example.com/ws/sub.TestNested",
 	}
-	views, err := tree.newSubjectViews(context.Background(), symbols, false, 0)
+	views, err := tree.newSubjectViews(context.Background(), symbols, false, engine.OracleBounds{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,6 +442,7 @@ func TestSiblingTestAdditionStalesRecordAsTestVariants(t *testing.T) {
 	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
 		t.Fatal(err)
 	}
+	assertFixturePurity(t, dir, "observed/observed_test.go", "TestObservedInput")
 	tr, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -501,6 +502,7 @@ func TestFresh(t *testing.T) {
 	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
 		t.Fatal(err)
 	}
+	assertFixturePurity(t, dir, "observed/observed_test.go", "TestObservedInput")
 	tr, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -547,8 +549,8 @@ func TestFresh(t *testing.T) {
 	missingProof := f
 	missingProof.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
 	missingProof.OracleEvidence[0].ObservationProof.Evidence = ""
-	if ok, err := tr.Fresh(context.Background(), missingProof, tg, 1); err != nil || ok {
-		t.Fatalf("missing observation proof read fresh: %v %v", ok, err)
+	if ok, err := tr.Fresh(context.Background(), missingProof, tg, 1); err != nil || !ok {
+		t.Fatalf("missing observation proof revoked independent purity: %v %v", ok, err)
 	}
 	oldProof := f
 	oldProof.TargetEvidence.ObservationProof.Strategy = "gofresh/observation-rta@2"
@@ -556,11 +558,11 @@ func TestFresh(t *testing.T) {
 	oldProof.OracleEvidence = append([]SubjectEvidence(nil), f.OracleEvidence...)
 	oldProof.OracleEvidence[0].ObservationProof.Strategy = "gofresh/observation-rta@2"
 	oldProof.OracleEvidence[0].ObservationProof.Evidence = "46056b8e7fea776a3b95b884b1b1c953"
-	if ok, err := tr.Fresh(context.Background(), oldProof, tg, 1); err != nil || ok {
-		t.Fatalf("superseded observation proof read fresh: %v %v", ok, err)
+	if ok, err := tr.Fresh(context.Background(), oldProof, tg, 1); err != nil || !ok {
+		t.Fatalf("unavailable observation proof incorrectly revoked independent purity: %v %v", ok, err)
 	}
 	inspection, err = tr.InspectFinding(context.Background(), oldProof, nil)
-	if err != nil || inspection.State != FindingUnverifiable {
+	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("superseded observation proof inspection = %+v, %v", inspection, err)
 	}
 	var oldProofDecisions []RunDecision
@@ -570,18 +572,13 @@ func TestFresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The superseded oracle proof classifies that oracle moved under the
-	// killer-drift carve-out: with no kills standing, the record's whole
-	// mutant content re-measures — never a cached serve — and the
-	// re-measured record carries only current-tree evidence
-	// (REQ-result-stale's killer-drift carve-out).
-	if len(remeasured) != 1 || remeasured[0].Cached || len(oldProofDecisions) != 1 ||
-		oldProofDecisions[0].Reason != "served: 0 kills stand on unmoved oracles; re-measuring 1 candidate against the current oracle (1 survivor narrowed to the added and moved tests)" ||
-		oldProofDecisions[0].Candidates != 1 {
-		t.Fatalf("superseded observation proof run = %+v, decisions %+v", remeasured, oldProofDecisions)
+	// The directive, not the optional proof, licenses this identity-only
+	// record. Serving must not rewrite history to invent a current proof.
+	if len(remeasured) != 1 || !remeasured[0].Cached || len(oldProofDecisions) != 1 || oldProofDecisions[0].Action != "cached" {
+		t.Fatalf("independent purity did not serve: %+v, decisions %+v", remeasured, oldProofDecisions)
 	}
-	if remeasured[0].TargetEvidence.ObservationProof.Strategy != f.TargetEvidence.ObservationProof.Strategy {
-		t.Fatalf("re-measured record kept a superseded strategy: %+v", remeasured[0].TargetEvidence)
+	if remeasured[0].TargetEvidence.ObservationProof.Strategy != oldProof.TargetEvidence.ObservationProof.Strategy {
+		t.Fatal("serving silently upgraded historical observation evidence")
 	}
 	other := Target{Symbol: "example.com/fixture/lib.Weak"}
 	if _, err := tr.Fresh(context.Background(), f, other, 1); err == nil || !strings.Contains(err.Error(), "checked against") {

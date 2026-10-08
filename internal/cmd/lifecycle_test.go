@@ -58,7 +58,7 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 	committed := func(symbol string) gomutant.Finding {
 		f := record(symbol)
 		f.Dirty, f.Commit = false, "abc"
-		f.TargetEvidence.RuntimeInputs, f.OracleEvidence[0].RuntimeInputs = "eyJ2IjoxfQ", "eyJ2IjoxfQ"
+		f.TargetEvidence.RuntimeInputs, f.OracleEvidence[0].RuntimeInputs = "eyJ2IjoyfQ", "eyJ2IjoyfQ"
 		return f
 	}
 	if _, err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) {

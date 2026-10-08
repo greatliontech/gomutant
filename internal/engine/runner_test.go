@@ -111,12 +111,10 @@ func TestTreeGoCommandsRideTheRunner(t *testing.T) {
 	if !log.saw(packageDir, "env") {
 		t.Fatalf("the ingest's roots probe did not ride the runner:\n%s", &log)
 	}
-	// The roots probe is memoized for one judged run — the bounds carry
-	// the memo: a second observation under the same bounds spawns no
-	// second probe in the package directory, a fresh derivation spawns
-	// one again (REQ-exec-go-command-runner).
+	// Actual processes receive distinct TMPDIR values. Even under one
+	// run-owned memo these are distinct complete environments and each probes.
 	bounds := DeriveOracleBounds(-1, 1)
-	for round, want := range []bool{true, false} {
+	for round, want := range []bool{true, true} {
 		log.dirs = nil
 		if _, _, _, _, state, err := TestProbeObservedEnv(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestPickInput$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, bounds); err != nil || !state.OK {
 			t.Fatalf("observed probe %d under one bounds: ok=%v err=%v", round, state.OK, err)
@@ -131,6 +129,34 @@ func TestTreeGoCommandsRideTheRunner(t *testing.T) {
 	}
 	if !log.saw(packageDir, "env") {
 		t.Fatalf("a fresh bounds reused another run's roots memo:\n%s", &log)
+	}
+	// Finalizing under an identical full environment does reuse its entry.
+	// Changing that environment or the run-owned memo must probe anew.
+	scratch := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "capture.log")
+	if err := os.WriteFile(logPath, []byte("# test log\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	frame := captureOracleFrame(ctx, moduleDir, packageDir, nil)
+	for _, tc := range []struct {
+		name   string
+		env    []string
+		bounds OracleBounds
+		want   bool
+	}{
+		{"first", env, bounds, true},
+		{"same environment", env, bounds, false},
+		{"changed environment", gotool.SetEnv(env, "GOMUTANT_RUNNER_PIN", "changed"), bounds, true},
+		{"fresh memo", env, DeriveOracleBounds(-1, 1), true},
+	} {
+		log.dirs = nil
+		state, reason, err := processObservationContext(ctx, logPath, moduleDir, "", tc.env, scratch, true, frame, nil, tc.bounds)
+		if err != nil || reason != "" || !state.OK {
+			t.Fatalf("%s finalization=%+v %q %v", tc.name, state, reason, err)
+		}
+		if got := log.saw(packageDir, "env"); got != tc.want {
+			t.Fatalf("%s: roots probe=%v, want %v", tc.name, got, tc.want)
+		}
 	}
 	log.dirs = nil
 	if _, err := CoveredPositions(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestAdd$", "example.com/fixture/lib", time.Minute, nil, env, tr.DirectiveCoverage(), OracleBounds{}); err != nil {

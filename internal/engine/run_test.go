@@ -104,6 +104,7 @@ func TestRunMutantObservedReturnsCompletedEvidence(t *testing.T) {
 	if !state.OK || state.Manifest == "" || state.Digest == "" || incomplete != "" {
 		t.Fatalf("observation = %+v, incomplete %q", state, incomplete)
 	}
+	assertIdentityOnly(t, state)
 }
 
 func TestMissingProcessLogIsIncomplete(t *testing.T) {

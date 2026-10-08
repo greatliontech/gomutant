@@ -621,6 +621,10 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
 	defer removeBaseScratch()
+	var baselineFrame runtimeinput.ProducerFrame
+	if capture {
+		baselineFrame = captureOracleFrame(ctx, dir, packageDir, bracketPaths)
+	}
 	base, err := oracleCommand(baseCtx, baseDir, oracleEnv(baseScratchEnv, bounds), baseArgs...)
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
@@ -635,7 +639,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}
 	if baseCtx.Err() != nil {
-		baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process did not complete", env, baseScratchRoot, capture, oracleFrame, namespaces, bounds)
+		baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process did not complete", effectiveBaselineEnv, baseScratchRoot, capture, baselineFrame, namespaces, bounds)
 		if observationErr != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
 		}
@@ -659,7 +663,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		return MutantDiscarded, "", state, diagnostic, "", nil
 	}
 	if baseErr == nil {
-		baselineState, _, err := processObservationContext(ctx, baseTestlog, dir, "", env, baseScratchRoot, capture, oracleFrame, namespaces, bounds)
+		baselineState, _, err := processObservationContext(ctx, baseTestlog, dir, "", effectiveBaselineEnv, baseScratchRoot, capture, baselineFrame, namespaces, bounds)
 		if err != nil {
 			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 		}
@@ -675,7 +679,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	// odd mutant records candidate-locally with its diagnostic and the
 	// campaign continues; an abort is reserved for corrupted
 	// orchestration state (REQ-exec-attribution).
-	baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process failed before observation finalization", env, baseScratchRoot, capture, oracleFrame, namespaces, bounds)
+	baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process failed before observation finalization", effectiveBaselineEnv, baseScratchRoot, capture, baselineFrame, namespaces, bounds)
 	if observationErr != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
 	}
@@ -727,11 +731,7 @@ func captureOracleFrame(ctx context.Context, treeRoot, packageDir string, bracke
 // facade refuses an environment whose PWD does not name the frame's
 // package directory, which ends the silent process-local seal every
 // PWD read got under the parent's inherited PWD. The spawn env's
-// TMPDIR and GOMEMLIMIT additions deliberately stay out of the mirror
-// - the minted scratch value is per-run noise the ephemeral-root
-// declaration covers, and the ceiling's value is a measurement pin
-// that stales findings itself - but the injected GOMAXPROCS is
-// mirrored: the width is neither a pin nor per-run noise, so an
+// TMPDIR and both injected resource settings are mirrored: an
 // oracle that observably reads it must have the value it actually saw
 // recorded as runtime-input evidence - a mirror that hid it would
 // serve stale verdicts to width-sensitive oracles across jobs changes
@@ -745,9 +745,9 @@ func captureOracleFrame(ctx context.Context, treeRoot, packageDir string, bracke
 // nothing.
 func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame, bounds OracleBounds) []string {
 	if frame.PkgDir == "" {
-		return oracleCPUEnv(env, bounds.Width)
+		return OracleEvidenceEnv(env, bounds)
 	}
-	return oracleCPUEnv(gotool.SetEnv(env, "PWD", frame.PkgDir), bounds.Width)
+	return OracleEvidenceEnv(gotool.SetEnv(env, "PWD", frame.PkgDir), bounds)
 }
 
 // oracleBookkeepingPaths are the tree-relative tool-bookkeeping
@@ -836,25 +836,34 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	// ingestion failure), the ingest exclusions (extended below with the
 	// tool-bookkeeping surfaces the frame excludes), and every
 	// classification root but one, resolved from the environment it is
-	// handed. That environment is the spawn environment less two
-	// settings the resolution never reads — the minted TMPDIR (withheld
-	// so the declaration below stands in for it) and the oracle's
-	// GOMEMLIMIT — every other divergence would silently vacate
+	// handed. The environment carries the minted TMPDIR as delivered;
+	// declaring its filesystem root ephemeral does not erase a read of the
+	// environment variable's value.
+	// Resource settings remain verbatim: a logged GOMEMLIMIT read pins the
+	// delivered value even when the memory-budget comparison is directional.
+	// Every other divergence would silently vacate
 	// observation beneath a root the run never used. The minted oracle
 	// scratch root is the one declaration: the tool created it for this
-	// process tree, keeps it out of the environment it ingests, and
+	// process tree and
 	// sweeps it after, so its identity carries no observable state -
 	// without the declaration, testing.TempDir's stat of TMPDIR records
 	// the root as an uncovered
 	// runtime input and seals verifiability for every temp-touching
 	// oracle (REQ-exec-oracle-scratch-declared).
-	ingestEnv := oracleIngestEnv(env, frame, bounds)
-	observation, reason, err := frame.Observe(ctx, path, runtimeinput.ProducerIngest{
+	ingestEnv := oracleIngestEnv(gotool.SetEnv(env, "TMPDIR", scratchRoot), frame, bounds)
+	completion, err := frame.Completion(path, ingestEnv, incompleteReason)
+	if err != nil {
+		return runtimeinput.Observation{}, "", err
+	}
+	// The analyzed source is the unmutated tree. It supplies no outcome
+	// capability for a transformed executable, and a baseline cannot lend one
+	// to a mutant. Finalize input guards without claiming operation outcomes.
+	observation, reason, err := frame.ObserveInputs(ctx, path, runtimeinput.ProducerIngest{
 		Identity:          path,
 		Env:               ingestEnv,
 		Runner:            goRunner,
 		Roots:             bounds.Roots,
-		IncompleteReason:  incompleteReason,
+		Completion:        completion,
 		ScratchRoot:       scratchRoot,
 		ExcludedPaths:     oracleBookkeepingPaths,
 		ScratchNamespaces: namespaces,
@@ -925,7 +934,7 @@ func mergeProcessObservationsContext(ctx context.Context, root string, env []str
 	// would read a width-reading oracle's records as moved and degrade
 	// the union to incomplete - silent evidence loss on exactly the
 	// differential-attribution path (REQ-exec-oracle-parallelism).
-	return mergeRuntimeEvidenceContext(ctx, root, OracleEvidenceEnv(env, bounds.Width), states...)
+	return mergeRuntimeEvidenceContext(ctx, root, OracleEvidenceEnv(env, bounds), states...)
 }
 
 func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
@@ -1129,7 +1138,16 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if err != nil {
 		return probeResult{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
-	state, _, err := processObservationContext(ctx, testlog, dir, "", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
+	completionReason := ""
+	if runErr != nil {
+		completionReason = "baseline test process exited before observation finalization"
+		if testProcessPanicked(stdout.Bytes()) {
+			completionReason = "baseline test process panicked before observation finalization"
+		} else if len(stream.failed) > 0 && testFailureCompleted(stdout.Bytes(), stream.failed[0]) {
+			completionReason = ""
+		}
+	}
+	state, _, err := processObservationContext(ctx, testlog, dir, completionReason, env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 	if err != nil {
 		return probeResult{}, err
 	}
@@ -1294,7 +1312,8 @@ func testProcessPanicked(stream []byte) bool {
 		if dec.Decode(&e) != nil {
 			return false
 		}
-		if strings.HasPrefix(strings.TrimSpace(e.Output), "panic:") {
+		output := strings.TrimSpace(e.Output)
+		if strings.HasPrefix(output, "panic:") || strings.HasPrefix(output, "fatal error:") {
 			return true
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/gitfixture"
 )
 
@@ -38,7 +39,7 @@ func historicalFiles(t *testing.T, s repositoryState, sourceFiles []string) []st
 // subjectViewOf is the tests' single-subject view through the one
 // production constructor.
 func subjectViewOf(tr *Tree, symbol string) (*subjectView, error) {
-	views, err := tr.newSubjectViews(context.Background(), []string{symbol}, false, 0)
+	views, err := tr.newSubjectViews(context.Background(), []string{symbol}, false, engine.OracleBounds{})
 	if err != nil {
 		return nil, err
 	}

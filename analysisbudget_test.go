@@ -215,14 +215,9 @@ func TestAnalysisBudgetCutLandsAnUnavailableProof(t *testing.T) {
 		t.Fatalf("budget-exhausted events = %+v; want the cut reported on the analysis channel", cuts)
 	}
 	mu.Unlock()
-	// The discriminator is the fixture's own shape: its oracle reaches
-	// file I/O, so the record never reads current, but the TARGET's
-	// reuse rests on its proof — proven, the target's evidence stands
-	// (its run's posture names the oracle alone and no stored
-	// observation); cut, the target's reuse is refused on the unproven
-	// I/O dependence and the stored observation names the budget, and
-	// a second run re-measures under that refusal where the proven
-	// record's kills were served.
+	// A static proof alone supplies no transformed-executable outcome support:
+	// both runs refuse I/O-based reuse. The analysis-budget cut additionally
+	// retains its own proof refusal and stored-observation diagnostic.
 	channels := func(p RecordPosture) (target, stored bool) {
 		for _, r := range p.Reasons {
 			target = target || (r.Channel == PostureFreshness && strings.HasPrefix(r.Reason, targetReasonPrefix))
@@ -233,8 +228,8 @@ func TestAnalysisBudgetCutLandsAnUnavailableProof(t *testing.T) {
 	if len(postures) != 2 {
 		t.Fatalf("postures = %+v", postures)
 	}
-	if target, stored := channels(postures[0]); target || stored {
-		t.Fatalf("proven record's posture = %+v; want neither a target refusal nor a stored-observation reason", postures[0])
+	if target, stored := channels(postures[0]); !target || stored {
+		t.Fatalf("proven record's posture = %+v; want unsupported target outcomes without an invented budget refusal", postures[0])
 	}
 	if target, stored := channels(postures[1]); !target || !stored {
 		t.Fatalf("budget-cut record's posture = %+v; want the target's reuse refused and the stored observation naming the budget", postures[1])
@@ -249,8 +244,8 @@ func TestAnalysisBudgetCutLandsAnUnavailableProof(t *testing.T) {
 		}
 		return decisions[0]
 	}
-	if d := second(proven); !strings.HasPrefix(d.Reason, "served:") {
-		t.Fatalf("second run over the proven record = %+v; want its kills served — the discriminating arm for the cut record", d)
+	if d := second(proven); !strings.HasPrefix(d.Reason, "unverifiable:") {
+		t.Fatalf("second run over the proven record = %+v; a baseline proof must not supply mutant outcomes", d)
 	}
 	if d := second(findings); !strings.HasPrefix(d.Reason, "unverifiable:") {
 		t.Fatalf("second run over the budget-cut record = %+v; want a fresh measurement under the refusal, never a serve on an unavailable proof", d)

@@ -31,6 +31,8 @@ func TestRunServesAcrossCheckoutRoots(t *testing.T) {
 		if err := os.CopyFS(root, os.DirFS(fixtureDir)); err != nil {
 			t.Fatal(err)
 		}
+		assertFixturePurity(t, root, "diskread/disk.go", "D")
+		assertFixturePurity(t, root, "diskread/disk_test.go", "TestDiskVerdict")
 	}
 
 	targets := []Target{{Symbol: "example.com/fixture/diskread.D", Oracle: []string{"example.com/fixture/diskread.TestDiskVerdict"}, OracleExplicit: true}}

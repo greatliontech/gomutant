@@ -106,21 +106,28 @@ func TestRunStatesPropertyOraclePrerequisites(t *testing.T) {
 // measured under draws the pinned regime never executes - while a
 // record carrying the current regime serves plainly cached on an
 // unchanged tree (REQ-exec-property-oracles, REQ-result-stale). The
-// plain serve is load-bearing: it requires the rapid oracle subject's
-// observation proof to record Observable, which rests on gofresh's
-// property-harness audit (the observed test-main window, the
-// flag-registration startup audit, and the harness boundary gate) -
-// a regression in any of those demotes this serve to a drift
-// re-measure and fails the exact-reason assertion below.
+// plain serve is load-bearing under an explicit purity override: the regime
+// pin must still refuse a record measured under different draws. Without that
+// override, the original source's proof supplies no transformed-executable
+// outcome support.
 func TestPropertyRegimePinGatesServe(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
-	tr := fixtureTree(t)
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS(fixtureDir)); err != nil {
+		t.Fatal(err)
+	}
+	assertFixturePurity(t, dir, "prop/prop.go", "Add")
+	assertFixturePurity(t, dir, "prop/prop_test.go", "TestPropRapidCheck")
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
-	// The clean prop fixture: its rapid-oracle subject proves
-	// Observable, so the record is born servable - the lib fixture's
-	// ambient kitchen sink would demote this to a drift re-measure.
+	// The regime gate remains load-bearing under an explicit purity override.
+	// Identity-only mutant observations do not acquire outcome support from
+	// the unmutated property's observability proof.
 	targets := []Target{{Symbol: "example.com/fixture/prop.Add", Oracle: []string{"example.com/fixture/prop.TestPropRapidCheck"}}}
 	first, err := tr.Run(ctx, targets, Options{})
 	if err != nil {

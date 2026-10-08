@@ -28,7 +28,7 @@ func TestRunCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	oracle := gomutant.SubjectEvidence{Symbol: "example.com/empty.TestBoundary", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "eyJ2IjoxfQ", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: "example.com/empty.TestBoundary"}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: true, RuntimeReason: "external directory input: escape"}
+	oracle := gomutant.SubjectEvidence{Symbol: "example.com/empty.TestBoundary", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "eyJ2IjoyfQ", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: "example.com/empty.TestBoundary"}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: true, RuntimeReason: "external directory input: escape"}
 	shaped := gomutant.Finding{Symbol: "example.com/empty.Boundary", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Commit: "abc",
 		Shape:          &gomutant.TargetShape{Structural: &gomutant.StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}},
 		OracleEvidence: []gomutant.SubjectEvidence{oracle}}
@@ -43,6 +43,9 @@ func TestRunCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 	seed, err := gomutant.OpenStore(path, dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if layer, reason := seed.Layer(shaped); layer != gomutant.LayerRepo {
+		t.Fatalf("seed layer=%s: %s", layer, reason)
 	}
 	if _, err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{shaped}, nil }); err != nil {
 		t.Fatal(err)
@@ -70,6 +73,11 @@ func TestRunCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "demoted") {
 		t.Fatalf("a re-keyed entry read as withdrawn:\n%s", output.String())
+	}
+	if data, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	} else if records, err := gomutant.ParseFindings(data); err != nil || len(records) != 1 || records[0].Symbol != shaped.Symbol {
+		t.Fatalf("re-key lost the committed record: %+v %v", records, err)
 	}
 	got, err := os.ReadFile(gomutant.ExemptionsPathFor(path))
 	if err != nil {
@@ -111,7 +119,7 @@ func TestAttestCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence := func(name string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: name, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "eyJ2IjoxfQ", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/empty", Symbol: strings.TrimPrefix(name, "example.com/empty.")}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: true, RuntimeReason: "external directory input: escape"}
+		return gomutant.SubjectEvidence{Symbol: name, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "eyJ2IjoyfQ", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/empty", Symbol: strings.TrimPrefix(name, "example.com/empty.")}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: true, RuntimeReason: "external directory input: escape"}
 	}
 	record := gomutant.Finding{Symbol: "example.com/empty.F", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Commit: "abc",
 		CandidateCount: 1, Generated: 1, Mutants: 1,
@@ -121,6 +129,11 @@ func TestAttestCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 	seed, err := gomutant.OpenStore(path, dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The reviewed shared observation must permit repository placement;
+	// a legacy-manifest refusal would make the preservation check vacuous.
+	if layer, reason := seed.Layer(record); layer != gomutant.LayerRepo {
+		t.Fatalf("attestation seed layer=%s: %s", layer, reason)
 	}
 	if _, err := seed.Update(context.Background(), func([]gomutant.Finding) ([]gomutant.Finding, error) { return []gomutant.Finding{record}, nil }); err != nil {
 		t.Fatal(err)
@@ -139,5 +152,10 @@ func TestAttestCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(gomutant.ExemptionsPathFor(path)); strings.Contains(string(got), dir) {
 		t.Fatalf("the attest left the record stale:\n%s", got)
+	}
+	if data, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	} else if records, err := gomutant.ParseFindings(data); err != nil || len(records) != 1 || len(records[0].Attested) != 1 {
+		t.Fatalf("attest lost repository placement or its disposition: %+v %v", records, err)
 	}
 }

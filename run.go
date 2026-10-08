@@ -2122,7 +2122,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// The campaign's one evidence environment, mode-independent (env plus
 	// the run's width; the per-mode engine sets are built after
 	// resolution, when each target's attestation is known).
-	runEnv := engine.OracleEvidenceEnv(t.eng.GoEnv(), opts.bounds.Width)
+	runEnv := engine.OracleEvidenceEnv(t.eng.GoEnv(), opts.bounds)
 	// The pin the run's evidence records and compares.
 	oracleMemoryPin := opts.bounds.MemoryBytes
 	// First match wins; duplicate symbols occur only in hand-edited
@@ -2416,8 +2416,8 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		mv, ok := modes[attested]
 		if !ok {
 			mv = &modeViews{
-				engines:    t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds.Width, opts.AnalysisBudget),
-				views:      &subjectViewSet{bySymbol: map[string]*subjectView{}, width: opts.bounds.Width, packageProcess: attested},
+				engines:    t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds, opts.AnalysisBudget),
+				views:      &subjectViewSet{bySymbol: map[string]*subjectView{}, bounds: opts.bounds, packageProcess: attested},
 				viewFaults: map[string]error{},
 			}
 			modes[attested] = mv

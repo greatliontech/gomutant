@@ -1918,7 +1918,7 @@ func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget
 		return false, err
 	}
 	symbols := append([]string{tg.Symbol}, oracle...)
-	views, err := t.newSubjectViews(ctx, symbols, packageProcessAttestable(t.PackageOf, tg.Symbol, oracle), 0)
+	views, err := t.newSubjectViews(ctx, symbols, packageProcessAttestable(t.PackageOf, tg.Symbol, oracle), engine.OracleBounds{})
 	if err != nil {
 		return false, err
 	}
