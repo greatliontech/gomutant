@@ -15,7 +15,7 @@ import (
 // silently classifying without review (REQ-result-exemptions).
 func TestLoadExemptionsValidation(t *testing.T) {
 	dir := t.TempDir()
-	if got, err := LoadExemptions(filepath.Join(dir, "absent.json")); err != nil || got != nil {
+	if got, _, err := LoadExemptions(filepath.Join(dir, "absent.json"), dir); err != nil || got != nil {
 		t.Fatalf("missing record = %v, %v; want empty", got, err)
 	}
 	for name, content := range map[string]string{
@@ -30,7 +30,7 @@ func TestLoadExemptionsValidation(t *testing.T) {
 			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := LoadExemptions(path); err == nil {
+			if _, _, err := LoadExemptions(path, filepath.Dir(path)); err == nil {
 				t.Fatalf("malformed record accepted: %s", content)
 			}
 		})
@@ -39,7 +39,7 @@ func TestLoadExemptionsValidation(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"version":1,"exemptions":[{"subject":"p.TestX","reason":"r","rationale":"why"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadExemptions(path)
+	got, _, err := LoadExemptions(path, filepath.Dir(path))
 	if err != nil || len(got) != 1 || got[0] != (Exemption{Subject: "p.TestX", Reason: "r", Rationale: "why"}) {
 		t.Fatalf("valid record = %+v, %v", got, err)
 	}
@@ -428,7 +428,7 @@ func TestExemptionRecordRefusesAnAttributedReason(t *testing.T) {
 	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), `attribution " [recently touched: lib/a.go (2026-09-05T10:00:00Z)]" — the attribution is fresh per measurement; name the clause alone`) {
+	if _, _, err := LoadExemptions(path, filepath.Dir(path)); err == nil || !strings.Contains(err.Error(), `attribution " [recently touched: lib/a.go (2026-09-05T10:00:00Z)]" — the attribution is fresh per measurement; name the clause alone`) {
 		t.Fatalf("attributed entry: %v; want the record's refusal naming the attribution", err)
 	}
 	// The classification form's pasted attribution is refused the same
@@ -437,14 +437,14 @@ func TestExemptionRecordRefusesAnAttributedReason(t *testing.T) {
 	if err := os.WriteFile(path, []byte(classified), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), `attribution " — open \"/srv\" in \"/home/u/repo/pkg\""`) {
+	if _, _, err := LoadExemptions(path, filepath.Dir(path)); err == nil || !strings.Contains(err.Error(), `attribution " — open \"/srv\" in \"/home/u/repo/pkg\""`) {
 		t.Fatalf("classification-attributed entry: %v; want the record's refusal naming the attribution", err)
 	}
 	plain := `{"version":1,"exemptions":[{"subject":"example.com/m.TestF","reason":"observation bracket moved: lib","rationale":"reviewed"}]}`
 	if err := os.WriteFile(path, []byte(plain), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadExemptions(path); err != nil {
+	if _, _, err := LoadExemptions(path, filepath.Dir(path)); err != nil {
 		t.Fatalf("the clause alone: %v", err)
 	}
 	// A root name itself carrying a bracketed segment stays in the
@@ -456,7 +456,7 @@ func TestExemptionRecordRefusesAnAttributedReason(t *testing.T) {
 	if err := os.WriteFile(path, []byte(bracketed), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := LoadExemptions(path)
+	entries, _, err := LoadExemptions(path, filepath.Dir(path))
 	if err != nil {
 		t.Fatalf("a root name carrying a bracketed segment: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestExemptionRecordRefusesAnAttributedReason(t *testing.T) {
 	if err := os.WriteFile(path, []byte(sibling), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	entries, err = LoadExemptions(path)
+	entries, _, err = LoadExemptions(path, filepath.Dir(path))
 	if err != nil {
 		t.Fatal(err)
 	}

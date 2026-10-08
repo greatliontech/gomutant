@@ -565,7 +565,21 @@ from the record on every decision, so deleting an entry revokes the
 acceptance for every later classification without a stamp rewrite - never a
 silent global switch. Matching is exact on subject and on the reason's
 clause: an instability drifting even one byte is a different instability
-the record never reviewed. The attribution after a refusal's separator — a
+the record never reviewed. An entry whose clause spells an in-module
+path by this checkout's absolute spelling — the module directory as
+given or resolved; a record authored before Gofresh spelled such
+paths module-relative — is read as the module-relative clause it now
+matches, and the first committing write (run, attest, prune,
+retarget) rewrites the record so under the document lock, re-reading
+a record that moved since the open rather than writing back the copy
+it loaded (a record torn since the open leaves the entries in force
+as they are and is never written over), the re-keyed entries listed
+on both faces (an error exit after the run's final write included); a
+read-only verb rewrites nothing. A
+record authored under another checkout's root spells paths this one
+never had — not derivable, left as it is, a dead acceptance until
+hand-edited (the recorded residual). The attribution after a
+refusal's separator — a
 resolved-target refusal's recorded-path spelling and target (state,
 reproduced by every derivation), or a classification refusal's
 operation, logged name, and directory (diagnostic detail, fresh per
@@ -1178,11 +1192,14 @@ reviewed exemption entries (REQ-result-exemptions) whose subjects the
 prefix pair moves are rewritten with the records — a subject is
 identity, the reason and rationale the reviewed content, which the
 rewrite leaves untouched — and listed in the response; the entries are
-written after the records and never under a check, so a write failing
-between them leaves the records rewritten and the entries as reviewed,
-and a rerun rewrites the entries alone; a reader between the two writes
-sees rewritten records beside the entries as reviewed, and its judgments
-heal at its next read. A rewrite that would give two entries one subject
+written under the document lock ahead of the records, in the one
+record write that carries the re-key the load derived, and never under
+a check, so the record's own failing write refuses the retarget whole
+with nothing rewritten, a record torn since the verb opened it refuses
+the rewrite naming the record, and a write failing after the record's
+— the document's, an overlay edit's — names the record as rewritten
+(the moves it holds, the re-key it carried), since a rerun finds the
+entries already moved. A rewrite that would give two entries one subject
 and reason refuses whole before any write, naming both; an entry's
 rewritten subject need not resolve in the tree. The record's form is
 the contract: version 1, the entries in their order as two-space JSON

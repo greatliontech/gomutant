@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -44,18 +46,41 @@ func ExemptionsPathFor(findingsPath string) string {
 	return filepath.Join(filepath.Dir(findingsPath), "exemptions.json")
 }
 
-// LoadExemptions reads and validates the committed exemption record; a
-// missing file is an empty record. Every entry needs its subject, the
-// exact recorded reason it accepts, and the reviewer's rationale - an
+// RekeyedExemption names one reviewed entry whose clause the load
+// re-keyed from a checkout's absolute spelling of an in-module path to
+// the module-relative spelling Gofresh gives such paths.
+type RekeyedExemption struct {
+	Subject string `json:"subject"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+}
+
+// LoadExemptions reads and validates the committed exemption record
+// beside the document of the module rooted at moduleDir; a missing
+// file is an empty record. Every entry needs its subject, the exact
+// recorded reason it accepts, and the reviewer's rationale - an
 // unreasoned or reason-free acceptance would be the silent global
-// switch the record exists to avoid.
-func LoadExemptions(path string) ([]Exemption, error) {
+// switch the record exists to avoid. An entry whose clause spells an
+// in-module path by this checkout's absolute spelling — a record
+// authored before Gofresh spelled such paths module-relative — is read
+// as the module-relative clause it now matches, and named in the
+// second result so a committing verb persists the re-key
+// (REQ-result-exemptions).
+func LoadExemptions(path, moduleDir string) ([]Exemption, []RekeyedExemption, error) {
+	entries, rekeyed, _, err := loadExemptionsFile(path, moduleDir)
+	return entries, rekeyed, err
+}
+
+// loadExemptionsFile is LoadExemptions returning the file's bytes
+// beside the entries — what a committing write compares the file
+// against under the document lock before persisting the re-key.
+func loadExemptionsFile(path, moduleDir string) ([]Exemption, []RekeyedExemption, []byte, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("gomutant: reading exemption record: %w", err)
+		return nil, nil, nil, fmt.Errorf("gomutant: reading exemption record: %w", err)
 	}
 	// The record's form is the contract: a key the form does not name,
 	// data past the document, or two entries for one subject and reason
@@ -68,33 +93,169 @@ func LoadExemptions(path string) ([]Exemption, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&doc); err != nil {
-		return nil, fmt.Errorf("gomutant: exemption record %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("gomutant: exemption record %s: %w", path, err)
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		if err == nil {
 			err = fmt.Errorf("trailing data")
 		}
-		return nil, fmt.Errorf("gomutant: exemption record %s: %w", path, err)
+		return nil, nil, nil, fmt.Errorf("gomutant: exemption record %s: %w", path, err)
 	}
 	if doc.Version != 1 {
-		return nil, fmt.Errorf("gomutant: exemption record %s: unsupported version %d", path, doc.Version)
+		return nil, nil, nil, fmt.Errorf("gomutant: exemption record %s: unsupported version %d", path, doc.Version)
 	}
+	roots := moduleRootSpellings(moduleDir)
+	var rekeyed []RekeyedExemption
+	rekeyedAt := map[int]string{}
 	seen := map[[2]string]int{}
-	for i, e := range doc.Exemptions {
+	for i := range doc.Exemptions {
+		e := &doc.Exemptions[i]
 		if carriesAttribution(e.Reason) {
-			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d names a reason with its attribution %q — the attribution is fresh per measurement; name the clause alone (a refused path itself spelled like an attribution is matched by the clause before it)", path, i, e.Reason[len(reasonClause(e.Reason)):])
+			return nil, nil, nil, fmt.Errorf("gomutant: exemption record %s: entry %d names a reason with its attribution %q — the attribution is fresh per measurement; name the clause alone (a refused path itself spelled like an attribution is matched by the clause before it)", path, i, e.Reason[len(reasonClause(e.Reason)):])
 		}
 		if e.Subject == "" || e.Reason == "" || e.Rationale == "" {
-			return nil, fmt.Errorf("gomutant: exemption record %s: entry %d needs subject, reason, and rationale", path, i)
+			return nil, nil, nil, fmt.Errorf("gomutant: exemption record %s: entry %d needs subject, reason, and rationale", path, i)
+		}
+		// The re-key precedes the pair check: two entries spelling one
+		// in-module path two ways are one acceptance, named as a pair.
+		if to, ok := rekeyClause(e.Reason, roots); ok {
+			rekeyed = append(rekeyed, RekeyedExemption{Subject: e.Subject, From: e.Reason, To: to})
+			rekeyedAt[i] = e.Reason
+			e.Reason = to
 		}
 		// Judged after the entry's own refusals, so a malformed pair is
-		// named for its own fault before it is named as a pair.
+		// named for its own fault before it is named as a pair — and
+		// after the re-key, naming the spelling the re-key folded.
 		if prior, dup := seen[[2]string{e.Subject, e.Reason}]; dup {
-			return nil, fmt.Errorf("gomutant: exemption record %s: entries %d and %d both accept %s for %q - two acceptances for one subject; delete one", path, prior, i, e.Subject, e.Reason)
+			return nil, nil, nil, fmt.Errorf("gomutant: exemption record %s: entries %d and %d both accept %s for %q%s - two acceptances for one subject; delete one", path, prior, i, e.Subject, e.Reason, rekeyedNote(rekeyedAt, prior, i))
 		}
 		seen[[2]string{e.Subject, e.Reason}] = i
 	}
-	return doc.Exemptions, nil
+	return doc.Exemptions, rekeyed, data, nil
+}
+
+// rekeyedNote names, for a refused pair, the spelling the re-key
+// folded onto the clause — the file shows two strings where the pair
+// refusal names one.
+func rekeyedNote(rekeyedAt map[int]string, prior, i int) string {
+	var parts []string
+	for _, n := range []int{prior, i} {
+		if from, ok := rekeyedAt[n]; ok {
+			parts = append(parts, fmt.Sprintf("entry %d re-keyed from %q", n, from))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, "; ") + ")"
+}
+
+// moduleRootSpellings is every absolute spelling an in-module path
+// could have carried in a clause authored before Gofresh spelled such
+// paths module-relative: THIS checkout's module directory as given,
+// cleaned, and its symlink-resolved form where that differs (the
+// identity's path was the process's own spelling, resolved or not). A
+// record authored under another checkout's root spells paths this one
+// never had — indistinguishable from an out-of-module path, not
+// derivable, left as it is (the recorded residual).
+func moduleRootSpellings(moduleDir string) []string {
+	clean := filepath.Clean(moduleDir)
+	roots := []string{clean}
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil && resolved != clean {
+		roots = append(roots, resolved)
+	}
+	return roots
+}
+
+// coverageEscapeOpen opens the one parenthetical a Gofresh clause
+// carries a second path in: the bracket-coverage refusal names the
+// escaping link after its path.
+const coverageEscapeOpen = " (symlink outside every bracket root: "
+
+// rekeyClause rewrites the in-module paths a clause spells by one of
+// the root spellings to Gofresh's module-relative spelling — by the
+// composers' grammar, never by searching the clause's text: every
+// composer ends its clause with ": " and the path, whole (a member's
+// display/rel spelling and a moved bracket's root included), and the
+// bracket-coverage refusal alone closes with " (symlink outside every
+// bracket root: <path>)" — so the paths are the text after the last
+// ": " of the clause's head and the parenthetical's own. A whole path
+// equal to a root becomes ".", one under a root its slash-relative
+// remainder; any other path — an out-of-module one carrying the root's
+// text inside it, a sibling directory whose name extends the root's —
+// is left as it is. A path carrying ": " itself reads as its tail,
+// never under a root: nothing is rewritten (the fail-safe residual).
+// ok reports a rewrite.
+func rekeyClause(clause string, roots []string) (string, bool) {
+	head, escaped, hasEscape := clause, "", false
+	if strings.HasSuffix(clause, ")") {
+		if i := strings.LastIndex(clause, coverageEscapeOpen); i >= 0 {
+			head, escaped, hasEscape = clause[:i], clause[i+len(coverageEscapeOpen):len(clause)-1], true
+		}
+	}
+	i := strings.LastIndex(head, ": ")
+	if i < 0 {
+		return clause, false
+	}
+	out := head[:i+2] + relativized(head[i+2:], roots)
+	if hasEscape {
+		out += coverageEscapeOpen + relativized(escaped, roots) + ")"
+	}
+	return out, out != clause
+}
+
+// relativized is path under Gofresh's module-relative spelling when it
+// is one of the roots or lies under one, else path itself. A member
+// whose name carries bytes Gofresh quotes (strconv's Go-quoted form,
+// for a non-UTF-8 or control-bearing name) is unquoted, relativized
+// and quoted again.
+func relativized(path string, roots []string) string {
+	if strings.HasPrefix(path, `"`) {
+		if inner, err := strconv.Unquote(path); err == nil {
+			if rel := relativized(inner, roots); rel != inner {
+				return strconv.Quote(rel)
+			}
+			return path
+		}
+	}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if path == root {
+			return "."
+		}
+		if len(path) > len(root) && strings.HasPrefix(path, root) && (path[len(root)] == filepath.Separator || path[len(root)] == '/') {
+			return filepath.ToSlash(path[len(root)+1:])
+		}
+	}
+	return path
+}
+
+// rekeyedExemptionRoster bounds the re-keyed entries a face lists;
+// the count leads and the remainder is counted (REQ-mcp-envelope's
+// row rule on the CLI's side too).
+const rekeyedExemptionRoster = 20
+
+// RekeyedExemptionsLine is the one line both faces print when a
+// committing verb persisted the re-key of the exemption record; empty
+// when nothing was re-keyed (REQ-result-exemptions).
+func RekeyedExemptionsLine(rekeyed []RekeyedExemption) string {
+	n := len(rekeyed)
+	if n == 0 {
+		return ""
+	}
+	shown := rekeyed
+	more := ""
+	if n > rekeyedExemptionRoster {
+		shown = shown[:rekeyedExemptionRoster]
+		more = fmt.Sprintf(" (+%d more)", n-rekeyedExemptionRoster)
+	}
+	moves := make([]string, 0, len(shown))
+	for _, e := range shown {
+		moves = append(moves, fmt.Sprintf("%s %q -> %q", e.Subject, e.From, e.To))
+	}
+	return fmt.Sprintf("re-keyed %d reviewed exemption clause(s) to the module-relative spelling: %s%s", n, strings.Join(moves, ", "), more)
 }
 
 // writeExemptions writes the committed exemption record whole — version
@@ -103,19 +264,20 @@ func LoadExemptions(path string) ([]Exemption, error) {
 // a retarget rewriting the subjects a rename moved leaves the reviewed
 // content as it was, and a torn write never replaces the record
 // (REQ-result-exemptions, REQ-result-lifecycle).
-func writeExemptions(ctx context.Context, path string, exemptions []Exemption) error {
+func writeExemptions(ctx context.Context, path string, exemptions []Exemption) ([]byte, error) {
 	data, err := json.MarshalIndent(exemptionsDocument{Version: 1, Exemptions: exemptions}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("gomutant: encoding exemption record: %w", err)
+		return nil, fmt.Errorf("gomutant: encoding exemption record: %w", err)
 	}
 	mode, err := recordFileMode(path)
 	if err != nil {
-		return fmt.Errorf("gomutant: exemption record %s: %w", path, err)
+		return nil, fmt.Errorf("gomutant: exemption record %s: %w", path, err)
 	}
-	if err := writeRecordFile(ctx, path, append(data, '\n'), mode); err != nil {
-		return fmt.Errorf("gomutant: exemption record %s: %w", path, err)
+	data = append(data, '\n')
+	if err := writeRecordFile(ctx, path, data, mode); err != nil {
+		return nil, fmt.Errorf("gomutant: exemption record %s: %w", path, err)
 	}
-	return nil
+	return data, nil
 }
 
 // exemptionFor returns the entry accepting (subject, reason) exactly,

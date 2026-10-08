@@ -1,6 +1,7 @@
 package gomutant
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -44,6 +45,20 @@ type Store struct {
 	// shares one Store across goroutines, and a library consumer may
 	// not either — a Store is one verb's.
 	exemptions []Exemption
+	// rekeyed names the entries the load re-keyed; rekeyPersisted says
+	// the record on disk carries them — set by the first committing
+	// write (REQ-result-exemptions).
+	rekeyed        []RekeyedExemption
+	rekeyPersisted bool
+	exemptionsRaw  []byte
+	// rekeyReported is every entry a write of this store re-keyed on
+	// disk — the faces' listing, kept apart from the pending
+	// derivation a later refresh replaces (REQ-result-exemptions).
+	rekeyReported []RekeyedExemption
+	// exemptionsTorn says the record on disk was malformed at the last
+	// refresh: the entries in force stand and nothing is persisted over
+	// it (REQ-result-exemptions).
+	exemptionsTorn bool
 
 	// mu guards the stat-keyed overlay parse cache. The overlay's
 	// per-symbol layout makes each entry independently cacheable: a read
@@ -307,11 +322,136 @@ func OpenStore(path, moduleDir string) (*Store, error) {
 	// the live authority for the portable line's exemption clause
 	// (REQ-result-exemptions); a malformed record refuses the store
 	// rather than silently classifying without it.
-	exemptions, err := LoadExemptions(ExemptionsPathFor(path))
+	exemptions, rekeyed, raw, err := loadExemptionsFile(ExemptionsPathFor(path), abs)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{path: path, moduleDir: abs, overlayDir: overlay, exemptions: exemptions, cache: map[string]overlayCacheEntry{}, judged: map[string]judgedRecord{}}, nil
+	return &Store{path: path, moduleDir: abs, overlayDir: overlay, exemptions: exemptions, rekeyed: rekeyed, exemptionsRaw: raw, cache: map[string]overlayCacheEntry{}, judged: map[string]judgedRecord{}}, nil
+}
+
+// RekeyedExemptions names the reviewed entries whose clauses a
+// committing write of this store re-keyed on disk — nil until one did,
+// so a verb reports a rewrite exactly when it happened, and every
+// write's re-key whatever a later refresh derived; a read-only verb
+// judges under the re-keyed entries and writes nothing
+// (REQ-result-exemptions).
+func (s *Store) RekeyedExemptions() []RekeyedExemption {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]RekeyedExemption(nil), s.rekeyReported...)
+}
+
+// refreshExemptions re-reads the exemption record under the document
+// lock, ahead of a committing write's own work: the record may have
+// moved since the open — a reviewer revoking an entry, another verb's
+// retarget — and where its bytes differ from the bytes loaded, the
+// entries in force are re-derived from the file as it stands (the
+// committability memo cleared: a record judged under the old entries
+// is judged afresh). A record torn or malformed since the open carries
+// no decidable entries: the write proceeds under the entries in force
+// — a campaign commits through the store its preparation opened to its
+// end — and nothing is persisted over the torn file; the next verb's
+// open refuses it as every load does. A record written back to
+// identical bytes is indistinguishable from no change; a deleted one
+// re-derives to no entries (REQ-result-exemptions).
+func (s *Store) refreshExemptions() error {
+	s.mu.Lock()
+	loaded := s.exemptionsRaw
+	s.mu.Unlock()
+	path := ExemptionsPathFor(s.path)
+	current, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("gomutant: exemption record %s: %w", path, err)
+	}
+	if bytes.Equal(current, loaded) {
+		s.mu.Lock()
+		s.exemptionsTorn = false
+		s.mu.Unlock()
+		return nil
+	}
+	entries, rekeyed, raw, err := loadExemptionsFile(path, s.moduleDir)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.exemptionsTorn = true
+		return nil
+	}
+	s.exemptions, s.rekeyed, s.exemptionsRaw = entries, rekeyed, raw
+	s.rekeyPersisted = len(rekeyed) == 0
+	s.exemptionsTorn = false
+	s.judged = map[string]judgedRecord{}
+	return nil
+}
+
+// ExemptionRewrite is a record verb's rewrite of the exemption record
+// as a whole: the entries as they should persist and the subject
+// moves it lists, or a refusal (REQ-result-lifecycle).
+type ExemptionRewrite func(entries []Exemption) ([]Exemption, []RewrittenExemption, error)
+
+// exemptionWrite is what a committing write's record write did:
+// the subject moves it listed, whether it wrote at all, and whether the
+// pending re-key rode it. A failure past the record's write names it
+// through failedAfter (REQ-result-lifecycle).
+type exemptionWrite struct {
+	Listed  []RewrittenExemption
+	Written bool
+	Rekeyed bool
+}
+
+// failedAfter wraps a committing write's failure that came after the
+// exemption record was written — the document's write, an overlay
+// edit — naming what the record now holds, since nothing undoes it
+// and a rerun finds the entries already moved; a failure before the
+// record's write, or with no record write, passes through
+// (REQ-result-lifecycle, REQ-result-exemptions).
+func (w exemptionWrite) failedAfter(err error) error {
+	if err == nil || !w.Written {
+		return err
+	}
+	var parts []string
+	if len(w.Listed) > 0 {
+		parts = append(parts, fmt.Sprintf("%d subject(s) moved", len(w.Listed)))
+	}
+	if w.Rekeyed {
+		parts = append(parts, "the re-key persisted")
+	}
+	return fmt.Errorf("the exemption record was rewritten (%s) ahead of the write that failed: %w", strings.Join(parts, "; "), err)
+}
+
+// prepareExemptions is the one write of the exemption record a
+// committing write makes — under the document lock, after the write
+// decided and ahead of the document's own write, so a failure refuses
+// the write with nothing landed: the pending re-key over the entries
+// refreshExemptions left and, for a record verb, its rewrite of the
+// subjects over the same entries, in one write. A record torn since
+// the open refuses a subject rewrite, naming it — nothing is ever
+// written over a torn record — and defers the re-key to a later verb
+// (REQ-result-exemptions, REQ-result-lifecycle).
+func (s *Store) prepareExemptions(ctx context.Context, rewrite ExemptionRewrite) (exemptionWrite, error) {
+	s.mu.Lock()
+	pending := len(s.rekeyed) > 0 && !s.rekeyPersisted
+	torn := s.exemptionsTorn
+	s.mu.Unlock()
+	entries := s.Exemptions()
+	var w exemptionWrite
+	if rewrite != nil {
+		if torn {
+			return w, fmt.Errorf("gomutant: exemption record %s: malformed since this verb opened it — repair it and rerun (nothing was rewritten)", ExemptionsPathFor(s.path))
+		}
+		var err error
+		entries, w.Listed, err = rewrite(entries)
+		if err != nil {
+			return exemptionWrite{}, err
+		}
+	}
+	if torn || (len(w.Listed) == 0 && !pending) {
+		return w, nil
+	}
+	if err := s.rewriteExemptions(ctx, entries); err != nil {
+		return exemptionWrite{}, err
+	}
+	w.Written, w.Rekeyed = true, pending
+	return w, nil
 }
 
 // Exemptions is the exemption record the store opened beside its
@@ -336,11 +476,22 @@ func (s *Store) rewriteExemptions(ctx context.Context, exemptions []Exemption) e
 			return err
 		}
 	}
-	if err := writeExemptions(ctx, ExemptionsPathFor(s.path), exemptions); err != nil {
+	written, err := writeExemptions(ctx, ExemptionsPathFor(s.path), exemptions)
+	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	s.exemptions = append([]Exemption(nil), exemptions...)
+	// Whatever entries a rewrite persists are the re-keyed ones: the
+	// writers compose over Exemptions(), the derived set — and the bytes
+	// written are the bytes the next refresh compares against, so this
+	// store's own write never reads as a move. A pending re-key this
+	// write carried joins the report.
+	s.exemptionsRaw = written
+	if !s.rekeyPersisted {
+		s.rekeyReported = append(s.rekeyReported, s.rekeyed...)
+	}
+	s.rekeyPersisted = true
 	s.mu.Unlock()
 	return nil
 }
@@ -1041,6 +1192,7 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 	var pruned []string
 	committable := map[string]bool{}
 	routing := Routing{}
+	var record exemptionWrite
 	held := map[string]Finding{}
 	forms := map[string]Finding{}
 	if err := updateDocument(ctx, s.path, documentUpdate{parse: s.readDocument, update: func(repoPrior []Finding) ([]Finding, error) {
@@ -1189,8 +1341,12 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			return err
 		}
 		return nil
+	}, before: s.refreshExemptions, prepare: func() error {
+		var err error
+		record, err = s.prepareExemptions(ctx, nil)
+		return err
 	}}); err != nil {
-		return nil, err
+		return nil, record.failedAfter(err)
 	}
 	return routing, nil
 }

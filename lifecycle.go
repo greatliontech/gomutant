@@ -48,6 +48,9 @@ type PruneResult struct {
 	Removed []PrunedRecord
 	Kept    LayerCounts
 	Check   bool
+	// ExemptionsRekeyed names the reviewed exemption entries the write
+	// re-keyed to the module-relative spelling (REQ-result-exemptions).
+	ExemptionsRekeyed []RekeyedExemption
 }
 
 // PruneDetachedContext removes every record whose mutated symbol no
@@ -94,6 +97,7 @@ func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check boo
 	if _, err := store.Revise(ctx, check, decide); err != nil {
 		return PruneResult{}, err
 	}
+	result.ExemptionsRekeyed = store.RekeyedExemptions()
 	return result, nil
 }
 
@@ -149,6 +153,9 @@ type RetargetResult struct {
 	// where nothing is written).
 	Exemptions []RewrittenExemption
 	Check      bool
+	// ExemptionsRekeyed names the reviewed entries the write re-keyed to
+	// the module-relative spelling (REQ-result-exemptions).
+	ExemptionsRekeyed []RekeyedExemption
 }
 
 // retargetSymbol rewrites one symbol identity under the prefix pair;
@@ -389,32 +396,15 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 		i := sort.SearchStrings(declared, symbol)
 		return i < len(declared) && declared[i] == symbol
 	}
-	moved, err := movedExemptionSubjects(store.exemptions, from, to)
+	var result RetargetResult
+	// The entries as they would be rewritten, judged before any write
+	// over the entries loaded (the preview's listing); a committing
+	// retarget derives them again under the lock over the entries in
+	// force — the record re-read there — so a revocation made since the
+	// open is never written back.
+	_, result.Exemptions, err = rewrittenExemptionEntries(store.exemptions, from, to)
 	if err != nil {
 		return RetargetResult{}, err
-	}
-	var result RetargetResult
-	// The entries as they would be rewritten, judged before any write:
-	// two entries meeting on one subject and reason would leave one
-	// acceptance's rationale dead text behind the other — a collision
-	// refused whole, naming both, as a record collision is. The loaded
-	// record carries no such pair (the load refuses it), so a collision
-	// here is one the rewrite makes: a moved entry meeting one the pair
-	// leaves alone.
-	rewrittenEntries := make([]Exemption, 0, len(store.exemptions))
-	seen := map[[2]string]string{}
-	for _, e := range store.exemptions {
-		reviewed := e.Subject
-		if next, ok := moved[e.Subject]; ok {
-			result.Exemptions = append(result.Exemptions, RewrittenExemption{From: e.Subject, To: next})
-			e.Subject = next
-		}
-		key := [2]string{e.Subject, e.Reason}
-		if prior, dup := seen[key]; dup {
-			return RetargetResult{}, fmt.Errorf("retarget: the exemption record would carry %s twice for %q (from %s and %s) - two acceptances for one subject; rewrite or delete one first", e.Subject, e.Reason, prior, reviewed)
-		}
-		seen[key] = reviewed
-		rewrittenEntries = append(rewrittenEntries, e)
 	}
 	result.Check = check
 	decide := func(layer string, f Finding) (Finding, bool, error) {
@@ -441,7 +431,9 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 		}
 		return rewritten, true, nil
 	}
-	revision, err := store.Revise(ctx, check, decide)
+	revision, err := store.ReviseExemptions(ctx, check, decide, func(entries []Exemption) ([]Exemption, []RewrittenExemption, error) {
+		return rewrittenExemptionEntries(entries, from, to)
+	})
 	if err != nil {
 		return RetargetResult{}, fmt.Errorf("retarget: %w", err)
 	}
@@ -453,17 +445,47 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 		r := &result.Rewritten[i]
 		r.Shadowed = r.Layer == LayerRepo && revision.Overlay[r.To]
 	}
-	// The reviewed entries whose subjects the rename moved follow the
-	// records: written after them, never under check; a write failing
-	// between them leaves the records rewritten and the entries as they
-	// were — a rerun rewrites the entries alone, since no record then
-	// carries the old prefix (REQ-result-lifecycle, REQ-result-exemptions).
-	if !check && len(result.Exemptions) > 0 {
-		if err := store.rewriteExemptions(ctx, rewrittenEntries); err != nil {
-			return result, fmt.Errorf("retarget: %d record(s) rewritten; the exemption record's %d moved subject(s) were not — a rerun rewrites them alone: %w", len(result.Rewritten)+result.Touched.Total(), len(result.Exemptions), err)
-		}
+	// The reviewed entries whose subjects the rename moved were written
+	// with the records, under the lock, ahead of them — the revision's
+	// own listing; the preview's listing above is the derivation over
+	// the entries loaded (REQ-result-lifecycle, REQ-result-exemptions).
+	if !check {
+		result.Exemptions = revision.Exemptions
 	}
+	result.ExemptionsRekeyed = store.RekeyedExemptions()
 	return result, nil
+}
+
+// rewrittenExemptionEntries is the exemption record as a retarget
+// rewrites it over entries: every subject the prefix pair moves
+// rewritten, listed; two entries meeting on one subject and reason
+// would leave one acceptance's rationale dead text behind the other —
+// a collision refused whole, naming both, as a record collision is
+// (the loaded record carries no such pair — the load refuses it — so a
+// collision here is one the rewrite makes: a moved entry meeting one
+// the pair leaves alone) (REQ-result-lifecycle, REQ-result-exemptions).
+func rewrittenExemptionEntries(entries []Exemption, from, to string) ([]Exemption, []RewrittenExemption, error) {
+	moved, err := movedExemptionSubjects(entries, from, to)
+	if err != nil {
+		return nil, nil, err
+	}
+	rewritten := make([]Exemption, 0, len(entries))
+	var listed []RewrittenExemption
+	seen := map[[2]string]string{}
+	for _, e := range entries {
+		reviewed := e.Subject
+		if next, ok := moved[e.Subject]; ok {
+			listed = append(listed, RewrittenExemption{From: e.Subject, To: next})
+			e.Subject = next
+		}
+		key := [2]string{e.Subject, e.Reason}
+		if prior, dup := seen[key]; dup {
+			return nil, nil, fmt.Errorf("retarget: the exemption record would carry %s twice for %q (from %s and %s) - two acceptances for one subject; rewrite or delete one first", e.Subject, e.Reason, prior, reviewed)
+		}
+		seen[key] = reviewed
+		rewritten = append(rewritten, e)
+	}
+	return rewritten, listed, nil
 }
 
 // movedExemptionSubjects maps each reviewed exemption subject the

@@ -2211,6 +2211,30 @@ type documentUpdate struct {
 	update func(prior []Finding) ([]Finding, error)
 	export func(next []Finding) ([]byte, error)
 	after  func(written []byte) error
+	// before runs under the document lock ahead of the prior read and
+	// the update: the writer's own record beside the document re-read
+	// as it then stands, a malformed one refusing before anything is
+	// judged or written. prepare runs once the update decided, ahead of
+	// the document's write (and of the after-work on the
+	// nothing-to-write arm): the record's write, whose failure refuses
+	// the whole write with nothing landed — never a landed document
+	// reported as a failed commit (REQ-result-exemptions).
+	before  func() error
+	prepare func() error
+}
+
+func (u documentUpdate) runBefore() error {
+	if u.before == nil {
+		return nil
+	}
+	return u.before()
+}
+
+func (u documentUpdate) runPrepare() error {
+	if u.prepare == nil {
+		return nil
+	}
+	return u.prepare()
 }
 
 // updateDocument is UpdateDocument over a documentUpdate.
@@ -2253,6 +2277,9 @@ func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 		return err
 	}
 	defer release()
+	if err := u.runBefore(); err != nil {
+		return err
+	}
 
 	var prior []Finding
 	mode, err := recordFileMode(path)
@@ -2282,10 +2309,16 @@ func updateDocument(ctx context.Context, path string, u documentUpdate) error {
 		// Nothing to write: a record verb whose edits touched no repo
 		// row leaves the document exactly as it stands — a re-emission
 		// would be a change it never reported (REQ-result-lifecycle).
+		if err := u.runPrepare(); err != nil {
+			return err
+		}
 		if u.after != nil {
 			return u.after(nil)
 		}
 		return nil
+	}
+	if err := u.runPrepare(); err != nil {
+		return err
 	}
 	written := append(doc, '\n')
 	if err := writeRecordFile(ctx, path, written, mode); err != nil {

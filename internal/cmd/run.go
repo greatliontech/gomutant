@@ -761,7 +761,7 @@ func renderResidueSheds(o runOptions, rep *runReporter, terminal io.Writer, outc
 // the run says they happened on every path that writes
 // (REQ-mcp-findings-doc).
 func renderDocumentMoves(w io.Writer, outcome gomutant.RunOutcome) {
-	for _, line := range []string{outcome.PromotedText(), outcome.DemotedText()} {
+	for _, line := range []string{outcome.PromotedText(), outcome.DemotedText(), gomutant.RekeyedExemptionsLine(outcome.ExemptionsRekeyed)} {
 		if line != "" {
 			fmt.Fprintln(w, line)
 		}

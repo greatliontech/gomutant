@@ -67,10 +67,25 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
+	// A reviewed entry spelled by this checkout's absolute path (a
+	// record authored before gofresh spelled in-module paths
+	// module-relative): the retarget — the first committing write —
+	// re-keys it with its own subject rewrite and says so; the prune
+	// after it finds nothing stale and says nothing
+	// (REQ-result-exemptions).
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(gomutant.FindingsPathAt(dir, defaultFindings)), []byte(`{"version":1,"exemptions":[{"subject":"example.com/old.TestF","reason":"external directory input: `+dir+`/escape","rationale":"reviewed"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	var retargetOut bytes.Buffer
 	if err := retargetCommand(ctx, retargetOptions{dir: dir, findingsFile: defaultFindings, from: "example.com/old.", to: "example.com/life."}, &retargetOut); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(retargetOut.String(), `re-keyed 1 reviewed exemption clause(s) to the module-relative spelling: example.com/old.TestF "external directory input: `+dir+`/escape" -> "external directory input: escape"`+"\n") {
+		t.Fatalf("retarget output lacks the re-key line: %q", retargetOut.String())
+	}
+	if got, _ := os.ReadFile(gomutant.ExemptionsPathFor(gomutant.FindingsPathAt(dir, defaultFindings))); strings.Contains(string(got), dir) || !strings.Contains(string(got), `"subject": "example.com/life.TestF"`) {
+		t.Fatalf("the retarget left the record stale or unmoved:\n%s", got)
 	}
 	// The dirty record sat in the overlay: the row carries the
 	// machine-local marker (REQ-result-layers).
@@ -93,6 +108,9 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 	}
 	// The dirty record sat in the overlay: the row carries the
 	// machine-local marker (REQ-result-layers).
+	if strings.Contains(pruned.String(), "re-keyed") {
+		t.Fatalf("the prune after the re-key reported one: %q", pruned.String())
+	}
 	if !strings.Contains(pruned.String(), "pruned     example.com/life.Gone  [machine-local]\n") || !strings.Contains(pruned.String(), "pruned     example.com/life.Gone2\n") ||
 		!strings.Contains(pruned.String(), "attested p.go:1:1 zero return  (equivalent by inspection)") {
 		t.Fatalf("prune output lost the disposition echo: %q", pruned.String())

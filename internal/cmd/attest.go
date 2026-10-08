@@ -104,6 +104,9 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	}
 	rep.epilogue(func(w io.Writer) {
 		fmt.Fprintf(w, "attested %s %s; %d open; layer: %s; reuse: %s\n", o.position, o.operator, len(attested.Open()), layerText, posture.Line())
+		if line := gomutant.RekeyedExemptionsLine(store.RekeyedExemptions()); line != "" {
+			fmt.Fprintln(w, line)
+		}
 	})
 	return nil
 }

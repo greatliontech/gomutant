@@ -213,6 +213,10 @@ type RunOutcome struct {
 	// their targets left the code — a persisted document write the face
 	// owns, never buried in an empty success (REQ-mcp-envelope).
 	Dropped int
+	// ExemptionsRekeyed names the reviewed exemption entries this run's
+	// first committing write re-keyed to the module-relative spelling
+	// (REQ-result-exemptions).
+	ExemptionsRekeyed []RekeyedExemption
 }
 
 // Finish is the final merge, run before anything renders so the output
@@ -259,6 +263,7 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 	}
 	outcome.Dropped = dropped
 	outcome.Rendered = l.Rendered(findings)
+	outcome.ExemptionsRekeyed = l.store.RekeyedExemptions()
 	for _, d := range DedupeAttestationSheds(append(append([]AttestationShed(nil), l.commitSheds...), finalSheds...)) {
 		key := mutantKey(d.Symbol, d.Position, d.Operator)
 		if l.reported[key] {
@@ -360,7 +365,7 @@ func (o RunOutcome) PersistedRiding(err error) error {
 		return nil
 	}
 	var parts []string
-	for _, line := range []string{o.DropText(), o.PromotedText(), o.DemotedText()} {
+	for _, line := range []string{o.DropText(), o.PromotedText(), o.DemotedText(), RekeyedExemptionsLine(o.ExemptionsRekeyed)} {
 		if line != "" {
 			parts = append(parts, line)
 		}

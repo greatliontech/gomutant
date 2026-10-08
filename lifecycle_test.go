@@ -824,14 +824,14 @@ func TestRetargetRewritesTheExemptionRecordsSubjects(t *testing.T) {
 	if after, err := os.Stat(store.path); err != nil || !os.SameFile(docBefore, after) {
 		t.Fatalf("the preview rewrote the document: %v", err)
 	}
-	if got, err := LoadExemptions(ExemptionsPathFor(store.path)); err != nil || got[0].Subject != "example.com/old.TestF" {
+	if got, _, err := LoadExemptions(ExemptionsPathFor(store.path), store.moduleDir); err != nil || got[0].Subject != "example.com/old.TestF" {
 		t.Fatalf("the preview rewrote the exemption record: %+v, %v", got, err)
 	}
 	result, err := tree.RetargetContext(ctx, reopened, "example.com/old.", "example.com/life.", false)
 	if err != nil || len(result.Rewritten) != 1 || !reflect.DeepEqual(result.Exemptions, want) {
 		t.Fatalf("retarget = %+v, %v; want the rewrite and the two moved subjects", result, err)
 	}
-	got, err := LoadExemptions(ExemptionsPathFor(store.path))
+	got, _, err := LoadExemptions(ExemptionsPathFor(store.path), store.moduleDir)
 	if err != nil || len(got) != 3 || got[0] != (Exemption{Subject: "example.com/life.TestF", Reason: "runtime input outside the tree: /tmp/x", Rationale: "reviewed"}) ||
 		got[1].Subject != "example.com/life.TestUnmeasured" || got[2].Subject != "example.com/other.TestG" {
 		t.Fatalf("the exemption record after the rewrite = %+v, %v; want the two moved subjects rewritten in place, the reviewed content and the outside entry as they were", got, err)
@@ -867,11 +867,13 @@ func TestRetargetRewritesTheExemptionRecordsSubjects(t *testing.T) {
 	}
 }
 
-// A write of the exemption record failing after the records were
-// rewritten names the partial and leaves the record as reviewed; a
-// rerun rewrites the entries alone, since no record then carries the
-// old prefix (REQ-result-lifecycle).
-func TestRetargetRecoversAFailedExemptionWrite(t *testing.T) {
+// A failing exemption write refuses the retarget whole: the entries
+// are written under the lock ahead of the records, so nothing is
+// rewritten and a rerun rewrites both; a record torn since the verb
+// opened it refuses the rewrite naming the record, the records
+// untouched and the torn file never written over
+// (REQ-result-lifecycle, REQ-result-exemptions).
+func TestRetargetRefusesWhenTheExemptionWriteFails(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
 	}
@@ -889,23 +891,80 @@ func TestRetargetRecoversAFailedExemptionWrite(t *testing.T) {
 	}
 	refused := errors.New("disk full")
 	reopened.hooks.beforeExemptionWrite = func() error { return refused }
-	result, err := tree.RetargetContext(ctx, reopened, "example.com/old.", "example.com/life.", false)
-	if !errors.Is(err, refused) || !strings.Contains(err.Error(), "1 record(s) rewritten; the exemption record's 1 moved subject(s) were not") || len(result.Rewritten) != 1 {
-		t.Fatalf("failed exemption write = %+v, %v; want the partial named with the records' count", result, err)
+	if _, err := tree.RetargetContext(ctx, reopened, "example.com/old.", "example.com/life.", false); !errors.Is(err, refused) || strings.Contains(err.Error(), "the exemption record was rewritten") {
+		t.Fatalf("failed exemption write = %v; want the refusal naming no record write", err)
 	}
-	if got, _ := LoadExemptions(ExemptionsPathFor(store.path)); len(got) != 1 || got[0].Subject != "example.com/old.TestF" {
+	if got, _, _ := LoadExemptions(ExemptionsPathFor(store.path), store.moduleDir); len(got) != 1 || got[0].Subject != "example.com/old.TestF" {
 		t.Fatalf("the record moved under a refused write: %+v", got)
 	}
-	if after, err := reopened.Load(ctx); err != nil || len(after) != 1 || after[0].Symbol != "example.com/life.F" {
-		t.Fatalf("the records were not rewritten before the refused write: %+v, %v", after, err)
+	if after, err := reopened.Load(ctx); err != nil || len(after) != 1 || after[0].Symbol != "example.com/old.F" {
+		t.Fatalf("the records were rewritten under a refused exemption write: %+v, %v", after, err)
 	}
 	reopened.hooks.beforeExemptionWrite = nil
 	again, err := tree.RetargetContext(ctx, reopened, "example.com/old.", "example.com/life.", false)
-	if err != nil || len(again.Rewritten) != 0 || !reflect.DeepEqual(again.Exemptions, []RewrittenExemption{{From: "example.com/old.TestF", To: "example.com/life.TestF"}}) {
-		t.Fatalf("rerun = %+v, %v; want the entry rewritten alone", again, err)
+	if err != nil || len(again.Rewritten) != 1 || !reflect.DeepEqual(again.Exemptions, []RewrittenExemption{{From: "example.com/old.TestF", To: "example.com/life.TestF"}}) {
+		t.Fatalf("rerun = %+v, %v; want the records and the entry rewritten together", again, err)
 	}
-	if got, _ := LoadExemptions(ExemptionsPathFor(store.path)); len(got) != 1 || got[0].Subject != "example.com/life.TestF" {
+	if got, _, _ := LoadExemptions(ExemptionsPathFor(store.path), store.moduleDir); len(got) != 1 || got[0].Subject != "example.com/life.TestF" {
 		t.Fatalf("the rerun did not rewrite the record: %+v", got)
+	}
+	// A record torn since the open.
+	torn := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	tree2, store2 := lifecycleModule(t, torn)
+	if err := os.WriteFile(ExemptionsPathFor(store2.path), []byte(`{"version":1,"exemptions":[{"subject":"example.com/old.TestF","reason":"r","rationale":"why"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tornStore, err := OpenStore(store2.path, tree2.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ExemptionsPathFor(store2.path), []byte("{ torn"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tree2.RetargetContext(ctx, tornStore, "example.com/old.", "example.com/life.", false); err == nil || !strings.Contains(err.Error(), "malformed since this verb opened it") {
+		t.Fatalf("the retarget over a torn record = %v; want the refusal naming it", err)
+	}
+	if got, _ := os.ReadFile(ExemptionsPathFor(store2.path)); string(got) != "{ torn" {
+		t.Fatalf("the torn record was written over:\n%s", got)
+	}
+	if after, err := tornStore.Load(ctx); err != nil || len(after) != 1 || after[0].Symbol != "example.com/old.F" {
+		t.Fatalf("the records were rewritten under a torn record: %+v, %v", after, err)
+	}
+	// A write failing AFTER the record's own: the overlay edit refused
+	// by a read-only overlay. The record holds the moved subject, the
+	// failure names it, and the rerun rewrites the records alone.
+	if os.Getuid() == 0 {
+		t.Skip("a read-only directory does not refuse root")
+	}
+	late := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	tree3, store3 := lifecycleModule(t, late)
+	shadow := lifecycleRepoFinding("example.com/old.F", "example.com/old")
+	shadow.Dirty, shadow.BodyHash = true, "moved"
+	if _, err := store3.Update(ctx, func([]Finding) ([]Finding, error) { return []Finding{shadow}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ExemptionsPathFor(store3.path), []byte(`{"version":1,"exemptions":[{"subject":"example.com/old.TestF","reason":"r","rationale":"why"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lateStore, err := OpenStore(store3.path, tree3.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(lateStore.overlayDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(lateStore.overlayDir, 0o755) })
+	_, err = tree3.RetargetContext(ctx, lateStore, "example.com/old.", "example.com/life.", false)
+	if err == nil || !strings.Contains(err.Error(), "the exemption record was rewritten (1 subject(s) moved) ahead of the write that failed: ") || !strings.Contains(err.Error(), "machine-local overlay edits landed before") {
+		t.Fatalf("a failure after the record's write = %v; want the record named ahead of the overlay failure", err)
+	}
+	if got, _, _ := LoadExemptions(ExemptionsPathFor(store3.path), store3.moduleDir); len(got) != 1 || got[0].Subject != "example.com/life.TestF" {
+		t.Fatalf("the record after the failed overlay edit = %+v; want the moved subject it holds", got)
+	}
+	os.Chmod(lateStore.overlayDir, 0o755)
+	again, err = tree3.RetargetContext(ctx, lateStore, "example.com/old.", "example.com/life.", false)
+	if err != nil || len(again.Rewritten) != 1 || again.Rewritten[0].Layer != LayerLocal || len(again.Exemptions) != 0 {
+		t.Fatalf("the rerun = %+v, %v; want the overlay record rewritten alone (the document landed before the failure) and no entry moved", again, err)
 	}
 }
 
@@ -942,7 +1001,7 @@ func TestRetargetRefusesAnExemptionCollision(t *testing.T) {
 	if after, err := os.Stat(store.path); err != nil || !os.SameFile(docBefore, after) {
 		t.Fatalf("a refused retarget rewrote the document: %v", err)
 	}
-	if got, _ := LoadExemptions(ExemptionsPathFor(store.path)); len(got) != 2 || got[0].Subject != "example.com/old.TestF" {
+	if got, _, _ := LoadExemptions(ExemptionsPathFor(store.path), store.moduleDir); len(got) != 2 || got[0].Subject != "example.com/old.TestF" {
 		t.Fatalf("a refused retarget rewrote the exemption record: %+v", got)
 	}
 }
@@ -955,13 +1014,13 @@ func TestLoadExemptionsRefusesAnUnknownKey(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"version":1,"exemptions":[{"subject":"a.T","reason":"r","rationale":"why","ticket":"X-1"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), "ticket") {
+	if _, _, err := LoadExemptions(path, filepath.Dir(path)); err == nil || !strings.Contains(err.Error(), "ticket") {
 		t.Fatalf("an unknown key loaded: %v", err)
 	}
 	if err := os.WriteFile(path, []byte(`{"version":1,"$schema":"x","exemptions":[]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), "$schema") {
+	if _, _, err := LoadExemptions(path, filepath.Dir(path)); err == nil || !strings.Contains(err.Error(), "$schema") {
 		t.Fatalf("an unknown top-level key loaded: %v", err)
 	}
 }
@@ -979,14 +1038,14 @@ func TestLoadExemptionsRefusesTrailingDataAndADuplicatedAcceptance(t *testing.T)
 		if err := os.WriteFile(path, []byte(trailing), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := LoadExemptions(path); err == nil {
+		if got, _, err := LoadExemptions(path, filepath.Dir(path)); err == nil {
 			t.Fatalf("trailing data loaded as %+v from %q", got, trailing)
 		}
 	}
 	if err := os.WriteFile(path, []byte(`{"version":1,"exemptions":[{"subject":"a.T","reason":"r","rationale":"first"},{"subject":"a.U","reason":"r","rationale":"other"},{"subject":"a.T","reason":"r","rationale":"second"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), `entries 0 and 2 both accept a.T for "r"`) {
+	if _, _, err := LoadExemptions(path, filepath.Dir(path)); err == nil || !strings.Contains(err.Error(), `entries 0 and 2 both accept a.T for "r"`) {
 		t.Fatalf("a duplicated acceptance loaded: %v", err)
 	}
 	// A shared subject under another reason, or a shared reason under
@@ -998,7 +1057,7 @@ func TestLoadExemptionsRefusesTrailingDataAndADuplicatedAcceptance(t *testing.T)
 		if err := os.WriteFile(path, []byte(record), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := LoadExemptions(path); err != nil || len(got) != 2 {
+		if got, _, err := LoadExemptions(path, filepath.Dir(path)); err != nil || len(got) != 2 {
 			t.Fatalf("two acceptances of two things refused: %+v, %v", got, err)
 		}
 	}
@@ -1006,7 +1065,7 @@ func TestLoadExemptionsRefusesTrailingDataAndADuplicatedAcceptance(t *testing.T)
 	if err := os.WriteFile(path, []byte(`{"version":1,"exemptions":[{},{}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadExemptions(path); err == nil || !strings.Contains(err.Error(), "entry 0 needs subject, reason, and rationale") {
+	if _, _, err := LoadExemptions(path, filepath.Dir(path)); err == nil || !strings.Contains(err.Error(), "entry 0 needs subject, reason, and rationale") {
 		t.Fatalf("an empty pair was named as a pair: %v", err)
 	}
 }

@@ -64,12 +64,30 @@ func TestToolPruneAndRetarget(t *testing.T) {
 	}
 	// A reviewed entry the rename moves is rewritten with the records and
 	// rides the response.
-	if err := os.WriteFile(gomutant.ExemptionsPathFor(filepath.Join(dir, gomutant.DefaultFindingsPath)), []byte(`{"version":1,"exemptions":[{"subject":"example.com/old.TestUnmeasured","reason":"r","rationale":"why"}]}`), 0o644); err != nil {
+	// The entry spells its clause by this checkout's absolute path (a
+	// record authored before gofresh spelled in-module paths
+	// module-relative): a preview reports no re-key and leaves the file;
+	// the committing retarget re-keys it with its subject rewrite and
+	// lists it (REQ-result-exemptions).
+	stale := `{"version":1,"exemptions":[{"subject":"example.com/old.TestUnmeasured","reason":"external directory input: ` + dir + `/escape","rationale":"why"}]}`
+	if err := os.WriteFile(gomutant.ExemptionsPathFor(filepath.Join(dir, gomutant.DefaultFindingsPath)), []byte(stale), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if _, previewed, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old.", To: "example.com/life.", Check: true}); err != nil || previewed.ExemptionsRekeyed != nil {
+		t.Fatalf("the preview reported a re-key: %+v, %v", previewed.ExemptionsRekeyed, err)
+	}
+	if got, _ := os.ReadFile(gomutant.ExemptionsPathFor(filepath.Join(dir, gomutant.DefaultFindingsPath))); string(got) != stale {
+		t.Fatalf("the preview rewrote the record:\n%s", got)
 	}
 	_, rOut, err := s.toolRetarget(ctx, nil, retargetIn{From: "example.com/old.", To: "example.com/life."})
 	if err != nil || len(rOut.Rewritten) != 1 || rOut.Rewritten[0].To != "example.com/life.F" || rOut.Rewritten[0].Layer != gomutant.LayerLocal || rOut.RewrittenCounts != (layerCountsOut{Local: 1}) || !reflect.DeepEqual(rOut.Exemptions, []rewrittenExemptionOut{{From: "example.com/old.TestUnmeasured", To: "example.com/life.TestUnmeasured"}}) {
 		t.Fatalf("retarget = %+v, %v", rOut, err)
+	}
+	if !reflect.DeepEqual(rOut.ExemptionsRekeyed, []gomutant.RekeyedExemption{{Subject: "example.com/old.TestUnmeasured", From: "external directory input: " + dir + "/escape", To: "external directory input: escape"}}) || rOut.OmittedExemptionsRekeyed != 0 {
+		t.Fatalf("retarget re-key rows = %+v", rOut.ExemptionsRekeyed)
+	}
+	if got, _ := os.ReadFile(gomutant.ExemptionsPathFor(filepath.Join(dir, gomutant.DefaultFindingsPath))); strings.Contains(string(got), dir) || !strings.Contains(string(got), `"subject": "example.com/life.TestUnmeasured"`) {
+		t.Fatalf("the retarget left the record stale or unmoved:\n%s", got)
 	}
 	// The shadow statement on the wire: a committed row renamed onto a
 	// symbol the overlay holds.
@@ -217,6 +235,9 @@ func TestToolLifecycleEchoBounds(t *testing.T) {
 	}
 
 	_, pOut, err := s.toolPrune(ctx, nil, pruneIn{})
+	if pOut.ExemptionsRekeyed != nil {
+		t.Fatalf("the prune after the re-key reported one: %+v", pOut.ExemptionsRekeyed)
+	}
 	if err != nil || len(pOut.Removed) != 60 || pOut.Kept.Repo+pOut.Kept.Local != 60 {
 		t.Fatalf("prune echo = %d rows, kept %d, %v; want every removal echoed, uncapped", len(pOut.Removed), pOut.Kept.Repo+pOut.Kept.Local, err)
 	}

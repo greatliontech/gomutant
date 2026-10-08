@@ -868,6 +868,8 @@ type runOut struct {
 	LegacyOverlays            []gomutant.LegacyEntry      `json:"legacyOverlays,omitempty" jsonschema:"machine-local overlay entries preserved unread because their document version predates this binary's range: an older gomutant's records, attested dispositions included, never served and never deleted; capped, the overlay directory holds the full set"`
 	OmittedUnreached          int                         `json:"omittedUnreached,omitempty" jsonschema:"unreached symbols beyond the summary's row cap - counted, never silent; the findings document's coverage-bounds table holds the full roster"`
 	OmittedLegacyOverlays     int                         `json:"omittedLegacyOverlays,omitempty" jsonschema:"legacy overlay rows beyond the response cap - counted, never silent"`
+	ExemptionsRekeyed         []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed from a checkout's absolute spelling of an in-module path to the module-relative spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	OmittedExemptionsRekeyed  int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
 // envelope is the response envelope's one bounding policy
@@ -979,6 +981,7 @@ func (out *runOut) recordOutcome(outcome gomutant.RunOutcome) {
 	out.Promoted = outcome.Promoted
 	out.Demoted = outcome.Demoted
 	out.MachineLocalOnly = outcome.MachineLocal
+	out.ExemptionsRekeyed, out.OmittedExemptionsRekeyed = rekeyedRows(outcome.ExemptionsRekeyed)
 }
 
 func (s *Server) toolRun(ctx context.Context, req *mcp.CallToolRequest, in runIn) (result *mcp.CallToolResult, out runOut, err error) {
@@ -1900,11 +1903,13 @@ type attestedEcho struct {
 }
 
 type attestOut struct {
-	Recorded    *attestedEcho          `json:"recorded,omitempty" jsonschema:"the disposition as recorded, echoed so the write is confirmed, not inferred"`
-	Open        int                    `json:"open" jsonschema:"the symbol's open findings after the disposition"`
-	Layer       string                 `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
-	LayerReason string                 `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
-	Posture     gomutant.RecordPosture `json:"posture" jsonschema:"the record's reuse posture judged once under this call's selection: reusable as it stands or not, each refusing channel named, and what a later judgment needs — a disposition is never reusable evidence by itself"`
+	Recorded                 *attestedEcho               `json:"recorded,omitempty" jsonschema:"the disposition as recorded, echoed so the write is confirmed, not inferred"`
+	Open                     int                         `json:"open" jsonschema:"the symbol's open findings after the disposition"`
+	Layer                    string                      `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
+	LayerReason              string                      `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Posture                  gomutant.RecordPosture      `json:"posture" jsonschema:"the record's reuse posture judged once under this call's selection: reusable as it stands or not, each refusing channel named, and what a later judgment needs — a disposition is never reusable evidence by itself"`
+	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed from a checkout's absolute spelling of an in-module path to the module-relative spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	OmittedExemptionsRekeyed int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
 func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in attestIn) (*mcp.CallToolResult, attestOut, error) {
@@ -1961,6 +1966,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	// warnings - a hard error there would read as a failed write that
 	// in fact landed.
 	out.Layer, out.LayerReason = routing.Of(store, attested)
+	out.ExemptionsRekeyed, out.OmittedExemptionsRekeyed = rekeyedRows(store.RekeyedExemptions())
 	notify := progressNotifier(ctx, req)
 	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
 	if err != nil {
@@ -1987,10 +1993,12 @@ type prunedOut struct {
 }
 
 type pruneOut struct {
-	Removed  []prunedOut    `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
-	Kept     layerCountsOut `json:"kept" jsonschema:"records kept, counted per layer: repo the committed document's rows, local the machine-local overlay's"`
-	Check    bool           `json:"check,omitempty"`
-	Document string         `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	Removed                  []prunedOut                 `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
+	Kept                     layerCountsOut              `json:"kept" jsonschema:"records kept, counted per layer: repo the committed document's rows, local the machine-local overlay's"`
+	Check                    bool                        `json:"check,omitempty"`
+	Document                 string                      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed from a checkout's absolute spelling of an in-module path to the module-relative spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	OmittedExemptionsRekeyed int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
 func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pruneIn) (*mcp.CallToolResult, pruneOut, error) {
@@ -2009,6 +2017,7 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 		return nil, out, err
 	}
 	out.Kept, out.Check = layerCountsRow(result.Kept), result.Check
+	out.ExemptionsRekeyed, out.OmittedExemptionsRekeyed = rekeyedRows(result.ExemptionsRekeyed)
 	// The removal echo is never truncated: for an overlay-resident
 	// record the response is the disposition reasoning's last home, and
 	// a capped check preview would hide part of what a destructive call
@@ -2062,6 +2071,14 @@ type rewrittenExemptionOut struct {
 	To   string `json:"to"`
 }
 
+// rekeyedRows is every committing verb's listing of the exemption
+// entries its write re-keyed — the library's own row, served as it is
+// — capped by the envelope's row rule (REQ-result-exemptions,
+// REQ-mcp-envelope).
+func rekeyedRows(rekeyed []gomutant.RekeyedExemption) ([]gomutant.RekeyedExemption, int) {
+	return capRows(rekeyed)
+}
+
 // prunedRow, rewrittenRow, and touchedRow are the lifecycle records'
 // wire projections — every field copied by name, the projection pin
 // comparing values through them.
@@ -2078,17 +2095,19 @@ func touchedRow(m gomutant.TouchedRewrite) touchedOut {
 }
 
 type retargetOut struct {
-	Rewritten         []rewrittenOut          `json:"rewritten" jsonschema:"records whose mutated symbol changed, each in its own layer"`
-	RewrittenCounts   layerCountsOut          `json:"rewrittenCounts" jsonschema:"records whose own symbol the rename rewrote, counted per layer (repo, local) - the count leads where the rewrites list is capped"`
-	Touched           layerCountsOut          `json:"touched" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface) - counted per layer (repo, local)"`
-	TouchedRewrites   []touchedOut            `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
-	OmittedRewritten  int                     `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
-	OmittedTouched    int                     `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
-	Check             bool                    `json:"check,omitempty"`
-	Document          string                  `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
-	Exemptions        []rewrittenExemptionOut `json:"exemptions,omitempty" jsonschema:"reviewed exemption entries whose subjects the rename moved, rewritten with the records - the reason and rationale untouched; capped at 50"`
-	OmittedExemptions int                     `json:"omittedExemptions,omitempty" jsonschema:"rewritten exemption subjects beyond the response cap - counted, not listed"`
-	Note              string                  `json:"note,omitempty" jsonschema:"set when the rename touched nothing: no record and no reviewed exemption subject moved, and the findings tool lists the recorded symbols"`
+	Rewritten                []rewrittenOut              `json:"rewritten" jsonschema:"records whose mutated symbol changed, each in its own layer"`
+	RewrittenCounts          layerCountsOut              `json:"rewrittenCounts" jsonschema:"records whose own symbol the rename rewrote, counted per layer (repo, local) - the count leads where the rewrites list is capped"`
+	Touched                  layerCountsOut              `json:"touched" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface) - counted per layer (repo, local)"`
+	TouchedRewrites          []touchedOut                `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
+	OmittedRewritten         int                         `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
+	OmittedTouched           int                         `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
+	Check                    bool                        `json:"check,omitempty"`
+	Document                 string                      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	Exemptions               []rewrittenExemptionOut     `json:"exemptions,omitempty" jsonschema:"reviewed exemption entries whose subjects the rename moved, rewritten with the records - the reason and rationale untouched; capped at 50"`
+	OmittedExemptions        int                         `json:"omittedExemptions,omitempty" jsonschema:"rewritten exemption subjects beyond the response cap - counted, not listed"`
+	Note                     string                      `json:"note,omitempty" jsonschema:"set when the rename touched nothing: no record and no reviewed exemption subject moved, and the findings tool lists the recorded symbols"`
+	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed from a checkout's absolute spelling of an in-module path to the module-relative spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	OmittedExemptionsRekeyed int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
 func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
@@ -2122,6 +2141,7 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 		out.Exemptions = append(out.Exemptions, rewrittenExemptionOut{From: e.From, To: e.To})
 	}
 	out.Exemptions, out.OmittedExemptions = capRows(out.Exemptions)
+	out.ExemptionsRekeyed, out.OmittedExemptionsRekeyed = rekeyedRows(result.ExemptionsRekeyed)
 	// A rename that moved nothing is an answer with a next step, not an
 	// empty success: the prefix either mismatches the recorded spelling
 	// or the rewrite already landed (REQ-mcp-envelope).

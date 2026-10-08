@@ -46,6 +46,10 @@ func (e *RecordCollisionError) Error() string {
 // overlay shadows a document row (REQ-result-layers).
 type Revision struct {
 	Overlay map[string]bool
+	// Exemptions lists the subject moves the revision's exemption
+	// rewrite made, written with the record under the lock
+	// (REQ-result-lifecycle).
+	Exemptions []RewrittenExemption
 }
 
 // RecordEdit is a record verb's decision for one stored record: the
@@ -83,7 +87,20 @@ func overlayInstall(f Finding) overlayEdit { return overlayEdit{symbol: f.Symbol
 // way. An overlay failure after the document write names what landed
 // (REQ-result-lifecycle, REQ-result-layers).
 func (s *Store) Revise(ctx context.Context, check bool, edit RecordEdit) (Revision, error) {
+	return s.ReviseExemptions(ctx, check, edit, nil)
+}
+
+// ReviseExemptions is Revise with the record verb's rewrite of the
+// exemption record: applied under the document lock to the entries in
+// force once the edits decided, written with the pending re-key in
+// one write ahead of the records. The record's own failing write, or a
+// collision the rewrite makes, refuses the revision whole with nothing
+// landed; a torn record refuses it naming the record; a failure after
+// the record's write — the document's, an overlay edit's — names the
+// record as rewritten (REQ-result-lifecycle, REQ-result-exemptions).
+func (s *Store) ReviseExemptions(ctx context.Context, check bool, edit RecordEdit, rewrite ExemptionRewrite) (Revision, error) {
 	var (
+		record      exemptionWrite
 		repoChanged bool
 		edits       []overlayEdit
 		rows        []Finding
@@ -190,9 +207,14 @@ func (s *Store) Revise(ctx context.Context, check bool, edit RecordEdit) (Revisi
 			s.mu.Unlock()
 		}
 		return s.applyOverlayEdits(ctx, written != nil, edits)
+	}, before: s.refreshExemptions, prepare: func() error {
+		var err error
+		record, err = s.prepareExemptions(ctx, rewrite)
+		revision.Exemptions = record.Listed
+		return err
 	}})
 	if err != nil {
-		return Revision{}, err
+		return Revision{}, record.failedAfter(err)
 	}
 	return revision, nil
 }

@@ -71,6 +71,9 @@ func renderPrune(w io.Writer, result gomutant.PruneResult) {
 		}
 	}
 	fmt.Fprintf(w, "%s %d record(s), %d kept (%d repo, %d machine-local)\n", verb, len(result.Removed), result.Kept.Total(), result.Kept.Repo, result.Kept.Local)
+	if line := gomutant.RekeyedExemptionsLine(result.ExemptionsRekeyed); line != "" {
+		fmt.Fprintln(w, line)
+	}
 }
 
 // rewrittenExemptionRoster bounds the rewritten exemption subjects a
@@ -163,4 +166,7 @@ func renderRetarget(w io.Writer, result gomutant.RetargetResult) {
 		fmt.Fprintf(w, "%s %d further record(s) whose oracle or killer identities carry the rename (%d repo, %d machine-local)\n", verb, result.Touched.Total(), result.Touched.Repo, result.Touched.Local)
 	}
 	fmt.Fprintf(w, "%s %d record(s) (%d repo, %d machine-local)\n", verb, len(result.Rewritten), result.RewrittenCounts.Repo, result.RewrittenCounts.Local)
+	if line := gomutant.RekeyedExemptionsLine(result.ExemptionsRekeyed); line != "" {
+		fmt.Fprintln(w, line)
+	}
 }
