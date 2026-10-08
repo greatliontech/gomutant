@@ -1,6 +1,10 @@
 package engine
 
-import "runtime"
+import (
+	"runtime"
+
+	"github.com/greatliontech/gofresh/runtimeinput"
+)
 
 // OracleBounds are the resource bounds one run — a campaign or an
 // ephemeral probe — applies to every oracle process tree it spawns:
@@ -11,9 +15,17 @@ import "runtime"
 // campaign and a probe, two probes — each spawn under their own, so a
 // run's baseline and its mutants always share one ceiling and one
 // width (differential attribution's "differ in the overlay alone").
+// Roots is the run's classification-root memo — Gofresh's one memo
+// shape for one judged run (one roots probe per package directory and
+// environment across every observation the run ingests; a cancelled
+// probe never memoized) — minted with the bounds and handed to every
+// ingest with them, so a run pays its probes once and two runs in one
+// process never share an answer; nil (a hand-built bounds) resolves
+// unmemoized (REQ-exec-go-command-runner).
 type OracleBounds struct {
 	MemoryBytes int64
 	Width       int
+	Roots       *runtimeinput.Roots
 }
 
 // DeriveOracleBounds derives a run's bounds from its memory choice and
@@ -24,7 +36,7 @@ type OracleBounds struct {
 // ceiling still applies as GOMEMLIMIT; the derived default needs a
 // readable RAM total, which only the Linux path currently provides.
 func DeriveOracleBounds(memoryBytes int64, jobs int) OracleBounds {
-	b := OracleBounds{Width: oracleParallelismWidth(jobs)}
+	b := OracleBounds{Width: oracleParallelismWidth(jobs), Roots: new(runtimeinput.Roots)}
 	switch {
 	case memoryBytes < 0:
 		b.MemoryBytes = 0

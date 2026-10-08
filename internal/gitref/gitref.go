@@ -1,46 +1,26 @@
 // Package gitref is the changed-surface and ref-content seam both
-// gomutant faces share, via the git binary; the root package's
-// provenance keeps its own git reads (the repository state a record
-// pins), and every other package stays git-free.
+// gomutant faces share, over the one git runner (internal/gitcmd); the
+// root package's provenance, the fixture guard and the fixture package
+// read git through the same runner, and every other package stays
+// git-free.
 package gitref
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"os/exec"
-	"strings"
+
+	"github.com/greatliontech/gomutant/internal/gitcmd"
 )
 
-// Show reads a tree-relative path's content at ref; ok=false when the path
-// did not exist there (a new file reads as all changed). The ./ form
-// resolves against the command's directory, so it stays correct when the
-// tree is not the repo root.
-func Show(dir, ref, path string) ([]byte, bool) {
-	return ShowContext(context.Background(), dir, ref, path)
-}
-
-// ShowContext is Show with caller-owned cancellation.
+// ShowContext reads a tree-relative path's content at ref; ok=false
+// when the path did not exist there (a new file reads as all changed).
+// The ./ form resolves against the command's directory, so it stays
+// correct when the tree is not the repo root.
 func ShowContext(ctx context.Context, dir, ref, path string) ([]byte, bool) {
-	out, err := outputContext(ctx, dir, "show", ref+":./"+path)
+	out, err := gitcmd.Output(ctx, dir, "show", ref+":./"+path)
 	if err != nil {
 		return nil, false
 	}
 	return out, true
-}
-
-func outputContext(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
 }
 
 // ContentAt is the ref's content as the changed-surface discovery

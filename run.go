@@ -3072,9 +3072,16 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// from these views (a shaped target has no target view of its
 		// own, and its probed files ride resolved.shapedFiles).
 		if repository.staged {
-			external, err := t.externalInputs(ctx, repository, targetView, oracleViews, resolved.shapedFiles)
+			external, unlisted, err := t.externalInputs(ctx, repository, targetView, oracleViews, resolved.shapedFiles)
 			if err != nil {
 				return nil, err
+			}
+			if len(unlisted) != 0 {
+				// The historical listing is a provenance input the
+				// snapshot cannot vouch for when it fails: the target
+				// refuses with the failure named (REQ-exec-quiescence).
+				refuseSkipped(i, unlistedRefusal(unlisted, "; measure unstaged"), true)
+				return nil, nil
 			}
 			if len(external) != 0 {
 				refuseSkipped(i, "measured input outside the repository: "+cappedJoin(external, 8)+" - the index snapshot cannot vouch for it; measure unstaged", true)
@@ -5319,10 +5326,20 @@ func (t *Tree) emitOracleGuidance(ctx context.Context, f Finding, w work, symbol
 	return nil
 }
 
+// unlistedRefusal is the one spelling of a staged run's refusal over a
+// failed historical listing — the fact(s), capped, and why the snapshot
+// cannot vouch — with the site's remedy appended (the preparation
+// names the unstaged measure; the stamp has none to offer)
+// (REQ-exec-quiescence, REQ-result-staged).
+func unlistedRefusal(unlisted []string, remedy string) string {
+	return cappedJoin(unlisted, 8) + "; the staged snapshot cannot vouch for the target" + remedy
+}
+
 // provenancePaths assembles the source-file set provenance is computed
 // over: the subject views' source files, their historical package files,
-// module selection, and workspace inputs.
-func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView) ([]string, error) {
+// module selection, and workspace inputs; unlisted names every package
+// directory whose historical listing failed (the stamp's fact).
+func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView) (paths, unlisted []string, err error) {
 	// A shaped target has no target view: provenance spans the oracle
 	// views alone, plus the shape's own probed files via the shape
 	// digest pin (REQ-target-structural).
@@ -5332,20 +5349,20 @@ func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, 
 	}
 	for _, oracleView := range oracleViews {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		sourceFiles = append(sourceFiles, oracleView.sourceFiles...)
 	}
-	historical, err := repository.historicalPackageFilesContext(ctx, sourceFiles)
+	historical, unlisted, err := repository.historicalPackageFilesContext(ctx, sourceFiles)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sourceFiles = append(sourceFiles, historical...)
 	sourceFiles = withModuleSelectionPaths(sourceFiles)
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum")), nil
+	return append(sourceFiles, filepath.Join(t.dir, "go.work"), filepath.Join(t.dir, "go.work.sum")), unlisted, nil
 }
 
 // externalInputs names the target's provenance inputs outside the
@@ -5354,14 +5371,13 @@ func (t *Tree) provenancePaths(ctx context.Context, repository repositoryState, 
 // dirty stamp judges them — so a staged run refuses the target at
 // preparation, before any proof or probe, with the input named
 // instead of a drift headline.
-func (t *Tree) externalInputs(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, shapedFiles []string) ([]string, error) {
-	paths, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
+func (t *Tree) externalInputs(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, shapedFiles []string) (external, unlisted []string, err error) {
+	paths, unlisted, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	paths = append(paths, shapedFiles...)
 	seen := map[string]bool{}
-	var external []string
 	for _, path := range paths {
 		if _, kind := repository.placement(path); kind.outside() && !seen[path] {
 			seen[path] = true
@@ -5369,7 +5385,7 @@ func (t *Tree) externalInputs(ctx context.Context, repository repositoryState, t
 		}
 	}
 	sort.Strings(external)
-	return external, nil
+	return external, unlisted, nil
 }
 
 // stampProvenance records the current tree's provenance on a finding -
@@ -5400,9 +5416,15 @@ func (t *Tree) externalInputs(ctx context.Context, repository repositoryState, t
 // record (REQ-result-staged); non-staged runs always return "".
 func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, targetView *subjectView, oracleViews []*subjectView, shapedFiles []string, f *Finding) (stagedDrift string, err error) {
 	f.StagedTree = repository.stagedTree
-	sourceFiles, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
+	sourceFiles, unlisted, err := t.provenancePaths(ctx, repository, targetView, oracleViews)
 	if err != nil {
 		return "", err
+	}
+	if len(unlisted) != 0 && repository.staged {
+		// A staged run's records never persist dirty: the failed
+		// listing refuses the target with the failure named
+		// (REQ-exec-quiescence, REQ-result-staged).
+		return unlistedRefusal(unlisted, ""), nil
 	}
 	// A shaped finding's probed files are provenance inputs the views
 	// cannot name: the candidates' replacement sources — the edited
@@ -5529,6 +5551,12 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		f.Commit, f.Dirty = "", true
 	} else {
 		f.Commit = commit
+	}
+	if len(unlisted) != 0 {
+		// A failed historical listing is a git failure at the stamp:
+		// the no-commit-provenance posture, target-local
+		// (REQ-exec-quiescence).
+		f.Commit, f.Dirty = "", true
 	}
 	if repository.staged {
 		if moved, merr := repository.snapshotMovedContext(ctx); merr != nil {

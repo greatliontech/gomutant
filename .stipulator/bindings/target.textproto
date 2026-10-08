@@ -630,3 +630,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "1b5cc2ca1c324b99f55fafb1c360d81805c2555e36aa6e6b4a8f7c4343ed6a8c"
 }
+
+bindings {
+  requirement_id: "REQ-target-changed"
+  content_hash: "641c6f5ac69c9d086cbd824305f49f9fdc148e3e11494ec168755fbda9c1c9f5"
+  source_hash: "622a6f7952846d81e7b44d1aef833011c57a00ab6bd99babee6ee95bf681f979"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/gitref.TestChangedPaths"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5a1d2e426ea5fbdad2acc0c33a6fcd945b09c777b634e280f057e18daf437578"
+}

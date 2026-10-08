@@ -6,13 +6,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/greatliontech/gomutant"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/gitcmd"
 )
 
 // ChangedSurfaceContext reads the changed surface against ref in one git
@@ -26,11 +27,11 @@ import (
 // faces cut open survivors by — advisory, never a pin.
 func ChangedSurfaceContext(ctx context.Context, dir, ref string) (gomutant.ChangedSurface, error) {
 	surface := gomutant.ChangedSurface{Ref: ref, Added: map[string][]gomutant.LineRange{}}
-	tracked, err := outputContext(ctx, dir, "-c", "core.quotepath=off", "diff", "--name-only", "--relative", ref)
+	tracked, err := gitcmd.Output(ctx, dir, "-c", "core.quotepath=off", "diff", "--name-only", "--relative", ref)
 	if err != nil {
 		return surface, err
 	}
-	untracked, err := outputContext(ctx, dir, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard")
+	untracked, err := gitcmd.Output(ctx, dir, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard")
 	if err != nil {
 		return surface, err
 	}
@@ -54,7 +55,7 @@ func ChangedSurfaceContext(ctx context.Context, dir, ref string) (gomutant.Chang
 	// not paired: changed-scope discovery reads a renamed file as wholly
 	// new (its path has no content at the ref), so its added lines must
 	// be the whole file too, not the hunks against the old path.
-	diff, err := outputContext(ctx, dir, "-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "--relative", ref)
+	diff, err := gitcmd.Output(ctx, dir, "-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/", "--relative", ref)
 	if err != nil {
 		return surface, err
 	}

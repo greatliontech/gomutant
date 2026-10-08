@@ -24,16 +24,18 @@
 package fixtureguard
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/greatliontech/gomutant/internal/gitcmd"
 )
 
 // Snapshot is a fixture tree's members with the facts a rewrite moves:
@@ -134,10 +136,9 @@ func (s Snapshot) Diff(later Snapshot) []string {
 // — untracked and ignored alike — the residue an earlier run may have
 // left, which a snapshot taken over it would carry on both sides.
 func Untracked(dir string) ([]string, error) {
-	cmd := exec.Command("git", "-C", dir, "status", "--porcelain", "--ignored", "--untracked-files=all", "--", ".")
-	out, err := cmd.CombinedOutput()
+	out, err := gitcmd.Output(context.Background(), dir, "status", "--porcelain", "--ignored", "--untracked-files=all", "--", ".")
 	if err != nil {
-		return nil, fmt.Errorf("git status over %s: %v: %s", dir, err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("git status over %s: %w", dir, err)
 	}
 	var rows []string
 	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {

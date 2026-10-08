@@ -6,28 +6,29 @@
 package gitfixture
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/greatliontech/gomutant/internal/gitcmd"
 )
 
-// Command is git over a fixture repository at dir, hermetic to the
-// developer's own git: the system and global configurations are
-// excluded (GIT_CONFIG_NOSYSTEM, and GIT_CONFIG_GLOBAL at /dev/null —
-// read by git 2.32 and later; an older git would inherit the global
+// Command is git over a fixture repository at dir under the hermetic
+// environment (gitcmd.Hermetic over the process's: the host's
+// configuration scopes, command-scope entries and repository
+// redirection closed — an older git than 2.32 would inherit the global
 // configuration, which the hermetic pin then names), so no hook path,
 // file-system monitor, signing rule, or maintenance setting of the
 // host reaches the repository — a writer the host forks into a
 // temporary tree would race its removal — and the identity and the
 // no-maintenance rule are the repository's own (Init). A fixture
-// repository is built with it alone.
-func Command(dir string, args ...string) *exec.Cmd {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
-	return cmd
+// repository is built with it alone, over the one git runner
+// (internal/gitcmd).
+func Command(dir string, args ...string) (*exec.Cmd, error) {
+	return gitcmd.Prepare(context.Background(), dir, gitcmd.Hermetic(os.Environ()), args...)
 }
 
 // Init initialises a fixture repository at dir: no background
@@ -44,7 +45,11 @@ func Init(dir string) error {
 		{"config", "user.email", "t@example.invalid"},
 		{"config", "user.name", "t"},
 	} {
-		if out, err := Command(dir, args...).CombinedOutput(); err != nil {
+		cmd, err := Command(dir, args...)
+		if err != nil {
+			return fmt.Errorf("git %v: %w", args, err)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git %v: %v: %s", args, err, out)
 		}
 	}
@@ -61,7 +66,11 @@ func Changed(t testing.TB) string {
 	dir := t.TempDir()
 	git := func(args ...string) {
 		t.Helper()
-		if out, err := Command(dir, args...).CombinedOutput(); err != nil {
+		cmd, err := Command(dir, args...)
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}

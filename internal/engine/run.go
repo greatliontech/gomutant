@@ -853,6 +853,7 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 		Identity:          path,
 		Env:               ingestEnv,
 		Runner:            goRunner,
+		Roots:             bounds.Roots,
 		IncompleteReason:  incompleteReason,
 		ScratchRoot:       scratchRoot,
 		ExcludedPaths:     oracleBookkeepingPaths,

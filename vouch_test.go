@@ -465,13 +465,30 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 		t.Fatalf("spawns: campaign %d, probe %d — want both measured", len(campaignSpawns), len(probeSpawns))
 	}
 	for _, b := range campaignSpawns {
-		if b != campaignBounds {
+		if b.MemoryBytes != campaignBounds.MemoryBytes || b.Width != campaignBounds.Width {
 			t.Fatalf("campaign spawned under %+v beside the probe, want its own %+v", b, campaignBounds)
 		}
 	}
 	for _, b := range probeSpawns {
 		if b.MemoryBytes != probeMemory || b.Width != runtime.NumCPU() {
 			t.Fatalf("probe spawned under %+v beside the campaign, want its own ceiling %d at a lone tree's width", b, probeMemory)
+		}
+	}
+	// The roots memo is each judged run's own: every spawn of the
+	// campaign carries the one memo its bounds minted, every spawn of the
+	// probe its own, and the two never share one — two runs in one
+	// process never share a roots answer (REQ-exec-go-command-runner).
+	if campaignSpawns[0].Roots == nil || probeSpawns[0].Roots == nil || campaignSpawns[0].Roots == probeSpawns[0].Roots {
+		t.Fatalf("roots memos: campaign %p, probe %p; want each run's own, never shared", campaignSpawns[0].Roots, probeSpawns[0].Roots)
+	}
+	for _, b := range campaignSpawns {
+		if b.Roots != campaignSpawns[0].Roots {
+			t.Fatalf("the campaign's spawns carry two roots memos: %p and %p", campaignSpawns[0].Roots, b.Roots)
+		}
+	}
+	for _, b := range probeSpawns {
+		if b.Roots != probeSpawns[0].Roots {
+			t.Fatalf("the probe's spawns carry two roots memos: %p and %p", probeSpawns[0].Roots, b.Roots)
 		}
 	}
 }

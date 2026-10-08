@@ -28,7 +28,11 @@ func committedTree(t *testing.T, stamp time.Time, members map[string]string) str
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "fixture"}} {
-		if out, err := gitfixture.Command(dir, args...).CombinedOutput(); err != nil {
+		cmd, err := gitfixture.Command(dir, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
@@ -255,6 +259,26 @@ func TestFixtureRepositoriesAreHermetic(t *testing.T) {
 		}
 		t.Setenv(scope, file)
 	}
+	// The command scope (a wrapping process's exported entries) and the
+	// repository redirection a hook exports: neither reaches the fixture.
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", hooks)
+	foreign := filepath.Join(t.TempDir(), "foreign.git")
+	t.Setenv("GIT_DIR", foreign)
+	t.Setenv("GIT_WORK_TREE", t.TempDir())
+	// GIT_CONFIG redirects every `git config` write; a template
+	// directory seeds every `git init` with its hooks.
+	redirected := filepath.Join(t.TempDir(), "config")
+	t.Setenv("GIT_CONFIG", redirected)
+	templates := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(templates, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templates, "hooks", "post-commit"), []byte("#!/bin/sh\ntouch templated\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_TEMPLATE_DIR", templates)
 	for name, build := range map[string]func() string{
 		"committedTree":      func() string { return committedTree(t, stamp, map[string]string{"lib/keep.go": "package lib\n"}) },
 		"gitfixture.Changed": func() string { return gitfixture.Changed(t) },
@@ -263,8 +287,27 @@ func TestFixtureRepositoriesAreHermetic(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "hooked")); err == nil {
 			t.Fatalf("%s: the host's post-commit hook ran in the fixture", name)
 		}
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+			t.Fatalf("%s: the fixture's own repository is missing — the host's GIT_DIR redirected it: %v", name, err)
+		}
+		if _, err := os.Stat(foreign); err == nil {
+			t.Fatalf("%s: the fixture wrote into the host's GIT_DIR", name)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "templated")); err == nil {
+			t.Fatalf("%s: the host's template hook ran in the fixture", name)
+		}
+		if _, err := os.Stat(redirected); err == nil {
+			t.Fatalf("%s: the fixture's configuration was written to the host's GIT_CONFIG", name)
+		}
+		// The repository's OWN file carries the configuration — read
+		// through the file, never through a `git config` the host
+		// could redirect.
 		for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0", "user.name": "t"} {
-			out, err := gitfixture.Command(dir, "config", "--get", key).Output()
+			cmd, err := gitfixture.Command(dir, "config", "--file", filepath.Join(dir, ".git", "config"), "--get", key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := cmd.Output()
 			if err != nil || strings.TrimSpace(string(out)) != want {
 				t.Fatalf("%s: config %s = %q, %v; want %q", name, key, out, err, want)
 			}

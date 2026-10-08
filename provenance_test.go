@@ -25,7 +25,7 @@ func TestRepositoryContextCancellation(t *testing.T) {
 	if _, _, err := repository.pathsDirtyContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled dirty check = %v", err)
 	}
-	if _, err := repository.historicalPackageFilesContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
+	if _, _, err := repository.historicalPackageFilesContext(ctx, []string{"source.go"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled history check = %v", err)
 	}
 	if _, err := repository.currentCommitContext(ctx); !errors.Is(err, context.Canceled) {

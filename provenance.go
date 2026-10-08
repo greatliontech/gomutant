@@ -5,12 +5,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/greatliontech/gomutant/internal/gitcmd"
 )
 
 func withModuleSelectionPaths(sourceFiles []string) []string {
@@ -53,7 +54,7 @@ type repositoryState struct {
 }
 
 func captureRepositoryStateContext(ctx context.Context, dir string, staged bool) (repositoryState, error) {
-	root, err := gitOutputContext(ctx, dir, "rev-parse", "--show-toplevel")
+	root, err := gitcmd.Output(ctx, dir, "rev-parse", "--show-toplevel")
 	if ctx.Err() != nil {
 		return repositoryState{}, ctx.Err()
 	}
@@ -66,7 +67,7 @@ func captureRepositoryStateContext(ctx context.Context, dir string, staged bool)
 	// The rev-parse is an availability probe: capture commits are read
 	// at stamp time (currentCommitContext), never served from a
 	// run-start snapshot, so only the probe's success is kept.
-	if _, err := gitOutputContext(ctx, dir, "rev-parse", "HEAD"); err != nil {
+	if _, err := gitcmd.Output(ctx, dir, "rev-parse", "HEAD"); err != nil {
 		if ctx.Err() != nil {
 			return repositoryState{}, ctx.Err()
 		}
@@ -86,7 +87,7 @@ func captureRepositoryStateContext(ctx context.Context, dir string, staged bool)
 		// write-tree refuses an unmerged index - exactly the states a
 		// snapshot run cannot pin - and materializes the tree identity
 		// the eventual commit will carry.
-		tree, err := gitOutputContext(ctx, state.root, "write-tree")
+		tree, err := gitcmd.Output(ctx, state.root, "write-tree")
 		if ctx.Err() != nil {
 			return repositoryState{}, ctx.Err()
 		}
@@ -99,13 +100,6 @@ func captureRepositoryStateContext(ctx context.Context, dir string, staged bool)
 	return state, nil
 }
 
-// pathsDirtyContext judges the caller's already-materialized paths:
-// runtime-input paths arrive resolved against their own subject's
-// module directory by the provenance stamp - there is no correct
-// single base to resolve a manifest against here. A dirty judgment
-// names its evidence: every arm that answers true reports the paths
-// (and their divergence class) that decided it, so a refusal built on
-// the judgment can name what differs instead of asserting bare drift.
 // placementKind is the family a provenance path falls in for the
 // repository: in the repository, physically outside it, missing under
 // an ancestor outside it, or of no establishable location.
@@ -207,6 +201,13 @@ func (s repositoryState) firstSymlinkComponent(path string) (string, bool) {
 	return "", false
 }
 
+// pathsDirtyContext judges the caller's already-materialized paths:
+// runtime-input paths arrive resolved against their own subject's
+// module directory by the provenance stamp - there is no correct
+// single base to resolve a manifest against here. A dirty judgment
+// names its evidence: every arm that answers true reports the paths
+// (and their divergence class) that decided it, so a refusal built on
+// the judgment can name what differs instead of asserting bare drift.
 func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []string) (bool, []string, error) {
 	if !s.available {
 		return true, []string{"no repository state available for the dirty judgment"}, nil
@@ -232,7 +233,7 @@ func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []
 	if len(pathspec) == 0 {
 		return false, nil, nil
 	}
-	status, err := gitOutputContext(ctx, s.root, append([]string{"-c", "core.quotepath=off", "status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--"}, pathspec...)...)
+	status, err := gitcmd.Output(ctx, s.root, append([]string{"-c", "core.quotepath=off", "status", "--porcelain", "--untracked-files=all", "--ignored=matching", "--"}, pathspec...)...)
 	if ctx.Err() != nil {
 		return false, nil, ctx.Err()
 	}
@@ -247,7 +248,7 @@ func (s repositoryState) pathsDirtyContext(ctx context.Context, selectedPaths []
 	// sharpens the stake: the staged clean stamp asserts equality with
 	// a named tree). ls-files -v tags: uppercase S is skip-worktree,
 	// any lowercase tag is assume-unchanged.
-	flagged, err := gitOutputContext(ctx, s.root, append([]string{"ls-files", "-v", "--"}, pathspec...)...)
+	flagged, err := gitcmd.Output(ctx, s.root, append([]string{"ls-files", "-v", "--"}, pathspec...)...)
 	if ctx.Err() != nil {
 		return false, nil, ctx.Err()
 	}
@@ -313,21 +314,27 @@ func (s repositoryState) snapshotMovedContext(ctx context.Context) (bool, error)
 	if !s.staged {
 		return false, nil
 	}
-	tree, err := gitOutputContext(ctx, s.root, "write-tree")
+	tree, err := gitcmd.Output(ctx, s.root, "write-tree")
 	if ctx.Err() != nil {
 		return false, ctx.Err()
 	}
 	return err != nil || strings.TrimSpace(string(tree)) != s.stagedTree, nil
 }
 
-func (s repositoryState) historicalPackageFilesContext(ctx context.Context, sourceFiles []string) ([]string, error) {
+// historicalPackageFilesContext lists the files HEAD holds under the
+// source files' package directories — the provenance pathspec's
+// historical members, so a deleted package file is judged. A directory
+// whose listing fails is named in unlisted (the listing's own error),
+// never dropped silently: the stamp resolves that fact target-locally
+// (REQ-exec-quiescence); only a cancellation is an error.
+func (s repositoryState) historicalPackageFilesContext(ctx context.Context, sourceFiles []string) (paths, unlisted []string, err error) {
 	if !s.available {
-		return nil, nil
+		return nil, nil, nil
 	}
 	dirs := map[string]bool{}
 	for _, source := range sourceFiles {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		rel, err := filepath.Rel(s.root, filepath.Dir(source))
 		if err == nil && filepath.IsLocal(rel) {
@@ -335,16 +342,21 @@ func (s repositoryState) historicalPackageFilesContext(ctx context.Context, sour
 		}
 	}
 	seen := map[string]bool{}
-	var paths []string
 	for dir := range dirs {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		listed, err := gitOutputContext(ctx, s.root, "ls-tree", "-rz", "--name-only", "HEAD", "--", dir)
+		listed, err := gitcmd.Output(ctx, s.root, "ls-tree", "-rz", "--name-only", "HEAD", "--", dir)
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 		if err != nil {
+			// A listing that failed says nothing about the files HEAD
+			// holds under dir — dropping them from the pathspec would
+			// stamp a deleted package file clean — so the directory is
+			// named unlisted and the stamp resolves it: dirty, no
+			// commit, machine-local; a staged run refuses the target.
+			unlisted = append(unlisted, fmt.Sprintf("historical package files under %s unlisted: %v", dir, err))
 			continue
 		}
 		for _, raw := range bytes.Split(listed, []byte{0}) {
@@ -362,7 +374,8 @@ func (s repositoryState) historicalPackageFilesContext(ctx context.Context, sour
 			}
 		}
 	}
-	return paths, nil
+	sort.Strings(unlisted)
+	return paths, unlisted, nil
 }
 
 // currentCommitContext reads the commit HEAD names now — the capture
@@ -378,7 +391,7 @@ func (s repositoryState) currentCommitContext(ctx context.Context) (string, erro
 	if !s.available {
 		return "", nil
 	}
-	head, err := gitOutputContext(ctx, s.root, "rev-parse", "HEAD")
+	head, err := gitcmd.Output(ctx, s.root, "rev-parse", "HEAD")
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
@@ -386,12 +399,6 @@ func (s repositoryState) currentCommitContext(ctx context.Context) (string, erro
 		return "", fmt.Errorf("gomutant: commit provenance unavailable at stamp time: %v", err)
 	}
 	return strings.TrimSpace(string(head)), nil
-}
-
-func gitOutputContext(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	return cmd.Output()
 }
 
 // measurementResidue names untracked files that appeared in the
@@ -407,7 +414,7 @@ func measurementResidue(ctx context.Context, s repositoryState, since time.Time,
 	if !s.available {
 		return ""
 	}
-	out, err := gitOutputContext(ctx, s.root, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard")
+	out, err := gitcmd.Output(ctx, s.root, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard")
 	if err != nil {
 		return ""
 	}

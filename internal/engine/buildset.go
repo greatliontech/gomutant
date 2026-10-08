@@ -10,8 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-
-	"github.com/greatliontech/gofresh/gotool"
 )
 
 // buildSet indexes the loaded build once: package import paths and the
@@ -83,18 +81,12 @@ func (t *Tree) LinkedTestPackagesContext(ctx context.Context, testPkg string) (m
 	// The lock is not held across the exec: concurrent probes on one
 	// Tree (the MCP server) derive in parallel, and a racing duplicate
 	// derivation costs one redundant go list, never a wrong set.
-	out, err := goRunner.Run(ctx, t.dir, t.env, "list", "-deps", "-test", "-f", "{{.ImportPath}}", testPkg)
-	if gotool.Salvaged(ctx, err) {
-		// The listing answered and exited; a descendant held the pipe
-		// past the policy's wait delay (a go wrapper's housekeeping
-		// child). The answer serves (REQ-exec-go-command-runner): the
-		// runner hands the output beside this error only when the
-		// process itself succeeded, and a successful listing of a
-		// package names at least that package — an empty answer is not
-		// a state this arm can meet, so no emptiness guard stands
-		// between it and a fail-open empty set.
-		err = nil
-	}
+	// Gofresh's listing form: an answer a descendant held the pipe
+	// past the policy's wait delay for is refused (ErrListingRefused —
+	// a cut listing has no wholeness test), and the refusal is this
+	// derivation's own error below, never a latched nil: a later spawn
+	// without the holder answers (REQ-exec-go-command-runner).
+	out, err := goRunner.List(ctx, t.dir, t.env, "-deps", "-test", "-f", "{{.ImportPath}}", testPkg)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -127,11 +119,12 @@ func (t *Tree) LinkedTestPackagesContext(ctx context.Context, testPkg string) (m
 			t.linkedMu.Unlock()
 			return nil, nil
 		}
-		// A start failure (fork/exec under memory pressure, RLIMIT)
-		// says nothing about the closure — standing down here would
-		// silently re-open the unlinked-false-survivor channel when a
-		// later spawn succeeds, so the derivation failure is the
-		// caller's error.
+		// A start failure (fork/exec under memory pressure, RLIMIT) or
+		// the listing form's refusal (ErrListingRefused — a descendant
+		// held the pipe past the wait delay) says nothing about the
+		// closure — standing down here would silently re-open the
+		// unlinked-false-survivor channel when a later spawn succeeds,
+		// so the derivation failure is the caller's error.
 		return nil, fmt.Errorf("resolving %s's linked dependency set: %w", testPkg, err)
 	}
 	set = map[string]bool{}

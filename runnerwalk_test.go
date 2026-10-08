@@ -14,8 +14,10 @@ import (
 // TestEveryGoCommandRidesTheRunner walks the module's production
 // sources for a go command spawned outside the tree's runner
 // (REQ-exec-go-command-runner): an exec.Command/CommandContext whose
-// program is the literal "go", a gotool.Runner composed or declared
-// anywhere but the runner's own home and the Windows oracle arm (which
+// program is the literal "go", a git command spawned anywhere but
+// the git runner's home (internal/gitcmd), a gotool.Runner composed or
+// declared anywhere but the runner's own home and the Windows oracle
+// arm (which
 // prepares the oracle under the plain policy with the tree's hook and
 // installs the job object over it), or a gofresh engine constructed in
 // a file that never names WithGoRunner. A source walk over the real
@@ -56,8 +58,15 @@ func TestEveryGoCommandRidesTheRunner(t *testing.T) {
 // runnerHomes are the files allowed to compose a gotool.Runner: the
 // runner's declaration and the Windows oracle arm.
 var runnerHomes = map[string]bool{
+	filepath.Join("internal", "gitcmd", "gitcmd.go"):          true,
 	filepath.Join("internal", "engine", "runner.go"):          true,
 	filepath.Join("internal", "engine", "process_windows.go"): true,
+}
+
+// gitHomes is the one file allowed to spawn git: the git runner's home
+// (internal/gitcmd), through which every other git read goes.
+var gitHomes = map[string]bool{
+	filepath.Join("internal", "gitcmd", "gitcmd.go"): true,
 }
 
 // goCommandSpawnsOutsideTheRunner reports each call in src that spawns
@@ -92,8 +101,15 @@ func goCommandSpawnsOutsideTheRunner(path string, src []byte) []string {
 					return true
 				}
 				if len(n.Args) > program {
-					if lit, ok := n.Args[program].(*ast.BasicLit); ok && lit.Kind == token.STRING && lit.Value == `"go"` {
-						report(n.Pos(), "exec."+sel.Sel.Name+`(…, "go", …)`)
+					if lit, ok := n.Args[program].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+						switch lit.Value {
+						case `"go"`:
+							report(n.Pos(), "exec."+sel.Sel.Name+`(…, "go", …)`)
+						case `"git"`:
+							if !gitHomes[path] {
+								report(n.Pos(), "exec."+sel.Sel.Name+`(…, "git", …)`)
+							}
+						}
 					}
 				}
 			}
@@ -148,6 +164,7 @@ func f(ctx context.Context, dir string, env []string) {
 	_ = exec.Command("go", "version")
 	_ = exec.CommandContext(ctx, "go", "env")
 	_ = exec.Command("git", "status")
+	_ = exec.CommandContext(ctx, "git", "status")
 	_ = gotool.Runner{}
 	var plain gotool.Runner
 	_, _ = goRunner.Run(ctx, dir, env, "list")
@@ -157,6 +174,7 @@ func f(ctx context.Context, dir string, env []string) {
 	got := goCommandSpawnsOutsideTheRunner(filepath.Join("internal", "x", "x.go"), src)
 	want := []string{
 		`exec.Command(…, "go", …)`, `exec.CommandContext(…, "go", …)`,
+		`exec.Command(…, "git", …)`, `exec.CommandContext(…, "git", …)`,
 		"gotool.Runner{…}", "var … gotool.Runner",
 		"gofresh.New without WithGoRunner",
 	}

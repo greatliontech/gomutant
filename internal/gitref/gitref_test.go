@@ -68,10 +68,10 @@ func TestChangedPaths(t *testing.T) {
 	}
 
 	// Reference content resolves tree-relative; a new file reads as absent.
-	if b, ok := Show(sub, "HEAD", "tracked.go"); !ok || string(b) != "package svc\n" {
+	if b, ok := ShowContext(context.Background(), sub, "HEAD", "tracked.go"); !ok || string(b) != "package svc\n" {
 		t.Fatalf("gitShow tracked = %q ok=%v", b, ok)
 	}
-	if _, ok := Show(sub, "HEAD", "untracked.go"); ok {
+	if _, ok := ShowContext(context.Background(), sub, "HEAD", "untracked.go"); ok {
 		t.Fatal("a new file read as present at the ref")
 	}
 }

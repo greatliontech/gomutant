@@ -24,9 +24,10 @@ import (
 // Windows oracle alone carries its own containment, the job object
 // (process_windows.go), under the same hook. A command that exited
 // cleanly while a descendant held its pipe past the policy's wait
-// delay answers with what it wrote: the listing serves it
-// (LinkedTestPackagesContext), the toolchain sample serves its first
-// line (gofresh's rule).
+// delay: the toolchain sample serves its first line (gofresh's rule);
+// the linked-set listing refuses it (Runner.List — a cut listing has
+// no wholeness test) as the derivation's own error, never a latched
+// empty set (LinkedTestPackagesContext).
 var goRunner = gotool.Runner{
 	Containment: &gotool.Containment{},
 	Prepare:     observeGoCommand,

@@ -1422,9 +1422,21 @@ is the process group, killed outright on a bound's expiry or a cancellation
 with no quit grace, and the oracle's resource policy (the memory ceiling, the
 group's niceness) is applied over the prepared command after it starts; on
 Windows the oracle's Job Object is gomutant's own containment over the
-policy's prepared command. The linked-set listing and the toolchain sample
-serve the answer a command wrote before exiting cleanly while a descendant
-held its pipe past the policy's wait delay (the listing whole, the sample its
-first line); the environment snapshots and the roots probe read that answer
-through Gofresh's own salvaging forms (the snapshot served whole, the roots
-probe's document parsed whole or refused).
+policy's prepared command. The toolchain sample serves the answer a
+command wrote before exiting cleanly while a descendant held its pipe
+past the policy's wait delay (its first line); the linked-set listing
+refuses that answer through Gofresh's listing form — a cut listing has
+no wholeness test — as the derivation's own error, never a latched
+empty set; the environment snapshots and the roots probe read that
+answer through Gofresh's own salvaging forms (the snapshot served
+whole, the roots probe's document parsed whole or refused). The roots
+probe is memoized for one judged run — one probe per package directory
+and environment across every observation the run ingests, the memo
+minted with the run's oracle bounds and handed to every ingest with
+them. Every git command gomutant spawns — commit provenance and residue
+reads, the changed surface and ref content, the fixture guard's status,
+a repository the fixture package builds — runs through one contained
+runner below the root under the same policy's consumer-command form,
+its stderr carried into the error and a cancellation named as the
+caller's; the test suites' own git helpers are outside this sentence
+and its walk.
