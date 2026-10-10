@@ -53,7 +53,8 @@ func lifecycleFinding(symbol string) Finding {
 		return SubjectEvidence{Symbol: name, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/life", Symbol: strings.TrimPrefix(name, "example.com/life.")}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	return Finding{Symbol: symbol, BodyHash: "body", OperatorSet: engine.OperatorSet, OracleTimeout: "1m0s", Dirty: true,
-		CandidateCount: 1, Generated: 1, Mutants: 1,
+		OracleExecutionPolicy: FullOracleExecutionPolicy,
+		CandidateCount:        1, Generated: 1, Mutants: 1,
 		TargetEvidence: evidence(symbol),
 		OracleEvidence: []SubjectEvidence{evidence("example.com/life.TestF")},
 		Operators:      []OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},

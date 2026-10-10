@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	iofs "io/fs"
 	"os"
 	"path"
@@ -30,20 +29,16 @@ import (
 var findingObservationSequence atomic.Uint64
 
 // runOptions is the run's own view of its options: the caller's
-// Options beside the services Run installs — the schedule-coverage
-// store, the machine-local baseline bank, the derived budget, leash,
+// Options beside the services Run installs — the machine-local
+// baseline bank, the derived budget, leash,
 // and duration resolvers, and the producer-probe gate. Every callee
 // below Run takes this, never a bare Options, so a caller-constructed
 // Options with no services cannot reach the execution machinery and
-// read as "no scheduling, no gating, no bank": nil-service semantics
+// read as "no gating, no bank": nil-service semantics
 // are unrepresentable there — Run is the one constructor. Callbacks
 // stay on Options: they are the caller's surface, locked once.
 type runOptions struct {
 	Options
-	// scheduleStore carries the run's schedule-coverage signal to the
-	// executors (REQ-exec-oracle-run's verdict-preserving schedule);
-	// nil disables scheduling (ephemeral probes).
-	scheduleStore *scheduleStore
 	// baselineBank is the run's machine-local measurement bank
 	// (REQ-result-baseline-bank); nil disables banking.
 	baselineBank *baselineBank
@@ -61,24 +56,13 @@ type runOptions struct {
 	// derive mode, the explicit timeout otherwise; nil before the run
 	// installs it (advisoryLeash falls back to OracleTimeout).
 	groupLeash func(g group) time.Duration
-	// probeGate is the run's producer-probe gate: the phase-baseline
-	// vouch holds it shared exactly like every other producer-side
-	// oracle probe, so it never shares a window with a serial
+	// probeGate is the run's producer-probe gate: producer-side
+	// oracle probes hold it shared so they never share a window with a serial
 	// confirmation's scored run (REQ-exec-attribution).
 	probeGate *sync.RWMutex
 	// bounds are the run's oracle resource bounds, derived once at
 	// Run's entry and applied to every oracle spawn.
 	bounds engine.OracleBounds
-}
-
-// unscheduled is the run's options with the schedule withheld: the
-// serial re-scores (the confirmation's fallback, the audit's full run)
-// execute the candidate's whole oracle scope, because a scheduled
-// corrector would reproduce the very narrowing it exists to re-examine
-// (REQ-exec-attribution, REQ-exec-oracle-run).
-func (o runOptions) unscheduled() runOptions {
-	o.scheduleStore = nil
-	return o
 }
 
 // advisoryLeash is the bound an advisory probe of g runs under
@@ -288,7 +272,7 @@ type Options struct {
 	// (REQ-result-run-posture). Nil asks for no posture.
 	Posture func(RecordPosture)
 	// Tallies receives what the run counted about itself — the banked
-	// state and the audit rate — on every exit once measurement began
+	// state and retained historical audit fields — on every exit once measurement began
 	// (the first execution event, the first window's dispatch) and on
 	// every completed or drifted run; a run cancelled before that calls
 	// it never (REQ-exec-banked-summary).
@@ -395,12 +379,8 @@ type Options struct {
 	// executedScope observes each mutant execution's oracle scope
 	// (per-group -run patterns), keyed by candidate identity (position,
 	// operator) — emitted by the executor off the same work value whose
-	// groups the execution derives from. The scope is
-	// SCHEDULE-INVARIANT: an execution schedule partitions a group's
-	// pattern into phases of the same test set (the partition property
-	// the schedule tests pin), and the scope speaks the oracle's
-	// canonical per-package patterns, never the phase split. Unordered
-	// (workers race); pins the survivor narrowing.
+	// groups execute verbatim. Unordered (workers race); pins the scope
+	// selected by the historical-composition gate.
 	executedScope func(position, operator string, oracleScope []string)
 	// confirmScoped observes each serial confirmation's candidate group
 	// scope the same way, emitted at the confirmation executor's own
@@ -481,26 +461,18 @@ type ExecutionEvent struct {
 	// being corroboration.
 	FlipPosition string `json:"flipPosition,omitempty"`
 	FlipKiller   string `json:"flipKiller,omitempty"`
-	// AuditedNarrowed/AuditDisagreed report the narrowed-survivor
-	// audit on its summary event (Phase "audit"): how many narrowed
-	// survivors the window's deterministic sample re-scored under the
-	// full unsplit oracle, and how many disagreed — each disagreement
-	// is a FALSE SURVIVOR re-scored from the full run (the authority)
-	// and additionally reported as its own audit-flip event carrying
-	// FlipPosition/FlipKiller (REQ-exec-oracle-run's narrowed-survivor
-	// clause).
+	// AuditedNarrowed/AuditDisagreed describe historical audit events.
+	// Complete-oracle execution emits neither audit nor audit-flip.
 	AuditedNarrowed int `json:"auditedNarrowed,omitempty"`
 	AuditDisagreed  int `json:"auditDisagreed,omitempty"`
-	// The estimate event (Phase "estimate", one per window after its
-	// coverage probes, before dispatch) carries the window cost
-	// model: EstimateProjected is the priced PROJECTION of scheduled
+	// The estimate event (Phase "estimate", one per window before
+	// dispatch) carries the window cost model: EstimateProjected is the
+	// priced PROJECTION of complete-group
 	// oracle time at measured-baseline pace (absent when nothing
 	// priced) — a pace anchor, not a bound in either direction: a
 	// timing-out candidate costs up to its derived budget, and
 	// confirmations, bucket probes, and build overlay are excluded —
-	// EstimateAudit the narrowed-survivor audit's price (its count
-	// is capped, its per-run cost is the same baseline-pace
-	// projection), and the three counts classify the executing
+	// and EstimateFull/EstimateUnknown classify the executing
 	// candidates — unpriced candidates are NEVER folded into the
 	// projection, they are counted (REQ-exec-run-status's estimate
 	// class). Phase "tick" events carry per-candidate completion:
@@ -509,27 +481,20 @@ type ExecutionEvent struct {
 	// pace ground for estimated-remaining, advisory like every
 	// execution-phase event.
 	EstimateProjected string `json:"estimateProjected,omitempty"`
-	EstimateAudit     string `json:"estimateAudit,omitempty"`
-	EstimateNarrowed  int    `json:"estimateNarrowed,omitempty"`
-	EstimateFull      int    `json:"estimateFull,omitempty"`
-	EstimateUnknown   int    `json:"estimateUnknown,omitempty"`
-	// EstimateNoSignal names, on the estimate event, every oracle
-	// group of the window carrying no schedule signal with the reason
-	// it carries none — "<oracle package>: <reason>" (a failed probe
-	// batch by position, too few tests, too few executing candidates
-	// for the target, a shaped target's explicit oracle, an unvouched
-	// covering-phase kill), bounded with the remainder counted — so a
-	// whole-group count is never unexplained (REQ-exec-run-status).
+	// EstimateAudit and EstimateNarrowed are historical event fields;
+	// fresh estimates leave them zero.
+	EstimateAudit    string `json:"estimateAudit,omitempty"`
+	EstimateNarrowed int    `json:"estimateNarrowed,omitempty"`
+	EstimateFull     int    `json:"estimateFull,omitempty"`
+	EstimateUnknown  int    `json:"estimateUnknown,omitempty"`
+	// EstimateNoSignal is the historical scheduling-reason roster.
+	// Complete-oracle estimates have no coverage-scheduling signal.
 	EstimateNoSignal []string `json:"estimateNoSignal,omitempty"`
-	// ProbesDone/ProbesTotal ride the `probing` phase: the window's
-	// coverage-probe batches paid so far and in all, announced with the
-	// projected cost before the first batch and ticked per batch
-	// (REQ-exec-run-status).
+	// ProbesDone/ProbesTotal are historical scheduling-probe counts.
+	// Fresh runs pay only the separate full-pattern advisory coverage.
 	ProbesDone  int `json:"probesDone,omitempty"`
 	ProbesTotal int `json:"probesTotal,omitempty"`
-	// ProbesUnpriced counts the announced batches of groups without a
-	// measured baseline — outside EstimateProjected, which on the
-	// probing phase is an upper bound at the groups' whole baselines.
+	// ProbesUnpriced is the historical unpriced scheduling-batch count.
 	ProbesUnpriced int `json:"probesUnpriced,omitempty"`
 }
 
@@ -802,9 +767,8 @@ type RunSummary struct {
 	Reusable           int             `json:"reusable"`
 	NotReusable        []RecordPosture `json:"notReusable,omitempty"`
 	OmittedNotReusable int             `json:"omittedNotReusable,omitempty"`
-	// Audit is the narrowed-survivor audit's measured rate for this
-	// run (REQ-exec-oracle-run's narrowed-survivor clause); absent
-	// when the run audited nothing.
+	// Audit preserves the measured rate of historical narrowed-survivor
+	// audit reports. Complete-oracle execution performs no such audit.
 	Audit *AuditSummary `json:"audit,omitempty"`
 	// Banked is a cancelled run's banked state: what the two layers
 	// kept under the named exit cause (REQ-exec-banked-summary);
@@ -1322,17 +1286,16 @@ func oracleScope(w work) []string {
 // analyzes source at runtime, so the forbidden state must exist on
 // disk — the overlay reaches only the oracle binary's own
 // compilation), body mutants run through the build overlay.
-func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, error) {
+func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
 	if opts.executedScope != nil {
 		// Emitted off the same w whose groups execute below: the
 		// observation and the execution cannot diverge.
 		opts.executedScope(m.Position, m.Operator, oracleScope(w))
 	}
 	if w.shaped {
-		// Shaped candidates never narrow: their oracles are explicit
-		// and their extents carry no coverage signal.
+		// Shaped candidates execute their explicit oracle inventory.
 		outcome, killer, memoryDecided, err := t.executeShapedCandidate(ctx, w, m, opts, runEnv)
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, err
+		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
 	}
 	return t.executeMutant(ctx, w, m, opts, runEnv)
 }
@@ -1411,11 +1374,8 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 			return out, gk, confirmMemoryDecided, merged, incomplete, nil
 		}
 	}
-	// The serial fallback runs UNSCHEDULED: REQ-exec-attribution makes
-	// the serial execution the scored measurement — the one corrector
-	// for a shape-induced window kill — and a scheduled corrector would
-	// reproduce the very narrowing it exists to re-examine.
-	out, gk, md, state, incomplete, _, err := t.executeWorkMutant(ctx, w, m, opts.unscheduled(), runEnv)
+	// The serial fallback runs the complete oracle scope.
+	out, gk, md, state, incomplete, err := t.executeWorkMutant(ctx, w, m, opts, runEnv)
 	return out, gk, md, state, incomplete, err
 }
 
@@ -1444,175 +1404,49 @@ func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scope
 	return ok
 }
 
-// executeMutant runs one mutant through its oracle groups and merges
-// the process observations - the shared execution the worker pool and
-// the serial kill confirmation both use. The sixth result marks a
-// NARROWED survivor: one whose non-reaching remainder was exempt from
-// execution on the schedule's sound batch coverage
-// (REQ-exec-oracle-run's narrowed-survivor clause).
-func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, error) {
-	outcome, killer, memoryDecided, state, incomplete, narrowedSurvivor, degrade, err := t.runSteps(ctx, w, m, opts, runEnv, t.scheduleSteps(w, m, opts))
-	if err != nil || degrade == degradeNone {
-		return outcome, killer, memoryDecided, state, incomplete, narrowedSurvivor, err
-	}
-	// The schedule disqualified itself for this mutant; the unsplit
-	// re-run is the scored measurement. A STRUCTURAL disqualification —
-	// an unvouched covering-phase kill (order-dependent suite) — also
-	// stops the work's groups from scheduling for the rest of the run;
-	// a narrowed-bound timeout is per-mutant slowness and leaves the
-	// schedule standing for its siblings.
-	if degrade == degradeRerunUnschedule && opts.scheduleStore != nil && w.targetView != nil {
-		for _, g := range w.groups {
-			opts.scheduleStore.unschedule(coverageKey(g, w.targetView.subject.Package))
-		}
-	}
-	outcome, killer, memoryDecided, state, incomplete, _, _, err = t.runSteps(ctx, w, m, opts, runEnv, unscheduledSteps(w.groups, opts))
-	return outcome, killer, memoryDecided, state, incomplete, false, err
-}
-
-// scheduleDegrade classifies a schedule that must not score
-// (REQ-exec-oracle-run's verdict-preserving schedule).
-type scheduleDegrade int
-
-const (
-	degradeNone scheduleDegrade = iota
-	// degradeRerun: a timeout under a narrowed phase — a subset pattern
-	// or a reduced remainder bound — is never a verdict: the split's own
-	// second-process overhead (package load, TestMain) is charged inside
-	// the shared budget, so only the UNSPLIT run's bound may decide a
-	// timeout kill, in either direction (a split near the bound could
-	// otherwise fabricate a timeout kill on a true survivor, or lose a
-	// true one).
-	degradeRerun
-	// degradeRerunUnschedule: a structural suite property the split
-	// exposed — the group stops scheduling for the rest of the run.
-	degradeRerunUnschedule
-)
-
-// stepResult is one oracle process's outcome inside a schedule step.
-type stepResult struct {
-	out           engine.MutantOutcome
-	killer        string
-	memoryDecided bool
-	state         runtimeinput.Observation
-	incomplete    string
-	diagnostic    string
-	degrade       scheduleDegrade
-}
-
-// runStepGroup executes one pattern of a schedule step and applies the
-// narrowed-pattern admission rules: a timeout kill from a narrowed
-// pattern degrades (only the unsplit bound decides timeouts), and a
-// test-attributed kill from a narrowed pattern is admitted only over a
-// passing baseline of that same pattern — the full group baseline
-// vouches the full pattern, never a subset (REQ-exec-attribution's
-// shape symmetry on the run-regex axis). A package-scope kill already
-// ran its differential baseline under this very pattern inside the
-// engine.
-func (t *Tree) runStepGroup(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string, g group, narrowed bool, timeout time.Duration) (stepResult, error) {
-	out, killer, memoryDecided, state, incomplete, diagnostic, err := seams.runMutantObserved(ctx, t.dir, m, g.pkgs, g.runRegex, timeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
-	res := stepResult{out: out, killer: killer, memoryDecided: memoryDecided, state: state, incomplete: incomplete, diagnostic: diagnostic}
-	if err != nil {
-		return res, fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
-	}
-	if diagnostic != "" {
-		return res, nil
-	}
-	if out == engine.MutantKilled {
-		if killer == TimeoutKiller {
-			if narrowed {
-				res.degrade = degradeRerun
-			}
-			return res, nil
-		}
-		if aerr := attributedKill(killer, w.oracleSet); aerr != nil {
-			return res, fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, aerr)
-		}
-		// The vouch probe is an advisory baseline, not a verdict-bearing
-		// process: it runs under the run-wide bound (the measurement
-		// leash in derive mode), never the phase's residual budget — a
-		// starved probe would fail the vouch and disable scheduling for
-		// the rest of the run over a budget artifact.
-		if narrowed && !strings.HasPrefix(killer, PackageKillerPrefix) && !t.phaseKillVouched(ctx, g, opts.OracleTimeout, opts, runEnv) {
-			res.degrade = degradeRerunUnschedule
-		}
-	}
-	return res, nil
-}
-
-// runSteps executes one mutant's schedule. A non-none degrade reports
-// a schedule that must not score — the caller re-runs unsplit
-// (REQ-exec-oracle-run's verdict-preserving schedule).
-func (t *Tree) runSteps(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string, steps []scheduleStep) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, bool, scheduleDegrade, error) {
+// executeMutant runs complete unsplit oracle groups and merges their
+// observations. Coverage is advisory and is not an input to dispatch.
+func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
 	outcome := engine.MutantSurvived
 	killer := ""
 	memoryDecided := false
-	narrowedSurvivor := false
 	incompleteReason := ""
 	var processStates []runtimeinput.Observation
-	admit := func(res stepResult) {
-		if res.incomplete != "" && incompleteReason == "" {
-			incompleteReason = res.incomplete
-		}
-		outcome = res.out
-		killer = res.killer
-		memoryDecided = memoryDecided || res.memoryDecided
-	}
-	for _, st := range steps {
+	for _, g := range w.groups {
 		if err := ctx.Err(); err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, degradeNone, err
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
 		}
 		if outcome != engine.MutantSurvived {
 			break
 		}
-		// The covering phase runs under the group's whole budget — the
-		// bound the unsplit run would have applied (the memory ceiling
-		// is per process tree by REQ-exec-oracle-memory's own
-		// definition and needs no threading); the timeout VERDICT
-		// under any narrowed bound still belongs to the unsplit run
-		// alone (degradeRerun).
-		first, err := t.runStepGroup(ctx, w, m, opts, runEnv, st.first, st.narrowed, st.budget)
+		out, who, decided, state, incomplete, diagnostic, err := seams.runMutantObserved(ctx, t.dir, m, g.pkgs, g.runRegex, stepBudget(g, opts), g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		if err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, degradeNone, err
+			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
 		}
-		if first.degrade != degradeNone {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, first.degrade, nil
+		if diagnostic == "" && out == engine.MutantKilled && who != TimeoutKiller {
+			if err := attributedKill(who, w.oracleSet); err != nil {
+				return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
+			}
 		}
-		if first.diagnostic != "" {
-			// The mutant failed this group's build: no test process
-			// started, so the group contributes no runtime observation
-			// and no incomplete-process evidence — the discard is a
-			// pure function of the mutant source under the toolchain
-			// and build-configuration pins the serve validates
-			// (REQ-result-stale). Groups that ran keep their
-			// observations.
-			admit(first)
-			continue
+		outcome, killer = out, who
+		memoryDecided = memoryDecided || decided
+		if incompleteReason == "" {
+			incompleteReason = incomplete
 		}
-		// A surviving narrowed step IS the narrowed survivor
-		// (REQ-exec-oracle-run's narrowed-survivor clause, user ruling
-		// 2026-08-31): the covering phase passed, and the partition
-		// exists only when every batch of the group carried a sound
-		// coverage verdict over the mutant's extent — the non-reaching
-		// remainder is exempt from execution, because a mutation
-		// alters behavior only where execution reaches its extent and
-		// per-batch coverage is per-process (an extent executed before
-		// or outside test bodies is covered by every batch and never
-		// partitions). The exemption's ground is the measured batch
-		// coverage; the survivor records the narrowed class, and each
-		// campaign's audit re-scores a sample under the full oracle.
-		narrowedSurvivor = narrowedSurvivor || (st.narrowed && first.out == engine.MutantSurvived)
-		processStates = append(processStates, first.state)
-		admit(first)
+		if diagnostic == "" {
+			// Build discards contributed no process; preceding groups'
+			// observations still belong to their executions.
+			processStates = append(processStates, state)
+		}
 	}
 	if err := ctx.Err(); err != nil {
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, degradeNone, err
+		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
 	}
 	state, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, processStates...)
 	if err != nil {
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", false, degradeNone, fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
 	}
-	return outcome, killer, memoryDecided, state, incompleteReason, narrowedSurvivor && outcome == engine.MutantSurvived, degradeNone, nil
+	return outcome, killer, memoryDecided, state, incompleteReason, nil
 }
 
 // windowScores is one window's verdict-bearing measurement for one
@@ -1630,13 +1464,6 @@ type windowScores struct {
 	// oracle memory ceiling decided (REQ-exec-oracle-memory); nil at
 	// carry-prior sites, whose candidates did not run.
 	memoryDecided []bool
-	// narrowed marks, per candidate, a NARROWED survivor — one whose
-	// non-reaching remainder was exempt from execution on the
-	// schedule's sound batch coverage (REQ-exec-oracle-run's
-	// narrowed-survivor clause); nil at carry-prior sites. It travels
-	// with the verdicts because the survivor's recorded class must
-	// never detach from the measurement that earned it.
-	narrowed []bool
 }
 
 // anyMemoryDecided reports whether any executed candidate's verdict
@@ -1709,17 +1536,8 @@ func carrySurvivor(candidate engine.Candidate, prior Survivor) Survivor {
 // with its killer named. A helper applied post-hoc was tried first and
 // silently missed two of the assembly paths in consecutive review
 // rounds — construction is where omission becomes uncompilable.
-func newSurvivor(candidate engine.Candidate, execution string, flips map[int]string, mi int, narrowed bool) Survivor {
+func newSurvivor(candidate engine.Candidate, execution string, flips map[int]string, mi int) Survivor {
 	row := Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: execution}
-	if narrowed && execution != "unstable-oracle" {
-		// The NARROWED class is this run's own measurement fact — the
-		// covering phases passed and the non-reaching remainder was
-		// exempt on sound batch coverage — so it replaces any carried
-		// text; instability and flips still outrank it below and in
-		// the bucket passes (REQ-exec-oracle-run's narrowed-survivor
-		// clause).
-		row.Execution = "covering-passed"
-	}
 	if withdrawn, flipped := flips[mi]; flipped {
 		row.Execution = "flipped-kill"
 		row.WithdrawnKiller = withdrawn
@@ -1727,19 +1545,14 @@ func newSurvivor(candidate engine.Candidate, execution string, flips map[int]str
 	return row
 }
 
-// narrowedAt reports the narrowed-survivor mark for one candidate,
-// nil-safe for carry sites whose candidates did not run.
-func (s windowScores) narrowedAt(mi int) bool {
-	return mi < len(s.narrowed) && s.narrowed[mi]
-}
-
 // bucketSurvivorExecution classifies why each survivor lived
 // (REQ-exec-survivor-evidence): unverifiable runtime evidence buckets
 // every survivor "unstable-oracle" without probing; otherwise one
 // baseline coverage probe per oracle group (cached across the run's
-// targets sharing a group and cover package) decides "never-executed"
+// targets sharing a group and cover package) decides "coverage-unobserved"
 // versus "executed-and-passed" by whether any executed block spans the
-// mutated position. Advisory classification on the unmutated tree,
+// mutated position. A negative parent profile establishes neither absent
+// child execution nor absent compile-time influence. Advisory data on the unmutated tree,
 // never a measurement pin. Survivors below from keep their recorded
 // buckets verbatim: a splice carries its served prefix's advisory data —
 // measured under the record's own verifiable conditions — like its
@@ -1793,12 +1606,9 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 			continue
 		}
 		if f.Survivors[si].Execution == "covering-passed" {
-			// The narrowed class is the run's own measurement claim —
-			// covering phases passed, the remainder exempt on sound
-			// batch coverage — and the advisory probe never overwrites
-			// it; the unstable and overlay-bypassed passes above still
-			// do, in the labeled-never-silent direction
-			// (REQ-exec-oracle-run's narrowed-survivor clause).
+			// Preserve a carried historical bucket. A fresh execution
+			// never mints this class; the reuse gate decides whether a
+			// historical row can be carried at all.
 			continue
 		}
 		covered, ok := survivorCovered(coverage, coverPkg, f.Survivors[si])
@@ -1810,7 +1620,7 @@ func (t *Tree) bucketSurvivorExecution(ctx context.Context, f *Finding, w work, 
 		if covered {
 			f.Survivors[si].Execution = "executed-and-passed"
 		} else {
-			f.Survivors[si].Execution = "never-executed"
+			f.Survivors[si].Execution = "coverage-unobserved"
 		}
 	}
 	return nil
@@ -2187,7 +1997,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// MCP server's concurrent campaigns over one cached Tree).
 	scopedBaselines := map[scopedBaselineKey]bool{}
 	coverageCache := map[string]engine.Coverage{}
-	opts.scheduleStore = newScheduleStore()
 	// The bank is WRITTEN by findings-producing runs only (OwnWrites is
 	// their marker, and the campaign lock they hold serializes the
 	// file); library embeddings and probes deposit nothing — the
@@ -2909,6 +2718,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			}
 		}
 		f.PropertyRegime = regime
+		f.OracleExecutionPolicy = FullOracleExecutionPolicy
 		reason := "no-prior"
 		var decision RunDecision
 		if hasPrior && opts.Force {
@@ -2944,7 +2754,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				return nil, nil
 			}
 			reason = "stale"
-			if !matches {
+			if issue := OracleExecutionPolicyIssue(*rec); issue != "" {
+				reason = "stale: " + issue
+			} else if !matches {
 				reason = "stale: an oracle or measurement pin moved"
 			} else if rec.BodyHash != resolved.shapedDigest {
 				reason = "stale: the declared shape or a probed file moved"
@@ -3127,6 +2939,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			}
 		}
 		f.PropertyRegime = regime
+		f.OracleExecutionPolicy = FullOracleExecutionPolicy
 		reason := "no-prior"
 		if hasPrior {
 			switch {
@@ -3249,6 +3062,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// request re-measures whole rather than mixing the two
 				// disciplines (REQ-result-stale).
 				reason += "; prior candidate evidence re-executes only under its recorded budget, so the whole target re-measures"
+				if issue := OracleExecutionPolicyIssue(*rec); issue != "" {
+					reason += "; " + issue
+				}
 			} else {
 				matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime)
 				if err != nil {
@@ -3687,7 +3503,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// run's derived oracle lists (a stood-down derivation shortens them
 	// for that run alone), never of a measured duration — so the
 	// partition never moves between runs of an unchanged tree under the
-	// same workers and the same derivations, and audited sets nest
+	// same workers and the same derivations
 	// (REQ-exec-oracle-run's window rule).
 	windowBudget, windowMinimum := windowcost.Bounds(jobs, seams.windowCandidates)
 	var treeDrift error
@@ -3775,29 +3591,26 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		incompletes := make([][]string, len(window))
 		killers := make([][]string, len(window))
 		memoryDecided := make([][]bool, len(window))
-		narrowedFlags := make([][]bool, len(window))
 		for wi := range window {
 			outcomes[wi] = make([]engine.MutantOutcome, len(window[wi].candidates))
 			observations[wi] = make([]runtimeinput.Observation, len(window[wi].candidates))
 			incompletes[wi] = make([]string, len(window[wi].candidates))
 			killers[wi] = make([]string, len(window[wi].candidates))
 			memoryDecided[wi] = make([]bool, len(window[wi].candidates))
-			narrowedFlags[wi] = make([]bool, len(window[wi].candidates))
 		}
 		// score is the window's ONE score writer: every measurement of a
-		// candidate — the parallel worker's, the serial confirmation's,
-		// the audit's — records its six channels through it, so a
+		// candidate — the parallel worker's or serial confirmation's —
+		// records its channels through it, so a
 		// measurement cannot replace the verdict and keep another
 		// channel's stale value.
 		// The outcome is written last: an unwritten outcome reads as
 		// the discard zero value, never as a verdict, so it is the
 		// row's sentinel and the other channels are in place before it.
-		score := func(wi, mi int, outcome engine.MutantOutcome, killer string, decided bool, state runtimeinput.Observation, incomplete string, narrowed bool) {
+		score := func(wi, mi int, outcome engine.MutantOutcome, killer string, decided bool, state runtimeinput.Observation, incomplete string) {
 			killers[wi][mi] = killer
 			memoryDecided[wi][mi] = decided
 			observations[wi][mi] = interner.intern(state)
 			incompletes[wi][mi] = incomplete
-			narrowedFlags[wi][mi] = narrowed
 			outcomes[wi][mi] = outcome
 		}
 		windowBase := mutantsDone.Load()
@@ -3807,62 +3620,15 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			Symbol:         targets[window[0].target].Symbol,
 			CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
 		})
-		// The schedule probes run serially before the pool dispatches:
-		// one batched coverage pass per qualifying group, cached for the
-		// whole run, so the workers' schedule reads are wait-free and
-		// every mutant of the window can front its probable killers
-		// (REQ-exec-oracle-run's verdict-preserving schedule). The
-		// survivor buckets keep their own full-pattern probe — a union
-		// of subset runs is not that measurement.
-		// The probe phase is priced and ticked like the mutant phase: one
-		// plan decides which groups probe (the loop consults the same
-		// plan), the announcement projects its cost from the groups'
-		// measured baselines, and each batch ticks.
-		var plan []probeUnit
-		for _, w := range window {
-			units, err := t.scheduleProbePlan(ctx, w, opts)
-			if err != nil {
-				return nil, err
-			}
-			plan = append(plan, units...)
-		}
-		if probesTotal := probePlanBatches(plan); probesTotal > 0 {
-			priced, unpriced := probePlanCost(plan, opts.baselineDur)
-			reportExecuting(opts.Executing, ExecutionEvent{
-				Phase:       "probing",
-				TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
-				Symbol:         targets[window[0].target].Symbol,
-				CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
-				ProbesTotal: probesTotal, EstimateProjected: probeProjection(priced), ProbesUnpriced: unpriced,
-			})
-			probesDone := 0
-			for _, unit := range plan {
-				if err := t.probeScheduleUnit(ctx, unit, opts, runEnv, func() {
-					probesDone++
-					reportExecuting(opts.Executing, ExecutionEvent{
-						Phase:       "probing",
-						TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
-						Symbol:         targets[window[0].target].Symbol,
-						CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
-						ProbesDone: probesDone, ProbesTotal: probesTotal,
-					})
-				}); err != nil {
-					return nil, err
-				}
-			}
-		}
-		// The window's cost model, priced AFTER the probes so the
-		// narrowing decision is the schedule's own — advisory, before
-		// any budget is spent (REQ-exec-run-status's estimate class).
-		est := estimateWindow(window, opts.scheduleStore, opts.baselineDur, windowcost.AuditNarrowedCap)
+		// Price complete groups; coverage carries no omission authority.
+		est := estimateWindow(window, opts.baselineDur)
 		reportExecuting(opts.Executing, ExecutionEvent{
 			Phase:       "estimate",
 			TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
 			Symbol:         targets[window[0].target].Symbol,
 			CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
-			EstimateNarrowed: est.narrowed, EstimateFull: est.full, EstimateUnknown: est.unknown,
-			EstimateNoSignal:  est.noSignalList(),
-			EstimateProjected: est.projectedString(), EstimateAudit: est.auditString(),
+			EstimateFull: est.full, EstimateUnknown: est.unknown,
+			EstimateProjected: est.projectedString(),
 		})
 		jobCh := make(chan job)
 		poolCtx, cancel := context.WithCancel(ctx)
@@ -3886,7 +3652,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if !runnable {
 						continue
 					}
-					outcome, killer, candidateMemoryDecided, state, incompleteReason, narrowedSurvivor, err := t.executeWorkMutant(poolCtx, w, m, opts, runEnv)
+					outcome, killer, candidateMemoryDecided, state, incompleteReason, err := t.executeWorkMutant(poolCtx, w, m, opts, runEnv)
 					if err != nil {
 						if poolCtx.Err() != nil {
 							return
@@ -3897,7 +3663,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 						})
 						return
 					}
-					score(j.wi, j.mi, outcome, killer, candidateMemoryDecided, state, incompleteReason, narrowedSurvivor)
+					score(j.wi, j.mi, outcome, killer, candidateMemoryDecided, state, incompleteReason)
 					// The completion tick: done advances candidate by
 					// candidate instead of window by window, the pace
 					// ground a multi-hour window would otherwise hide
@@ -3993,7 +3759,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				if window[wi].serve != nil || window[wi].extend != nil || window[wi].drift != nil || k == 0 {
 					discard[wi] = true
 					window[wi].candidates = nil
-					outcomes[wi], observations[wi], incompletes[wi], killers[wi], memoryDecided[wi], narrowedFlags[wi] = nil, nil, nil, nil, nil, nil
+					outcomes[wi], observations[wi], incompletes[wi], killers[wi], memoryDecided[wi] = nil, nil, nil, nil, nil
 					continue
 				}
 				window[wi].candidates = window[wi].candidates[:k]
@@ -4002,7 +3768,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				incompletes[wi] = incompletes[wi][:k]
 				killers[wi] = killers[wi][:k]
 				memoryDecided[wi] = memoryDecided[wi][:k]
-				narrowedFlags[wi] = narrowedFlags[wi][:k]
 				f := &findings[window[wi].target]
 				f.Budget = k
 				f.Generated = k
@@ -4024,22 +3789,15 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			windowTotal += int64(len(window[wi].candidates))
 		}
 		mutantsDone.Store(advanceDone(windowBase, windowTotal, mutantsDone.Load()))
-		// rescore is the window's ONE serial re-score discipline, shared
-		// by the kill confirmation and the narrowed-survivor audit: the
+		// rescore is the window's serial confirmation discipline: the
 		// candidate re-executes alone under the exclusively held probe
 		// gate — so no pipelined sibling's preparation probe shares its
 		// isolation window — and the scored serial run replaces the
 		// window's verdict for it wholesale through the same score
 		// writer the parallel workers use: outcome, killer, memory
 		// disposition, observation, and incompleteness, as one value.
-		// A re-scored candidate is never a narrowed survivor: the
-		// confirmation re-scores kills and the audit's full run is the
-		// authority that clears the mark. Each pass supplies its own
-		// execution (the confirmation's killer-scoped confirmMutant,
-		// the audit's unscheduled full run) and keeps its own
-		// bookkeeping around the call; the replacement itself cannot
-		// diverge between them (REQ-exec-attribution,
-		// REQ-exec-oracle-run's narrowed-survivor clause).
+		// The serial execution replaces every channel of the parallel
+		// measurement (REQ-exec-attribution).
 		rescore := func(wi, mi int, run func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error)) (engine.MutantOutcome, string, error) {
 			w := scopedWork(window[wi], mi)
 			m, _ := window[wi].candidates[mi].Mutant()
@@ -4049,7 +3807,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			if err != nil {
 				return outcome, killer, err
 			}
-			score(wi, mi, outcome, killer, decided, state, incomplete, false)
+			score(wi, mi, outcome, killer, decided, state, incomplete)
 			return outcome, killer, nil
 		}
 		if jobs > 1 {
@@ -4147,73 +3905,11 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		// The narrowed-survivor AUDIT (REQ-exec-oracle-run's
-		// narrowed-survivor clause): auditSample selects this window's
-		// audit — hash-ordered narrowed survivors truncated at the
-		// savings-derived cap. The selection ORDER is content-stable
-		// (a fully served campaign audits nothing; coverage widens
-		// only as bodies change and re-key the hashes); the DEPTH
-		// follows this run's measured durations, so audited sets nest
-		// across runs of an unchanged tree rather than repeating
-		// identically. A drained window skips the audit (the
-		// interrupt asked for less work, not more).
-		if discard == nil {
-			pool := auditSample(window,
-				func(wi int) string { return targets[window[wi].target].Symbol },
-				func(wi, mi int) bool {
-					return outcomes[wi][mi] == engine.MutantSurvived && narrowedFlags[wi][mi]
-				},
-				opts.scheduleStore, opts.baselineDur)
-			disagreed := 0
-			for _, pick := range pool {
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				w := scopedWork(window[pick.wi], pick.mi)
-				if _, runnable := w.candidates[pick.mi].Mutant(); !runnable {
-					continue
-				}
-				// The audit's re-score is the full unsplit run — the
-				// authority either way — under the window's one rescore
-				// discipline; an audit-minted kill is terminal, never
-				// confirmed again.
-				outcome, killer, err := rescore(pick.wi, pick.mi, func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
-					outcome, killer, decided, state, incomplete, _, err := t.executeWorkMutant(ctx, w, m, opts.unscheduled(), runEnv)
-					return outcome, killer, decided, state, incomplete, err
-				})
-				if err != nil {
-					return nil, err
-				}
-				if outcome == engine.MutantKilled {
-					if aerr := attributedKill(killer, w.oracleSet); aerr != nil && killer != TimeoutKiller && !strings.HasPrefix(killer, PackageKillerPrefix) {
-						return nil, fmt.Errorf("%s: narrowed-survivor audit: %w", targets[w.target].Symbol, aerr)
-					}
-					disagreed++
-					reportExecuting(opts.Executing, ExecutionEvent{
-						Phase:       "audit-flip",
-						TargetIndex: dispatchedTargets + pick.wi + 1, TargetCount: int(preparedTargets.Load()),
-						Symbol:       targets[w.target].Symbol,
-						FlipPosition: w.candidates[pick.mi].Position,
-						FlipKiller:   killer,
-					})
-				}
-			}
-			if len(pool) > 0 {
-				// The summary spans the window's targets; no single
-				// symbol owns it (the per-flip events carry theirs).
-				reportExecuting(opts.Executing, ExecutionEvent{
-					Phase:       "audit",
-					TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
-					AuditedNarrowed: len(pool), AuditDisagreed: disagreed,
-				})
-			}
-		}
-
 		cancel()
 		dispatchedTargets += len(window)
 		scores := make([]windowScores, len(window))
 		for wi := range window {
-			scores[wi] = windowScores{outcomes: outcomes[wi], killers: killers[wi], flips: flips[wi], memoryDecided: memoryDecided[wi], narrowed: narrowedFlags[wi]}
+			scores[wi] = windowScores{outcomes: outcomes[wi], killers: killers[wi], flips: flips[wi], memoryDecided: memoryDecided[wi]}
 		}
 		return &executedWindow{window: window, scores: scores, observations: observations, incompletes: incompletes, discard: discard}, nil
 	}
@@ -4557,7 +4253,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				}
 				switch scores[wi].outcomes[mi] {
 				case engine.MutantSurvived:
-					f.Survivors = append(f.Survivors, newSurvivor(candidate, "", scores[wi].flips, mi, scores[wi].narrowedAt(mi)))
+					f.Survivors = append(f.Survivors, newSurvivor(candidate, "", scores[wi].flips, mi))
 				case engine.MutantKilled:
 					// The keystone persisted: every kill names its killer
 					// (REQ-core-attributed-kills), so reuse can key the kill
@@ -4595,7 +4291,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					// carry no site anchor. So a shaped disposition
 					// carries only under the full pin gate
 					// (REQ-attest-survivor's shaped clause).
-					return sameAttestationPins(rec, *f)
+					return mutationDomainHeld(rec, *f) && shapeEqual(rec.Shape, f.Shape) && sameAttestationPins(rec, *f)
 				}
 				return mutationDomainHeld(rec, *f)
 			}
@@ -5094,55 +4790,6 @@ func nextReadyWindow(pool []readyWindow) int {
 		}
 	}
 	return pick
-}
-
-// auditPick is one narrowed survivor selected for the window's
-// full-oracle audit, keyed by its content hash.
-type auditPick struct {
-	wi, mi int
-	hash   uint64
-}
-
-// auditSample assembles the window's narrowed-survivor audit: every
-// narrowed survivor enters the pool with its content hash; the pool
-// sorts by hash (ties by position for determinism), and truncates at
-// the savings-derived cap (windowcost.DerivedAuditCap) — the audit spends a
-// bounded share of what THIS window's narrowing modelled as saved,
-// each re-run priced at the costliest work's full-oracle baseline.
-// The selection ORDER is content-stable; the depth follows this
-// run's measured durations, so across runs of an unchanged tree the
-// audited sets NEST (one is a prefix of the other) rather than being
-// identical (REQ-exec-oracle-run's savings-derived audit bound).
-func auditSample(window []work, symbol func(wi int) string, isNarrowedSurvivor func(wi, mi int) bool, store *scheduleStore, baselineDur func(group) (time.Duration, bool)) []auditPick {
-	var pool []auditPick
-	var savings, unit time.Duration
-	for wi := range window {
-		wf, wfOK := workFullPrice(window[wi], baselineDur)
-		for mi := range window[wi].candidates {
-			if !isNarrowedSurvivor(wi, mi) {
-				continue
-			}
-			h := fnv.New64a()
-			h.Write([]byte(symbol(wi)))
-			h.Write([]byte(window[wi].candidates[mi].Position))
-			h.Write([]byte(window[wi].candidates[mi].Operator))
-			pool = append(pool, auditPick{wi: wi, mi: mi, hash: h.Sum64()})
-			savings += candidateNarrowingSavings(window[wi], mi, store, baselineDur)
-			if wfOK && wf > unit {
-				unit = wf
-			}
-		}
-	}
-	sort.Slice(pool, func(i, j int) bool {
-		if pool[i].hash != pool[j].hash {
-			return pool[i].hash < pool[j].hash
-		}
-		return pool[i].wi < pool[j].wi || (pool[i].wi == pool[j].wi && pool[i].mi < pool[j].mi)
-	})
-	if auditCap := windowcost.DerivedAuditCap(savings, unit); len(pool) > auditCap {
-		pool = pool[:auditCap]
-	}
-	return pool
 }
 
 // advanceDone is the window-boundary true-up of the done counter: it
@@ -5724,7 +5371,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 			if stamp {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi, scores.narrowedAt(mi)))
+			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi))
 		case "killed":
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
 		}
@@ -6239,7 +5886,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 		applyDisposition(&operators[i], disposition, 1)
 		switch disposition {
 		case "survived":
-			survivors = append(survivors, newSurvivor(candidate, suffixExecution, flips, mi, scores.narrowedAt(mi)))
+			survivors = append(survivors, newSurvivor(candidate, suffixExecution, flips, mi))
 		case "killed":
 			if killsComplete {
 				kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})
@@ -6581,7 +6228,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 			if unstableForBuckets(&rec, exemptions) {
 				execution = "unstable-oracle"
 			}
-			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi, scores.narrowedAt(mi)))
+			survivors = append(survivors, newSurvivor(candidate, execution, flips, mi))
 		}
 		if disposition == "killed" && killsComplete {
 			kills = append(kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: killers[mi]})

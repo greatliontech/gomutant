@@ -122,8 +122,8 @@ func LoadEphemeralAttestations(path string) ([]EphemeralAttestation, error) {
 // AttestEphemeralEquivalence builds the attestation row for a
 // completed probe, refusing every state that is not an exercised full
 // survivor: a kill or a mixed killed-some-runs outcome is evidence
-// AGAINST equivalence (evidence beats attestation); an unexercised
-// survivor is vacuous — no run reached the edit; and a survivor whose
+// AGAINST equivalence (evidence beats attestation); a negative parent
+// profile leaves reach unestablished; and a survivor whose
 // exercise state is UNKNOWN (the coverage probe failed) is
 // unverifiable — absence of the unexercised label is not evidence of
 // exercise. The provenance stamp records commit and dirty over the
@@ -139,7 +139,7 @@ func AttestEphemeralEquivalence(ctx context.Context, dir string, res *EphemeralR
 		return EphemeralAttestation{}, fmt.Errorf("gomutant: the probe killed in %d of %d runs — evidence beats attestation; a killed or mixed mutant is not equivalent", res.KilledRuns, res.Runs)
 	}
 	if len(res.UnexercisedFiles) > 0 {
-		return EphemeralAttestation{}, fmt.Errorf("gomutant: the probe never exercised %s — an unexercised survivor is vacuous evidence for equivalence", strings.Join(res.UnexercisedFiles, ", "))
+		return EphemeralAttestation{}, fmt.Errorf("gomutant: baseline parent coverage did not establish exercise of %s — absence of profile reach is vacuous evidence for equivalence", strings.Join(res.UnexercisedFiles, ", "))
 	}
 	if res.CoverageUnknown {
 		return EphemeralAttestation{}, fmt.Errorf("gomutant: the probe's exercise state is unknown (the coverage probe failed) — an unverifiable survivor attests nothing; re-run the probe")

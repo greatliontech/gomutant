@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -15,8 +14,8 @@ import (
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
-// The baseline bank (REQ-result-baseline-bank): baseline and
-// coverage-probe measurements are CONTENT-PINNED evidence, banked
+// The baseline bank (REQ-result-baseline-bank): baseline
+// measurements are CONTENT-PINNED evidence, banked
 // machine-local and served across runs — a killed or finished
 // campaign's measurement is never discarded by the calendar. Serving
 // is sound by construction: the banked oracle-subject evidence rows
@@ -74,14 +73,9 @@ type bankedBaseline struct {
 	MeasuredAtUnix int64 `json:"measuredAtUnix"`
 }
 
-// bankedCoverage is one (group, cover package) coverage probe: the
-// content pins (the group's oracle-subject rows AND the covered
-// package's own row — coverage speaks about both sides), the plan's
-// batch count, the probed batches with their coverage and wall-clocks
-// — each at its position in the plan, deposited as it lands — and the
-// batches whose probe failed, by position, so a later run whose pins
-// hold resumes the entry: the banked batches serve, the failed and the
-// unprobed ones probe (REQ-result-baseline-bank).
+// bankedCoverage preserves historical coverage entries on decode and bank
+// rewrites. Neither their pins nor their profiles authorize fresh scheduling;
+// no production path restores, resumes or deposits coverage batches.
 type bankedCoverage struct {
 	Evidence []closureRow    `json:"evidence"`
 	CoverRow closureRow      `json:"coverRow"`
@@ -97,50 +91,11 @@ type bankedBatch struct {
 	Coverage  engine.PersistedCoverage `json:"coverage"`
 }
 
-// bankedFailure records one batch whose coverage probe failed — its
-// position, its tests, and the probe's refusal — so the next run's
-// retry names the prior failure (a deterministic failure then costs
-// one batch per run, never the unit).
+// bankedFailure preserves a historical batch's failure attribution.
 type bankedFailure struct {
 	Index  int      `json:"index"`
 	Fns    []string `json:"fns"`
 	Reason string   `json:"reason"`
-}
-
-// resume matches a banked entry against the current plan: the banked
-// batches whose position and tests equal the plan's, keyed by
-// position, and the prior failures by position. A banked batch or
-// failure whose tests differ from the plan's at its position, or lie
-// outside it, discards the entry (ok false) — fail-closed over a plan
-// that moved, so a retry never names a prior failure of other tests.
-func (c bankedCoverage) resume(plan [][]string) (banked map[int]scheduleBatch, failed map[int]string, ok bool) {
-	if c.Plan != len(plan) {
-		return nil, nil, false
-	}
-	banked = make(map[int]scheduleBatch, len(c.Batches))
-	for _, b := range c.Batches {
-		if b.Index < 0 || b.Index >= len(plan) || !slices.Equal(b.Fns, plan[b.Index]) {
-			return nil, nil, false
-		}
-		if _, dup := banked[b.Index]; dup {
-			return nil, nil, false
-		}
-		banked[b.Index] = scheduleBatch{fns: b.Fns, cov: b.Coverage.Restore(), dur: time.Duration(b.DurMillis) * time.Millisecond}
-	}
-	failed = make(map[int]string, len(c.Failed))
-	for _, f := range c.Failed {
-		if f.Index < 0 || f.Index >= len(plan) || !slices.Equal(f.Fns, plan[f.Index]) {
-			return nil, nil, false
-		}
-		failed[f.Index] = f.Reason
-	}
-	return banked, failed, true
-}
-
-// complete reports whether every batch of the plan holds a passing
-// probe — the entry serves whole.
-func (c bankedCoverage) complete() bool {
-	return c.Plan > 0 && len(c.Batches) == c.Plan
 }
 
 // baselineBank is the in-memory bank for one run: loaded once, each
@@ -282,30 +237,6 @@ func (b *baselineBank) putBaseline(key string, e bankedBaseline) {
 	b.persistLocked()
 }
 
-func (b *baselineBank) coverage(key string) (bankedCoverage, bool) {
-	if b == nil {
-		return bankedCoverage{}, false
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	e, ok := b.file.Coverage[key]
-	return e, ok
-}
-
-func (b *baselineBank) putCoverage(key string, e bankedCoverage) {
-	if b == nil {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.file.Coverage == nil {
-		b.file.Coverage = map[string]bankedCoverage{}
-	}
-	b.file.Coverage[key] = e
-	b.dirty = true
-	b.persistLocked()
-}
-
 // pendingBankDeposit is a really-probed group baseline awaiting its
 // pins: the probe knows the manifest and the wall-clock, but the
 // observation-bearing evidence rows the pins need are built once, by
@@ -330,58 +261,14 @@ func bankOracleRowsFor(f Finding, pkg string) []SubjectEvidence {
 	return rows
 }
 
-// closureRow is the coverage entries' lighter pin: source closures
-// and guards alone. Coverage is a function of sources and toolchain —
-// its runtime-dependent residue is exactly the risk class the
-// narrowed-survivor audit already measures, within a run and across
-// them alike — so a closure-and-guards match is the whole
-// reuse condition.
+// closureRow is the source-and-guard inventory stored in historical coverage
+// entries. It is decoded as data, never judged as omission authority.
 type closureRow struct {
 	Symbol             string `json:"symbol"`
 	MaximalClosure     string `json:"maximalClosure"`
 	TestVariantClosure string `json:"testVariantClosure"`
 	Toolchain          string `json:"toolchain"`
 	BuildConfig        string `json:"buildConfig"`
-}
-
-func closureRowOf(v *subjectView) closureRow {
-	return closureRow{
-		Symbol:             v.symbol,
-		MaximalClosure:     v.fp.MaximalClosure,
-		TestVariantClosure: v.fp.TestVariantClosure,
-		Toolchain:          v.fp.Guards.Toolchain,
-		BuildConfig:        v.fp.Guards.BuildConfig,
-	}
-}
-
-// closureRows builds coverage pins for a set of views.
-func closureRows(views []*subjectView) []closureRow {
-	rows := make([]closureRow, 0, len(views))
-	for _, v := range views {
-		rows = append(rows, closureRowOf(v))
-	}
-	return rows
-}
-
-// closurePinsHold compares banked closure rows against the current
-// views: same subjects, identical closures and guards.
-func closurePinsHold(rows []closureRow, views []*subjectView) bool {
-	if len(rows) != len(views) {
-		return false
-	}
-	bySymbol := make(map[string]closureRow, len(rows))
-	for _, r := range rows {
-		if _, dup := bySymbol[r.Symbol]; dup {
-			return false
-		}
-		bySymbol[r.Symbol] = r
-	}
-	for _, v := range views {
-		if bySymbol[v.symbol] != closureRowOf(v) {
-			return false
-		}
-	}
-	return true
 }
 
 // bankPinsHold reports whether banked evidence rows still describe

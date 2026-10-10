@@ -506,9 +506,8 @@ func runCommand(ctx context.Context, o runOptions) error {
 		if cut != nil {
 			summary.Delta = &gomutant.DeltaSummary{Ref: cut.Ref, Open: deltaOpen}
 		}
-		// The narrowed-survivor audit's measured rate rides the run
-		// summary from the run's own tallies (REQ-exec-oracle-run's
-		// narrowed-survivor clause).
+		// Retain historical audit data in the summary projection.
+		// Complete-oracle runs leave these tallies zero.
 		if tallies != nil && tallies.Audit.Narrowed > 0 {
 			audit := tallies.Audit
 			summary.Audit = &audit
@@ -626,9 +625,8 @@ func skipClasses(findings []gomutant.Finding) (string, int) {
 	return strings.Join(parts, "; "), total
 }
 
-// renderAudit renders the summary's narrowed-survivor audit rate, the
-// run's own count (REQ-exec-oracle-run's narrowed-survivor clause);
-// a run that audited nothing renders no line.
+// renderAudit renders retained historical audit data. Complete-oracle
+// runs carry no audit and render no line.
 func renderAudit(w io.Writer, summary gomutant.RunSummary) {
 	if summary.Audit == nil {
 		return

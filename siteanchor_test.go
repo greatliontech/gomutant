@@ -51,7 +51,7 @@ func TestGraftAttestationsAnchorsOnSiteContent(t *testing.T) {
 // Attest stamps the named survivor's site onto the recorded disposition,
 // and the merge surface reports cross-site sheds by symbol.
 func TestAttestStampsSiteAndMergeReportsSheds(t *testing.T) {
-	f := Finding{Symbol: "pkg.F", Survivors: []Survivor{{Position: "f.go:3:2", Operator: "op", Site: "cafe0123cafe0123"}}}
+	f := Finding{Symbol: "pkg.F", OracleExecutionPolicy: FullOracleExecutionPolicy, Survivors: []Survivor{{Position: "f.go:3:2", Operator: "op", Site: "cafe0123cafe0123"}}}
 	if err := f.Attest("f.go:3:2", "op", "equivalent"); err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +59,8 @@ func TestAttestStampsSiteAndMergeReportsSheds(t *testing.T) {
 		t.Fatalf("attest did not stamp the survivor's site: %+v", f.Attested[0])
 	}
 
-	prior := []Finding{{Symbol: "pkg.F", Survivors: f.Survivors, Attested: f.Attested}}
-	fresh := []Finding{{Symbol: "pkg.F", Survivors: []Survivor{{Position: "f.go:3:2", Operator: "op", Site: "d00d4567d00d4567"}}}}
+	prior := []Finding{{Symbol: "pkg.F", OracleExecutionPolicy: FullOracleExecutionPolicy, Survivors: f.Survivors, Attested: f.Attested}}
+	fresh := []Finding{{Symbol: "pkg.F", OracleExecutionPolicy: FullOracleExecutionPolicy, Survivors: []Survivor{{Position: "f.go:3:2", Operator: "op", Site: "d00d4567d00d4567"}}}}
 	merged, shed := MergeFindings(prior, fresh, nil)
 	if len(merged) != 1 || len(merged[0].Attested) != 0 {
 		t.Fatalf("cross-site disposition survived the merge: %+v", merged)

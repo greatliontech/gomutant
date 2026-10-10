@@ -12,7 +12,6 @@ import (
 
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
-	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 // The measurement leash is lifted by a banked duration to the budget
@@ -136,18 +135,9 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	restoreProbe := seams.baselineProbe
 	restoreCov := seams.coveredPositions
-	restoreMinT := windowcost.ScheduleMinTests
-	restoreMinC := windowcost.ScheduleMinCandidates
-	// Lowered so the schedule's coverage probe fires over this two-test
-	// fixture (its production minimums gate it out of a probe this
-	// small); the survivor-bucket probe fires on Sub's surviving mutants.
-	windowcost.ScheduleMinTests = 2
-	windowcost.ScheduleMinCandidates = 1
 	t.Cleanup(func() {
 		seams.baselineProbe = restoreProbe
 		seams.coveredPositions = restoreCov
-		windowcost.ScheduleMinTests = restoreMinT
-		windowcost.ScheduleMinCandidates = restoreMinC
 	})
 	var bounds, probeBounds []time.Duration
 	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
@@ -181,15 +171,21 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 		return tr
 	}
 	// Sub's test asserts nothing, so its mutants survive and the
-	// survivor-bucket coverage probe runs beside the schedule's.
+	// survivor-bucket coverage probe runs under the complete oracle.
 	target := []Target{{Symbol: "example.com/leashmod/a.Add"}, {Symbol: "example.com/leashmod/a.Sub"}}
 	own := RunOwnWrites(filepath.Join(dir, ".gomutant", "findings.json"))
 	run := func(name string, o Options) {
 		t.Helper()
 		bounds, probeBounds = nil, nil
 		o.OwnWrites = own
-		if _, err := load().Run(context.Background(), target, o); err != nil {
+		findings, err := load().Run(context.Background(), target, o)
+		if err != nil {
 			t.Fatalf("%s: %v", name, err)
+		}
+		if len(probeBounds) == 0 {
+			for _, f := range findings {
+				t.Logf("%s: %s skipped=%q mutants=%d killed=%d discarded=%d survivors=%+v", name, f.Symbol, f.Skipped, f.Mutants, f.Killed, f.Discarded, f.Survivors)
+			}
 		}
 	}
 	allEqual := func(ds []time.Duration, want time.Duration) bool {
@@ -200,13 +196,14 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 		}
 		return len(ds) > 0
 	}
-	run("first", Options{Budget: 1, Jobs: 2})
+	// The first candidate deletes the return and cannot compile. Include
+	// the next candidate so Sub has a real survivor to classify.
+	run("first", Options{Budget: 2, Jobs: 2})
 	if !allEqual(bounds, campaignBaselineLeash) || !allEqual(probeBounds, campaignBaselineLeash) {
 		t.Fatalf("first campaign: baseline bounds %v, probe bounds %v; want the fixed leash", bounds, probeBounds)
 	}
-	// The banked entry says the oracle takes twenty minutes; the
-	// coverage entries are dropped so the advisory probes run (a served
-	// coverage probe launches nothing) while the baseline serves.
+	// The banked entry says the oracle takes twenty minutes. Baselines
+	// serve while the run's full-pattern advisory coverage probes execute.
 	lifted := derivedOracleBudget(20 * time.Minute)
 	rewriteBank := func() {
 		t.Helper()
@@ -220,7 +217,6 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 			e.RawMillis = int64((20 * time.Minute) / time.Millisecond)
 			bank.file.Baselines[key] = e
 		}
-		bank.file.Coverage = nil
 		bank.dirty = true
 		bank.mu.Unlock()
 		bank.save()
@@ -229,9 +225,9 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 	// Served from the bank (a moved budget pin re-measures the target,
 	// the entry's pins still hold): no baseline probe, and the advisory
 	// probes run under the leash the served duration lifts.
-	run("served", Options{Budget: 2, Jobs: 2})
-	if len(bounds) != 0 || len(probeBounds) < 3 || !allEqual(probeBounds, lifted) {
-		t.Fatalf("served campaign: baseline bounds %v, probe bounds %v; want no baseline probe and the lifted %s on every advisory probe (the schedule's and the survivor buckets')", bounds, probeBounds, lifted)
+	run("served", Options{Budget: 3, Jobs: 2})
+	if len(bounds) != 0 || !allEqual(probeBounds, lifted) {
+		t.Fatalf("served campaign: baseline bounds %v, probe bounds %v; want no baseline probe and the lifted %s on every full-pattern advisory probe", bounds, probeBounds, lifted)
 	}
 	// The entry's pins stop serving when the test moves: the baseline
 	// probe runs under the leash the stale entry lifts, and the advisory
@@ -240,19 +236,19 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "a", "a_test.go"), []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run("miss", Options{Budget: 2, Jobs: 2})
+	run("miss", Options{Budget: 3, Jobs: 2})
 	if !allEqual(bounds, lifted) || !allEqual(probeBounds, campaignBaselineLeash) {
 		t.Fatalf("miss campaign: baseline bounds %v, probe bounds %v; want the lifted %s baseline and the fixed advisory leash", bounds, probeBounds, lifted)
 	}
 	// An explicit timeout is never lifted: neither the advisory probes
 	// of a served group nor the baseline probe on a forced miss.
 	rewriteBank()
-	run("explicit served", Options{Budget: 3, Jobs: 2, OracleTimeout: time.Minute})
+	run("explicit served", Options{Budget: 4, Jobs: 2, OracleTimeout: time.Minute})
 	if len(bounds) != 0 || !allEqual(probeBounds, time.Minute) {
 		t.Fatalf("explicit served campaign: baseline bounds %v, probe bounds %v; want no baseline probe and the caller's minute", bounds, probeBounds)
 	}
 	rewriteBank()
-	run("explicit forced", Options{Budget: 3, Jobs: 2, OracleTimeout: time.Minute, Force: true})
+	run("explicit forced", Options{Budget: 4, Jobs: 2, OracleTimeout: time.Minute, Force: true})
 	if !allEqual(bounds, time.Minute) {
 		t.Fatalf("explicit forced campaign: baseline bounds %v; want the caller's minute", bounds)
 	}

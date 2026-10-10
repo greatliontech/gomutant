@@ -41,7 +41,7 @@ func TestSameAttestationPins(t *testing.T) {
 	target := SubjectEvidence{Symbol: "p.F", Fingerprint: gofresh.Fingerprint{MaximalClosure: "f", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult}}
 	oracle := SubjectEvidence{Symbol: "p.TestF", Fingerprint: gofresh.Fingerprint{MaximalClosure: "test", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult}}
 	secondOracle := SubjectEvidence{Symbol: "p.TestG", Fingerprint: gofresh.Fingerprint{MaximalClosure: "test-g", RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult}}
-	base := Finding{OperatorSet: "go/2", Budget: 3, OracleTimeout: "1m0s", TargetEvidence: target, OracleEvidence: []SubjectEvidence{oracle, secondOracle}}
+	base := Finding{OperatorSet: "go/2", Budget: 3, OracleTimeout: "1m0s", OracleExecutionPolicy: FullOracleExecutionPolicy, TargetEvidence: target, OracleEvidence: []SubjectEvidence{oracle, secondOracle}}
 	reordered := base
 	reordered.OracleEvidence = []SubjectEvidence{secondOracle, oracle}
 	if !sameAttestationPins(base, reordered) {
@@ -431,7 +431,7 @@ func TestSkippedPackageRadiusNamesDarkPackages(t *testing.T) {
 // record carries the attestation, the rows come back whole, and a
 // symbol with no finding refuses.
 func TestAttestFindingDispositionsTheNamedRecord(t *testing.T) {
-	rows := []Finding{{Symbol: "a.B", Survivors: []Survivor{{Position: "p.go:1:1", Operator: "zero return"}}}, {Symbol: "a.C"}}
+	rows := []Finding{{Symbol: "a.B", OracleExecutionPolicy: FullOracleExecutionPolicy, Survivors: []Survivor{{Position: "p.go:1:1", Operator: "zero return"}}}, {Symbol: "a.C"}}
 	all, attested, err := AttestFinding(rows, "a.B", "p.go:1:1", "zero return", "r")
 	if err != nil || len(all) != 2 || attested.Symbol != "a.B" || len(attested.AttestedDispositions()) != 1 {
 		t.Fatalf("AttestFinding = %v, %+v, %v", len(all), attested, err)
@@ -442,7 +442,7 @@ func TestAttestFindingDispositionsTheNamedRecord(t *testing.T) {
 	if _, _, err := AttestFinding(rows, "a.X", "p.go:1:1", "zero return", "r"); err == nil {
 		t.Fatal("a symbol with no finding was attested")
 	}
-	fresh := []Finding{{Symbol: "a.B", Survivors: []Survivor{{Position: "p.go:1:1", Operator: "zero return"}}}}
+	fresh := []Finding{{Symbol: "a.B", OracleExecutionPolicy: FullOracleExecutionPolicy, Survivors: []Survivor{{Position: "p.go:1:1", Operator: "zero return"}}}}
 	if _, _, err := AttestFinding(fresh, "a.B", "p.go:1:1", "zero return", "   "); err == nil || len(fresh[0].AttestedDispositions()) != 0 {
 		t.Fatalf("a whitespace-only reasoning was recorded: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestFingerprintRecordKeysRideTheDocumentVersion(t *testing.T) {
 	}
 	got := keysOf(raw)
 	want := []string{"buildConfig", "closureStrategy", "dynamicStateStrategy", "dynamicStateVouches", "inertTestVariantApplicability", "machine", "maximalClosure", "observationAssertion", "observationProof", "packageProcessDischarges", "purityAssertion", "resultKind", "runtimeConfig", "runtimeDigest", "runtimeInputs", "singleSubjectDischarges", "testVariantClosure", "toolchain"}
-	if !reflect.DeepEqual(got, want) || DocumentVersion != 15 {
+	if !reflect.DeepEqual(got, want) || DocumentVersion != 16 {
 		t.Fatalf("the record's keys = %v (DocumentVersion %d); a moved key set rides a version bump", got, DocumentVersion)
 	}
 	// The nested proof object has its own strict decoder, so its key

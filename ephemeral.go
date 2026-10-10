@@ -49,8 +49,8 @@ type EphemeralResult struct {
 	// touches (non-kill verdicts - plain survival and the mixed
 	// killed-some-runs outcome alike): the file is linked into the
 	// oracle's binary — an unlinked replacement refuses at validation —
-	// yet the probed run never reached it, so killed=false over it is
-	// not evidence the oracle noticed anything. Advisory, absent when
+	// but the parent profile does not establish its reach. Child execution
+	// and compile-time influence remain unaccounted for. Advisory, absent when
 	// the coverage probe fails (REQ-exec-ephemeral).
 	UnexercisedFiles []string `json:"unexercisedFiles,omitempty"`
 	// EditDigest identifies the measured mutant: a digest over the
@@ -758,19 +758,12 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	res.Killed = res.KilledRuns == runs
 	if !res.Killed {
 		report(PreparationEvent{Stage: PreparationCoverage, Symbol: run, Package: testPkg, OracleBudget: probeLeash.String()})
-		// A survivor verdict over a replacement the probed run never
-		// exercised is not evidence the oracle noticed anything — the
-		// linked-but-unexecuted false-survivor channel (an UNLINKED
-		// replacement already refused at validation): the file is in
-		// the binary, but no covered block reaches it, so every test
-		// passing says nothing about the mutant. One baseline coverage probe (non-kill
-		// verdicts only - the mixed killed-some-runs outcome leaves the
-		// false-survivor reading open too; kills need no qualifier)
-		// classifies each
-		// replacement file; a probe failure leaves the advisory label
-		// absent rather than failing a sound measurement — and marks
-		// the exercise state UNKNOWN, so absence never reads as
-		// exercised (REQ-exec-ephemeral).
+		// Parent baseline coverage supplies positive reach evidence, not
+		// a negative proof about children or compile-time influence. A
+		// plain negative withholds the survival claim; a mixed outcome
+		// retains the limitation as advisory. A probe failure leaves
+		// exercise UNKNOWN, never inferred from an absent negative label
+		// (REQ-exec-ephemeral). Attributed kills need no such qualifier.
 		// The coverage probe recompiles the linked closure instrumented
 		// — a structurally different (heavier) workload than the
 		// measured oracle — so neither the derived budget (scaled to
@@ -815,16 +808,12 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 				}
 			}
 		}
-		// A plain survivor over a replacement the probed run never
-		// reached is no verdict at all: the file is linked but
-		// unexercised, so "did not notice" would assert what the label
-		// exists to deny — a guard that observes the TREE (a
-		// source-reading test, a `go list`-based layering check) sees
-		// the unmutated sources and can never kill. Refused, naming the
-		// reachable repair; a mixed killed-some-runs outcome keeps the
-		// advisory, since some run did reach it (REQ-exec-ephemeral).
+		// Negative parent-profile coverage leaves reach unestablished,
+		// so plain survival is refused rather than promoted to an
+		// equivalence premise. A mixed result retains the limitation as
+		// advisory; an actual attributed kill stands independently.
 		if res.KilledRuns == 0 && len(res.UnexercisedFiles) > 0 {
-			return nil, fmt.Errorf("no verdict: the probed run never reached %s (linked into %s's binary, unexercised by %s) — survival would prove nothing; a guard that observes the tree (a source-reading test, a go list-based check) sees the unmutated sources: mutate the guard's own input instead, or route it to review", cappedNameList(res.UnexercisedFiles, "files"), testPkg, run)
+			return nil, fmt.Errorf("no verdict: baseline parent-profile coverage did not establish reach of %s (linked into %s's binary, oracle %s) — child execution and compile-time influence are unaccounted for; inspect the deciding oracle, or mutate the actual input of a source-reading guard instead", cappedNameList(res.UnexercisedFiles, "files"), testPkg, run)
 		}
 	}
 	// An attested survivor reads as one on every face: the standing

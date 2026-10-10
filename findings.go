@@ -301,17 +301,12 @@ type Survivor struct {
 	// pin (REQ-attest-survivor).
 	Site string `json:"site,omitempty"`
 	// Execution buckets why the survivor lived (REQ-result-record):
-	// "never-executed" - the oracle's baseline coverage never reaches the
-	// mutated position, so the survivor is a coverage gap;
-	// "executed-and-passed" - the position runs and the oracle still
-	// passes, so the survivor is a weak assertion or an equivalent
-	// mutant; "covering-passed" - the NARROWED survivor
-	// (REQ-exec-oracle-run's narrowed-survivor clause): every covering
-	// test ran and passed, and the non-reaching remainder was exempt
-	// from execution on sound batch coverage — the same weak-assertion
-	// or equivalence reading as executed-and-passed, with the exemption
-	// named so the campaign audit can re-score a sample under the full
-	// oracle; "overlay-bypassed" - the observed union recorded a read of
+	// "coverage-unobserved" - the parent baseline profile reports no
+	// reach; child execution and compile-time influence remain unknown.
+	// "executed-and-passed" - baseline coverage reaches the extent and
+	// the complete required mutant oracle passed. "never-executed" and
+	// "covering-passed" are historical buckets, not fresh measurements
+	// under the full-oracle policy. "overlay-bypassed" - the observed union recorded a read of
 	// a mutated file's own on-disk path, so a disk-walking oracle's
 	// verdict derived from the unmutated tree and the survivor reading
 	// is not evidence the oracle noticed nothing; "unstable-oracle" - the finding's runtime evidence is
@@ -340,12 +335,14 @@ type Survivor struct {
 // both stay advisory — never a verdict (REQ-result-findings).
 func SurvivorAdvice(execution string) string {
 	switch execution {
+	case "coverage-unobserved":
+		return "the parent baseline profile reports no reach; child execution and compile-time influence are unaccounted for - inspect the deciding oracle before inferring a coverage gap"
 	case "never-executed":
-		return "no oracle test executes the mutated position - extend a test to reach it"
+		return "historical coverage reported no reach - re-measure under the complete oracle before drawing a coverage conclusion"
 	case "executed-and-passed":
-		return "the position executes and every oracle assertion still passes - sharpen an assertion or attest an equivalence"
+		return "the baseline profile reaches the extent and the required mutant oracle passed - sharpen an assertion or attest an equivalence"
 	case "covering-passed":
-		return "every covering test executes the position and still passes (the non-reaching remainder was exempt on measured coverage) - sharpen an assertion or attest an equivalence"
+		return "historical measurement omitted non-reaching batches - re-measure under the complete oracle before judging this survivor"
 	case "overlay-bypassed":
 		return "the oracle's observed reads include a mutated file's own on-disk path - its verdict came from the unmutated tree, not the built mutant; restructure the test to judge the linked build (a pure core over in-memory inputs) instead of re-reading the tree"
 	case "unstable-oracle":
@@ -471,6 +468,11 @@ type Finding struct {
 	// other draws re-measures instead of serving as reproducible
 	// (REQ-exec-property-oracles).
 	PropertyRegime string `json:"propertyRegime,omitempty"`
+	// OracleExecutionPolicy records the measurement's oracle-execution
+	// authority. Missing or unknown policy on a body finding requires whole
+	// remeasurement: old coverage profiles did not establish sound negative
+	// exemptions. It is never supplied by decoding or moving a record.
+	OracleExecutionPolicy string `json:"oracleExecutionPolicy,omitempty"`
 	// CompartmentLedger is the target package's test-variant declaration
 	// ledger at measure time; the killer-drift carve-out diffs it against
 	// the current tree, and a record persisted without one (an older
@@ -668,6 +670,9 @@ func (f *Finding) Attest(position, operator, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("gomutant: attestation needs a reason")
 	}
+	if why := OracleExecutionPolicyIssue(*f); why != "" {
+		return fmt.Errorf("gomutant: %s: %s", f.Symbol, why)
+	}
 	found := false
 	for _, s := range f.Survivors {
 		if s.Position == position && s.Operator == operator {
@@ -712,7 +717,7 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // content key in place of position (a shape an older reader cannot
 // resolve, the positional documents of 11-13 read as they were). The
 // reading range each boundary draws is ParseDocument's.
-const DocumentVersion = 15
+const DocumentVersion = 16
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale
@@ -1208,7 +1213,7 @@ func parseInlineFindings(top map[string]json.RawMessage) ([]Finding, error) {
 var inlineFindingFields = map[string]bool{
 	"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
 	"budget": true, "targetEvidence": true, "oracleEvidence": true,
-	"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "propertyRegime": true, "compartmentLedger": true, "commit": true, "dirty": true,
+	"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "propertyRegime": true, "oracleExecutionPolicy": true, "compartmentLedger": true, "commit": true, "dirty": true,
 	"candidateCount": true, "generated": true, "mutants": true, "killed": true,
 	"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true,
 	"candidateEvidence": true, "oracleCeilingDecided": true,
@@ -1924,6 +1929,9 @@ func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget
 	}
 	if f.Symbol != tg.Symbol {
 		return false, fmt.Errorf("gomutant: finding %s checked against target %s", f.Symbol, tg.Symbol)
+	}
+	if OracleExecutionPolicyIssue(f) != "" {
+		return false, nil
 	}
 	oracle, err := t.resolveOracleContext(ctx, tg)
 	if err != nil {

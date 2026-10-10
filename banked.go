@@ -12,10 +12,9 @@ import (
 // execution event, the first window's dispatch — and on every
 // completed or drifted run; a run cancelled before that delivers
 // nothing, since it has no banked state to report. The banked state
-// a cancelled run reports and the narrowed-survivor audit's rate ride
-// here, one tally for both faces (REQ-exec-banked-summary;
-// REQ-exec-oracle-run's
-// narrowed-survivor clause). Committed counts exactly the findings
+// a cancelled run reports rides here, one tally for both faces
+// (REQ-exec-banked-summary). Audit remains historical schema data and
+// is zero in complete-oracle runs. Committed counts exactly the findings
 // whose incremental commit RETURNED SUCCESSFULLY, with their kill and
 // open tallies — never in-flight work, never a commit that failed —
 // and stays zero for a caller that persists nothing. CommittedLocal
@@ -33,9 +32,8 @@ type RunTallies struct {
 	Audit          AuditSummary
 }
 
-// AuditSummary is the narrowed-survivor audit's measured rate: how
-// many narrowed survivors the run re-scored under the full oracle and
-// how many disagreed (each disagreement a false survivor re-scored).
+// AuditSummary preserves historical narrowed-survivor audit counts.
+// Complete-oracle execution produces no narrowing or corrective audit.
 type AuditSummary struct {
 	Narrowed  int `json:"narrowed"`
 	Disagreed int `json:"disagreed"`

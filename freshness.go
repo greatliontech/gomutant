@@ -1197,6 +1197,9 @@ func (t *Tree) admitFindingContext(ctx context.Context, f Finding, shared *admis
 			return adm, fmt.Errorf("finding %s has invalid oracle timeout: %w", f.Symbol, err)
 		}
 		adm.target = f.Symbol
+		if reason := OracleExecutionPolicyIssue(f); reason != "" {
+			return decided(FindingInspection{State: FindingStale, Reason: reason})
+		}
 		if !f.OracleExplicit {
 			currentOracle, err := t.resolveOracleContext(ctx, Target{Symbol: f.Symbol})
 			if err != nil {
@@ -1219,6 +1222,9 @@ func (t *Tree) admitFindingContext(ctx context.Context, f Finding, shared *admis
 			}
 		}
 		adm.symbols = append(adm.symbols, f.Symbol)
+	}
+	if reason := OracleExecutionPolicyIssue(f); reason != "" {
+		return decided(FindingInspection{State: FindingStale, Reason: reason})
 	}
 	adm.oracle = sortedSubjectEvidence(f.OracleEvidence)
 	adm.validOracle = make(map[string]bool, len(adm.oracle))
@@ -1480,7 +1486,7 @@ func timeoutPinMatchesRecord(prior, current Finding) bool {
 }
 
 func sameAttestationPins(prior, current Finding) bool {
-	if prior.PropertyRegime != current.PropertyRegime {
+	if prior.PropertyRegime != current.PropertyRegime || OracleExecutionPolicyIssue(prior) != "" || OracleExecutionPolicyIssue(current) != "" {
 		return false
 	}
 	if prior.OperatorSet != current.OperatorSet || prior.OracleExplicit != current.OracleExplicit || prior.Budget != current.Budget ||
@@ -1956,7 +1962,7 @@ func (r *compartmentReach) walk(seeds []int) bool {
 // uncomposable identities (sorted), every other refusal none — the caller's
 // decision names the rule's refusal and no other.
 func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (moved, added []string, drifts bool, uncomposable []string, err error) {
-	if prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
+	if OracleExecutionPolicyIssue(prior) != "" || prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
 		prior.OperatorSet != operatorSet || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime ||
 		len(prior.OracleEvidence) > len(oracle) ||
@@ -2097,7 +2103,7 @@ func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subje
 }
 
 func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
-	if prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
+	if OracleExecutionPolicyIssue(prior) != "" || prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
@@ -2130,7 +2136,7 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 // the shape digest is compared by the caller as the BodyHash pin
 // (REQ-target-structural, REQ-target-manual-recipes).
 func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*subjectView, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (bool, error) {
-	if prior.OperatorSet != operatorSet || !prior.OracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
+	if OracleExecutionPolicyIssue(prior) != "" || prior.OperatorSet != operatorSet || !prior.OracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) ||
 		len(prior.CandidateEvidence) != 0 {
 		return false, nil

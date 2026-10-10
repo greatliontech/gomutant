@@ -39,7 +39,8 @@ func cleanEvidence(symbol string) SubjectEvidence {
 
 func storeFinding(symbol string, mutate func(*Finding)) Finding {
 	f := Finding{Symbol: symbol, BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s",
-		Commit: "abc", TargetEvidence: cleanEvidence(symbol),
+		OracleExecutionPolicy: FullOracleExecutionPolicy,
+		Commit:                "abc", TargetEvidence: cleanEvidence(symbol),
 		OracleEvidence: []SubjectEvidence{cleanEvidence(symbol + "Test")},
 		CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}
@@ -138,8 +139,10 @@ func TestCommittableReasonsListEveryFailingClause(t *testing.T) {
 // (REQ-result-findings).
 func TestSurvivorAdviceVocabulary(t *testing.T) {
 	want := map[string]string{
-		"never-executed":      "no oracle test executes the mutated position - extend a test to reach it",
-		"executed-and-passed": "the position executes and every oracle assertion still passes - sharpen an assertion or attest an equivalence",
+		"coverage-unobserved": "the parent baseline profile reports no reach; child execution and compile-time influence are unaccounted for - inspect the deciding oracle before inferring a coverage gap",
+		"never-executed":      "historical coverage reported no reach - re-measure under the complete oracle before drawing a coverage conclusion",
+		"covering-passed":     "historical measurement omitted non-reaching batches - re-measure under the complete oracle before judging this survivor",
+		"executed-and-passed": "the baseline profile reaches the extent and the required mutant oracle passed - sharpen an assertion or attest an equivalence",
 		"overlay-bypassed":    "the oracle's observed reads include a mutated file's own on-disk path - its verdict came from the unmutated tree, not the built mutant; restructure the test to judge the linked build (a pure core over in-memory inputs) instead of re-reading the tree",
 		"unstable-oracle":     "the finding's runtime evidence is unverifiable - stabilize the oracle's runtime inputs before trusting execution evidence",
 		"":                    "execution evidence unavailable - the coverage probe was refused or the record predates bucketing; re-measure to bucket this survivor",

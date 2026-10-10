@@ -102,7 +102,15 @@ advisory coverage-probe geometry (REQ-exec-survivor-evidence's
 range-shaped bucket), never a reuse input, and a row without one is
 answered by its anchor point — plus per-operator generated, discarded,
 killed, and survived
-counts whose sums equal the finding totals. The oracle is pinned by identity and complete Gofresh evidence,
+counts whose sums equal the finding totals. Fresh body and shaped measurements
+also record `oracleExecutionPolicy` with value `gomutant/full-oracle@1`:
+each required group ran with its full unsplit pattern, without coverage-based
+negative exemptions, subject to the named-killer confirmation and separately
+licensed historical-pass composition rules. This is independent of the
+operator-set version, which identifies the mutation catalog, not the oracle's
+execution policy. An absent or unknown policy is preserved as recorded;
+decoding, writing, changing layers, retargeting, and merely serving a record
+never backfill it. The oracle is pinned by identity and complete Gofresh evidence,
 not merely by name: strengthening a test or any source it
 depends on moves its closure, so a record cannot keep reporting a survivor a
 now-sharper test would kill. The completed processes' merged runtime-input evidence is attached to every
@@ -193,7 +201,11 @@ that failed to load does. Counts, committability, and layer never
 stand for reuse: a measured kill and an equivalence disposition are
 preserved as measured and never presented as reusable evidence. The
 summary's not-reusable roster caps with the remainder counted; the
-finding rows carry each record's own posture.
+finding rows carry each record's own posture. Policy validation names its
+independent cause and action: an absent or unsupported body-record policy,
+or an unsupported shaped-record policy, requires a whole measurement with
+the complete oracle. A supported policy permits the other evidence checks;
+it does not itself establish freshness, observability, or reuse.
 
 **REQ-result-unreached-bound** (behavior): A run under a declared build
 selection (build tags, a toolchain directive, or both — each toolchain
@@ -222,8 +234,9 @@ argument never admits.
 
 **REQ-result-tolerant** (behavior): Loading a finding record MUST tolerate an
 unrecognized field by discarding it rather than refusing the document. The
-tolerance is safe because its direction is anti-flattering: every open
-finding is a genuinely measured survivor, so a dropped field can re-stale
+tolerance is safe because its direction is anti-flattering: the reader
+preserves historical outcomes without granting them current authority, and
+the independent execution-policy gate still applies. A dropped field can re-stale
 the record (a missing pin no longer covers the request — REQ-result-stale)
 or widen the open set (a dropped disposition-bearing field puts attested
 survivors back among open findings), but can never serve a kill or an
@@ -254,7 +267,21 @@ never corruption — the reader preserves its bytes and serves nothing from
 it, naming the probable cause (an older gomutant wrote it).
 
 **REQ-result-stale** (behavior): gomutant MUST re-measure a target rather
-than serve a record whose pins no longer cover the request — an edit to the
+than serve a record whose oracle execution policy or pins no longer cover
+the request. Policy admission is independent of source and runtime freshness:
+`gomutant/full-oracle@1` permits further evidence judgment; an absent policy
+on a historical shaped record is also admitted because that measurement ran
+the full explicit oracle unsplit by construction. An unknown shaped policy
+is not admitted. A body record with an absent or unknown policy requires a
+whole re-measurement, even if no survivor carries a historical narrowed
+bucket: that absence proves nothing about how its other candidates ran.
+This gate precedes exact reuse, budget extension, oracle-drift composition,
+and flagged-candidate splices; none can retain historical counts behind a
+failed policy gate. The reason names the missing or unsupported policy and
+the action — re-measure with the complete oracle — independently of every
+other validation reason. A fresh whole measurement stamps its own policy;
+no decoder, writer, layer move, or retarget upgrades historical evidence.
+With policy admission satisfied, an edit to the
 target or any target/oracle dependency, a changed runtime input, purity,
 toolchain, or build configuration, an added or removed oracle identity, a new
 oracle selection mode or operator version, or a different effective oracle
@@ -664,11 +691,17 @@ standing row, unless the caller asks for the replacement by name.
 Building or recording an attestation is refused for every probe state
 that is not an exercised full survivor: a kill or a mixed killed-some-runs
 outcome is evidence against equivalence (evidence beats attestation);
-an unexercised survivor is vacuous — no run reached the edit, so its
-survival supports nothing; and a survivor whose exercise state is
+negative baseline-parent-profile coverage leaves reach unestablished — it
+proves neither absent child execution nor absent compile-time influence and
+supplies no equivalence evidence; and a survivor whose exercise state is
 unknown (the coverage probe failed — the probe result carries that
 fact distinctly, never encoded as the absence of the unexercised
-label) is unverifiable and refuses the same way. Re-attesting the same
+label) refuses a new attestation as well. Unknown coverage alone does not
+refuse the probe: without a negative coverage entry it returns an explicitly
+unverified advisory result. A standing attestation matching the digest may
+still ride that result as historical reasoning, not newly established reach
+or equivalence. Neither a negative nor an unknown parent profile proves
+absence of execution or a kill. Re-attesting the same
 mutant, asked for by name, supersedes every row naming the mutant by
 either key (a raw-keyed legacy row beside its canonical successor
 included); the record
@@ -721,7 +754,7 @@ content's, or two entries under one key, is malformed — carrying, per mutated
 symbol, the pins that scope the record (target and oracle subject evidence,
 each carrying its package's test-variant compartment hash beside the maximal
 closure;
-oracle selection mode; operator version; budget; oracle timeout; oracle
+oracle selection mode; oracle execution policy; operator version; budget; oracle timeout; oracle
 memory ceiling; commit and dirty provenance), the mutant and
 kill counts, the kill-attribution list when the record carries one (its
 absence is tolerated in the anti-flattering direction: a record without it
@@ -784,9 +817,17 @@ This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 a spec-driven producer recovering findings by label — consumes gomutant's contract, never
-its internal store. Version 15 carries the native fingerprint's optional
-`inertTestVariantApplicability` object (`strategy`, `testVariantClosure`) and
-complete binding-aware ledgers. A ledger's optional `bindingStrategy` names its
+its internal store. The current document version is 16 and the reader accepts
+versions 4 through 16. Version 16 carries `oracleExecutionPolicy` on each
+fresh body or shaped finding, with `gomutant/full-oracle@1` identifying the
+full-oracle policy. Absent and unknown values remain readable and preserved,
+but their reuse is governed by REQ-result-stale, not inferred from the
+document's version. Upgrading the enclosing document never backfills a row's
+policy. This measurement-policy boundary is not an operator-set change.
+Version 15's native fingerprint form retains its optional
+`inertTestVariantApplicability` object (`strategy`, `testVariantClosure`),
+and its complete binding-aware ledgers remain intact. A ledger's optional
+`bindingStrategy` names its
 derivation; `baseFiles` preserves a present empty array rather than conflating it
 with absent evidence. Both base-file and compartment headers
 carry optional `bindings` objects with `package`, `references` and `imports`
@@ -937,11 +978,15 @@ parked at a path a write installs at is re-homed at its own path
 before the install, so a write never loses a record it reported
 nothing about.
 
-A survivor carries optional execution evidence — `never-executed`,
-`executed-and-passed`, `covering-passed`, `overlay-bypassed`,
+A survivor carries optional execution evidence — `coverage-unobserved`,
+`executed-and-passed`, `overlay-bypassed`,
 `unstable-oracle`, or `flipped-kill` per REQ-exec-survivor-evidence in
 [execution.md](execution.md) — advisory and empty on records measured before
 bucketing existed; it is location metadata's sibling, never a measurement pin.
+The historical `never-executed` and `covering-passed` categories are retained
+on read, never minted by fresh classification. A baseline parent profile's
+negative answer is `coverage-unobserved`, not proof of absent child execution
+or absent compile-time influence.
 
 A survivor position is `file.go:line:column`. When distinct generated mutants
 share that position and operator, the second and later identities append
@@ -956,7 +1001,7 @@ Under REQ-result-candidate-conservation, occurrence suffixes are assigned over
 the complete globally ordered candidate set before budget selection or discard;
 an earlier discarded candidate can therefore reserve an occurrence number.
 
-**REQ-result-baseline-bank** (behavior): Baseline and coverage-probe
+**REQ-result-baseline-bank** (behavior): Passing baseline
 measurements MUST bank machine-local — a killed or finished
 campaign's measurement is never discarded by the calendar — in a
 versioned bank file (`baselines.json`, version 2) beside the findings
@@ -964,34 +1009,18 @@ overlay under the same resolved-tree key, never in the repo document
 (durations and probe identities are one machine's facts). A banked
 baseline entry carries the group's oracle-subject evidence rows as
 its content pins, the passing observation's persisted manifest and
-digest, and the raw wall-clock; a banked coverage entry additionally
-pins the covered package's own closure pin and carries each batch's
-test names, coverage spans, and wall-clock. A coverage entry deposits
-BATCH BY BATCH — each batch is its own passing probe, deposited as it
-lands with its position in the group's batch plan and the plan's size
-— and records a batch whose probe failed by its position, its tests,
-and the probe's refusal, so a later run whose pins hold RESUMES the
-entry: the banked batches serve, only the failed and the unprobed
-batches probe, and the retry names the prior failure; an entry every
-batch of whose plan holds a passing probe is complete and serves
-whole, and a banked batch whose tests differ from the plan's at its
-position discards the entry. The bank's granularity leaves the run's
-own schedule signal unchanged: a group any batch of which failed THIS
-run carries no signal this run (REQ-exec-oracle-run's every-batch
-rule). Serving re-verifies,
-each entry class at the strength its reuse requires: a BASELINE's
-rows validate against the current subject views through the same
+digest, and the raw wall-clock. Historical coverage payloads — batch tests,
+spans, timings, positions, plan sizes, and failures — remain readable and
+preserved, but no fresh coverage-bank producer runs. They neither restore
+nor resume a schedule, authorize an omission, contribute a cost saving, nor
+supply reuse authority. Full-pattern advisory coverage is separate from
+this historical bank. Serving re-verifies a baseline's
+rows against the current subject views through the same
 evidence discipline finding serves use (per-pair prechecks, the
 runtime memo, nothing skipped), and its observation re-enters ONLY
 through runtime-input adoption, which re-evaluates every recorded
 identity against disk and refuses on any disagreement, the adopted
-digest compared against the banked one; a COVERAGE entry pins source
-closures and code guards alone — closure contributions hash whole
-files, so any edit to the covered package or the oracle tests moves
-a pinned closure and stale spans cannot survive a held pin, and the
-residual axis (runtime-dependent coverage, an environment-dependent
-skip) is exactly the risk class the narrowed-survivor audit measures
-on every window, banked coverage and probed coverage alike. Any pin,
+digest compared against the banked one. Any pin,
 adoption, or digest failure falls through to a fresh
 probe, never an error — a pin-check error is a fall-through too,
 only the run's own cancellation propagates — exactly as an absent,
@@ -999,16 +1028,14 @@ unreadable, malformed,
 version-skewed, or over-ceiling bank reads as empty (the bank is
 cache with a fixed size ceiling; the
 re-measure is the recovery path). Only a clean, verifiable, PASSING
-probe deposits MEASUREMENT — an unverifiable observation would
-re-enter unverifiable evidence — a failed coverage-probe batch
-deposits its failure record alone (its position, its tests, the
-refusal), never spans, and a completed deposit PERSISTS
+probe deposits measurement — an unverifiable observation would
+re-enter unverifiable evidence — and a completed deposit persists
 immediately: the bank exists to survive killed campaigns, and
 persistence deferred to process exit dies with the process. A
 BASELINE deposit completes when its finding COMMITS: the pins are
 the finding's own attached evidence rows (attachment is one-shot),
-so a campaign killed before its first commit banks coverage but not
-baselines, and the graceful drain's capped commits bank normally. The bank rides findings-producing runs
+so a campaign killed before its first commit banks no new baseline,
+and the graceful drain's capped commits bank normally. The bank rides findings-producing runs
 only, and a forced run bypasses the serve entirely — force is the
 operator's distrust-the-cache control, and the fresh probes it takes
 re-deposit. A served group reports its banked
@@ -1021,7 +1048,16 @@ content-valid measurement.
 
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among
-the record's current survivors; a record's open findings are its survivors
+the record's current survivors and its oracle execution policy passes
+REQ-result-stale's independent admission. Missing body policy or unsupported
+policy refuses a new disposition with the complete-oracle re-measurement
+action; a legacy shaped record's absent policy retains its proven-full
+exception. Equivalence reasoning on a policy-refused record is retained,
+not erased by that refusal, and may carry only after a valid fresh
+full-oracle measurement and
+the ordinary carry checks hold; a fresh kill contradicts it as before.
+Neither a negative parent profile nor a historical coverage bucket proves
+equivalence. A record's open findings are its survivors
 less its attested ones. A disposition is a judgment about the mutated
 source, so its lifecycle is keyed to the mutation domain, never to
 measurement pins: a re-measure carries a disposition exactly when the
@@ -1242,8 +1278,9 @@ is removed under the names the read found it holding its symbol
 what landed.
 
 **REQ-result-inspection** (behavior): Findings inspection MUST classify every
-record as `current` when all recorded mutation-domain and subject evidence
-still proves reusable, `stale` when a comparable input moved, `unverifiable`
+record as `current` when its oracle execution policy is admitted and all
+recorded mutation-domain and subject evidence still proves reusable,
+`stale` when policy admission fails or a comparable input moved, `unverifiable`
 when current evidence cannot prove reuse, or `detached` when the mutated symbol
 no longer resolves - a terminal state the reason says so loudly in every
 judged view, naming the prune and retarget moves, because nothing short of the
@@ -1264,7 +1301,15 @@ name, never with the record count — announced as the expensive stretch
 it is, and the recorded default names the judged opt-in at its point
 of use. Every judged view carries the reason, and every view the open
 and attested counts, independently of that state, including fully
-attested records; the detail
+attested records. Every default and detail view, CLI and MCP alike, carries
+the recorded `oracleExecutionPolicy` (absent stays absent) and the derived
+`oracleExecutionPolicyIssue` when the record's policy is unsupported. This
+record-only validation loads no tree: its issue names the cause and the
+complete-oracle re-measurement action, and the counts are explicitly flagged
+historical, not complete-oracle evidence. A missing issue, including for a
+legacy shaped record's proven-full policy, establishes no current-tree
+freshness. Historical rows are preserved, never declared collectively valid
+by the document's readability. The detail
 view carries the survivor and disposition lists themselves, and the CLI's
 machine-readable JSON export (under the one structured-face flag name
 REQ-exec-run-status fixes) - like the document on disk - stays complete

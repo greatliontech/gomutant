@@ -251,7 +251,7 @@ func renderEphemeralVerdict(w io.Writer, res *gomutant.EphemeralResult) {
 		fmt.Fprintf(w, "coverage unknown  %s  — whether the probed run reached this replacement could not be established (the coverage probe failed or could not attribute it); this survival is unverified\n", strings.Join(res.CoverageUnknownFiles, ", "))
 	}
 	for _, f := range res.UnexercisedFiles {
-		fmt.Fprintf(w, "unexercised  %s  — no baseline-covered block reaches this replacement (linked into the oracle's binary, never reached by the probed run); its survival is not evidence the oracle noticed anything\n", f)
+		fmt.Fprintf(w, "unexercised  %s  — no baseline parent-profile block reaches this replacement; child execution and compile-time influence are unaccounted for, so this is not equivalence evidence\n", f)
 	}
 	if res.KillerOutput != "" {
 		for _, l := range strings.Split(res.KillerOutput, "\n") {

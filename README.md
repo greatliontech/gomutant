@@ -10,6 +10,14 @@ consumes its findings.
 
 The contract lives in [docs/specs](docs/specs/overview.md).
 
+Fresh measurements run each required oracle group with its full unsplit
+pattern. Coverage is advisory: a parent profile cannot prove that a child
+never executed a mutation or that a compile-time change had no influence.
+There are no coverage-based negative exemptions, scheduling batch probes,
+coverage-bank restores, narrowed-survivor audits, or coverage savings.
+Named-killer confirmation and independently licensed reuse of prior passes
+retain their own rules.
+
 ## CLI
 
 ```
@@ -72,6 +80,22 @@ hold measures only the unmeasured candidate suffix and splices it onto the
 recorded prefix. Open findings are survivors minus attested dispositions;
 whether they fail a build is the caller's policy, not gomutant's verdict.
 
+Fresh body and shaped findings record `oracleExecutionPolicy` as
+`gomutant/full-oracle@1`. Default CLI and MCP findings views show that policy
+and any `oracleExecutionPolicyIssue` without loading the tree. Missing or
+unknown body policy requires a whole complete-oracle remeasurement, including
+before extensions or partial re-execution; unknown shaped policy does too.
+Legacy shaped records with no policy retain their proven-full exception.
+Unsupported counts are shown as historical, not current complete-oracle
+evidence. A supported policy alone does not establish freshness. Version 16
+documents read versions 4–16 and retain version 15's complete ledgers;
+rewriting or retargeting a historical row never upgrades its policy.
+
+`coverage-unobserved` asks for investigation of the oracle and its baseline
+parent profile, not an equivalence judgment. `executed-and-passed` names
+baseline-profile reach beside the full mutant oracle's pass.
+`never-executed` and `covering-passed` remain historical categories only.
+
 Long analysis stretches print a throttled `analysis` heartbeat naming the
 phase. For a run that appears hung, set `GOMUTANT_PPROF=127.0.0.1:6060`
 before launching: the process serves `net/http/pprof` on that address, so
@@ -110,7 +134,8 @@ the same run serves findings whose pins still hold; `--force` deliberately
 remeasures them. Package- and symbol-filtered runs are scoped and never delete
 findings outside their selected surface. `--timeout` bounds command work through
 the atomic findings commit and defaults to unlimited; `--oracle-timeout` bounds
-each baseline or mutant oracle process and defaults to one minute. Each
+each oracle process; its default of 0 derives the mutant budget from the
+passing baseline under the measurement leash. Each
 finished target's finding commits incrementally under the findings document
 lock, so an interrupt or command timeout observed mid-run cancels the full
 oracle process tree while keeping every already-finished target; an unfinished
@@ -158,7 +183,11 @@ attest echoes the disposition, the remaining open count, and the record's
 layer, and warns when the record is already stale — the next measure judges
 the equivalence afresh. Attestations remain visible on a stale record, but a
 remeasurement sheds them
-when the evidence pins move. Open survivors remain advisory, so a completed mutation run exits
+when the mutation domain moves or fresh evidence contradicts them; historical
+reasoning may carry after valid fresh full-oracle measurement under the normal
+carry checks. Unsupported execution policy refuses a new attestation until
+whole remeasurement. Negative advisory coverage never proves equivalence.
+Open survivors remain advisory, so a completed mutation run exits
 successfully regardless of their count. Operational errors and malformed or
 unattributable observations fail the command; cancellation observed before the
 result commit does too.

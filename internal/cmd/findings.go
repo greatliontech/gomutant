@@ -40,13 +40,15 @@ func (o findingsOptions) judged() bool {
 }
 
 type findingView struct {
-	Symbol      string                `json:"symbol"`
-	Labels      []string              `json:"labels,omitempty"`
-	State       gomutant.FindingState `json:"state"`
-	Reason      string                `json:"reason,omitempty"`
-	Layer       string                `json:"layer"`
-	LayerReason string                `json:"layerReason,omitempty"`
-	Run         string                `json:"run,omitempty"`
+	Symbol                     string                `json:"symbol"`
+	Labels                     []string              `json:"labels,omitempty"`
+	State                      gomutant.FindingState `json:"state"`
+	Reason                     string                `json:"reason,omitempty"`
+	Layer                      string                `json:"layer"`
+	LayerReason                string                `json:"layerReason,omitempty"`
+	Run                        string                `json:"run,omitempty"`
+	OracleExecutionPolicy      string                `json:"oracleExecutionPolicy,omitempty"`
+	OracleExecutionPolicyIssue string                `json:"oracleExecutionPolicyIssue,omitempty"`
 	// DeltaOpen is present exactly when a changed-ref cut ran (an
 	// empty list is "cut ran, none on the delta").
 	DeltaOpen      *[]gomutant.Survivor         `json:"deltaOpen,omitempty"`
@@ -292,6 +294,7 @@ func renderFindingSummaries(w io.Writer, views []findingView, inspection gomutan
 			fmt.Fprintf(w, "  (%s)", view.Reason)
 		}
 		fmt.Fprintln(w, runSuffix(view.Run))
+		renderOracleExecutionPolicyIssue(w, view)
 	}
 	fmt.Fprintf(w, "%d repo-committable, %d machine-local; --detail for survivors and dispositions", inspection.Repo, inspection.Local)
 	if !judged {
@@ -323,6 +326,7 @@ func renderFindingViews(w io.Writer, views []findingView, inspection gomutant.In
 		if view.Reason != "" {
 			fmt.Fprintf(w, "    cause: %s\n", view.Reason)
 		}
+		renderOracleExecutionPolicyIssue(w, view)
 		for i, survivor := range view.Open {
 			mark := ""
 			if view.split.IsOnDelta(i) {
@@ -353,6 +357,14 @@ func renderFindingViews(w io.Writer, views []findingView, inspection gomutant.In
 
 func renderFindingsJSON(w io.Writer, views []findingView) error {
 	return json.NewEncoder(w).Encode(views)
+}
+
+func renderOracleExecutionPolicyIssue(w io.Writer, view findingView) {
+	if view.OracleExecutionPolicyIssue != "" {
+		fmt.Fprintf(w, "    oracle execution policy %q: %s; counts are historical\n", view.OracleExecutionPolicy, view.OracleExecutionPolicyIssue)
+	} else if view.OracleExecutionPolicy != "" {
+		fmt.Fprintf(w, "    oracle execution policy %q\n", view.OracleExecutionPolicy)
+	}
 }
 
 // findingFilters selects the records an inspection renders: the
@@ -386,6 +398,7 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 		}
 		views = append(views, findingView{
 			Symbol: finding.Symbol, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
+			OracleExecutionPolicy: finding.OracleExecutionPolicy, OracleExecutionPolicyIssue: gomutant.OracleExecutionPolicyIssue(finding),
 			Layer: row.Layer, LayerReason: row.LayerReason, Run: finding.Run, DeltaOpen: onDelta, split: split,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,

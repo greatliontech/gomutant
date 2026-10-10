@@ -123,7 +123,7 @@ func TestEphemeralPrunesStrandedImports(t *testing.T) {
 	}
 }
 
-// A plain survivor over a replacement the probed run never reached is
+// A plain survivor whose parent profile establishes no replacement reach is
 // a refusal naming the repair, not a verdict; a mutated test file is
 // admitted and named, since its verdict is about the test, never the
 // code under test (REQ-exec-ephemeral's blind spots).
@@ -148,7 +148,7 @@ func TestEphemeralRefusesBlindSpotTargets(t *testing.T) {
 		t.Fatal("fixture edit failed")
 	}
 	_, err = tr.RunEphemeral(context.Background(), EphemeralRequest{File: "genp/gen.go", Mutant: []byte(mutated), TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeout: time.Minute, Runs: 1})
-	if err == nil || !strings.Contains(err.Error(), "never reached genp/gen.go") || !strings.Contains(err.Error(), "mutate the guard's own input") {
+	if err == nil || !strings.Contains(err.Error(), "coverage did not establish reach of genp/gen.go") || !strings.Contains(err.Error(), "mutate the actual input") {
 		t.Fatalf("unexercised survivor = %v; want the no-verdict refusal naming the repair", err)
 	}
 }

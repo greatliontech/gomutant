@@ -543,7 +543,8 @@ func capRunFindings(ctx context.Context, findings []gomutant.Finding, layer func
 			open = open[:envelope.open]
 		}
 		row := findingOut{
-			Symbol: f.Symbol, Labels: f.Labels,
+			oracleExecutionPolicyOut: oracleExecutionPolicyRow(f),
+			Symbol:                   f.Symbol, Labels: f.Labels,
 			CandidateCount: f.CandidateCount, Generated: f.Generated,
 			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
 			Attested: len(f.Attested), Open: open,
@@ -814,6 +815,7 @@ type runIn struct {
 }
 
 type findingOut struct {
+	oracleExecutionPolicyOut
 	Symbol           string                   `json:"symbol"`
 	Labels           []string                 `json:"labels,omitempty"`
 	CandidateCount   int                      `json:"candidateCount"`
@@ -834,6 +836,20 @@ type findingOut struct {
 	Analysis         string                   `json:"analysis,omitempty" jsonschema:"what a later judgment needs: a re-measure, a re-execution of the affected evidence, nothing a re-judgment can lift, or a re-judgment once a tree that failed to load does"`
 	Layer            string                   `json:"layer,omitempty" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay; absent on skipped targets"`
 	LayerReason      string                   `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+}
+
+// oracleExecutionPolicyOut reports a recorded measurement's policy without
+// judging the current tree. Passing this gate alone establishes no freshness.
+type oracleExecutionPolicyOut struct {
+	OracleExecutionPolicy      string `json:"oracleExecutionPolicy,omitempty" jsonschema:"the recorded oracle execution policy; absent on legacy records, never a current-tree freshness claim"`
+	OracleExecutionPolicyIssue string `json:"oracleExecutionPolicyIssue,omitempty" jsonschema:"the measurement policy's known limitation; when present the counts are historical, not complete-oracle evidence; absence only permits further evidence judgment"`
+}
+
+func oracleExecutionPolicyRow(f gomutant.Finding) oracleExecutionPolicyOut {
+	return oracleExecutionPolicyOut{
+		OracleExecutionPolicy:      f.OracleExecutionPolicy,
+		OracleExecutionPolicyIssue: gomutant.OracleExecutionPolicyIssue(f),
+	}
 }
 
 type runOut struct {
@@ -1530,6 +1546,7 @@ type findingsIn struct {
 // record, what state, which layer, how much is open - with the full
 // lists behind detail (REQ-mcp-envelope, REQ-result-inspection).
 type findingSummary struct {
+	oracleExecutionPolicyOut
 	Symbol    string                `json:"symbol"`
 	State     gomutant.FindingState `json:"state"`
 	Reason    string                `json:"reason,omitempty"`
@@ -1541,6 +1558,7 @@ type findingSummary struct {
 }
 
 type inspectedFinding struct {
+	oracleExecutionPolicyOut
 	Symbol         string                       `json:"symbol"`
 	Labels         []string                     `json:"labels,omitempty"`
 	State          gomutant.FindingState        `json:"state"`
@@ -1695,7 +1713,8 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		}
 		if !in.Detail {
 			out.Summary = append(out.Summary, findingSummary{
-				Symbol: finding.Symbol, State: row.Inspection.State, Reason: row.Inspection.Reason,
+				oracleExecutionPolicyOut: oracleExecutionPolicyRow(finding),
+				Symbol:                   finding.Symbol, State: row.Inspection.State, Reason: row.Inspection.Reason,
 				Layer: row.Layer, Run: finding.Run, Open: len(finding.Open()), DeltaOpen: deltaCount, Attested: len(finding.AttestedDispositions()),
 			})
 			continue
@@ -1703,7 +1722,8 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		labels := append([]string(nil), finding.Labels...)
 		sort.Strings(labels)
 		out.Findings = append(out.Findings, inspectedFinding{
-			Symbol: finding.Symbol, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
+			oracleExecutionPolicyOut: oracleExecutionPolicyRow(finding),
+			Symbol:                   finding.Symbol, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
 			Layer: row.Layer, LayerReason: row.LayerReason, Run: finding.Run, DeltaOpen: onDelta,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,

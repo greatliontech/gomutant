@@ -3453,8 +3453,8 @@ func TestRunBucketsSurvivorExecution(t *testing.T) {
 	for _, s := range weak[0].Survivors {
 		buckets[s.Execution]++
 	}
-	if buckets["never-executed"] == 0 {
-		t.Fatalf("Weak survivors = %+v; want the untested branch bucketed never-executed", weak[0].Survivors)
+	if buckets["coverage-unobserved"] == 0 {
+		t.Fatalf("Weak survivors = %+v; want the branch absent from the parent profile bucketed coverage-unobserved", weak[0].Survivors)
 	}
 	if buckets[""] != 0 {
 		t.Fatalf("Weak survivors carry empty buckets: %+v", weak[0].Survivors)

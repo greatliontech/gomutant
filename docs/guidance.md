@@ -47,13 +47,15 @@ analysis streams leave the response when a progress token streamed
 them — their totals stay; without one the payload-bearing analysis
 events ride the response, capped. Long campaigns exceed MCP client timeouts —
 raise the timeout or use the cli.
-A window's coverage-probe phase announces its cost's upper bound
-before its first batch and reports the batches paid after each, before
-the window's estimate; a failed probe batch is named on the analysis
-stream with its tests and output while the plan's other batches bank
-and a later run resumes from them, and the estimate names each group
-without a schedule signal and why; a
-target skipped on a failing oracle baseline carries the oracle's own
+Each required oracle group runs its full unsplit pattern. Parent-profile
+coverage never authorizes omitting a test: a child can execute outside the
+profile and a compile-time mutation can influence a result without reaching
+its block. There are no scheduling batch probes, restored coverage schedules,
+narrowed-survivor audits, or coverage savings. Named-killer confirmations and
+independently licensed composition of prior passes keep their own rules.
+Full-pattern baseline coverage remains advisory. Historical banked coverage
+payloads remain readable but supply no authority; passing-baseline banking
+is unchanged. A target skipped on a failing oracle baseline carries the oracle's own
 output as an analysis line beside its decision. Execution proceeds in
 windows that commit as they close: a window closes at a candidate
 ceiling (eight per worker, sixty-four at least) or, once it holds at
@@ -107,7 +109,15 @@ oracleSet integer referencing oracleSets[].id.
 facts by default, cheap at any document size; layer is repo
 (portable, committed) or local (machine-local overlay, with the
 reason it is not committable). Rows cap at 50 with the remainder
-counted; the document on disk always carries the full set. A record's posture at the end of its run is already on the run's report; findings re-derives it against the current tree when the tree may have moved since.
+counted; the document on disk always carries the full set. Every row also
+reports its recorded oracleExecutionPolicy and any oracleExecutionPolicyIssue
+without loading a tree. An absent or unsupported body policy, or an unknown
+shaped policy, flags the counts as historical and calls for a whole
+complete-oracle re-measurement. Fresh body and shaped records carry
+gomutant/full-oracle@1; an absent policy on a legacy shaped record retains
+its proven-full exception. Policy admission alone never establishes
+freshness. A record's posture at the end of its run is already on the run's
+report; findings re-derives freshness only when a judged question is asked.
 **example:** findings with state=unverifiable after a campaign to
 list what cannot serve.
 
@@ -144,8 +154,13 @@ document is unexpectedly empty.
 - `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use attestation only after judging a survivor genuinely
 equivalent — refused unless the mutant is among the finding's
-current survivors (the provenance guards judge under this call's
-selection); the disposition rides re-measures while the
+current survivors and its oracle execution policy is supported (the
+provenance guards judge under this call's selection). A missing body policy
+or unsupported policy requires whole remeasurement with the complete oracle
+before a new attestation. Historical reasoning may carry after that valid
+fresh measurement under the normal carry checks; a kill still contradicts it.
+A negative baseline profile is never an equivalence argument.
+The disposition rides re-measures while the
 mutated source is unchanged and the mutant keeps surviving, and
 sheds when the mutation domain moves (the body or the operator set)
 or evidence contradicts it (a test kills the mutant), so every body
@@ -220,7 +235,7 @@ to=example.com/new. after a package rename, then for real.
 - `oracle_memory_mib` (mcp, cli as `oracle-memory-mib`) — memory ceiling for the probe's oracle process tree in MiB: absent or 0 derives the lone tree's default (RAM/2 floored at 1 GiB — the run's RAM/(2 × jobs) at one job), -1 disables; the result reports the ceiling the probe ran under (`oracleMemoryBytes`, 0 = unlimited). The probe's bounds are its own: a run in flight and a sibling probe each spawn under theirs.
 - `runs` (mcp, cli) — run the mutant this many times, 1-10 (default 1), against the once-probed baseline: killed means every run killed — N consecutive kills split a deterministic kill from a property generator's draw luck; per-run verdicts ride the result.
 - `progress-interval` (cli) — cadence of the progress line naming the stretch in flight (preparing, then prepare loading, prepare baseline, prepare mutant-run, prepare coverage) and the elapsed time; 0 disables.
-- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document, `ephemeral-attestations.json` (a blank reasoning refuses before any load or probe; a probe that killed, was mixed, or could not establish that it reached the edit refuses after it); a never-reached plain survivor is refused by the probe itself.
+- `attest` (mcp, cli) — record the surviving probe as a judged equivalence with this reasoning, in the committed record beside the findings document, `ephemeral-attestations.json` (a blank reasoning refuses before any load or probe; a kill, a mixed result, or unknown reach refuses a new attestation afterwards); negative parent-profile coverage refuses plain survival, while unknown coverage alone returns an explicitly unverified advisory result. Neither supplies equivalence evidence; a standing attestation may still ride a matching digest as history.
 - `findings` (mcp, cli) — findings document path whose sibling ephemeral-attestation record `attest` writes and a surviving probe is matched against (default .gomutant/findings.json); an attested survivor's verdict names its attestation instead of a bare SURVIVED.
 - `reattest` (mcp, cli) — with `attest`: replace an existing attestation of the same mutant instead of refusing.
 - `tags` (mcp, cli as `tag`) — build tags for this call's selection.
@@ -231,7 +246,7 @@ hand-written mutant the operator set cannot generate, one deciding
 test, the tree never touched and nothing persisted (an `attest`ed
 equivalence judgment is the one durable output, written to the
 committed record, never to a finding); an observed
-probe executes the named test once, bracketing runtime-input
+probe executes the complete explicit oracle pattern, unsplit, bracketing runtime-input
 observation, and a kill carries the killing test's bounded output
 head. Give exactly one mutation form. The named package's test binary
 runs under the oracle's own flags — `-rapid.nofailfile` and
@@ -257,8 +272,8 @@ scoring: a guard that observes the TREE — a source-reading test
 (`os.ReadDir`/`go/parser` over the module's own files) or a `go
 list`-based layering check — sees the unmutated sources, since the
 mutant links into the binary and the tree is never touched, so a
-survivor over a file the probed run never reached is a REFUSAL (no
-verdict; mutate the guard's own input instead — a kind added to the
+survivor over a file with negative baseline-profile coverage is a REFUSAL
+(no survival claim; mutate the guard's own input instead — a kind added to the
 scanned set, an edge added to the parsed table — which links into the
 binary, or route the guard to review); a mutated test file is
 admitted and named (`mutated test`): its verdict is about the test —
@@ -266,10 +281,15 @@ was the edited part load-bearing for the named run — never about the
 code under test. A compiler signal death under the baseline or a mutant run is retried
 once and, recurring, reported as the crash it is (`compiler crashed
 twice — re-run to confirm`), never as a mutant that does not compile
-and never as the baseline failing to build. A survivor whose exercise
-could not be established (`coverage unknown`: the coverage probe
-failed, or a file's profile entry could not be attributed) is
-unverified, neither refused nor vouched.
+and never as the baseline failing to build. Plain survival whose exercise
+could not be established (`coverage unknown`: the coverage probe failed,
+or a file's profile entry could not be attributed), without a negative
+coverage entry, returns an explicitly unverified advisory result rather than
+a refusal. It cannot authorize a new equivalence attestation; a standing
+attestation matching the digest may still ride as historical reasoning.
+Negative parent-profile coverage proves neither absent child execution nor
+absent compile-time influence. It is only a refusal or, for a mixed result,
+an advisory; it neither proves equivalence nor overturns an attributed kill.
 **example:** ephemeral with a batch edit neutering one guard and
 run naming the test that must notice.
 
@@ -349,10 +369,23 @@ document; discover lists effective targets without measuring; explain
 answers why — a symbol's full machine-local clause list and per-survivor
 prescriptions, or the whole document's promotion triage. Survivors are
 findings awaiting disposition — strengthen a test or attest an
-equivalence — never verdicts. A survivor bucketed never-executed wants
-coverage; executed-and-passed and covering-passed (the narrowed
-survivor: covering tests passed, the non-reaching remainder exempt on
-measured coverage) want a sharper assertion or an attestation. Send a
+equivalence — never verdicts. Fresh measurements run every required oracle
+group unsplit. `coverage-unobserved` means the baseline parent profile did
+not observe the extent; investigate the oracle and profile, since it proves
+neither absent child execution nor absent compile-time influence.
+`executed-and-passed` means baseline-profile reach beside a full mutant-oracle
+pass; inspect the assertion or establish equivalence independently.
+`never-executed` and `covering-passed` are historical read categories, never
+freshly minted authority. Recorded views show oracleExecutionPolicy and any
+policy issue, flagging unsupported counts as historical without a tree
+judgment. Missing body policy or unknown policy requires whole remeasurement;
+a legacy shaped record's absent policy retains its proven-full exception.
+Current policy permits freshness judgment, never substitutes for it.
+Ephemeral uses the full explicit oracle: negative parent-profile coverage
+refuses plain survival; unknown coverage alone returns an explicitly
+unverified advisory result and refuses a new equivalence attestation. A
+standing attestation may still ride a matching digest as history. Neither
+coverage answer proves absence of execution, equivalence, or a kill. Send a
 progress token on run/ephemeral for phase notifications and a heartbeat;
 long campaigns exceed MCP client timeouts — raise the timeout or use the
 CLI (mcp timeouts default to 300 seconds, the cli to unlimited).

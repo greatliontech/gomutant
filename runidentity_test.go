@@ -89,7 +89,7 @@ func TestNewRunIDIsFreshHex(t *testing.T) {
 // attestation pin: records differing only in it keep their
 // dispositions (REQ-attest-survivor).
 func TestAttestationPinsIgnoreTheRunIdentity(t *testing.T) {
-	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
+	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
 		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}, Run: "run-one"}
 	other := base

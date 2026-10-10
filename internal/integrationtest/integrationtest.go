@@ -8,9 +8,9 @@
 // is its unit suite — seconds, and the oracle gomutant derives for the
 // package's own symbols when it measures itself — while `-tags
 // integration` leaves the flag to the command line and every test runs.
-// A symbol only an integration test reaches reads never-executed under
-// the default selection, truthfully: that symbol's oracle is the
-// integration selection's campaign.
+// A symbol absent from the default selection's parent coverage reads
+// coverage-unobserved: it may need the integration selection's oracle,
+// but a negative parent profile cannot establish absent child execution.
 package integrationtest
 
 import "flag"

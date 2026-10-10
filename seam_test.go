@@ -267,7 +267,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	prior := Finding{
-		OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(),
+		OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(), OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence,
 	}
 	calls := 0
@@ -309,7 +309,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	workspacePrior := Finding{
-		OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(),
+		OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(), OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: workspaceTargetEvidence, OracleEvidence: workspaceOracleEvidence,
 	}
 	calls = 0
@@ -339,7 +339,7 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	prior := Finding{OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(), TargetEvidence: evidence}
+	prior := Finding{OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(), OracleExecutionPolicy: FullOracleExecutionPolicy, TargetEvidence: evidence}
 	matches, err := evidenceSetMatchesContextWithCurrent(ctx, prior, target, nil, true, engine.OperatorSet, time.Minute.String(), false, 0, "", func(ctx context.Context, _, _ string, _ []string) (runtimeinput.State, error) {
 		cancel()
 		return runtimeinput.State{}, ctx.Err()
@@ -653,7 +653,7 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	finding := Finding{Symbol: "example.com/fixture/lib.Add", OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: "1m0s", TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence}
+	finding := Finding{Symbol: "example.com/fixture/lib.Add", OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: "1m0s", OracleExecutionPolicy: FullOracleExecutionPolicy, TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence}
 	inspection, err := tr.InspectFinding(context.Background(), finding, nil)
 	if err != nil || inspection.State != FindingCurrent {
 		t.Fatalf("current inspection = %+v, %v", inspection, err)

@@ -12,7 +12,8 @@ func seededLocalFinding(symbol string) gomutant.Finding {
 		return gomutant.SubjectEvidence{Symbol: sym, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: sym}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	return gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
-		CandidateCount: 1, Generated: 1, Mutants: 1,
+		OracleExecutionPolicy: gomutant.FullOracleExecutionPolicy,
+		CandidateCount:        1, Generated: 1, Mutants: 1,
 		TargetEvidence: evidence(symbol),
 		OracleEvidence: []gomutant.SubjectEvidence{evidence(symbol + "Test")},
 		Operators:      []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},

@@ -122,7 +122,8 @@ func TestAttestCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 		return gomutant.SubjectEvidence{Symbol: name, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "eyJ2IjoyfQ", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/empty", Symbol: strings.TrimPrefix(name, "example.com/empty.")}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: true, RuntimeReason: "external directory input: escape"}
 	}
 	record := gomutant.Finding{Symbol: "example.com/empty.F", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Commit: "abc",
-		CandidateCount: 1, Generated: 1, Mutants: 1,
+		OracleExecutionPolicy: gomutant.FullOracleExecutionPolicy,
+		CandidateCount:        1, Generated: 1, Mutants: 1,
 		TargetEvidence: evidence("example.com/empty.F"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestF")},
 		Operators: []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors: []gomutant.Survivor{{Position: "empty.go:1:1", Operator: "zero return"}}}

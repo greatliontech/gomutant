@@ -135,7 +135,7 @@ func TestCount(t *testing.T) {
 		return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: fp.MaximalClosure, TestVariantClosure: fp.TestVariantClosure, ObservationAssertion: "caller assertion", DynamicStateVouches: fp.DynamicStateVouches, DynamicStateStrategy: fp.DynamicStateStrategy, RuntimeInputs: emptyManifest, RuntimeDigest: current.Digest, Guards: guard.Guards{Toolchain: fp.Guards.Toolchain, BuildConfig: fp.Guards.BuildConfig}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/vouchmut", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	finding := Finding{Symbol: "example.com/vouchmut.Count", BodyHash: "h", OperatorSet: engine.OperatorSet,
-		OracleTimeout: "1m0s", Commit: "abc",
+		OracleTimeout: "1m0s", Commit: "abc", OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: evidence("example.com/vouchmut.Count"),
 		OracleEvidence: []SubjectEvidence{evidence("example.com/vouchmut.TestCount")}}
 
@@ -204,7 +204,7 @@ func TestCount(t *testing.T) {
 		t.Fatalf("vouched capture lacks the discharge: %+v", captured["example.com/vouchmut.Count"])
 	}
 	finding = Finding{Symbol: "example.com/vouchmut.Count", BodyHash: "h", OperatorSet: engine.OperatorSet,
-		OracleTimeout: "1m0s", Commit: "abc",
+		OracleTimeout: "1m0s", Commit: "abc", OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: evidence("example.com/vouchmut.Count"),
 		OracleEvidence: []SubjectEvidence{evidence("example.com/vouchmut.TestCount")}}
 	if got := finding.TargetEvidence.DynamicStateVouches; got != culprit {
@@ -222,7 +222,7 @@ func TestCount(t *testing.T) {
 //
 //gofresh:pure
 func TestAttestationPinsIgnoreRecordedVouches(t *testing.T) {
-	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
+	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
 		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}}
 	vouched := base
@@ -268,7 +268,7 @@ func TestSubjectEvidenceCarriesDynamicStateVouches(t *testing.T) {
 //
 //gofresh:pure
 func TestOracleMemoryPinGatesReuse(t *testing.T) {
-	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleMemoryBytes: 1 << 30,
+	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleMemoryBytes: 1 << 30, OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
 		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}}
 	// The pin is directional: attestations ride to a record assembled
@@ -505,7 +505,7 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 //
 //gofresh:pure
 func TestAttestationPinsIgnoreRecordedClosureStrategy(t *testing.T) {
-	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
+	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
 		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}}
 	stamped := base
@@ -535,7 +535,7 @@ func TestAttestationPinsIgnoreRecordedClosureStrategy(t *testing.T) {
 //
 //gofresh:pure
 func TestAttestationPinsIgnoreRecordedPackageProcessDischarges(t *testing.T) {
-	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s",
+	base := Finding{Symbol: "p.S", OperatorSet: "go/12", OracleTimeout: "1m0s", OracleExecutionPolicy: FullOracleExecutionPolicy,
 		TargetEvidence: SubjectEvidence{Symbol: "p.S", Fingerprint: gofresh.Fingerprint{MaximalClosure: "h", ResultKind: gofresh.CodeResult}},
 		OracleEvidence: []SubjectEvidence{{Symbol: "p.T", Fingerprint: gofresh.Fingerprint{MaximalClosure: "o", ResultKind: gofresh.CodeResult}}}}
 	discharged := base

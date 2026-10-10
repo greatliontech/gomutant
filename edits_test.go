@@ -126,7 +126,8 @@ func TestUpdateDocument(t *testing.T) {
 		return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
-		TargetEvidence: evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1,
+		OracleExecutionPolicy: FullOracleExecutionPolicy,
+		TargetEvidence:        evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1,
 		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "zero return"}}}}
 	if err := UpdateDocument(context.Background(), path, func(prior []Finding) ([]Finding, error) {
@@ -146,7 +147,8 @@ func TestUpdateDocument(t *testing.T) {
 	// The long session writes its (stale-snapshot-independent) merge: the
 	// update sees the re-read document, disposition intact.
 	fresh := []Finding{{Symbol: "p.B", BodyHash: "h2", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
-		TargetEvidence: evidence("p.B"), OracleEvidence: []SubjectEvidence{evidence("p.TestB")}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
+		OracleExecutionPolicy: FullOracleExecutionPolicy,
+		TargetEvidence:        evidence("p.B"), OracleEvidence: []SubjectEvidence{evidence("p.TestB")}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Killed: 1}}}}
 	if err := UpdateDocument(context.Background(), path, func(current []Finding) ([]Finding, error) {
 		for _, f := range current {
@@ -261,7 +263,8 @@ func TestUpdateDocumentKeepsTheFilesMode(t *testing.T) {
 		return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	seed := []Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
-		TargetEvidence: evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1,
+		OracleExecutionPolicy: FullOracleExecutionPolicy,
+		TargetEvidence:        evidence("p.A"), OracleEvidence: []SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1,
 		Operators: []OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors: []Survivor{{Position: "f.go:1:1", Operator: "zero return"}}}}
 	if err := UpdateDocument(context.Background(), path, func(prior []Finding) ([]Finding, error) {

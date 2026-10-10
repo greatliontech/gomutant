@@ -1,23 +1,19 @@
 package windowcost
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
-// The constants are contract (the partition is observable across runs),
-// and the one cross-model invariant holds: the candidate minimum is the
-// audit share divisor it exists to honour, so a window at the minimum
-// spends exactly one sample's share on the floored audit.
-func TestConstantsAreContractAndTied(t *testing.T) {
+// Membership constants pin the observable partition independently of pricing
+// and confirmation: removing an execution optimization cannot move windows.
+func TestWindowMembershipConstants(t *testing.T) {
 	if CandidatesPerWorker != 8 || CandidatesFloor != 64 || CandidatesMin != 8 || ExecutionBudget != 512 {
 		t.Fatalf("the window's constants moved: %d %d %d %d", CandidatesPerWorker, CandidatesFloor, CandidatesMin, ExecutionBudget)
 	}
-	if CandidatesMin != AuditShareDivisor {
-		t.Fatalf("the candidate minimum %d is not the audit share divisor %d it exists to honour", CandidatesMin, AuditShareDivisor)
-	}
-	if AuditNarrowedCap != 4 || ConfirmStreak != 3 || ConfirmStride != 4 {
-		t.Fatalf("the audit ceiling or confirmation constants moved: %d %d %d", AuditNarrowedCap, ConfirmStreak, ConfirmStride)
+}
+
+// Serial kill confirmation retains its reproduction streak and sample stride.
+func TestConfirmationConstants(t *testing.T) {
+	if ConfirmStreak != 3 || ConfirmStride != 4 {
+		t.Fatalf("the confirmation constants moved: %d %d", ConfirmStreak, ConfirmStride)
 	}
 }
 
@@ -42,23 +38,5 @@ func TestBoundsDeriveFromTheWorkerCount(t *testing.T) {
 func TestExecutionsIsTheProduct(t *testing.T) {
 	if Executions(3, 7) != 21 || Executions(0, 7) != 0 || Executions(3, 0) != 0 {
 		t.Fatal("Executions is not candidates × oracle tests")
-	}
-}
-
-// The derived cap: floored at one, savings/(divisor × unit) between,
-// the ceiling above; an unpriced unit derives the floor.
-func TestDerivedAuditCapShareFloorAndCeiling(t *testing.T) {
-	unit := time.Minute
-	if got := DerivedAuditCap(0, unit); got != 1 {
-		t.Fatalf("no savings: cap = %d, want the floor 1", got)
-	}
-	if got := DerivedAuditCap(AuditShareDivisor*2*unit, unit); got != 2 {
-		t.Fatalf("cap = %d, want savings/(%d×unit) = 2", got, AuditShareDivisor)
-	}
-	if got := DerivedAuditCap(AuditShareDivisor*100*unit, unit); got != AuditNarrowedCap {
-		t.Fatalf("cap = %d, want the ceiling %d", got, AuditNarrowedCap)
-	}
-	if got := DerivedAuditCap(time.Hour, 0); got != 1 {
-		t.Fatalf("unpriced unit: cap = %d, want the floor 1", got)
 	}
 }

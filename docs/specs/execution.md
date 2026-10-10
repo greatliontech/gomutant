@@ -16,86 +16,30 @@ spanning packages is scoped per package — each package run with the test
 pattern of its own oracle tests alone — because one union pattern would also
 run a same-named non-oracle test in a sibling package, whose failure is
 unattributable and aborts a sweep the per-package form completes. A run
-may execute a mutant's oracle as a SCHEDULE — an ordered sequence of
-per-package phases, probable killers first, guided by recorded baseline
-coverage over the mutant's own extent — provided the schedule is
-verdict-preserving: the phases of a group partition that group's test
-set exactly; a survivor verdict requires every COVERING phase to have
-run and passed — the NARROWED SURVIVOR (user ruling 2026-08-31): when
-every batch of a group carries a sound coverage verdict over the
-mutant's extent, the non-reaching remainder is exempt from execution,
-because a mutation alters behavior only where execution reaches its
-extent and per-batch coverage is per-process, so an extent executed
-before or outside test bodies (package initialization, TestMain) is
-covered by EVERY batch and degenerates to the full run by
-construction; the exemption's ground is the measured batch coverage
-itself, the survivor records the narrowed class distinctly, and any
-batch without a sound verdict restores the full-run requirement for
-the whole group; a kill ends the schedule early exactly as a test failure ends a
-single run; the phases of a group execute under the ONE oracle-timeout
-budget the unsplit run would have applied in aggregate (the memory
-ceiling is per process tree by REQ-exec-oracle-memory's own
-definition), and a TIMEOUT under any narrowed phase is never a verdict
-— the split's own second-process overhead is charged inside that
-budget, so only the unsplit run's bound decides a timeout kill, in
-either direction, via an unsplit re-measure; a test-attributed kill
-from a narrowed phase pattern is
-admitted only over a passing baseline of that same pattern — the shape
-symmetry REQ-exec-attribution establishes on the run-regex axis, since
-the full-group baseline vouches the full pattern and never a subset —
-and a phase kill that baseline cannot vouch, like a split whose
-individually verifiable phase observations merged unverifiable,
-re-measures unsplit with the unsplit run the scored measurement;
-serial confirmations execute unsplit for the same reason. Attribution
-classes, the oracle of record, and the
-reported oracle scope are all schedule-invariant. Coverage guides the
-order — and, for the narrowed survivor above, the covering-set
-exemption — while REQ-exec-survivor-evidence's once-per-group bucket
-probe remains its own full-pattern measurement (a union of subset
-runs is not that measurement): an unavailable, unsound, or
-extent-less signal degrades to the unordered full run, and a KILL
-verdict is never narrowed — every kill stands on an executed failing
-test over its vouched pattern exactly as before. Each campaign
-additionally re-scores a small deterministic sample of its narrowed
-survivors under the full unsplit
-oracle as a standing audit, bounded per execution window BY THE
-NARROWING'S OWN MODELED SAVINGS: one sample is FLOORED whenever the
-window has a narrowed survivor — the disagreement rate is measured
-in every narrowing window on any oracle duration, never assumed, and
-the floor is a deliberate purchase of measurement that can exceed a
-low-savings window's own win, bounded to an eighth of the window's
-candidates by the window's candidate minimum (a serve-heavy window,
-whose candidates mostly do not execute, relaxes that share) — and BEYOND that floored first sample
-the audit spends at most a fixed share of what the window's
-narrowing saved (each re-run priced at the costliest work's
-full-oracle baseline), with a fixed per-window sample ceiling
-binding above it; the derived bound varies only the DEPTH of the
-content-stable selection order, so audited sets across runs of an
-unchanged tree NEST — one is a prefix of the other — rather than
-repeating identically — under one worker count: the execution window
-is a pure function of the tree, the target order, the worker count,
-and the run's derived oracle lists (a derivation that stood down for a
-run shortens that run's lists and so is a partition input for that run
-alone), so the nesting holds across runs of an unchanged tree run with
-the same workers and the same derivations. A window closes when its candidate total reaches a
-ceiling (eight candidates per worker, sixty-four at least) or, once it
-holds at least the candidate minimum (the worker count, eight at
-least), when its test-execution total — each target's candidates times
-its derived oracle's test count, an upper bound that is a tree property
-— reaches a budget of five hundred and twelve, whichever first, and
-always holds at least one target; a suite-class oracle thereby commits
-on a shorter horizon, no measured duration entering the rule. The
-minimum bounds CANDIDATES, not mutant runs: it keeps the audit's
-floored sample within an eighth of every window's candidates but the
-campaign's last, which closes on the drain, and offers the
-worker pool at least one candidate per worker; a serve-heavy window,
-whose candidates mostly do not execute, relaxes both — the share and
-the fill — since the executing set is the findings document's and must
-never key the partition. A
-disagreement is a false survivor, scored from the full run (the
-authority) and reported loudly, and the sample's measured
-disagreement rate rides the run summary — the narrowing's residual
-risk is a measured quantity, never an assumption. Without an
+executes each required package group with its complete oracle pattern.
+A parent-process coverage profile alone never authorizes a negative
+exemption: a contributing child may execute the mutation outside that
+profile, instrumentation/environment differences may move a test's path,
+and a compile-time mutation may affect a result without executing the
+declaration's coverage block. Unknown negative authority therefore runs
+the whole group; profiles and historical batch banks cannot restore
+omissions. No scheduling-only batch probes or corrective sampling audit
+are performed. A survivor requires every required group to pass; a kill
+can end execution early under REQ-exec-attribution. Its named-killer
+confirmation and REQ-result-stale's independently licensed composition of
+prior passes retain their own rules, neither deriving authority from
+negative coverage. Full-pattern coverage remains advisory under
+REQ-exec-survivor-evidence. Windows are a pure function of the tree,
+target order, worker count and the run's derived oracle lists, not
+measured durations or the findings document's executing subset. A
+window closes when its candidate total reaches a ceiling (eight
+candidates per worker, sixty-four at least) or, after the candidate
+minimum (the worker count, eight at least), its test-execution total
+reaches five hundred and twelve, whichever first; it always holds at
+least one target and the last closes on the drain. Test-execution total
+is each target's candidates times its oracle test count, an upper bound.
+The minimum counts candidates, not executed mutants; a serve-heavy
+window may execute fewer than the worker count. Without an
 explicit oracle timeout the campaign DERIVES each oracle group's budget
 from that group's own measured baseline — the baseline probe is a
 measurement of the oracle's cost on this tree under this load, run once
@@ -117,7 +61,7 @@ slow is not refused at a leash sized for faster ones — as a multiple
 with the retired 60-second default as its floor, the same derivation
 the ephemeral face carries; the measurement is a passing baseline's own
 wall-clock (a failing or refused baseline skips its targets, derives
-nothing, and banks nothing), every verdict-bearing process of a group — scheduled phases,
+nothing, and banks nothing), every verdict-bearing process of a group — full-group runs,
 serial confirmations, structural-shaped runs alike — executes under
 that group's derived budget while unmutated advisory probes run under
 the leash, and an explicit timeout remains the caller's uniform
@@ -365,21 +309,21 @@ to unverifiable, never to served: no path admits an unavailable proof as
 reuse evidence.
 
 **REQ-exec-survivor-evidence** (behavior): A measured finding's survivors MUST
-carry execution evidence bucketing why each lived: `never-executed` when no
-executed block of the oracle's baseline coverage intersects the mutated
-node's half-open source extent (a coverage gap), `executed-and-passed` when
-the extent intersects executed coverage and the oracle still passes (a weak
-assertion or an equivalent mutant) — one range-shaped probe shared by every
-classification pass, with a survivor row that
-carries no extent answered by its anchor point alone — `covering-passed`
-when the survivor is NARROWED (REQ-exec-oracle-run's narrowed-survivor
-clause): every covering test ran and passed and the non-reaching remainder
-was exempt on sound batch coverage — the same weak-assertion-or-equivalence
-reading as executed-and-passed with the exemption named, minted at
-measurement from the run's own narrowed verdict (never derived by the
-coverage probe, which must not overwrite it; the unstable and
-overlay-bypass judgments still do, in their evidence-outranks-probe
-direction) — `overlay-bypassed` when
+carry advisory execution evidence: `coverage-unobserved` when no executed
+block of the oracle's baseline parent-process coverage intersects the
+mutated node's half-open source extent, and `executed-and-passed` when the
+extent intersects that baseline profile and the full mutant oracle still
+passes. The latter wire word describes baseline-profile reach beside the
+mutant oracle's pass, not measured reach in the mutant process. The former
+proves neither absence of execution in a contributing child nor absence of
+compile-time influence; it calls for investigating the oracle and profile,
+never an equivalence inference or a negative execution exemption. Both use
+one range-shaped query, a row without an extent answered by its anchor point
+alone. `never-executed` and `covering-passed` remain readable historical
+categories, never minted by a fresh measurement; their old coverage-based
+claims do not establish complete-oracle evidence. The independent oracle
+execution policy gate in REQ-result-stale judges their record, not the
+presence or absence of either bucket. Other buckets are `overlay-bypassed` when
 the finding's observed union recorded a read of a mutated file's own
 on-disk path - the mutant executes through the build overlay, so a
 disk-walking oracle's verdict derived from the unmutated tree and the
@@ -391,9 +335,9 @@ probe runs, and `flipped-kill` when a window run scored a kill and the
 serial confirmation re-scored the mutant a survivor: the anti-flattering
 scoring stands — the survivor is the verdict — and the flip rides the
 RECORD, never only the event stream, carrying the withdrawn killer by
-name, because the flip is itself the strongest execution evidence (the
-position demonstrably executes and a named test demonstrably can fail
-on it) and the survivor is oracle nondeterminism to stabilize, never a
+name, because a named test failed against the mutant in the window and
+the serial run instead passed; the survivor is oracle nondeterminism to
+stabilize, never a
 plain coverage or assertion gap; no coverage probe runs on it, the
 advisory unverifiability stamp never overwrites it, and a mutant a test
 has killed is never an equivalence-attestation candidate. A drift
@@ -401,14 +345,13 @@ re-measure re-derives its re-measured survivors' buckets from the
 current probe — re-judging the overlay-bypass from the current union
 before classifying fresh — while standing survivors and an extension's
 carried prefix are never touched; `overlay-bypassed`, `unstable-oracle`,
-`flipped-kill`, and `covering-passed` are judged from evidence a coverage
-probe cannot see — the first three from runtime and confirmation
-evidence, the last minted at measurement from the run's own narrowed
-verdict — so no probe-derived classification ever overrides them
-(the unstable and overlay-bypass judgments still override
-`covering-passed`, per its definition above). The overlay-bypass judgment precedes the coverage probe:
+`flipped-kill` are judged from runtime and confirmation evidence a coverage
+probe cannot see, so no probe-derived classification overrides them.
+Historical buckets on a carried portion remain history, never fresh
+negative authority. The overlay-bypass judgment precedes the coverage probe:
 a bypassed target's coverage would bucket confidence the evidence
-cannot support. Coverage is measured once per oracle group on the unmutated tree
+cannot support. Coverage is measured under the full pattern once per oracle
+group on the unmutated tree
 and cached across the run's targets sharing the group and cover package —
 advisory classification, never a measurement pin; an unprobeable oracle
 leaves the bucket empty rather than failing a sound measurement. Every
@@ -433,7 +376,7 @@ not steal it. The refusals are REPRESENTABLE: every claimant of a
 refused key and both sides of a collision are marked
 coverage-unsound, no query about an unsound file is a coverage
 verdict, and the affected buckets stay empty — the best-effort
-posture above, never a manufactured never-executed for covered code. Served
+posture above, never manufactured evidence of absent execution. Served
 records keep their recorded buckets; re-measurement refreshes them. A
 spliced record mixes the two truthfully: survivors carried from the served
 portion keep their recorded buckets verbatim — measured under the record's
@@ -689,30 +632,35 @@ provenance (the leash, the derived budget, or a command deadline that
 undercut them) rather than the oracle knob that never governed it. The
 honest-naming duty attaches to refusals and kills; the advisory coverage
 probe's bound expiry — and a replacement whose profile entry the probe
-could not soundly attribute — is the recorded probe-failure posture
-(exercise state unknown for the files concerned, named as unknown, the
-label absent), never a named refusal and never a vouch. A manual mutant
+could not soundly attribute — leaves exercise unknown for the files
+concerned, named as unknown and never vouched for. Unknown coverage alone
+returns an explicitly unverified advisory result, not a refusal; it cannot
+authorize a new equivalence attestation. A negative or unknown coverage
+answer never establishes absence of execution, equivalence, or a kill. A manual mutant
 that fails to build, and a baseline probe whose test package fails to
 build, each refuse with the compiler's own diagnostic in the message —
 manual probes are interactive evidence gathering, so the caller repairs
 the edit from the compiler's reason, never from a guess. The result
 reports whether the named test killed the mutant and the attributed
 failing test; it is evidence for the caller to act on, never persisted
-to a finding record (REQ-result-record). A plain survivor over a
-replacement file no baseline-covered block touches - the file is linked
-into the oracle's binary (an unlinked replacement refuses at
-validation), yet the probed run never reached it - is no verdict at all
-and is refused naming the files and the repair: killed=false over an
-unexercised replacement would assert what the classification exists to
-deny, the shape of a guard that observes the tree (a source-reading
-test, a `go list`-based check) and so sees the unmutated sources, whose
-honest probe mutates the guard's own input, which does link into the
-binary; the mixed killed-some-runs outcome keeps the files as an
-advisory (some run reached them); the classification comes from one
-baseline coverage probe run only when the verdict is not a kill, never
-covers a mutated test file (the coverage instruments the code under
-test), and is absent when the probe fails - a probe failure never fails
-a sound measurement. A mutated test file is admitted and named in the
+to a finding record (REQ-result-record). Every mutant run uses the complete
+explicit oracle pattern, unsplit; advisory coverage never omits a test.
+A plain survivor over a replacement file no baseline-covered block touches
+is refused naming the files and the repair. The parent profile's negative
+answer does not prove the child never executed the edit or that a
+compile-time change had no influence: the refusal withholds a survival
+claim whose reach is unestablished, not a measured false-kill claim. A
+source-reading test or `go list`-based guard sees the unmutated source tree;
+its hand probe needs an input the overlay actually changes, or an independent
+review. A mixed killed-some-runs result retains the negative coverage as
+advisory, never equivalence evidence. Classification comes from one baseline
+coverage probe only when the result is not a kill; it never covers a mutated
+test file, since coverage instruments the code under test. Unknown reach
+without a negative coverage entry leaves plain survival explicitly unverified,
+not refused, and cannot authorize a new attestation. An existing attestation
+matching the edit digest may still ride that result as historical reasoning,
+never as reach established by this probe. A
+mutated test file is admitted and named in the
 result: its verdict is about the test - whether the edited part was
 load-bearing for the named run - never about the code under test (where
 a campaign never targets a test file, the ephemeral probe may: the
@@ -788,14 +736,11 @@ freshness-analysis keep-alive's unit with its position among the pass's
 units — so a reader of
 either face reads the other's words); the ephemeral verb reports
 `baseline` before its probe, `mutant-run` before each run, and
-`coverage` before its advisory probe, on both faces; a window's
-coverage-probe phase announces
-`probing` with its projected cost — an upper bound, each batch at its
-group's measured baseline, the batches of groups without one counted
-unpriced, and no figure at all when nothing is priced (a projection with
-nothing priced is absent, never zero: the rule every projection of the
-estimate class keeps) — before its first batch, and reports the batches
-paid after each, before the window's `estimate`; the shared runner
+`coverage` before its advisory probe, on both faces. Campaign execution
+performs no scheduling batch probes and emits no scheduling `probing` or
+`probe-failed` phase, narrowed-survivor audit, or coverage-savings report.
+Historical event and schema fields remain readable; fresh narrowing,
+batch-probe, audit, and savings fields are zero or absent. The shared runner
 reports `resolving` before each target's target and oracle resolution,
 `freshness` before constructing and checking that target's subject
 views, `views` before each present mode's decision-view build and
@@ -854,10 +799,7 @@ as their own fields on every structured face — while a
 payload-bearing event (the per-subject analysis-unavailable provenance,
 the unlisted-toolchain notice, a failing baseline's own output — a
 reported failure or a result drifting between its discovery and
-measurement runs — beside its skip decision, a failed coverage-probe
-batch — its position in the group's plan, its tests, and the probe's
-own output, one event per failed batch while the probe continues to
-the plan's remaining batches) is a distinct fact that no
+measurement runs — beside its skip decision) is a distinct fact that no
 face may throttle, fold, or discard at the source — transport-level
 advisory delivery is unchanged — its package kept a package and its
 payload its own field on every structured face. Subscribing to the class
@@ -881,30 +823,18 @@ decisions count them, growing to the campaign-wide totals as pipelined
 preparation completes — timing-dependent by nature, outside the
 deterministic sequence, never entering a decision or finding, so an
 operator can read phase and progress from the log alone. The same class
-carries the WINDOW COST MODEL: after a window's coverage probes and
-before its first mutant dispatches, the run reports the window's
-estimate — a projection of scheduled oracle time at measured-baseline
-pace, derived entirely from measurements the run already made
-(passing-baseline wall-clocks and coverage-probe batch wall-clocks), the
-executing candidates classified as narrowed, whole-group, or unpriced,
-every oracle group carrying no schedule signal named with the reason it
-carries none (a failed probe batch by position, too few tests, too few
-executing candidates for the target to amortize a probe, a shaped
-target's explicit oracle, an unvouched covering-phase kill — per group:
-a candidate a present signal cannot judge, an unsound coverage file over
-its extent, counts whole-group without a line), and the
-narrowed-survivor audit priced separately — an unpriced
-candidate is counted and NEVER folded into the projection: the model
-fabricates no duration; the projection is a pace anchor, not a bound in
-either direction — its named exclusions are a timing-out candidate
-(which costs up to its derived budget, a multiple of the priced
-baseline), serial confirmation runs, the once-per-group survivor bucket
-probes, and per-mutant build overlay cost, all reconciled by the live
-pace instead of predicted. The separately-priced audit is the same kind
-of anchor: its COUNT is a true cap (at most the per-window sample bound
-of full-oracle re-runs), but each re-run is priced at passing-baseline
-pace and a mutated tree can run slower or time out at its derived budget
-— the audit price is a projection, never a bound; and per-candidate
+carries the WINDOW COST MODEL: before its first mutant dispatches, the run
+reports the window's estimate — a projection of full required-group oracle
+time at measured passing-baseline pace. Executing candidates are whole-group
+or unpriced; an unpriced candidate is counted and never folded into the
+projection. Nothing priced means an absent projection, never a fabricated
+zero duration. Coverage batch timings and historical schedules contribute
+neither a price nor execution authority. The projection is a pace anchor,
+not a bound in either direction: its exclusions are timing-out candidates
+(which can cost their derived budgets), serial confirmations, advisory
+survivor coverage probes, and per-mutant build overlay cost, reconciled by
+live pace instead of predicted. There is no audit floor, audit sample cost,
+or negative-coverage saving. The same class carries per-candidate
 completion events, delivered monotonically, so the done tally advances
 candidate by candidate instead of window by window (a multi-hour window
 must not read as a stuck campaign), truing up to the prepared totals at
@@ -914,9 +844,7 @@ is value-ordered: among the READY windows — a window is ready once
 admitted to the driver's pool; a gathered-but-unadmitted window waits
 for a later pick, and once preparation completes every remaining window
 is admitted before the next pick — the cheapest dispatches first by the
-PRE-PROBE price (the same cost model with every executing candidate
-priced whole-group off the measured baselines, which legitimately
-differs from the same window's post-probe estimate event); an unpriced
+full-group price off the measured baselines; an unpriced
 window — one ANY of whose executing candidates has no recorded price —
 never jumps the queue on fabricated cheapness: it waits behind every
 priced window, in arrival order. Window membership and the deterministic
