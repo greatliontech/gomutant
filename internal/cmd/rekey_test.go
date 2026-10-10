@@ -67,7 +67,7 @@ func TestRunCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, output: &output}); err != nil {
 		t.Fatal(err)
 	}
-	want := `re-keyed 1 reviewed exemption clause(s) to the module-relative spelling: example.com/empty.TestBoundary "external directory input: ` + dir + `/escape" -> "external directory input: escape"` + "\n"
+	want := `re-keyed 1 reviewed exemption clause(s) to the canonical spelling: example.com/empty.TestBoundary "external directory input: ` + dir + `/escape" -> "external directory input: escape"` + "\n"
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("the run left its re-key unstated:\n%s", output.String())
 	}
@@ -147,7 +147,7 @@ func TestAttestCommandReKeysTheExemptionRecordAndSaysSo(t *testing.T) {
 	if err := attestCommand(context.Background(), attestOptions{dir: dir, findingsFile: defaultFindings, symbol: "example.com/empty.F", position: "empty.go:1:1", operator: "zero return", reason: "equivalent by inspection"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `re-keyed 1 reviewed exemption clause(s) to the module-relative spelling: example.com/empty.TestF "external directory input: `+dir+`/escape" -> "external directory input: escape"`+"\n") {
+	if !strings.Contains(output.String(), `re-keyed 1 reviewed exemption clause(s) to the canonical spelling: example.com/empty.TestF "external directory input: `+dir+`/escape" -> "external directory input: escape"`+"\n") {
 		t.Fatalf("the attest left its re-key unstated:\n%s", output.String())
 	}
 	if got, _ := os.ReadFile(gomutant.ExemptionsPathFor(path)); strings.Contains(string(got), dir) {

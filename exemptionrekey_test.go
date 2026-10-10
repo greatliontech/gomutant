@@ -14,8 +14,8 @@ import (
 // An entry whose clause spells an in-module path by this checkout's
 // absolute spelling — the module directory as given or its resolved
 // form — is read as the module-relative clause Gofresh now produces,
-// by the composers' grammar: the whole path after the clause's last
-// ": " (a member's display/rel form, a moved bracket's root, the
+// by the composers' grammar: the whole path after the composer's
+// separator (a member's display/rel form, a moved bracket's root, the
 // nested unverifiable form), the bracket-coverage parenthetical's own
 // path, the root standing whole. An out-of-module path — one carrying
 // the root's text inside it included — a sibling directory whose name
@@ -424,7 +424,7 @@ func TestReKeyedExemptionsPersistAtTheFirstCommittingWrite(t *testing.T) {
 	if got, _ := os.ReadFile(ExemptionsPathFor(path)); strings.Contains(string(got), dir) || len(checked.RekeyedExemptions()) != 1 {
 		t.Fatalf("a committing revision left the record stale:\n%s", got)
 	}
-	if line := RekeyedExemptionsLine(checked.RekeyedExemptions()); !strings.HasPrefix(line, `re-keyed 1 reviewed exemption clause(s) to the module-relative spelling: p.ATest "external directory input: `+dir+`/escape" -> "external directory input: escape"`) {
+	if line := RekeyedExemptionsLine(checked.RekeyedExemptions()); !strings.HasPrefix(line, `re-keyed 1 reviewed exemption clause(s) to the canonical spelling: p.ATest "external directory input: `+dir+`/escape" -> "external directory input: escape"`) {
 		t.Fatalf("line = %q", line)
 	}
 	if RekeyedExemptionsLine(nil) != "" {

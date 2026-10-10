@@ -868,7 +868,7 @@ type runOut struct {
 	LegacyOverlays            []gomutant.LegacyEntry      `json:"legacyOverlays,omitempty" jsonschema:"machine-local overlay entries preserved unread because their document version predates this binary's range: an older gomutant's records, attested dispositions included, never served and never deleted; capped, the overlay directory holds the full set"`
 	OmittedUnreached          int                         `json:"omittedUnreached,omitempty" jsonschema:"unreached symbols beyond the summary's row cap - counted, never silent; the findings document's coverage-bounds table holds the full roster"`
 	OmittedLegacyOverlays     int                         `json:"omittedLegacyOverlays,omitempty" jsonschema:"legacy overlay rows beyond the response cap - counted, never silent"`
-	ExemptionsRekeyed         []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed from a checkout's absolute spelling of an in-module path to the module-relative spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	ExemptionsRekeyed         []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed to canonical path or bracket-root spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
 	OmittedExemptionsRekeyed  int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
@@ -1908,7 +1908,7 @@ type attestOut struct {
 	Layer                    string                      `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
 	LayerReason              string                      `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
 	Posture                  gomutant.RecordPosture      `json:"posture" jsonschema:"the record's reuse posture judged once under this call's selection: reusable as it stands or not, each refusing channel named, and what a later judgment needs — a disposition is never reusable evidence by itself"`
-	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed from a checkout's absolute spelling of an in-module path to the module-relative spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed to canonical path or bracket-root spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
 	OmittedExemptionsRekeyed int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
@@ -1997,7 +1997,7 @@ type pruneOut struct {
 	Kept                     layerCountsOut              `json:"kept" jsonschema:"records kept, counted per layer: repo the committed document's rows, local the machine-local overlay's"`
 	Check                    bool                        `json:"check,omitempty"`
 	Document                 string                      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
-	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed from a checkout's absolute spelling of an in-module path to the module-relative spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed to canonical path or bracket-root spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
 	OmittedExemptionsRekeyed int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
@@ -2106,7 +2106,7 @@ type retargetOut struct {
 	Exemptions               []rewrittenExemptionOut     `json:"exemptions,omitempty" jsonschema:"reviewed exemption entries whose subjects the rename moved, rewritten with the records - the reason and rationale untouched; capped at 50"`
 	OmittedExemptions        int                         `json:"omittedExemptions,omitempty" jsonschema:"rewritten exemption subjects beyond the response cap - counted, not listed"`
 	Note                     string                      `json:"note,omitempty" jsonschema:"set when the rename touched nothing: no record and no reviewed exemption subject moved, and the findings tool lists the recorded symbols"`
-	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed from a checkout's absolute spelling of an in-module path to the module-relative spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed to canonical path or bracket-root spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
 	OmittedExemptionsRekeyed int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 

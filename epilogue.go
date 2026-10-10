@@ -214,7 +214,7 @@ type RunOutcome struct {
 	// owns, never buried in an empty success (REQ-mcp-envelope).
 	Dropped int
 	// ExemptionsRekeyed names the reviewed exemption entries this run's
-	// first committing write re-keyed to the module-relative spelling
+	// first committing write re-keyed to the canonical clause spelling
 	// (REQ-result-exemptions).
 	ExemptionsRekeyed []RekeyedExemption
 }

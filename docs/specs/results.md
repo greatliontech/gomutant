@@ -573,8 +573,15 @@ the record never reviewed. An entry whose clause spells an in-module
 path by this checkout's absolute spelling — the module directory as
 given or resolved; a record authored before Gofresh spelled such
 paths module-relative — is read as the module-relative clause it now
-matches, and the first committing write (run, attest, prune,
-retarget) rewrites the record so under the document lock, re-reading
+matches. A moved-bracket clause takes Gofresh's canonical root spelling
+through `runtimeinput.CanonicalMovedBracketClause`, relocates the decoded
+root as a whole, and renders it through `runtimeinput.MovedBracketClause`:
+a root carrying the list's framing is quoted, and an already-canonical
+relative key is unchanged. Matching a finding's reason applies the same
+canonicalizer after splitting its attribution, so an unambiguous older
+root spelling still matches the reviewed acceptance. The first committing
+write (run, attest, prune, retarget) rewrites the record so under the
+document lock, re-reading
 a record that moved since the open rather than writing back the copy
 it loaded (a record torn since the open leaves the entries in force
 as they are and is never written over), the re-keyed entries listed
@@ -595,11 +602,17 @@ Gofresh's one implementation of that split; an entry naming either
 could never match, so the record refuses it (a refused path itself
 spelled like an attribution is matched by the clause before it, and a
 moved-bracket root whose own name carries a bracketed segment keeps it
-unless the segment, read with what follows it to the reason's end,
-parses as a labelled member list — Gofresh's split is prefix-first, and
-a root spelled so collides with the root before the segment). Every
-other clause ends in a path and is matched whole, a bracketed segment
-of the path included.
+when quoted; for a legacy bare root, a suffix parsing as a labelled
+member list remains indistinguishable from an attribution and refuses
+before re-keying). A legacy bare root that itself spells a valid Go
+quoted literal of a framing-bearing name is indistinguishable from a
+canonical key and stays unchanged: that acceptance needs a hand edit
+to name the literal root's new clause. A legacy bare root beginning in
+a valid quoted literal followed by more name prevents attribution
+splitting: an old finding carrying that root and a member list stays
+unaccepted rather than guessing where its root ends. Every other clause
+ends in a path and is matched whole, a bracketed segment of the path
+included.
 
 **REQ-result-ephemeral-attest** (behavior): A committed
 ephemeral-equivalence record beside the findings document

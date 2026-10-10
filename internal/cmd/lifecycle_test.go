@@ -81,7 +81,7 @@ func TestPruneAndRetargetCommands(t *testing.T) {
 	if err := retargetCommand(ctx, retargetOptions{dir: dir, findingsFile: defaultFindings, from: "example.com/old.", to: "example.com/life."}, &retargetOut); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(retargetOut.String(), `re-keyed 1 reviewed exemption clause(s) to the module-relative spelling: example.com/old.TestF "external directory input: `+dir+`/escape" -> "external directory input: escape"`+"\n") {
+	if !strings.Contains(retargetOut.String(), `re-keyed 1 reviewed exemption clause(s) to the canonical spelling: example.com/old.TestF "external directory input: `+dir+`/escape" -> "external directory input: escape"`+"\n") {
 		t.Fatalf("retarget output lacks the re-key line: %q", retargetOut.String())
 	}
 	if got, _ := os.ReadFile(gomutant.ExemptionsPathFor(gomutant.FindingsPathAt(dir, defaultFindings))); strings.Contains(string(got), dir) || !strings.Contains(string(got), `"subject": "example.com/life.TestF"`) {

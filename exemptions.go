@@ -47,8 +47,8 @@ func ExemptionsPathFor(findingsPath string) string {
 }
 
 // RekeyedExemption names one reviewed entry whose clause the load
-// re-keyed from a checkout's absolute spelling of an in-module path to
-// the module-relative spelling Gofresh gives such paths.
+// re-keyed to Gofresh's module-relative path or quoted bracket-root
+// spelling.
 type RekeyedExemption struct {
 	Subject string `json:"subject"`
 	From    string `json:"from"`
@@ -63,7 +63,8 @@ type RekeyedExemption struct {
 // switch the record exists to avoid. An entry whose clause spells an
 // in-module path by this checkout's absolute spelling — a record
 // authored before Gofresh spelled such paths module-relative — is read
-// as the module-relative clause it now matches, and named in the
+// as the module-relative clause it now matches. Moved-bracket roots
+// then take Gofresh's canonical quoting. Changes are named in the
 // second result so a committing verb persists the re-key
 // (REQ-result-exemptions).
 func LoadExemptions(path, moduleDir string) ([]Exemption, []RekeyedExemption, error) {
@@ -172,29 +173,40 @@ func moduleRootSpellings(moduleDir string) []string {
 // escaping link after its path.
 const coverageEscapeOpen = " (symlink outside every bracket root: "
 
-// rekeyClause rewrites the in-module paths a clause spells by one of
-// the root spellings to Gofresh's module-relative spelling — by the
-// composers' grammar, never by searching the clause's text: every
-// composer ends its clause with ": " and the path, whole (a member's
-// display/rel spelling and a moved bracket's root included), and the
-// bracket-coverage refusal alone closes with " (symlink outside every
-// bracket root: <path>)" — so the paths are the text after the last
-// ": " of the clause's head and the parenthetical's own. A whole path
-// equal to a root becomes ".", one under a root its slash-relative
-// remainder; any other path — an out-of-module one carrying the root's
-// text inside it, a sibling directory whose name extends the root's —
-// is left as it is. A path carrying ": " itself reads as its tail,
-// never under a root: nothing is rewritten (the fail-safe residual).
-// ok reports a rewrite.
+// rekeyClause identifies a moved-bracket root through Gofresh's
+// canonical spelling before relocating its decoded path, then renders
+// it through the producer's composer. Quotes needed only by the old
+// checkout prefix never become part of the relocated root's name.
+// Other path clauses use the composer's first separator after the
+// optional bracket-unverifiable wrapper; a second separator in the
+// path leaves it unchanged. The coverage refusal's parenthetical has
+// its own path. Only a whole path equal to or under a checkout root
+// relocates; an embedded occurrence never does. ok reports a rewrite.
 func rekeyClause(clause string, roots []string) (string, bool) {
+	const moved = "observation bracket moved: "
+	if strings.HasPrefix(clause, moved) {
+		root := strings.TrimPrefix(runtimeinput.CanonicalMovedBracketClause(clause), moved)
+		if strings.HasPrefix(root, `"`) {
+			// The canonicalizer emits a complete Go quoted literal here.
+			root, _ = strconv.Unquote(root)
+		}
+		out := runtimeinput.MovedBracketClause(relativePath(root, roots))
+		return out, out != clause
+	}
 	head, escaped, hasEscape := clause, "", false
 	if strings.HasSuffix(clause, ")") {
 		if i := strings.LastIndex(clause, coverageEscapeOpen); i >= 0 {
 			head, escaped, hasEscape = clause[:i], clause[i+len(coverageEscapeOpen):len(clause)-1], true
 		}
 	}
-	i := strings.LastIndex(head, ": ")
+	const wrapper = "observation bracket unverifiable: "
+	inner := strings.TrimPrefix(head, wrapper)
+	i := strings.Index(inner, ": ")
 	if i < 0 {
+		return clause, false
+	}
+	i += len(head) - len(inner)
+	if strings.Contains(head[i+2:], ": ") {
 		return clause, false
 	}
 	out := head[:i+2] + relativized(head[i+2:], roots)
@@ -218,6 +230,12 @@ func relativized(path string, roots []string) string {
 			return path
 		}
 	}
+	return relativePath(path, roots)
+}
+
+// relativePath relocates a decoded path, without interpreting quotes
+// that may be literal bytes of its name.
+func relativePath(path string, roots []string) string {
 	for _, root := range roots {
 		if root == "" {
 			continue
@@ -255,7 +273,7 @@ func RekeyedExemptionsLine(rekeyed []RekeyedExemption) string {
 	for _, e := range shown {
 		moves = append(moves, fmt.Sprintf("%s %q -> %q", e.Subject, e.From, e.To))
 	}
-	return fmt.Sprintf("re-keyed %d reviewed exemption clause(s) to the module-relative spelling: %s%s", n, strings.Join(moves, ", "), more)
+	return fmt.Sprintf("re-keyed %d reviewed exemption clause(s) to the canonical spelling: %s%s", n, strings.Join(moves, ", "), more)
 }
 
 // writeExemptions writes the committed exemption record whole — version
@@ -281,7 +299,8 @@ func writeExemptions(ctx context.Context, path string, exemptions []Exemption) (
 }
 
 // exemptionFor returns the entry accepting (subject, reason) exactly,
-// or nil. Matching is exact on the subject and on the reason's clause:
+// or nil. Matching is exact on the subject and on the reason's clause,
+// with moved-bracket roots canonicalized as at the record's load:
 // a clause drifting even one byte is a different instability the
 // record never reviewed. The producer may append an attribution to a
 // clause — a classification refusal's operation, name, and directory,
@@ -289,7 +308,7 @@ func writeExemptions(ctx context.Context, path string, exemptions []Exemption) (
 // detail, fresh per measurement, which the clause does not include
 // (REQ-result-exemptions).
 func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
-	clause := reasonClause(reason)
+	clause := runtimeinput.CanonicalMovedBracketClause(reasonClause(reason))
 	for i := range exemptions {
 		if exemptions[i].Subject == subject && exemptions[i].Reason == clause {
 			return &exemptions[i]
@@ -304,11 +323,9 @@ func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
 // classification refusal carried before Gofresh moved its attribution
 // off the reason onto the observation, and the moved-bracket clause's
 // trailing bracketed member list — split by Gofresh's one
-// implementation (runtimeinput.RefusalClause; a root name itself
-// carrying a bracketed segment keeps it unless the segment, read with
-// what follows it to the reason's end, parses as a labelled member
-// list — Gofresh's split is prefix-first, and a root spelled so
-// collides with the root before the segment).
+// implementation (runtimeinput.RefusalClause). A quoted root is read
+// whole. For legacy bare roots, the first suffix parsing as a labelled
+// member list is the attribution, so that spelling remains ambiguous.
 // The exemption record's readers — the match and the dead-acceptance
 // refusal — key on it; the freshness judgments of
 // recorded evidence compare a reason whole, the attribution included,

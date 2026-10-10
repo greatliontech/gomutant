@@ -49,7 +49,7 @@ type PruneResult struct {
 	Kept    LayerCounts
 	Check   bool
 	// ExemptionsRekeyed names the reviewed exemption entries the write
-	// re-keyed to the module-relative spelling (REQ-result-exemptions).
+	// re-keyed to the canonical clause spelling (REQ-result-exemptions).
 	ExemptionsRekeyed []RekeyedExemption
 }
 
@@ -154,7 +154,7 @@ type RetargetResult struct {
 	Exemptions []RewrittenExemption
 	Check      bool
 	// ExemptionsRekeyed names the reviewed entries the write re-keyed to
-	// the module-relative spelling (REQ-result-exemptions).
+	// the canonical clause spelling (REQ-result-exemptions).
 	ExemptionsRekeyed []RekeyedExemption
 }
 
