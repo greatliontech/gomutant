@@ -3,8 +3,8 @@
 
 bindings {
   requirement_id: "REQ-core-attributed-kills"
-  content_hash: "90842a6c5a7ccbf67b9a3dfdc80023df5058de543dab8bb9af59ed89538196d0"
-  source_hash: "75c4dbc51026d11e46deee5991358119bcb17cdecdbdfaffa99fd7168931579f"
+  content_hash: "5b0ff67def90a453642e9fc4cc1c6fec992c07bc4329c8e662aafcd983dc6b80"
+  source_hash: "6666629acd9d47496f2beb84b24b9c7371db7c6e0ea4cdf04bcf326953c18089"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant.TestParseFindingsKillAttribution"
   role: BINDING_ROLE_TESTS
@@ -13,10 +13,20 @@ bindings {
 
 bindings {
   requirement_id: "REQ-core-attributed-kills"
-  content_hash: "90842a6c5a7ccbf67b9a3dfdc80023df5058de543dab8bb9af59ed89538196d0"
-  source_hash: "75c4dbc51026d11e46deee5991358119bcb17cdecdbdfaffa99fd7168931579f"
+  content_hash: "5b0ff67def90a453642e9fc4cc1c6fec992c07bc4329c8e662aafcd983dc6b80"
+  source_hash: "6666629acd9d47496f2beb84b24b9c7371db7c6e0ea4cdf04bcf326953c18089"
   backend: "go"
-  symbol: "github.com/greatliontech/gomutant.TestRunServesDriftedKillsKeyedToUnmovedOracles"
+  symbol: "github.com/greatliontech/gomutant.TestOracleHelperEditsRemeasureAllCandidates"
   role: BINDING_ROLE_TESTS
-  shape_hash: "2684f344344a822c17ba69f9220921bc7c24ebd492a94d52dfe8eab8f4213b77"
+  shape_hash: "a026749c1701c6ea81e9f6cdcbd096520e675b465e1648ff875b3ef12f484846"
+}
+
+bindings {
+  requirement_id: "REQ-core-attributed-kills"
+  content_hash: "5b0ff67def90a453642e9fc4cc1c6fec992c07bc4329c8e662aafcd983dc6b80"
+  source_hash: "6666629acd9d47496f2beb84b24b9c7371db7c6e0ea4cdf04bcf326953c18089"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestOracleGrowthRemeasuresInterferingTests"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f175b81b4a80e87f2f6ec85d2ab5fa57ff519ff5a70f80dc7c61a883956be732"
 }

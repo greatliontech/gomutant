@@ -18,8 +18,6 @@ func executesCandidate(w work, mi int) bool {
 		return false
 	case w.extend != nil && mi < w.extendFrom:
 		return false
-	case w.drift != nil && !w.driftRemeasure[mi]:
-		return false
 	}
 	_, runnable := w.candidates[mi].Mutant()
 	return runnable

@@ -2452,15 +2452,10 @@ func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
 	}
 }
 
-// TestRunServesExplicitGrownOracleMeasuringOnlySurvivors pins the
-// killer-drift carve-out under an EXPLICIT oracle (REQ-result-stale): a
-// record measured against the caller's list, then a request listing one
-// more test the caller just wrote, serves the standing kills and
-// re-measures only the open survivors against the added test — the
-// derived route's own shape, named in the explicit mode; a newly listed
-// test whose declaration the recorded compartment already carried is
-// indistinguishable from a dropped evidence row and re-measures whole.
-func TestRunServesExplicitGrownOracleMeasuringOnlySurvivors(t *testing.T) {
+// Explicit oracle growth, replacement and cross-package selection require
+// complete remeasurement. A new oracle's kills are attributed, and every
+// executed candidate retains the complete selected pattern.
+func TestExplicitOracleChangesRemeasureAllCandidates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
@@ -2525,17 +2520,15 @@ func TestRunServesExplicitGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	}
 	// An explicit oracle reports no derivation suffix — the oracle is
 	// the caller's statement, never a derivation that ran.
-	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (explicit oracle grew by 1 test)",
-		killNoun(prior[0].Killed), candidateNoun(survivorCount), survivorNoun(survivorCount))
-	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != survivorCount {
-		t.Fatalf("explicit grown-set decision = %+v, want %q over %d survivors", decisions, wantReason, survivorCount)
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.HasPrefix(decisions[0].Reason, "stale: ") || decisions[0].Candidates != prior[0].Generated {
+		t.Fatalf("explicit grown-set decision = %+v, want complete remeasurement", decisions)
 	}
-	if len(dispatched) != survivorCount {
-		t.Fatalf("dispatched %d candidates, want exactly the %d recorded survivors", len(dispatched), survivorCount)
+	if len(dispatched) != prior[0].Generated {
+		t.Fatalf("dispatched %d candidates, want all %d", len(dispatched), prior[0].Generated)
 	}
 	for _, scope := range executedScopes {
-		if !slices.Equal(scope, []string{"^(TestBig)$"}) {
-			t.Fatalf("execution ran scope %v, want the survivors narrowed to the added test", scope)
+		if !slices.Equal(scope, []string{"^(TestBig|TestSmall)$"}) {
+			t.Fatalf("execution ran incomplete scope %v", scope)
 		}
 	}
 	grown := grownFindings[0]
@@ -2560,8 +2553,8 @@ func TestRunServesExplicitGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if _, err := grownTree.Run(ctx, []Target{oldTarget}, Options{Prior: prior, Decision: func(d RunDecision) { wholeDecisions = append(wholeDecisions, d) }}); err != nil {
 		t.Fatal(err)
 	}
-	if len(wholeDecisions) != 1 || wholeDecisions[0].Action != "measure" || !strings.HasPrefix(wholeDecisions[0].Reason, "stale: the oracle set grew by 1 test the carve-out cannot compose") || !strings.Contains(wholeDecisions[0].Reason, "example.com/grown.TestOld") || wholeDecisions[0].Candidates != prior[0].Generated {
-		t.Fatalf("a pre-existing test newly listed = %+v, want a whole re-measure naming TestOld", wholeDecisions)
+	if len(wholeDecisions) != 1 || wholeDecisions[0].Action != "measure" || !strings.HasPrefix(wholeDecisions[0].Reason, "stale: ") || wholeDecisions[0].Candidates != prior[0].Generated {
+		t.Fatalf("a pre-existing test newly listed = %+v, want a whole re-measure", wholeDecisions)
 	}
 
 	// A grown set the gate refuses on ANOTHER pin — here the oracle
@@ -2606,23 +2599,16 @@ func TestRunServesExplicitGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if _, err := farTree.Run(ctx, []Target{farTarget}, Options{Prior: prior, Decision: func(d RunDecision) { farDecisions = append(farDecisions, d) }}); err != nil {
 		t.Fatal(err)
 	}
-	if len(farDecisions) != 1 || farDecisions[0].Action != "measure" || !strings.HasPrefix(farDecisions[0].Reason, "stale: the oracle set grew by 1 test the carve-out cannot compose") || !strings.Contains(farDecisions[0].Reason, "example.com/grown/other.TestFar") || farDecisions[0].Candidates != prior[0].Generated {
-		t.Fatalf("an out-of-package test newly listed = %+v, want a whole re-measure naming TestFar", farDecisions)
+	if len(farDecisions) != 1 || farDecisions[0].Action != "measure" || !strings.HasPrefix(farDecisions[0].Reason, "stale: ") || farDecisions[0].Candidates != prior[0].Generated {
+		t.Fatalf("an out-of-package test newly listed = %+v, want a whole re-measure", farDecisions)
 	}
 }
 
-// TestRunServesGrownOracleMeasuringOnlySurvivors pins the killer-drift
-// carve-out's grown-set shape end to end (REQ-result-stale): a sibling test
-// added beside the oracle grows the derived set under an attributable
-// compartment delta with nothing moved, so the prior record serves — kills
-// and discards stand — while only the recorded survivors re-execute,
-// narrowed to the added test alone. Newly killed survivors move to killed
-// (shedding their attestations with the contradiction reported), the
-// drifted record carries the current tree's evidence and ledger — proven
-// by a follow-up run serving it cached — and a delta that also edits an
-// existing oracle re-measures that oracle's kills too, survivors still
-// narrowed.
-func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
+// Derived oracle growth remeasures the requested candidate population under
+// the complete oracle. Newly killed attestations are contradicted, surviving
+// reasoning carries under its own rules, and the resulting unchanged record
+// can serve on a later run (REQ-result-stale).
+func TestDerivedOracleGrowthRemeasuresAllCandidates(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
@@ -2709,19 +2695,16 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if survivorCount < 2 {
 		t.Fatalf("fixture yielded %d survivors, want several so the plural literal below has teeth", survivorCount)
 	}
-	wantReason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test); oracle: 2 tests across 1 package",
-		killNoun(prior[0].Killed), candidateNoun(survivorCount), survivorNoun(survivorCount))
-	if len(decisions) != 1 || decisions[0].Action != "measure" || decisions[0].Reason != wantReason || decisions[0].Candidates != survivorCount {
-		t.Fatalf("grown-set drift decision = %+v, want %q over %d survivors", decisions, wantReason, survivorCount)
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.HasPrefix(decisions[0].Reason, "stale: ") || decisions[0].Candidates != prior[0].Generated {
+		t.Fatalf("grown-set decision = %+v, want complete remeasurement", decisions)
 	}
-	if len(dispatched) != survivorCount {
-		t.Fatalf("dispatched %d candidates, want exactly the %d recorded survivors", len(dispatched), survivorCount)
+	if len(dispatched) != prior[0].Generated {
+		t.Fatalf("dispatched %d candidates, want all %d", len(dispatched), prior[0].Generated)
 	}
-	// The narrowing is executed, not just worded: the executor reports
-	// the scope off the very work value it runs, and every re-measured
-	// survivor's execution is the added test alone, the fresh kill's
-	// serial confirmation staying inside that narrow ground.
-	narrowScope := []string{"^(TestBig)$"}
+	// The observed candidate execution and confirmation scopes both start
+	// from the complete current groups; named-killer confirmation retains
+	// its separate differential-baseline rules.
+	narrowScope := []string{"^(TestBig|TestSmall)$"}
 	if len(executedScopes) < survivorCount {
 		t.Fatalf("observed %d executions, want at least the %d re-measured survivors", len(executedScopes), survivorCount)
 	}
@@ -2764,10 +2747,8 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 		t.Fatalf("contradictions = %+v, want the doomed attestation shed with its killer named", contradictions)
 	}
 
-	// A covering but smaller budget request grows the same way: regeneration
-	// runs at the record's own budget, so a serviceable exhaustive record is
-	// never destroyed by the request shape, and the grown record keeps its
-	// recorded budget.
+	// Changed evidence invalidates the prior outcomes. A smaller request
+	// measures its own prefix rather than inheriting the old larger budget.
 	var cappedDecisions []RunDecision
 	cappedGrown, err := grownTree.Run(ctx, []Target{target}, Options{
 		Budget:   1,
@@ -2777,11 +2758,11 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cappedDecisions) != 1 || cappedDecisions[0].Reason != wantReason {
-		t.Fatalf("covering-but-smaller budget decision = %+v, want the grown-set drift serve %q", cappedDecisions, wantReason)
+	if len(cappedDecisions) != 1 || !strings.HasPrefix(cappedDecisions[0].Reason, "stale: ") || cappedDecisions[0].Candidates != 1 {
+		t.Fatalf("smaller budget decision = %+v, want fresh requested prefix", cappedDecisions)
 	}
-	if cappedGrown[0].Budget != prior[0].Budget || cappedGrown[0].Generated != prior[0].Generated {
-		t.Fatalf("capped growth rewrote the record's selection: budget %d, generated %d", cappedGrown[0].Budget, cappedGrown[0].Generated)
+	if cappedGrown[0].Budget != 1 || cappedGrown[0].Generated != 1 {
+		t.Fatalf("capped remeasurement ignored requested selection: budget %d, generated %d", cappedGrown[0].Budget, cappedGrown[0].Generated)
 	}
 
 	// The grown record is current on the grown tree: a follow-up run serves
@@ -2803,12 +2784,8 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 		t.Fatalf("grown record did not serve cached on its own tree: %+v, %+v", followed[0].Cached, followDecisions)
 	}
 
-	// A delta that also edits the existing oracle: the sole recorded
-	// oracle moved, so every one of its kills and every set-wide kill
-	// re-measures against the full current oracle while the survivors
-	// stay narrowed to the added and moved tests, with the growth
-	// disclosed — no kill stands, but the serve is a drift serve, never
-	// a stale whole re-measure.
+	// Adding and editing together still measures the complete candidate
+	// population, with every kill attributed to the current execution.
 	if err := os.WriteFile(filepath.Join(dir, "gated_test.go"), []byte(strings.Replace(files["gated_test.go"], "t.Fail()", "t.Fail() // edited", 1)+"\nfunc TestBig(t *testing.T) {\n\tif Gated(200) != 603 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2826,13 +2803,10 @@ func TestRunServesGrownOracleMeasuringOnlySurvivors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	remeasured := prior[0].Killed + len(prior[0].Survivors)
-	wantEdited := fmt.Sprintf(
-		"served: %s stand on unmoved oracles; re-measuring %s against the current oracle (%s narrowed to the added and moved tests) (derived oracle grew by 1 test); oracle: 2 tests across 1 package",
-		killNoun(0), candidateNoun(remeasured), survivorNoun(len(prior[0].Survivors)))
-	if edited[0].Cached || len(editedDecisions) != 1 || editedDecisions[0].Reason != wantEdited ||
+	remeasured := prior[0].Generated
+	if edited[0].Cached || len(editedDecisions) != 1 || !strings.HasPrefix(editedDecisions[0].Reason, "stale: ") ||
 		len(editedDispatched) != remeasured {
-		t.Fatalf("non-inert delta = %+v dispatching %d, want the composed drift serve %q over %d", editedDecisions, len(editedDispatched), wantEdited, remeasured)
+		t.Fatalf("non-inert delta = %+v dispatching %d, want complete %d", editedDecisions, len(editedDispatched), remeasured)
 	}
 	if len(edited[0].Kills) != edited[0].Killed {
 		t.Fatalf("composed serve broke kill attribution: %d attributions for %d kills", len(edited[0].Kills), edited[0].Killed)

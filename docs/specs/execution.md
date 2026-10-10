@@ -111,11 +111,9 @@ baseline — the killer passing, a timeout on either side, a
 discard — scores nothing by itself: the serial run of the candidate's
 whole oracle scope executes and
 ITS verdict is the scored measurement, so a survivor verdict always
-rests on every group the candidate executes against — the full
-derived set, or the added and moved tests for a survivor narrowed
-under REQ-result-stale's killer-drift carve-out, whose recorded
-passes on the unmoved oracles stand (the anti-flattering direction is
-untouched) — and a flip remains "a serial run scoring the mutant a
+rests on every group in the full required oracle set, whether derived or
+explicit. No historical individual pass narrows that scope after an oracle
+change. A flip remains "a serial run scoring the mutant a
 survivor" over that same scope alone; a scoped run that times out
 therefore costs its oracle budget twice before the fallback
 resolves, the accepted price of never scoring from a timeout. The
@@ -905,7 +903,7 @@ event, refused and plan-only runs included — the structured summaries
 (the CLI's `--json` summary event, the MCP summary) carry it, and every
 result row carries the identity of the run that last measured any
 candidate of the record: the run's own on a measured row and on a served
-row whose flagged or drifted candidates this run re-executed, the
+row whose flagged candidates this run re-executed, the
 measuring run's on a wholly served row — so a campaign's measured set is
 recoverable from its output without a log. A changed-ref run additionally
 cuts every result row's open survivors by the delta: the survivors whose
@@ -999,17 +997,10 @@ A budget extension (REQ-result-stale's budget-extension carve-out) reports
 `measure` with `candidates` counting only the measured suffix and a reason
 naming the served prefix (`served: prefix of N candidates stands; measuring M
 more`, the candidate noun count-aware: a one-candidate prefix reads
-`1 candidate`). A killer-drift serve (REQ-result-stale's third carve-out)
-reports `measure` with `candidates` counting the re-measured candidates and
-the drift reason of [results.md](results.md); its survivor-scoped
-re-measure builds per-package oracle groups over only the added and moved
-test names — each group earning its own baseline probe under the ordinary
-per-group discipline, so a failing added test refuses the run before any
-mutant executes — dispatches survivor-scoped candidates against that
-narrowed set and every other re-measured candidate against the full
-current groups, confirms kills serially within each candidate's own
-scope, and attributes kills against the full current oracle set (the run
-pattern already bounds execution to each scope's tests).
+`1 candidate`). Oracle changes instead report a whole-target `measure`
+decision at the requested budget, with the inspection's cause and the complete
+current per-package oracle groups. Every group earns its passing baseline
+before mutant execution; a failing added or changed test refuses that target.
 
 **REQ-exec-provenance** (behavior): Every tree load MUST refuse outright
 — at the shared load path, so every entry on every face inherits the

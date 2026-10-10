@@ -111,15 +111,13 @@ func TestBumpUnrelated(t *testing.T) {
 	if len(second) != 1 {
 		t.Fatalf("run B findings = %d, want 1", len(second))
 	}
-	// The decision class is pinned so a degenerate always-re-measure
-	// (or a wholesale cache) cannot green this net: the edit steers
-	// the killer-drift carve-out in its growth flavour — survivors
-	// re-measure against the CURRENT oracle.
+	// A changed oracle requires every candidate to be measured against
+	// the complete current set, not a retained per-test pass.
 	if second[0].Cached {
 		t.Fatalf("run B served a cached record across a strengthened oracle: %+v", second[0])
 	}
-	if len(decisionsB) != 1 || !strings.Contains(decisionsB[0].Reason, "re-measuring") || !strings.Contains(decisionsB[0].Reason, "derived oracle grew") {
-		t.Fatalf("run B decision = %+v, want the growth-flavoured killer-drift re-measure", decisionsB)
+	if len(decisionsB) != 1 || !strings.HasPrefix(decisionsB[0].Reason, "stale: ") || decisionsB[0].Candidates != second[0].Generated {
+		t.Fatalf("run B decision = %+v, want complete current-oracle remeasurement", decisionsB)
 	}
 	for _, s := range second[0].Survivors {
 		if s.Operator == "arithmetic: + -> -" {
@@ -132,8 +130,7 @@ func TestBumpUnrelated(t *testing.T) {
 // The in-place-only arm: the SAME oracle test strengthened with NO
 // added sibling — the field ask (a) verbatim. The body edit alone
 // must invalidate the record and the survivor must flip
-// (REQ-result-stale; the killer-drift carve-out without its growth
-// clause).
+// (REQ-result-stale's complete remeasurement rule).
 func TestRunSurvivorFlipsOnInPlaceOracleEditAlone(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -187,11 +184,11 @@ func TestRunSurvivorFlipsOnInPlaceOracleEditAlone(t *testing.T) {
 	if second[0].Cached {
 		t.Fatalf("run B served a cached record across the in-place edit: %+v", second[0])
 	}
-	// The in-place edit takes the killer-drift carve-out WITHOUT its
+	// The in-place edit requires whole remeasurement WITHOUT an oracle-set
 	// growth clause - pinned so this arm cannot drift into the
 	// growth-flavoured neighbour it exists to distinguish.
-	if len(decisionsB) != 1 || !strings.Contains(decisionsB[0].Reason, "re-measuring") || strings.Contains(decisionsB[0].Reason, "oracle grew") {
-		t.Fatalf("run B decision = %+v, want the growth-free killer-drift re-measure", decisionsB)
+	if len(decisionsB) != 1 || decisionsB[0].Action != "measure" || decisionsB[0].Candidates != first[0].Generated || !strings.Contains(decisionsB[0].Reason, "stale: target: test variants") || strings.Contains(decisionsB[0].Reason, "oracle grew") {
+		t.Fatalf("run B decision = %+v, want whole remeasurement after the in-place edit", decisionsB)
 	}
 	for _, s := range second[0].Survivors {
 		if s.Operator == "arithmetic: + -> -" {

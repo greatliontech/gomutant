@@ -14,10 +14,9 @@ type windowEstimate struct {
 func estimateWindow(window []work, baselineDur func(group) (time.Duration, bool)) windowEstimate {
 	var est windowEstimate
 	for _, w := range window {
-		for _, mi := range executingIndexes(w) {
-			// Historical composition may choose a proved remeasurement
-			// scope. Price precisely the groups the dispatcher will run.
-			cost, priced := workFullPrice(scopedWork(w, mi), baselineDur)
+		for range executingIndexes(w) {
+			// Every candidate uses its complete current oracle groups.
+			cost, priced := workFullPrice(w, baselineDur)
 			if !priced {
 				est.unknown++
 				continue

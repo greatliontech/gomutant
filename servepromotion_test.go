@@ -9,12 +9,11 @@ import (
 	"testing"
 )
 
-// promoteThroughServe drives one dirty-born record through a serve at a
-// clean tree and returns the served finding and the repo document rows:
-// the shared harness for the growth and drift promotion-shape pins.
+// promoteAfterOracleChange remeasures a dirty-born record at a clean tree
+// and returns the new finding and repo document rows.
 // setup returns the repo, its git runner, and the file whose
 // uncommitted edit makes the first measure dirty-born.
-func promoteThroughServe(t *testing.T, target Target, setup func(t *testing.T) (string, func(...string), string), moveOracle func(tmp string, runGit func(...string))) (Finding, []Finding, string) {
+func promoteAfterOracleChange(t *testing.T, target Target, setup func(t *testing.T) (string, func(...string), string), moveOracle func(tmp string, runGit func(...string))) (Finding, []Finding, string) {
 	t.Helper()
 	cacheDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
@@ -72,17 +71,15 @@ func promoteThroughServe(t *testing.T, target Target, setup func(t *testing.T) (
 	}
 	second, err := tr2.Run(ctx, []Target{target}, Options{Budget: 1, Prior: prior, Commit: commit, RunID: "promote-two"})
 	if err != nil || len(second) != 1 {
-		t.Fatalf("clean serve = %+v, %v", second, err)
+		t.Fatalf("clean remeasurement = %+v, %v", second, err)
 	}
-	// Both promotion serves re-execute candidates (the grown oracle's
-	// survivors, the drifted killer's flagged set): the record names
-	// the serving run as its last measuring run (REQ-result-record).
-	if second[0].Run != "promote-two" {
-		t.Fatalf("re-executing serve run = %q, want promote-two", second[0].Run)
+	// Remeasurement records this run's identity (REQ-result-record).
+	if second[0].Cached || second[0].Run != "promote-two" {
+		t.Fatalf("remeasurement cached=%t run=%q, want measured promote-two", second[0].Cached, second[0].Run)
 	}
 	raw, err := os.ReadFile(docPath)
 	if err != nil {
-		t.Fatalf("repo document missing after the clean serve: %v", err)
+		t.Fatalf("repo document missing after clean remeasurement: %v", err)
 	}
 	parsed, err := ParseFindings(raw)
 	if err != nil {
@@ -145,11 +142,10 @@ func growthModuleRepo(t *testing.T) (string, func(...string), string) {
 	return tmp, runGit, filepath.Join(tmp, "doc.go")
 }
 
-// A dirty-born record serves through the oracle-growth carve-out at a
-// clean tree: provenance re-stamps like a fresh measure's and the
-// record - its disposition riding - reaches the repo findings document
-// (REQ-result-stale's serve-provenance clause, REQ-result-layers).
-func TestGrowthServePromotesDirtyBornRecordOnCleanTree(t *testing.T) {
+// A dirty-born record is remeasured after oracle growth on a clean tree.
+// The new record and its carried disposition reach the repo document
+// (REQ-result-stale, REQ-result-layers).
+func TestOracleGrowthRemeasurePromotesDirtyBornRecord(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
@@ -159,12 +155,11 @@ func TestGrowthServePromotesDirtyBornRecordOnCleanTree(t *testing.T) {
 	// carrying those identities is machine-local by the portable line
 	// and dirty by the out-of-repo guard - it can never promote, which
 	// is exactly the identities' contract, not this pin's subject.
-	served, parsed, cleanHead := promoteThroughServe(t,
+	served, parsed, cleanHead := promoteAfterOracleChange(t,
 		Target{Symbol: "example.com/grow.F"},
 		growthModuleRepo,
 		func(tmp string, runGit func(...string)) {
-			// An added derived sibling test is the growth delta; committed,
-			// so the serve happens at a clean tree.
+			// Commit the added derived sibling so remeasurement sees a clean tree.
 			path := filepath.Join(tmp, "grow2_test.go")
 			if err := os.WriteFile(path, []byte("package grow\n\nimport \"testing\"\n\nfunc TestF2(t *testing.T) {\n\tF(1)\n}\n"), 0o644); err != nil {
 				t.Fatal(err)
@@ -175,23 +170,20 @@ func TestGrowthServePromotesDirtyBornRecordOnCleanTree(t *testing.T) {
 	assertPromotedShape(t, served, parsed, cleanHead, "example.com/grow.F", 1)
 }
 
-// A dirty-born record serves through the killer-drift carve-out at a
-// clean tree with the same promotion shape (REQ-result-stale's
-// serve-provenance clause, REQ-result-layers).
-func TestDriftServePromotesDirtyBornRecordOnCleanTree(t *testing.T) {
+// An oracle-body edit on a clean tree fully remeasures a dirty-born record
+// before promoting it (REQ-result-stale, REQ-result-layers).
+func TestOracleEditRemeasurePromotesDirtyBornRecord(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
-	served, parsed, cleanHead := promoteThroughServe(t,
+	served, parsed, cleanHead := promoteAfterOracleChange(t,
 		Target{Symbol: "example.com/fixture/lib.Weak", Oracle: []string{"example.com/fixture/lib.TestWeak"}, OracleExplicit: true},
 		func(t *testing.T) (string, func(...string), string) {
 			tmp, runGit := gitFixtureRepo(t)
 			return tmp, runGit, filepath.Join(tmp, "lib", "doc.go")
 		},
 		func(tmp string, runGit func(...string)) {
-			// Editing the oracle test's body moves killer content: the
-			// drift serve re-measures the flagged candidates against the
-			// current oracle; committed, so the serve is at a clean tree.
+			// Commit the oracle-body edit so the fresh record can promote.
 			path := filepath.Join(tmp, "lib", "lib_test.go")
 			src, err := os.ReadFile(path)
 			if err != nil {
@@ -207,7 +199,7 @@ func TestDriftServePromotesDirtyBornRecordOnCleanTree(t *testing.T) {
 			runGit("add", "-A")
 			runGit("commit", "-q", "-m", "oracle body lands")
 		})
-	// The drift splice re-executes the attested survivor against the
+	// Whole remeasurement executes the attested survivor against the
 	// current oracle; it survives again at its exact site, so the
 	// disposition rides the promotion.
 	assertPromotedShape(t, served, parsed, cleanHead, "example.com/fixture/lib.Weak", 1)

@@ -53,15 +53,12 @@ func TestEstimateWindowMirrorsExecutingSelection(t *testing.T) {
 	extended := base
 	extended.extend = &Finding{}
 	extended.extendFrom = 2
-	drifted := base
-	drifted.drift = &Finding{}
-	drifted.driftRemeasure = map[int]bool{0: true, 2: true}
 	for _, tc := range []struct {
 		name  string
 		w     work
 		count int
 	}{
-		{"serve", served, 1}, {"extension", extended, 1}, {"drift", drifted, 2},
+		{"serve", served, 1}, {"extension", extended, 1}, {"fresh", base, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			est := estimateWindow([]work{tc.w}, baseline)
@@ -69,19 +66,6 @@ func TestEstimateWindowMirrorsExecutingSelection(t *testing.T) {
 				t.Fatalf("estimate=%+v", est)
 			}
 		})
-	}
-	// Reuse's proved composition chooses its groups before dispatch. The
-	// estimate reads that same choice, not a different full-pattern price.
-	drifted.driftSurvivors = map[int]bool{0: true}
-	drifted.narrowGroups = []group{{pkgs: []string{"example.com/p"}, runRegex: "^TestAdded$"}}
-	est := estimateWindow([]work{drifted}, func(g group) (time.Duration, bool) {
-		if g.runRegex == "^TestAdded$" {
-			return 7 * time.Second, true
-		}
-		return time.Minute, true
-	})
-	if est.full != 2 || est.projected != 67*time.Second {
-		t.Fatalf("composed scope=%+v", est)
 	}
 }
 

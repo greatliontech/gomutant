@@ -468,7 +468,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 			// A served row names the run that last measured any of its
 			// candidates: the measuring run's on a wholly served record,
 			// this run's (the head line's) when the serve re-executed
-			// flagged or drifted candidates (REQ-exec-run-status).
+			// flagged candidates (REQ-exec-run-status).
 			fmt.Fprintf(&terminal, "cached    %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open%s%s\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()), deltaCount(cut, onDelta), runSuffix(f.Run))
 		default:
 			fmt.Fprintf(&terminal, "measured  %s  %d/%d candidates, %d mutants, %d killed, %d discarded, %d open%s\n", f.Symbol, f.Generated, f.CandidateCount, f.Mutants, f.Killed, f.Discarded, len(f.Open()), deltaCount(cut, onDelta))

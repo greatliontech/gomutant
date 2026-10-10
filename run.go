@@ -350,12 +350,11 @@ type Options struct {
 	// target's bounded per-target retry — a test seam pinning the
 	// unit/retry split, like producer above.
 	proofAttempt func(symbol string, attempt int)
-	// Contradiction receives each attested survivor a drift serve's added
-	// or moved tests killed: the attestation is shed — evidence beats
+	// Contradiction receives each attested survivor a new measurement
+	// killed: the attestation is shed — evidence beats
 	// attestation — and the contradiction is worth a human's attention,
 	// because a mutant judged equivalent was just distinguished
-	// (REQ-attest-survivor,
-	// REQ-result-stale's killer-drift carve-out). Nil drops the reports; the
+	// (REQ-attest-survivor). Nil drops the reports; the
 	// shed itself is unconditional.
 	Contradiction func(AttestationContradiction)
 	// AttestationSiteShed reports a disposition refused only because the
@@ -372,22 +371,21 @@ type Options struct {
 	AttestationCarried func(AttestationCarry)
 	// dispatched observes each candidate index handed to the worker pool —
 	// a test seam pinning suffix-only dispatch under a budget extension,
-	// flagged-only dispatch under a candidate-evidence serve, and
-	// survivor-only dispatch under a grown-set drift serve, like producer
-	// above. Deterministically ordered (the dispatch loop emits it).
+	// flagged-only dispatch under a candidate-evidence serve, and complete
+	// dispatch under changed oracle evidence. Deterministically ordered.
 	dispatched func(symbol string, mi int)
 	// executedScope observes each mutant execution's oracle scope
 	// (per-group -run patterns), keyed by candidate identity (position,
 	// operator) — emitted by the executor off the same work value whose
 	// groups execute verbatim. Unordered (workers race); pins the scope
-	// selected by the historical-composition gate.
+	// of the complete current oracle.
 	executedScope func(position, operator string, oracleScope []string)
 	// confirmScoped observes each serial confirmation's candidate group
 	// scope the same way, emitted at the confirmation executor's own
 	// entry off its w: the serial fallback executes those groups
 	// verbatim, and the killer-scoped branch runs its killer sub-probe
-	// within one of them — pinning that a narrowed survivor's
-	// confirmation stays inside its narrow ground.
+	// within one of them — pinning both confirmation routes to the
+	// candidate's complete current oracle.
 	confirmScoped func(position, operator string, oracleScope []string)
 }
 
@@ -1165,8 +1163,8 @@ func derivationMove(prior, current SubjectEvidence) string {
 	return prior.ClosureStrategy + " -> " + current.ClosureStrategy
 }
 
-// AttestationContradiction reports one attested survivor a drift serve's
-// added or moved tests killed, with the shed attestation's reasoning and
+// AttestationContradiction reports one attested survivor a fresh measurement
+// killed, with the shed attestation's reasoning and
 // the killer so the re-judgment starts from the evidence.
 type AttestationContradiction struct {
 	Symbol   string
@@ -1218,57 +1216,10 @@ type work struct {
 	// three splices the suffix outcomes onto the record.
 	extend     *Finding
 	extendFrom int
-	// drift is the prior record served under the killer-drift carve-out
-	// (REQ-result-stale): the target package's compartment moved by an
-	// attributable delta, driftMoved names the oracles whose evidence or
-	// reference walk observed it, and only the candidate indexes in
-	// driftRemeasure — every survivor when the set grew or anything moved
-	// (driftAdded names the current oracles — derived or the caller's
-	// explicit list — with no recorded evidence: the grown-set
-	// composition, whose added tests join the
-	// re-measure oracle and cannot un-kill a standing kill), every
-	// candidate carrying recorded candidate evidence, every kill whose
-	// killer moved, and
-	// every timeout or package-scope kill when anything moved — re-execute
-	// against the full current oracle, except unflagged survivors, whose
-	// scope narrows to the added and moved tests (driftSurvivors below);
-	// kills keyed to unmoved oracles and
-	// unflagged discards keep their recorded dispositions, and phase three
-	// splices the fresh outcomes into the record under the current tree's
-	// evidence.
-	drift          *Finding
-	driftMoved     []string
-	driftAdded     []string
-	driftRemeasure map[int]bool
-	// driftSurvivors marks the re-measured candidates whose oracle
-	// narrows to the added and moved tests: each unmoved oracle's
-	// recorded pass stands as a standing kill does, so only added ∪
-	// moved can change a per-oracle verdict — forgoing only the
-	// whole-set single-process wall-clock channel, a deliberate
-	// asymmetry the spec states (REQ-result-stale).
-	// Flagged candidates and re-measured kills keep the full current
-	// oracle. narrowGroups are that scope's execution groups (their
-	// baselines ride w.baselines beside the full set's); empty when no
-	// candidate is survivor-scoped.
-	driftSurvivors map[int]bool
-	narrowGroups   []group
 	// shapedFiles are a shaped target's provenance inputs, threaded
 	// from the resolve-time derivation to the stamp (nil for symbol
 	// targets).
 	shapedFiles []string
-}
-
-// scopedWork returns the work item a candidate executes under: a
-// drift-re-measured survivor runs the narrowed oracle (the added and
-// moved tests' groups) — its recorded passes on unmoved oracles stand —
-// while every other candidate runs the full set. The swap covers the
-// whole execution machinery (mutant run, killer-scoped confirmation,
-// serial fallback) because they all read the item's groups.
-func scopedWork(w work, mi int) work {
-	if w.driftSurvivors[mi] && len(w.narrowGroups) != 0 {
-		w.groups = w.narrowGroups
-	}
-	return w
 }
 
 // oracleScope renders a work item's effective oracle scope — each
@@ -1317,9 +1268,7 @@ func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, o
 // scoped baseline — the killer passing, a timeout either side, a
 // discard, an unscopable killer — falls back to the serial run of the
 // candidate's whole oracle scope, whose verdict scores: a survivor
-// verdict always rests on every group the candidate executes against
-// (for a narrowed survivor, the added and moved tests — its unmoved
-// passes stand recorded).
+// verdict always rests on every complete current oracle group.
 func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, killer string, scopedBaselines map[scopedBaselineKey]bool, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
 	if opts.confirmScoped != nil {
 		// Emitted off the same w both confirmation paths derive from:
@@ -2536,9 +2485,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// itself (REQ-exec-quiescence's baseline locality).
 	probeGroupBaselines := func(ctx context.Context, tg Target, w *work) (string, error) {
 		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
-		groupsAll := append(append([]group(nil), w.groups...), w.narrowGroups...)
-		for gi, group := range groupsAll {
-			narrowScoped := gi >= len(w.groups)
+		for _, group := range w.groups {
 			key := keyFor(group)
 			if reason, failed := baselineFailures[key]; failed {
 				return reason, nil
@@ -2662,7 +2609,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// whose accept refuses unverifiable evidence) — the
 				// guard only keeps dead weight out of the bank. The
 				// manifest guard is load-bearing: adoption needs one.
-				if !narrowScoped && !observed.Unverifiable && observed.Manifest != "" {
+				if !observed.Unverifiable && observed.Manifest != "" {
 					groupBudgetMu.Lock()
 					pendingBankDeposits[key] = pendingBankDeposit{manifest: observed.Manifest, digest: observed.Digest, raw: baselineElapsed}
 					groupBudgetMu.Unlock()
@@ -2952,9 +2899,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			}
 		}
 		var serve *Finding
-		var drift *Finding
-		var driftMoved []string
-		var driftAdded []string
 		// refuseServeCheck is the serve block's target-local exit for a
 		// failed evidence check (serveCheckRefusal, any non-ctx error):
 		// the condition is this target's own, the campaign proceeds.
@@ -2971,44 +2915,13 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				return nil, nil
 			}
 			if !matches {
-				// A mismatch may be exactly the drift the carve-out serves:
-				// the compartment moved attributably — a purely grown set,
-				// derived or explicit, included, its added tests being
-				// attributable additions with nothing moved — so kills
-				// keyed to unmoved oracles stand and the rest re-measures
-				// (REQ-result-stale's killer-drift carve-out).
-				if moved, addedOracles, drifts, uncomposable, derr := evidenceSetCoversKillerDriftContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime); derr != nil {
-					if ctx.Err() != nil {
-						return nil, ctx.Err()
-					}
-					refuseServeCheck(serveCheckRefusal(derr))
-					return nil, nil
-				} else if drifts {
-					snapshot := snapshotFindings([]Finding{*rec})[0]
-					drift = &snapshot
-					driftMoved = moved
-					driftAdded = addedOracles
-				} else {
-					// The moved pin is named so a caller who just wrote
-					// kill-tests sees the tool noticing them instead of
-					// forcing defensively (REQ-result-stale). The class comes
-					// from the inspection, not an assumed "stale": an
-					// unverifiable prior is not stale. The attribution may
-					// build a supplementary view for a recorded oracle the
-					// current resolution lacks — analysis-pass work gated
-					// shared exactly like the union build above.
-					if len(uncomposable) > 0 {
-						// The added-test rule's own refusal — a pre-existing
-						// or out-of-package declaration newly listed — and
-						// the caller is told which; every other refusal
-						// keeps the inspection's own class and text.
-						reason = uncomposableNote(uncomposable)
-					} else {
-						probeGate.RLock()
-						reason = t.movedPinAttribution(ctx, *rec, mv.views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
-						probeGate.RUnlock()
-					}
-				}
+				// A named killer is not an independence proof: another test
+				// can alter its shared state, and an added test can un-kill it.
+				// Keep the actual refusal attribution and remeasure the target
+				// against its complete current oracle (REQ-result-stale).
+				probeGate.RLock()
+				reason = t.movedPinAttribution(ctx, *rec, mv.views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
+				probeGate.RUnlock()
 			}
 			if matches && len(rec.CandidateEvidence) == 0 {
 				cached := *rec
@@ -3153,7 +3066,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		if err != nil {
 			return nil, err
 		}
-		item := work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, currentLedger: currentLedger, serve: serve, extend: extend, drift: drift, driftMoved: driftMoved, driftAdded: driftAdded}
+		item := work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, currentLedger: currentLedger, serve: serve, extend: extend}
 		w := &item
 		var decision RunDecision
 		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
@@ -3166,15 +3079,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			// flagged candidates re-identify deterministically.
 			budget = w.serve.Budget
 		}
-		if w.drift != nil {
-			// Same discipline again for killer drift: the record's own
-			// selection is what its kills and survivors re-identify against
-			// (REQ-result-stale's killer-drift carve-out).
-			budget = w.drift.Budget
-		}
 		// regenerateAtBudget re-enumerates at the request budget when a
 		// carve-out's record-shaped regeneration cannot be spliced —
-		// one exit for the three carve-out fallbacks (drift skips
+		// one exit for the retained reuse fallbacks (source drift skips
 		// target-locally, any other failure aborts as ever).
 		regenerateAtBudget := func() (engine.Generation, bool, error) {
 			g, gerr := t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
@@ -3227,57 +3134,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				w.reason += "; deterministic regeneration cannot re-identify the measured prefix"
 			}
 		}
-		if w.drift != nil {
-			if remeasure, survivorScoped, stand, flagged, ok := driftRemeasureIndexes(generation, *w.drift, w.driftMoved, w.driftAdded); ok {
-				w.candidates = generation.Candidates
-				w.driftRemeasure = remeasure
-				w.driftSurvivors = survivorScoped
-				reason := fmt.Sprintf("served: %s stand on unmoved oracles; re-measuring %s against the current oracle", killNoun(stand), candidateNoun(len(remeasure)))
-				if len(survivorScoped) != 0 {
-					// The survivor scope is the response's own claim: those
-					// candidates run only the added and moved tests, their
-					// recorded passes on unmoved oracles standing.
-					reason += fmt.Sprintf(" (%s narrowed to the added and moved tests)", survivorNoun(len(survivorScoped)))
-				}
-				if len(w.driftAdded) != 0 {
-					// The grown set is named in its mode: the derivation's
-					// growth, or the caller's grown explicit selection.
-					mode := "derived"
-					if targets[w.target].explicitOracle() {
-						mode = "explicit"
-					}
-					reason += fmt.Sprintf(" (%s oracle grew by %s)", mode, testNoun(len(w.driftAdded)))
-				}
-				if flagged != 0 {
-					reason += fmt.Sprintf("; %s re-execute%s flagged evidence", candidateNoun(flagged), map[bool]string{true: "s"}[flagged == 1])
-				}
-				if len(remeasure) == 0 && len(w.driftAdded) == 0 {
-					// Flagged evidence always re-measures, so an empty set
-					// here means nothing moved, nothing flagged, and — by
-					// the guard — nothing added: the no-reach serve. With
-					// added tests and an empty set (a fully-killed record),
-					// the grown wording above stands.
-					reason = "served: compartment delta reaches no recorded oracle; nothing re-measures"
-				}
-				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason + resolved.oracleNote, Candidates: len(remeasure)}
-			} else {
-				// Deterministic regeneration cannot re-identify the recorded
-				// candidates, kills, and survivors, so the record cannot
-				// serve under drift: the whole target re-measures under the
-				// request's own budget (REQ-result-stale).
-				w.drift = nil
-				w.reason = "killer drift is attributable, but deterministic regeneration cannot re-identify the recorded candidates, kills, and survivors"
-				if budget != opts.Budget {
-					var regenerated bool
-					if generation, regenerated, err = regenerateAtBudget(); regenerated {
-						return nil, nil
-					} else if err != nil {
-						return nil, err
-					}
-				}
-			}
-		}
-		if w.serve == nil && w.extend == nil && w.drift == nil {
+		if w.serve == nil && w.extend == nil {
 			w.candidates = generation.Candidates
 			decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason + resolved.oracleNote, Candidates: len(generation.Candidates)}
 			f.Budget = opts.Budget
@@ -3286,12 +3143,8 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		}
 		// Per-package oracle scoping (REQ-exec-oracle-run), with the rapid
 		// failfile flag only in front of binaries that register it
-		// (REQ-mut-overlay). A drift serve with narrowed survivors builds
-		// its narrow groups over the added and moved tests beside the full
-		// set's — the recorded passes already rest on the unmoved oracles
-		// (REQ-core-attributed-kills) — every group of either scope earning
-		// its own baseline below, so a failing added test skips this target
-		// with the failure named (REQ-exec-quiescence's baseline locality).
+		// (REQ-mut-overlay). Every complete current group earns its own
+		// baseline before any mutant runs.
 		if opts.PlanOnly {
 			// The plan needs candidate counts and decisions, never
 			// baseline probes: group construction and probing are
@@ -3333,16 +3186,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		}
 		if w.groups, err = buildGroups(w.oracle); err != nil {
 			return nil, err
-		}
-		if len(w.driftSurvivors) != 0 {
-			// The survivor scope's own probed groups: the added and moved
-			// tests alone, run-regex-scoped exactly like the full set's
-			// (REQ-result-stale's killer-drift carve-out).
-			narrowOracle := append(append([]string(nil), w.driftAdded...), w.driftMoved...)
-			sort.Strings(narrowOracle)
-			if w.narrowGroups, err = buildGroups(narrowOracle); err != nil {
-				return nil, err
-			}
 		}
 		if reason, err := probeGroupBaselines(ctx, tg, w); err != nil {
 			return nil, err
@@ -3718,7 +3561,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					opts.dispatched(window[wi].candidates[mi].Symbol, mi)
 				}
 				select {
-				case jobCh <- job{wi, mi, scopedWork(window[wi], mi)}:
+				case jobCh <- job{wi, mi, window[wi]}:
 				case <-opts.SoftStop:
 					softStopped = true
 					prefixes[wi], breakWi = mi, wi
@@ -3756,7 +3599,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				if k < 0 {
 					continue
 				}
-				if window[wi].serve != nil || window[wi].extend != nil || window[wi].drift != nil || k == 0 {
+				if window[wi].serve != nil || window[wi].extend != nil || k == 0 {
 					discard[wi] = true
 					window[wi].candidates = nil
 					outcomes[wi], observations[wi], incompletes[wi], killers[wi], memoryDecided[wi] = nil, nil, nil, nil, nil
@@ -3799,7 +3642,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// The serial execution replaces every channel of the parallel
 		// measurement (REQ-exec-attribution).
 		rescore := func(wi, mi int, run func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error)) (engine.MutantOutcome, string, error) {
-			w := scopedWork(window[wi], mi)
+			w := window[wi]
 			m, _ := window[wi].candidates[mi].Mutant()
 			opts.probeGate.Lock()
 			outcome, killer, decided, state, incomplete, err := run(w, m)
@@ -4006,88 +3849,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				}
 				continue
 			}
-			if w.drift != nil {
-				spliced, _, shed, err := t.spliceDriftFinding(ctx, runEnv, *w.drift, w, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions, oracleMemoryPin, maxGroupBudget(w, opts), deriveOracleBudgets)
-				if err != nil {
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					if !errors.Is(err, errEvidenceFinalization) {
-						return err
-					}
-					refuseTarget(w.target, err.Error()+residue())
-					continue
-				}
-				observations[wi] = nil
-				if unavailable, err := producerValidation(ctx, w.producer); err != nil {
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					refuseTarget(w.target, err.Error()+residue())
-					continue
-				} else if unavailable != "" {
-					stampUnverifiable(&spliced, unavailable)
-					// The splice bucketed its survivors before this
-					// record-wide stamp; under it — uncovered by an
-					// exemption — every survivor's advisory bucket
-					// re-derives as a fresh measure's would, so no survivor
-					// commits without one (REQ-exec-survivor-evidence).
-					if unstableForBuckets(&spliced, opts.Exemptions) {
-						if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
-							return err
-						}
-					}
-				}
-				// The exemption record is derived after every unverifiable stamp
-				// the record can carry, never before one (the exemptions'
-				// derived-state rule).
-				stampExemptions(&spliced, opts.Exemptions)
-				// The drifted record carries the current tree's evidence — the
-				// gate proved the retained movement is the attributable
-				// compartment delta — so provenance is recomputed like a fresh
-				// measure's (REQ-result-stale's killer-drift carve-out).
-				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, nil, &spliced); err != nil {
-					return err
-				} else if stagedDrift != "" {
-					refuseTarget(w.target, stagedDrift+residue())
-					continue
-				}
-				spliced.Run = opts.RunID
-				// With any oracle moved or the set grown, every surviving
-				// candidate's verdict rests on the full current oracle —
-				// recorded passes standing, added and moved re-measured —
-				// so advisory buckets re-derive from the current
-				// probe exactly as a fresh measure's do; a no-reach serve
-				// with nothing added re-measured nothing and carries every
-				// recorded bucket verbatim, paying no coverage probe.
-				if (len(w.driftMoved) != 0 || len(w.driftAdded) != 0) && !unstableForBuckets(&spliced, opts.Exemptions) {
-					if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
-						return err
-					}
-				}
-				// Evidence beats attestation: a
-				// re-measured attested survivor a moved test now kills sheds
-				// its attestation with the contradiction reported — before
-				// the commit, so a commit-time shed stream finds it on
-				// record (first-report-wins).
-				if opts.Contradiction != nil && len(shed) != 0 {
-					byIdentity, _ := candidateIdentityIndex(w.candidates)
-					for _, attestation := range shed {
-						killer := ""
-						if mi, ok := byIdentity[survivorKey{attestation.Position, attestation.Operator}]; ok {
-							killer = scores[wi].killers[mi]
-						}
-						opts.Contradiction(AttestationContradiction{
-							Symbol: targets[w.target].Symbol, Position: attestation.Position,
-							Operator: attestation.Operator, Killer: killer, Reason: attestation.Reason,
-						})
-					}
-				}
-				if err := commitAndAttribute(ctx, spliced, w); err != nil {
-					return err
-				}
-				continue
-			}
 			if w.extend != nil {
 				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget, opts.Exemptions, oracleMemoryPin, maxGroupBudget(w, opts), deriveOracleBudgets)
 				if err != nil {
@@ -4256,9 +4017,8 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					f.Survivors = append(f.Survivors, newSurvivor(candidate, "", scores[wi].flips, mi))
 				case engine.MutantKilled:
 					// The keystone persisted: every kill names its killer
-					// (REQ-core-attributed-kills), so reuse can key the kill
-					// to its killer's content (REQ-result-stale's
-					// killer-drift carve-out).
+					// (REQ-core-attributed-kills). Attribution is evidence of
+					// the event, never an oracle-independence license.
 					f.Kills = append(f.Kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: scores[wi].killers[mi]})
 				}
 			}
@@ -5262,36 +5022,6 @@ func carryAnchoredAttestations(prior []Attestation, survivors []Survivor) (kept 
 	return kept, siteSheds, gone
 }
 
-// spliceDriftFinding serves a record under the killer-drift carve-out
-// (REQ-result-stale): kills keyed to unmoved oracles and all discards keep
-// their recorded dispositions, the re-measured candidates' fresh outcomes —
-// kills and flagged candidates measured against the full current oracle,
-// unflagged survivors against their narrowed scope — replace theirs, and
-// the drifted record carries the current tree's evidence for every subject
-// plus the current compartment ledger. The
-// re-measure processes' completed union is reconciled over the record's
-// persisted union fail-closed: a read beyond the recorded pins preserves the
-// drifted outcome but stamps it explicitly non-reusable. Returns the
-// reconciled union (for provenance) and the shed attestations of newly
-// killed survivors.
-func (t *Tree) spliceDriftFinding(ctx context.Context, env []string, rec Finding, w work, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, runtimeinput.Observation, []Attestation, error) {
-	outcomes := scores.outcomes
-	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, w.candidates, w.driftRemeasure, w.baselines, w.targetView, w.oracleViews, w.currentLedger, outcomes, observations, incompletes, labels, true, false)
-	if err != nil {
-		return Finding{}, runtimeinput.Observation{}, nil, err
-	}
-	rec = spliced.rec
-	diverged := rec.TargetEvidence.RuntimeUnverifiable
-	divergenceReason := rec.TargetEvidence.RuntimeReason
-	rec.TargetEvidence = spliced.targetEvidence
-	rec.OracleEvidence = spliced.oracleEvidence
-	if diverged {
-		stampUnverifiable(&rec, divergenceReason)
-	}
-	driftedFinding, shed, err := driftFindingCounts(ctx, rec, w.candidates, w.driftRemeasure, scores, spliced.fresh, exemptions, memoryPin, oracleBudget, budgetDerived)
-	return driftedFinding, spliced.union, shed, err
-}
-
 // driftFindingCounts replaces each re-measured candidate's disposition with
 // its fresh outcome — per operator and in the finding totals — while every
 // standing candidate keeps its recorded one
@@ -5464,19 +5194,10 @@ func survivorNoun(n int) string { return countNoun(n, "survivor") }
 
 func killNoun(n int) string { return countNoun(n, "kill") }
 
-// driftRemeasureIndexes deterministically re-identifies a drifted record's
-// candidates within the regenerated set and selects the re-measure set: every
-// recorded survivor when any oracle moved or the derived set grew (an added
-// test may kill it; with nothing moved and nothing added, survivals stand
-// exactly like kills), every kill whose recorded killer is a moved oracle,
-// every timeout or package-scope kill when any oracle moved — those rest on
-// the whole recorded set's behavior, which a purely grown set can only
-// extend — and every candidate carrying recorded candidate evidence (the
-// candidate-splice composition: flagged evidence re-executes rather than
-// disqualifying the record). Kills keyed to unmoved oracles and unflagged
-// discards stand. stand counts the standing kills for the decision line. Any
-// re-identification failure refuses the drift serve so the whole target
-// re-measures (REQ-result-stale's killer-drift carve-out).
+// driftRemeasureIndexes computes the non-admitted forward-reference
+// proposal's candidate partition. This projection cannot establish test
+// independence and no measurement path consumes it. Its helper-only test
+// surface is tracked in docs/issues/retired-oracle-drift-helper-tests.md.
 func driftRemeasureIndexes(generation engine.Generation, rec Finding, moved, added []string) (remeasure, survivorScoped map[int]bool, stand, flaggedCount int, ok bool) {
 	byIdentity, ok := reidentify(generation, rec)
 	if !ok {
@@ -5746,22 +5467,16 @@ func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Find
 
 // splicedEvidence is one splice's evidence outcome: the record after
 // fail-closed union reconciliation, the re-executed candidates' fresh
-// evidence, the reconciled union (for provenance), and the current attach
-// results — kept by the killer-drift arm, whose gate justifies upgrading
-// every subject to the current tree's evidence, and discarded by the flagged
-// and extension splices, whose cached proof is never upgraded by a partial
-// measurement (REQ-exec-observation).
+// evidence. The current attach results validate the producing views but do
+// not replace the historical evidence retained by a partial measurement
+// (REQ-exec-observation).
 type splicedEvidence struct {
-	rec            Finding
-	fresh          []CandidateEvidence
-	union          runtimeinput.Observation
-	targetEvidence SubjectEvidence
-	oracleEvidence []SubjectEvidence
+	rec   Finding
+	fresh []CandidateEvidence
 }
 
 // spliceRecordedEvidence is the shared evidence spine of every record splice
-// (the flagged-candidate re-execution, the budget extension, and the
-// killer-drift serve): union the re-executed processes' observations,
+// (flagged-candidate re-execution and budget extension): union their observations,
 // optionally fold the record's persisted union in first (comparing "recorded
 // pins plus fresh reads" against the recorded pins), reconcile against the
 // record fail-closed (applySplicedUnion), attach the fresh union so
@@ -5769,7 +5484,7 @@ type splicedEvidence struct {
 // and advance only an already complete, preserved binding ledger. Missing
 // historical binding evidence is never backfilled by a partial measurement.
 // Counts folding stays with
-// each arm — replacement, append, and survivor-rescore are different truths
+// each arm — replacement and append are different truths
 // over the same spine.
 func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, reExecuted map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, foldRecorded, cached bool) (splicedEvidence, error) {
 	union, freshEvidence, err := completedObservationUnion(ctx, t.dir, env, baselines, candidates, outcomes, observations, incompletes, reExecuted)
@@ -5783,18 +5498,18 @@ func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Fin
 		}
 	}
 	portable := newPortableUnion(union, env)
-	union, rec, err = t.applySplicedUnion(ctx, env, rec, union, portable, evidenceBase(t.dir, rec.TargetEvidence))
+	_, rec, err = t.applySplicedUnion(ctx, env, rec, union, portable, evidenceBase(t.dir, rec.TargetEvidence))
 	if err != nil {
 		return splicedEvidence{}, err
 	}
-	targetEvidence, oracleEvidence, err := attachEvidence(targetView, oracleViews, portable)
+	_, _, err = attachEvidence(targetView, oracleViews, portable)
 	if err != nil {
 		return splicedEvidence{}, err
 	}
 	rec.CompartmentLedger = splicedCompartmentLedger(rec.CompartmentLedger, currentLedger)
 	rec.Labels = append([]string(nil), labels...)
 	rec.Cached = cached
-	return splicedEvidence{rec: rec, fresh: freshEvidence, union: union, targetEvidence: targetEvidence, oracleEvidence: oracleEvidence}, nil
+	return splicedEvidence{rec: rec, fresh: freshEvidence}, nil
 }
 
 // foldRecordedUnion merges the served record's persisted completed-process
@@ -6475,11 +6190,3 @@ func deepestResolvedAncestor(p string) (ancestor, remainder string, ok bool) {
 // explicitly empty statement, is the caller's oracle; neither is a
 // derivation (REQ-result-stale pins the mode on both sides of a serve).
 func (tg Target) explicitOracle() bool { return tg.OracleExplicit || len(tg.Oracle) != 0 }
-
-// uncomposableNote names the identities the drift gate's added-test rule
-// refused — a pre-existing or out-of-package declaration newly listed —
-// so a caller who grew the oracle sees why the target re-measures whole
-// (REQ-result-stale); bounded.
-func uncomposableNote(ids []string) string {
-	return fmt.Sprintf("stale: the oracle set grew by %s the carve-out cannot compose — a pre-existing or out-of-package declaration newly listed re-measures whole (%s)", testNoun(len(ids)), cappedJoin(ids, 4))
-}

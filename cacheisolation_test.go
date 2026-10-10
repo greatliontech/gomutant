@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/testsuite"
 )
 
@@ -11,5 +12,5 @@ import (
 // the overlay isolated, the selection's -short default taken, the
 // tracked fixture trees guarded.
 func TestMain(m *testing.M) {
-	testsuite.Main(m, filepath.Dir(fixtureDir))
+	testsuite.Main(m, filepath.Dir(fixtureDir), engine.GoRunner())
 }

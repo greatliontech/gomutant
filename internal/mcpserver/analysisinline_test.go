@@ -161,8 +161,8 @@ func TestToolRunNotifiesContradictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clientSession.Close()
-	// The moved oracle timeout beside the oracle edit forces the full
-	// re-measure path rather than the killer-drift serve.
+	// Both the moved oracle timeout and the oracle edit require full
+	// remeasurement; the contradiction still names its actual killer.
 	params := &mcp.CallToolParams{Name: "run", Arguments: map[string]any{"targets_json": targets, "budget": 1, "oracle_timeout_sec": 180}}
 	params.SetProgressToken("tok")
 	result, err := clientSession.CallTool(ctx, params)

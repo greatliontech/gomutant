@@ -81,11 +81,13 @@ recorded prefix. Open findings are survivors minus attested dispositions;
 whether they fail a build is the caller's policy, not gomutant's verdict.
 
 Fresh body and shaped findings record `oracleExecutionPolicy` as
-`gomutant/full-oracle@1`. Default CLI and MCP findings views show that policy
-and any `oracleExecutionPolicyIssue` without loading the tree. Missing or
-unknown body policy requires a whole complete-oracle remeasurement, including
+`gomutant/full-oracle@2`. Default CLI and MCP findings views show that policy
+and any `oracleExecutionPolicyIssue` without loading the tree. Policy-1 body
+records may contain outcomes composed across interfering oracle changes;
+they, and missing or unknown body policy, require whole remeasurement, including
 before extensions or partial re-execution; unknown shaped policy does too.
-Legacy shaped records with no policy retain their proven-full exception.
+Legacy shaped records with no policy or policy 1 retain their unsplit,
+non-composed policy exception. Other evidence checks still apply.
 Unsupported counts are shown as historical, not current complete-oracle
 evidence. A supported policy alone does not establish freshness. Version 16
 documents read versions 4–16 and retain version 15's complete ledgers;

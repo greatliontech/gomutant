@@ -210,8 +210,8 @@ func TestRunFullRemeasureContradictionNamesKiller(t *testing.T) {
 	if err := os.WriteFile(libTest, []byte(strengthened), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// The moved oracle timeout beside the oracle edit forces the full
-	// re-measure path rather than the killer-drift serve.
+	// Both the moved oracle timeout and the oracle edit require full
+	// remeasurement; the contradiction still names its actual killer.
 	opts.oracleTimeout = 3 * time.Minute
 	var second bytes.Buffer
 	opts.output = &second

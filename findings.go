@@ -34,11 +34,10 @@ type SubjectEvidence struct {
 	// Fingerprint is the recorded gofresh evidence. Its
 	// TestVariantClosure is the subject package's test-variant
 	// compartment hash: the gofresh pin that distinguishes "a sibling
-	// test moved" from every other drift. The killer-drift gate
-	// refreshes a target-package subject's recorded pin to the current
-	// one — the refresh its inert ledger diff licenses — and requires
-	// the refreshed evidence plainly valid; inspection and attribution
-	// surface gofresh's stable "test variants" verdict reason on refusal
+	// test moved" from every other drift. Recorded compartment evidence
+	// is never refreshed to retain outcomes across oracle changes;
+	// inspection and attribution surface gofresh's stable "test variants"
+	// verdict reason on refusal
 	// paths. It is required and never legitimately empty (gofresh
 	// defines a non-empty identity even for a package with no test
 	// files), so a document lacking it is refused at parse and an
@@ -199,10 +198,9 @@ type CompartmentDeclaration struct {
 	Name     string `json:"name"`
 	Receiver string `json:"receiver,omitempty"`
 	Hash     string `json:"hash"`
-	// Package is the declaring file's package clause name; the killer-drift
-	// license resolves a method's receiver type within its own package
-	// only, and a recorded entry without one (an older document) leaves
-	// method deltas unattributable, fail-closed (REQ-result-stale).
+	// Package is the declaring file's package clause name. Older records
+	// without it retain that absence rather than borrowing another
+	// variant's package identity.
 	Package string `json:"package,omitempty"`
 }
 
@@ -229,9 +227,8 @@ type CompartmentImport struct {
 
 // CompartmentLedger is the target package's persisted test-variant
 // declaration ledger (REQ-result-record): recorded at measure time from the
-// same view snapshot the compartment hash pinned, and diffed at serve time
-// against the current view's ledger so the killer-drift carve-out can
-// classify how the compartment moved (REQ-result-stale).
+// same view snapshot the compartment hash pinned. It is preserved as data;
+// its reference graph supplies no oracle-independence license.
 type CompartmentLedger struct {
 	BindingStrategy string                   `json:"bindingStrategy,omitempty"`
 	BaseFiles       []CompartmentFileHeader  `json:"baseFiles,omitzero"`
@@ -248,13 +245,8 @@ func compartmentLedgerFromView(ledger gofresh.TestVariantLedger) *CompartmentLed
 		FileHeaders:     compartmentHeadersFromView(ledger.FileHeaders),
 	}
 	for _, declaration := range ledger.Declarations {
-		// Field-by-field: the view's declaration also carries its
-		// referenced-name list, which is serve-time input for the
-		// killer-drift walk and never persisted — the current view's list
-		// speaks for every unchanged declaration: equal hashes pin equal
-		// bytes, and the one exception (an omitted-list const spec tracking
-		// its governing list) always folds the governing entry's own name,
-		// whose movement is the change the walk must observe.
+		// Declaration reference lists are not part of this wire form.
+		// Preserve the historical projection without inventing them.
 		out.Declarations = append(out.Declarations, CompartmentDeclaration{
 			File: declaration.File, Kind: declaration.Kind, Name: declaration.Name,
 			Receiver: declaration.Receiver, Hash: declaration.Hash, Package: declaration.Package,
@@ -356,9 +348,9 @@ func SurvivorAdvice(execution string) string {
 
 // Kill is one killed candidate's attribution: the keystone — every reported
 // kill rests on an attributed event (REQ-core-attributed-kills) — persisted,
-// so reuse can key a kill to its killer's content rather than the whole
-// oracle surface (REQ-result-stale's killer-drift carve-out). Killer is the
-// killing oracle test's symbol, the timeout marker, or the package-failure
+// without implying that the killer is independent of the rest of the oracle.
+// Killer is the killing oracle test's symbol, the timeout marker, or the
+// package-failure
 // marker; position and operator identify the candidate under the same
 // occurrence discipline as survivors. A record carries either every kill's
 // attribution or none (older records): a partial list is refused at parse.
@@ -469,20 +461,20 @@ type Finding struct {
 	// (REQ-exec-property-oracles).
 	PropertyRegime string `json:"propertyRegime,omitempty"`
 	// OracleExecutionPolicy records the measurement's oracle-execution
-	// authority. Missing or unknown policy on a body finding requires whole
-	// remeasurement: old coverage profiles did not establish sound negative
-	// exemptions. It is never supplied by decoding or moving a record.
+	// authority. Missing, policy-1 or unknown policy on a body finding
+	// requires whole remeasurement: neither negative coverage nor changed-
+	// oracle composition is licensed. Decoding or layer movement never
+	// supplies a policy.
 	OracleExecutionPolicy string `json:"oracleExecutionPolicy,omitempty"`
 	// CompartmentLedger is the target package's test-variant declaration
-	// ledger at measure time; the killer-drift carve-out diffs it against
-	// the current tree, and a record persisted without one (an older
-	// document) re-measures whole rather than drift-serving (REQ-result-stale).
+	// ledger at measure time. It remains inspectable historical evidence,
+	// never an oracle-independence license (REQ-result-stale).
 	CompartmentLedger *CompartmentLedger `json:"compartmentLedger,omitempty"`
 	Commit            string             `json:"commit,omitempty"`
 	Dirty             bool               `json:"dirty"`
 	// Run is the identity of the run that last measured any candidate
 	// of the record — a fresh measure, a budget extension, or a serve
-	// that re-executed flagged or drifted candidates — never a wholly
+	// that re-executed flagged candidates — never a wholly
 	// served record, which keeps the measuring run's identity. Opaque, compared for equality only: an inspection
 	// scopes to one campaign's measured set by it. Audit beside the
 	// commit provenance, no reuse or attestation pin, so it rides the
@@ -509,8 +501,8 @@ type Finding struct {
 	Operators      []OperatorSummary `json:"operators"`
 	// Kills attributes every killed candidate when present (complete: one
 	// entry per kill), and is absent on records measured before attribution
-	// was persisted — those re-measure whole under the killer-drift
-	// carve-out rather than serving (REQ-result-stale).
+	// was persisted. Absence supplies no attribution or composition
+	// authority; execution policy and all other pins govern reuse.
 	Kills             []Kill              `json:"kills,omitempty"`
 	Survivors         []Survivor          `json:"survivors,omitempty"`
 	Attested          []Attestation       `json:"attested,omitempty"`
@@ -1336,8 +1328,7 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 	}
 	if len(finding.Kills) != 0 {
 		// Kill attribution is all-or-nothing (REQ-core-attributed-kills):
-		// a partial list could serve some kills under the killer-drift
-		// carve-out while silently dropping others from its accounting.
+		// a partial list silently drops reported kills from its accounting.
 		if len(finding.Kills) != finding.Killed {
 			return false, fmt.Errorf("kill attributions do not cover the killed count")
 		}

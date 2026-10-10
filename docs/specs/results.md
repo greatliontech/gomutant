@@ -83,11 +83,10 @@ resource bound whose configured value decides attribution is a measurement
 pin, where scheduling bounds reach verdicts through wall-clock or the
 recorded environment evidence instead
 (REQ-exec-oracle-parallelism) — carrying the target package's test-variant
-compartment ledger (the declaration-level record the killer-drift carve-out diffs
-at serve time, including the recognized binding strategy and file-scoped
+compartment ledger (declaration evidence, including the recognized binding strategy and file-scoped
 reference/import evidence for both compiled base files and test files), the capture commit and dirty provenance, the identity of
 the run that last measured any of its candidates (a fresh measure, a
-budget extension, or a serve that re-executed flagged or drifted candidates
+budget extension, or a serve that re-executed flagged candidates
 — never a wholly served record, which keeps the measuring run's; opaque,
 compared for equality only; audit beside the provenance and no reuse or
 attestation pin, so an inspection scopes to one campaign's measured set by
@@ -103,10 +102,10 @@ range-shaped bucket), never a reuse input, and a row without one is
 answered by its anchor point — plus per-operator generated, discarded,
 killed, and survived
 counts whose sums equal the finding totals. Fresh body and shaped measurements
-also record `oracleExecutionPolicy` with value `gomutant/full-oracle@1`:
+also record `oracleExecutionPolicy` with value `gomutant/full-oracle@2`:
 each required group ran with its full unsplit pattern, without coverage-based
-negative exemptions, subject to the named-killer confirmation and separately
-licensed historical-pass composition rules. This is independent of the
+negative exemptions or oracle-drift outcome composition, subject to named-killer
+confirmation and the unchanged-input reuse rules. This is independent of the
 operator-set version, which identifies the mutation catalog, not the oracle's
 execution policy. An absent or unknown policy is preserved as recorded;
 decoding, writing, changing layers, retargeting, and merely serving a record
@@ -152,7 +151,7 @@ refused. Enforced by
 `TestRunConservesCandidateDiscards`,
 `TestSpliceFindingCountsConservesChangedOutcomes`,
 `TestExtendFindingCountsAppendsSuffixOutcomes`,
-`TestDriftFindingCountsRescoresRemeasured`,
+`TestOracleGrowthRemeasuresInterferingTests`,
 `TestParseFindingsCandidateEvidence`.
 
 **REQ-result-local-signpost** (behavior): A run surface that renders
@@ -269,13 +268,15 @@ it, naming the probable cause (an older gomutant wrote it).
 **REQ-result-stale** (behavior): gomutant MUST re-measure a target rather
 than serve a record whose oracle execution policy or pins no longer cover
 the request. Policy admission is independent of source and runtime freshness:
-`gomutant/full-oracle@1` permits further evidence judgment; an absent policy
-on a historical shaped record is also admitted because that measurement ran
-the full explicit oracle unsplit by construction. An unknown shaped policy
-is not admitted. A body record with an absent or unknown policy requires a
-whole re-measurement, even if no survivor carries a historical narrowed
-bucket: that absence proves nothing about how its other candidates ran.
-This gate precedes exact reuse, budget extension, oracle-drift composition,
+`gomutant/full-oracle@2` permits further evidence judgment. A historical shaped
+record with an absent policy or `gomutant/full-oracle@1` is also admitted:
+its execution was unsplit and never entered the body-only oracle-drift path.
+An unknown shaped policy is not admitted. A body record with policy 1, an
+absent policy or an unknown policy requires whole remeasurement. Policy-1
+records do not distinguish fresh full execution from a later unlicensed
+composition; even apparently exact current pins can cover contaminated
+outcomes. Absence of a historical narrowed bucket proves neither full execution
+nor independent composition. This gate precedes exact reuse, budget extension
 and flagged-candidate splices; none can retain historical counts behind a
 failed policy gate. The reason names the missing or unsupported policy and
 the action — re-measure with the complete oracle — independently of every
@@ -330,13 +331,9 @@ BYTES are machine circumstance (RAM-derived by default), the
 ceiling's DECISIONS are measurement identity. Every target and
 oracle Gofresh verdict must be valid; stale or unverifiable remeasures.
 Measurement pins are never partially trusted: any moved pin remeasures the
-whole target, with exactly three precisely scoped carve-outs — candidate-local
-evidence, the budget when it is the only pin that fails to cover, and
-killer-scoped oracle drift under an attributable test-variant delta — the
-drift carve-out composing a purely grown derived set (an attributable delta
-of additions with nothing moved), moved oracles, and flagged candidate
-evidence, so the strengthen loop's add-and-change rounds serve their
-standing kills.
+whole target, with exactly two precisely scoped carve-outs under unchanged
+oracle evidence — candidate-local evidence and the budget when it is the
+only pin that fails to cover.
 Candidate evidence is the first narrower axis: a record whose only
 unverifiable runtime evidence is candidate-local serves its covered candidates
 and re-executes exactly the unverifiable ones under a passing current baseline
@@ -381,161 +378,21 @@ pinned preserves the extended outcome but stamps it explicitly non-reusable. A
 forced run re-measures whole regardless. The extension's decision reports the
 served prefix and the measured suffix ("served: prefix of N candidates stands;
 measuring M more", the candidate noun count-aware: a one-candidate prefix
-reads "1 candidate"). Killer-scoped oracle drift is the third
-carve-out, resting on two keystones made durable: every recorded kill
-names its killer beside the kill (REQ-core-attributed-kills), and a purely
-grown oracle cannot un-kill anything — added tests only extend the
-recorded set's behavior, so growth only kills more. When the target package's compartment moves
-in a way the declaration ledger can attribute — or holds still while some
-oracle's own evidence moves; the partition is by what each kill rests on,
-and an empty delta partitions by the evidence signal alone — an edit a
-killer provably
-cannot observe cannot un-kill its kill. The delta is attributable exactly
-when Gofresh's complete-ledger judgment preserves bindings, including base-file
-references and used import bindings, and every added, changed, or removed declaration is a plain function (never
-TestMain), a method of a receiver type declared as a compartment type in
-the same compartment package (receiver types resolve within their own
-package, so a name-only match against the other variant's type certifies
-nothing, and an entry recorded without its package clause certifies
-nothing), a const, or a
-type, and no embedded member's header moved — the rejected kinds each reach
-unchanged tests without any reference (a package var's initializer and an
-init function run at test-binary initialization, TestMain wraps every test,
-a directive is behavior-bearing from any position, a method of a receiver
-type declared outside the compartment can flip interface satisfaction
-observed by code the ledger cannot see, and an embedded member's bytes feed
-unchanged code as data) — and additionally no unchanged unconditional
-root — a package var's initializer, an init function, or TestMain — nor a
-production-file reference can reach a delta declaration through the same
-reference walk. The complete base-file reference surface is conservatively
-rooted because the ledger carries no production call graph: a test helper
-reached through production is not invisible to the license. An unconditional
-root runs changed code around every test; a production reference can hide a
-route outside the compartment graph. Either reaching the delta re-measures
-the whole target. Under an attributable delta each oracle classifies
-moved or unmoved by two independent signals: its own evidence checking
-plainly valid — target-package subjects with their compartment pin refreshed
-to the current one, the refresh licensed by the attributable delta, and the
-check staying plain because gofresh orders the compartment comparison before
-the environment tiers (accepting the stale "test variants" verdict instead
-would let a moved pin hide behind it); any
-other subject's evidence as recorded, its own package's compartment being
-untouched by this delta — and, for target-package oracles, a reference walk
-over the current ledger's referenced-name lists (the current ledger's lists
-speak for every unchanged declaration: equal hashes pin equal bytes, and
-the ledger's one stated fold exception always carries the governing entry's
-own name, whose movement is what the walk must observe): from the oracle
-test's own declaration through every name it
-references, every same-named declaration, and every method of a receiver
-type it reaches — reflection's only route to a compartment function — with
-the walk observing a delta declaration, an unknown starting declaration, or
-a served declaration with no reference list each classifying the oracle
-moved, fail-closed. When the record carries complete kill attribution and a
-compartment ledger, the recorded oracle identity set is a subset of the
-current one — a removed identity stays the general rule's domain, while an
-added identity composes: the strengthen loop's usual round both adds tests
-and changes them, and the two keystones apply simultaneously. An added
-oracle is one whose function name NO recorded compartment declaration
-carries — the diff's own addition by construction, matched fail-closed on
-the bare name across both compartment variants (oracle symbols collapse
-the variants onto one identity, so a same-named declaration in either
-variant refuses — a name-keyed acceptance would be the laundering
-channel); the record's evidence list is never an
-identity oracle, so a current oracle the record merely fails to mention (a
-dropped evidence row) is no addition and refuses whole, a kill keyed to a
-killer outside the recorded evidence refuses the same way (a ghost the walk
-cannot classify), and a duplicated current oracle symbol refuses (a repeat
-could hide a removal in the retained count). An added
-oracle has no recorded evidence and joins every re-measure's oracle; by the
-growth keystone it cannot un-kill anything — a grown set only extends the
-recorded set's behavior — so it never moves a standing kill, set-wide kills
-included. A grown set serves under a derived request as the derivation's
-growth and under an explicit request as the caller's grown selection — the
-oracle mode pinned equal on both sides, the added test a declaration of the
-TARGET package the recorded compartment never carried under either mode: the
-record keeps no explicit list and the ledger is the target package's, so a
-pre-existing test newly listed, or an added oracle outside the target package,
-is indistinguishable from a dropped evidence row and re-measures whole — the
-decision then names the identities that rule refused ("stale: the oracle set
-grew by K tests the carve-out cannot compose … (<identities>)"), and only
-that rule's refusal: a grown set the carve-out refuses on any other pin keeps
-the inspection's own class and text — so the caller sees why
-(the record's claim "survived X" is true, the request's "survived X ∪ Y" was
-never measured, and only the added tests need to run against the open
-survivors). Candidate
-evidence composes rather than disqualifying: every flagged candidate joins
-the re-measure set and re-executes against the full current oracle — the
-candidate-local splice's own discipline, under this carve-out's baselines —
-its recorded disposition (kill, survival, or discard) replaced by the fresh
-execution and its evidence by the fresh capture; unflagged discards stand (a
-compile rejection is a pure function of the mutant source under the
-toolchain and build-configuration pins). With the scalar pins equal and the
-target's evidence checking plainly valid under the same refresh: kills whose
-recorded killer is an unmoved oracle stand, and every other candidate
-re-measures against the full current oracle — kills whose killer moved (the
-other oracles' outcomes on that candidate were never recorded), timeout and
-package-scope kills whenever any oracle moved (they rest on the whole
-recorded set's behavior, which a purely grown set can only extend: the
-oracle timeout bounds the whole group process's wall clock and a grown
--run selection only lengthens the same process's run, a ground that would
-fail under a per-test timeout model — under
-growth alone they stand), and, whenever any oracle moved or the set grew,
-every survivor — re-measured against only the added and moved tests: each
-unmoved oracle's recorded pass on the survivor stands exactly as a
-standing kill does, so only added and moved oracles can change any
-per-oracle verdict. The narrowed grounds are asymmetric on the set-wide
-wall-clock axis and the contract says so: a narrowed run forgoes the
-whole-current-set single-process timeout — a full-scope process could
-cross the bound where the recorded process and the narrow process each
-fit it — and the forgone channel is deliberate: the recorded process
-already ran the mutant against every unmoved oracle within the timeout
-and the narrow process measures its behavior on every added and moved
-oracle under the same bound, so a full-scope crossing could only be the
-aggregate of individually-bounded, individually-measured runs exceeding
-a threshold their sum was never judged against — a set-packing artifact,
-not a new fact about the mutant's behavior on any oracle. The narrow
-scope's own timeout channel stays sound because its baseline and its
-mutant run are judged under the same scope, and a narrow-scope timeout
-records as a kill by wall-clock monotonicity (the full process only
-runs longer). A flagged survivor re-executes against the full current
-oracle through its evidence instead (with nothing moved and nothing
-added, survivals stand exactly like kills) — with re-measured survivors'
-advisory buckets re-derived from the current probe, a newly killed
-attested survivor shedding its attestation through the contradiction
-report, and a fresh kill — the added test's included — attributed like
-any other. The drifted record carries the
-current tree's evidence for every subject, the added oracles' included, and
-the current compartment ledger. The carve-out is
-bounded fail-closed like its siblings: it never composes with a budget
-shortfall; a record without complete kill attribution
-or without a compartment ledger re-measures whole; deterministic
-regeneration must re-identify the record's candidates, kills, survivors,
-and flagged evidence identities (each flagged candidate runnable)
-or the target re-measures whole; the re-measure processes' completed union,
-merged over the record's persisted union, must equal that persisted union or
-the drifted finding is preserved but explicitly non-reusable; a failing
-added test on the clean tree refuses at the per-group baseline exactly as
-any baseline failure; and a forced
-run re-measures whole. A delta reaching no recorded oracle, with nothing
-added and nothing flagged, serves the whole
-record with nothing re-measured. The drift decision reports "served: N kills
-stand on unmoved oracles; re-measuring M candidates against the current
-oracle" (count-aware nouns), appending " (S survivors narrowed to the added
-and moved tests)" when any survivor narrows — S counts the narrowed
-survivors; a re-measure whose survivors are all flagged (each keeping the
-full oracle) appends nothing — " (derived oracle grew by K
-tests)" or " (explicit oracle grew by K tests)" when the set grew, in the
-request's oracle mode, and "; F candidates re-execute flagged evidence"
-when evidence is flagged (count-aware nouns and verb) (a delta reaching no oracle with nothing added or
-flagged reports "served:
-compartment delta reaches no recorded oracle; nothing re-measures") with
-`candidates` counting the re-measured candidates. When
+reads "1 candidate"). A changed oracle set or changed target/oracle evidence
+instead requires whole-target remeasurement at the request's budget, against
+every complete current oracle group. A named killer, declaration reachability
+or a previously passing test does not establish independence from other tests
+in the process: an added or edited test can enable or disable another test's
+assertion through shared state. No compartment-pin refresh or added/moved-test
+scope is licensed to carry those historical outcomes. The decision retains
+the current inspection's cause rather than claiming a number of standing kills.
+Unchanged-input exact serving, candidate-local re-execution and prefix extension
+remain governed by their own rules above. When
 REQ-result-candidate-conservation applies, a zero-budget request requires
 `generated == candidateCount`; a positive request `N` requires `generated >=
 min(N, candidateCount)`. A stronger exhaustive or longer-prefix finding may
 serve a weaker request without remeasurement. Every serve rewrite — the
-cached serve, the candidate re-execution splice, the budget extension,
-and killer-scoped drift — records commit and dirty
+cached serve, the candidate re-execution splice and the budget extension — records commit and dirty
 provenance recomputed from the current tree, exactly as a fresh measure
 stamps them: the proof that licensed the serve validated every subject's
 evidence and runtime manifest against the current tree, so a record
@@ -757,10 +614,8 @@ closure;
 oracle selection mode; oracle execution policy; operator version; budget; oracle timeout; oracle
 memory ceiling; commit and dirty provenance), the mutant and
 kill counts, the kill-attribution list when the record carries one (its
-absence is tolerated in the anti-flattering direction: a record without it
-re-measures whole under the killer-drift carve-out rather than serving, so
-the field widens reuse and rides the current version without a bump — the
-inverse of candidate evidence's narrowing precedent), each survivor's
+absence is tolerated as historical data, never inferred attribution; its
+execution policy and all other pins still govern reuse), each survivor's
 position and operator, the candidate-evidence
 list when any candidate carries one, and each attested
 disposition with its reason, and the per-operator disposition summary. A version tag lets a consumer reject a document
@@ -819,8 +674,10 @@ result format going out, so a downstream reader — a dashboard, a CI step, or
 a spec-driven producer recovering findings by label — consumes gomutant's contract, never
 its internal store. The current document version is 16 and the reader accepts
 versions 4 through 16. Version 16 carries `oracleExecutionPolicy` on each
-fresh body or shaped finding, with `gomutant/full-oracle@1` identifying the
-full-oracle policy. Absent and unknown values remain readable and preserved,
+fresh body or shaped finding. `gomutant/full-oracle@2` identifies complete
+execution without oracle-drift composition; policy 1 allowed such composition
+and cannot establish a body record's independent outcome history. Absent,
+historical and unknown values remain readable and preserved,
 but their reuse is governed by REQ-result-stale, not inferred from the
 document's version. Upgrading the enclosing document never backfills a row's
 policy. This measurement-policy boundary is not an operator-set change.
@@ -1051,7 +908,7 @@ equivalent with a recorded reason, refused unless the named mutant is among
 the record's current survivors and its oracle execution policy passes
 REQ-result-stale's independent admission. Missing body policy or unsupported
 policy refuses a new disposition with the complete-oracle re-measurement
-action; a legacy shaped record's absent policy retains its proven-full
+action; a legacy shaped record's absent or policy-1 value retains its unsplit
 exception. Equivalence reasoning on a policy-refused record is retained,
 not erased by that refusal, and may carry only after a valid fresh
 full-oracle measurement and

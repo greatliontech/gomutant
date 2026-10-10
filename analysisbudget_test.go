@@ -309,8 +309,8 @@ func TestValidationCutByTheBudgetStampsUnverifiableEvidence(t *testing.T) {
 		t.Fatalf("run under a failed validation = %v; want the target refused with the failure", err)
 	}
 	// The stamp lands on every validated commit path — a served record
-	// re-executing its candidate-local evidence, a killer-drift splice
-	// re-measuring against the current oracle, and a budget extension —
+	// re-executing its candidate-local evidence, a whole remeasurement
+	// against a changed oracle, and a budget extension —
 	// and the record's exemptions are derived after it, so an exemption
 	// naming the cut is honoured on those paths as on a fresh measure.
 	seams.validateProducers = unavailable
@@ -364,8 +364,8 @@ func TestValidationCutByTheBudgetStampsUnverifiableEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("GOMUTANT_EXTERNAL_FIXTURE", fixture)
-	// Loose keeps survivors under the I/O-reading oracle, so its record
-	// re-measures them against the current oracle — the drift splice.
+	// Loose keeps survivors under the I/O-reading oracle, so whole
+	// remeasurement retains survivors for the validation-cut assertions.
 	loose := Target{Symbol: "example.com/fixture/extinput.Loose", Oracle: []string{"example.com/fixture/extinput.TestFlag"}}
 	proven, err := fixtureTree(t).Run(context.Background(), []Target{loose}, Options{Budget: 4, BracketPaths: []string{fixture}})
 	if err != nil || len(proven) != 1 || len(proven[0].Survivors) == 0 {

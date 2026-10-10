@@ -39,6 +39,6 @@ measurement that reads as a sound one inflates them in the flattering
 direction, so the tool refuses it rather than guess. The attribution is
 durable: a measured finding persists each kill's killer beside the kill
 (REQ-result-record in [results.md](results.md)), and a record carries either
-every kill's attribution or none — reuse that keys a kill to its killer's
-content (REQ-result-stale's killer-drift carve-out) is licensed exactly by
-this persisted attribution.
+every kill's attribution or none. Attribution records the deciding event;
+it does not prove that the test is independent of other tests or license
+retaining its outcome across changed oracle evidence (REQ-result-stale).

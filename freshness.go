@@ -788,11 +788,8 @@ func stampUnverifiable(f *Finding, reason string) {
 }
 
 // acceptValidVerdict is the one matching predicate: only a plainly valid
-// gofresh verdict lets a recorded subject stand. The killer-drift gate
-// reaches the same bar by refreshing a target-package subject's compartment
-// pin before checking — the refresh its attributable ledger diff licenses
-// (REQ-result-stale's killer-drift carve-out) — never by tolerating a stale
-// verdict, behind whose "test variants" reason a moved pin could hide.
+// gofresh verdict lets a recorded subject stand. A stale verdict is never
+// tolerated: a moved pin could hide behind its "test variants" reason.
 func acceptValidVerdict(verdict gofresh.Verdict) bool {
 	return verdict.Status == gofresh.Valid
 }
@@ -1706,13 +1703,14 @@ func (m *runtimeMemo) verify(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// killerDriftAttributable reports whether a compartment delta is one the
-// referenced-name walk can fully attribute (REQ-result-stale's killer-drift
-// carve-out): the complete ledgers preserve name bindings, and every
+// killerDriftAttributable classifies a delta's forward-reference projection.
+// This is not an independence proof and licenses no reuse. The helper-only
+// test surface is tracked in docs/issues/retired-oracle-drift-helper-tests.md.
+// The complete ledgers preserve name bindings, and every
 // added, changed, or removed declaration is a plain
 // function (never TestMain), a method of a compartment-declared receiver
-// type, a const, or a type — kinds whose only route to an unchanged test is
-// a reference chain the walk follows. The rejected kinds each reach
+// type, a const, or a type. Shared-state interference lies outside this
+// projection even for those kinds. The rejected kinds each reach
 // unchanged code without any reference: a package var's initializer and an
 // init function run during test-binary initialization, TestMain wraps every
 // test, a directive is behavior-bearing from any position, a method of a
@@ -1934,33 +1932,11 @@ func (r *compartmentReach) walk(seeds []int) bool {
 	return false
 }
 
-// evidenceSetCoversKillerDriftContext reports whether prior's evidence covers
-// the request under the killer-drift carve-out (REQ-result-stale): the record
-// carries complete kill attribution and a compartment ledger; scalar pins are
-// equal; the recorded oracle identity set is a subset of the current one — a
-// removed identity stays the general rule's domain, while an added identity
-// composes: it has no recorded evidence, joins every re-measure's oracle, and
-// by the growth keystone cannot un-kill a standing kill — under a derived
-// request as derived growth, under an explicit request as the caller's
-// grown selection, the mode pinned equal on both sides and the added test
-// a declaration the recorded compartment never carried either way (the
-// record keeps no explicit list, so a pre-existing test newly listed is
-// indistinguishable from a dropped evidence row and re-measures whole).
-// Candidate evidence composes rather than
-// disqualifying: the
-// flagged candidates join the re-measure set downstream under the
-// candidate-splice discipline. The compartment delta is attributable; and the
-// target's evidence checks plainly valid with its compartment pin refreshed
-// to the current one — the refresh licensed by the attributable delta, whose
-// every movement the per-oracle walk accounts for. Each retained oracle then
-// classifies moved or unmoved: moved when its own evidence no longer checks
-// plainly valid (target-package subjects checked with the same refresh, any
-// other subject as recorded — its own package's compartment pin is untouched
-// by this target's delta) or when its reference walk over the current ledger
-// reaches a delta declaration. Returns the moved and added oracle symbols,
-// each sorted; a refusal by the added-test rule alone returns the
-// uncomposable identities (sorted), every other refusal none — the caller's
-// decision names the rule's refusal and no other.
+// evidenceSetCoversKillerDriftContext computes a forward-reference proposal,
+// not a reuse license. Compartment refresh and per-test reference reach do
+// not prove execution independence. No run or judgment path consumes this
+// proposal; its helper-only tests are accounted for in
+// docs/issues/retired-oracle-drift-helper-tests.md.
 func evidenceSetCoversKillerDriftContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (moved, added []string, drifts bool, uncomposable []string, err error) {
 	if OracleExecutionPolicyIssue(prior) != "" || prior.CompartmentLedger == nil || prior.OracleExplicit != oracleExplicit ||
 		prior.OperatorSet != operatorSet || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
