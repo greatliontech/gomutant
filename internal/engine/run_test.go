@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
-	"golang.org/x/tools/go/packages"
 )
 
 // TestRunMutantOutcomes pins the overlay runner end to end

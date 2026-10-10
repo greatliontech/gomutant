@@ -57,6 +57,9 @@ func TestKillerDriftAttributableClassifiesDeltaKinds(t *testing.T) {
 		{"plain header movement", gofresh.TestVariantDelta{HeaderChanges: []gofresh.TestVariantHeaderChange{{File: "a_test.go", Before: "a", After: "b"}}}, true},
 	}
 	for _, tc := range cases {
+		// This table isolates declaration kinds after the independent
+		// binding-preservation precondition has been established.
+		tc.delta.BindingsPreserved = true
 		if got := killerDriftAttributable(tc.delta, compartment, compartment); got != tc.want {
 			t.Errorf("%s: attributable = %v, want %v", tc.name, got, tc.want)
 		}

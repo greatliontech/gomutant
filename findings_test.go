@@ -575,8 +575,8 @@ func TestFingerprintRecordKeysRideTheDocumentVersion(t *testing.T) {
 		return got
 	}
 	got := keysOf(raw)
-	want := []string{"buildConfig", "closureStrategy", "dynamicStateStrategy", "dynamicStateVouches", "machine", "maximalClosure", "observationAssertion", "observationProof", "packageProcessDischarges", "purityAssertion", "resultKind", "runtimeConfig", "runtimeDigest", "runtimeInputs", "singleSubjectDischarges", "testVariantClosure", "toolchain"}
-	if !reflect.DeepEqual(got, want) || DocumentVersion != 14 {
+	want := []string{"buildConfig", "closureStrategy", "dynamicStateStrategy", "dynamicStateVouches", "inertTestVariantApplicability", "machine", "maximalClosure", "observationAssertion", "observationProof", "packageProcessDischarges", "purityAssertion", "resultKind", "runtimeConfig", "runtimeDigest", "runtimeInputs", "singleSubjectDischarges", "testVariantClosure", "toolchain"}
+	if !reflect.DeepEqual(got, want) || DocumentVersion != 15 {
 		t.Fatalf("the record's keys = %v (DocumentVersion %d); a moved key set rides a version bump", got, DocumentVersion)
 	}
 	// The nested proof object has its own strict decoder, so its key
@@ -587,6 +587,9 @@ func TestFingerprintRecordKeysRideTheDocumentVersion(t *testing.T) {
 	}
 	if got := keysOf(outer["observationProof"]); !reflect.DeepEqual(got, []string{"evidence", "observable", "package", "reason", "strategy", "symbol"}) {
 		t.Fatalf("the proof's keys = %v; a moved key set rides a version bump", got)
+	}
+	if got := keysOf(outer["inertTestVariantApplicability"]); !reflect.DeepEqual(got, []string{"strategy", "testVariantClosure"}) {
+		t.Fatalf("the applicability keys = %v; a moved key set rides a version bump", got)
 	}
 }
 

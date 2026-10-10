@@ -208,9 +208,23 @@ type CompartmentDeclaration struct {
 
 // CompartmentFileHeader is one compartment file's persisted header identity.
 type CompartmentFileHeader struct {
-	File     string `json:"file"`
-	Hash     string `json:"hash"`
-	Embedded bool   `json:"embedded,omitempty"`
+	File     string               `json:"file"`
+	Hash     string               `json:"hash"`
+	Embedded bool                 `json:"embedded,omitempty"`
+	Bindings *CompartmentBindings `json:"bindings,omitempty"`
+}
+
+// CompartmentBindings preserves the file-scoped name resolution evidence.
+type CompartmentBindings struct {
+	Package    string              `json:"package"`
+	References []string            `json:"references,omitzero"`
+	Imports    []CompartmentImport `json:"imports,omitzero"`
+}
+
+// CompartmentImport records the effective local name and imported path.
+type CompartmentImport struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // CompartmentLedger is the target package's persisted test-variant
@@ -219,15 +233,19 @@ type CompartmentFileHeader struct {
 // against the current view's ledger so the killer-drift carve-out can
 // classify how the compartment moved (REQ-result-stale).
 type CompartmentLedger struct {
-	Declarations []CompartmentDeclaration `json:"declarations,omitempty"`
-	FileHeaders  []CompartmentFileHeader  `json:"fileHeaders,omitempty"`
+	BindingStrategy string                   `json:"bindingStrategy,omitempty"`
+	BaseFiles       []CompartmentFileHeader  `json:"baseFiles,omitzero"`
+	Declarations    []CompartmentDeclaration `json:"declarations,omitempty"`
+	FileHeaders     []CompartmentFileHeader  `json:"fileHeaders,omitempty"`
 }
 
 // compartmentLedgerFromView converts gofresh's ledger to the wire encoding.
 func compartmentLedgerFromView(ledger gofresh.TestVariantLedger) *CompartmentLedger {
 	out := &CompartmentLedger{
-		Declarations: make([]CompartmentDeclaration, 0, len(ledger.Declarations)),
-		FileHeaders:  make([]CompartmentFileHeader, 0, len(ledger.FileHeaders)),
+		BindingStrategy: ledger.BindingStrategy,
+		BaseFiles:       compartmentHeadersFromView(ledger.BaseFiles),
+		Declarations:    make([]CompartmentDeclaration, 0, len(ledger.Declarations)),
+		FileHeaders:     compartmentHeadersFromView(ledger.FileHeaders),
 	}
 	for _, declaration := range ledger.Declarations {
 		// Field-by-field: the view's declaration also carries its
@@ -242,26 +260,22 @@ func compartmentLedgerFromView(ledger gofresh.TestVariantLedger) *CompartmentLed
 			Receiver: declaration.Receiver, Hash: declaration.Hash, Package: declaration.Package,
 		})
 	}
-	for _, header := range ledger.FileHeaders {
-		out.FileHeaders = append(out.FileHeaders, CompartmentFileHeader(header))
-	}
 	return out
 }
 
 // ledger converts the wire encoding back to gofresh's ledger type.
 func (l *CompartmentLedger) ledger() gofresh.TestVariantLedger {
 	out := gofresh.TestVariantLedger{
-		Declarations: make([]gofresh.TestVariantDeclaration, 0, len(l.Declarations)),
-		FileHeaders:  make([]gofresh.TestVariantFileHeader, 0, len(l.FileHeaders)),
+		BindingStrategy: l.BindingStrategy,
+		BaseFiles:       compartmentHeadersToView(l.BaseFiles),
+		Declarations:    make([]gofresh.TestVariantDeclaration, 0, len(l.Declarations)),
+		FileHeaders:     compartmentHeadersToView(l.FileHeaders),
 	}
 	for _, declaration := range l.Declarations {
 		out.Declarations = append(out.Declarations, gofresh.TestVariantDeclaration{
 			File: declaration.File, Kind: declaration.Kind, Name: declaration.Name,
 			Receiver: declaration.Receiver, Hash: declaration.Hash, Package: declaration.Package,
 		})
-	}
-	for _, header := range l.FileHeaders {
-		out.FileHeaders = append(out.FileHeaders, gofresh.TestVariantFileHeader(header))
 	}
 	return out
 }
@@ -587,7 +601,8 @@ func cloneFinding(f Finding) Finding {
 	if f.CompartmentLedger != nil {
 		ledger := *f.CompartmentLedger
 		ledger.Declarations = slices.Clone(ledger.Declarations)
-		ledger.FileHeaders = slices.Clone(ledger.FileHeaders)
+		ledger.FileHeaders = cloneCompartmentHeaders(ledger.FileHeaders)
+		ledger.BaseFiles = cloneCompartmentHeaders(ledger.BaseFiles)
 		f.CompartmentLedger = &ledger
 	}
 	if f.Shape != nil {
@@ -697,7 +712,7 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // content key in place of position (a shape an older reader cannot
 // resolve, the positional documents of 11-13 read as they were). The
 // reading range each boundary draws is ParseDocument's.
-const DocumentVersion = 14
+const DocumentVersion = 15
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale

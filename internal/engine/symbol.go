@@ -14,9 +14,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/text/unicode/norm"
-	"golang.org/x/tools/go/packages"
 )
 
 // ErrNotFunction marks a resolvable symbol with no function body — a type or

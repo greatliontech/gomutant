@@ -84,7 +84,8 @@ pin, where scheduling bounds reach verdicts through wall-clock or the
 recorded environment evidence instead
 (REQ-exec-oracle-parallelism) — carrying the target package's test-variant
 compartment ledger (the declaration-level record the killer-drift carve-out diffs
-at serve time), the capture commit and dirty provenance, the identity of
+at serve time, including the recognized binding strategy and file-scoped
+reference/import evidence for both compiled base files and test files), the capture commit and dirty provenance, the identity of
 the run that last measured any of its candidates (a fresh measure, a
 budget extension, or a serve that re-executed flagged or drifted candidates
 — never a wholly served record, which keeps the measuring run's; opaque,
@@ -363,7 +364,8 @@ oracle's own evidence moves; the partition is by what each kill rests on,
 and an empty delta partitions by the evidence signal alone — an edit a
 killer provably
 cannot observe cannot un-kill its kill. The delta is attributable exactly
-when every added, changed, or removed declaration is a plain function (never
+when Gofresh's complete-ledger judgment preserves bindings, including base-file
+references and used import bindings, and every added, changed, or removed declaration is a plain function (never
 TestMain), a method of a receiver type declared as a compartment type in
 the same compartment package (receiver types resolve within their own
 package, so a name-only match against the other variant's type certifies
@@ -376,10 +378,14 @@ a directive is behavior-bearing from any position, a method of a receiver
 type declared outside the compartment can flip interface satisfaction
 observed by code the ledger cannot see, and an embedded member's bytes feed
 unchanged code as data) — and additionally no unchanged unconditional
-root — a package var's initializer, an init function, or TestMain — can
-reach a delta declaration through the same reference walk: such a root runs
-changed code around every test without any oracle naming it, so a reaching
-root re-measures the whole target. Under an attributable delta each oracle classifies
+root — a package var's initializer, an init function, or TestMain — nor a
+production-file reference can reach a delta declaration through the same
+reference walk. The complete base-file reference surface is conservatively
+rooted because the ledger carries no production call graph: a test helper
+reached through production is not invisible to the license. An unconditional
+root runs changed code around every test; a production reference can hide a
+route outside the compartment graph. Either reaching the delta re-measures
+the whole target. Under an attributable delta each oracle classifies
 moved or unmoved by two independent signals: its own evidence checking
 plainly valid — target-package subjects with their compartment pin refreshed
 to the current one, the refresh licensed by the attributable delta, and the
@@ -765,7 +771,17 @@ This is the inverse of the targeting seam: gomutant
 parses a producer's format going in (REQ-target-producers) but owns the
 result format going out, so a downstream reader — a dashboard, a CI step, or
 a spec-driven producer recovering findings by label — consumes gomutant's contract, never
-its internal store. A field that narrows reuse — candidate evidence is the precedent — always
+its internal store. Version 15 carries the native fingerprint's optional
+`inertTestVariantApplicability` object (`strategy`, `testVariantClosure`) and
+complete binding-aware ledgers. A ledger's optional `bindingStrategy` names its
+derivation; `baseFiles` preserves a present empty array rather than conflating it
+with absent evidence. Both base-file and compartment headers
+carry optional `bindings` objects with `package`, `references` and `imports`
+(entries with `name` and `path`); nil base/reference/import arrays are omitted,
+while present empty arrays stay empty. Older ledgers retain their absence and original content keys. An ordinary
+serve never backfills missing historical binding evidence; a partial measurement
+advances only a complete, binding-preserved ledger. A fresh whole measurement
+records its own complete ledger. A field that narrows reuse — candidate evidence is the precedent — always
 rides a version bump, because field tolerance in an older consumer would
 otherwise serve the record with the narrowing silently dropped. A clean break
 otherwise changes the current version's shape directly; documents missing any

@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"golang.org/x/tools/go/packages"
-	"golang.org/x/tools/imports"
+	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/go-x-tools/imports"
 )
 
 type sourceEdit struct {

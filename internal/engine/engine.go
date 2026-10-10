@@ -26,10 +26,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/mod/modfile"
-	"golang.org/x/tools/go/packages"
 )
 
 // Tree is a loaded Go tree: a single module, or a workspace whose go.work

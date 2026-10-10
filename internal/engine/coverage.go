@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/tools/cover"
+	"github.com/greatliontech/go-x-tools/cover"
 )
 
 // Coverage is one or more baseline coverage profiles' executed extents,

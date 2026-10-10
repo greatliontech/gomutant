@@ -8,7 +8,7 @@ import (
 	"go/token"
 	"strconv"
 
-	"golang.org/x/tools/go/ast/astutil"
+	"github.com/greatliontech/go-x-tools/go/ast/astutil"
 )
 
 // pruneUnusedImports drops the imports a mutant source no longer uses:

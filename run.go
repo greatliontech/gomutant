@@ -3201,17 +3201,8 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				cached := *rec
 				cached.Labels = append([]string(nil), tg.Labels...)
 				cached.Cached = true
-				// Matched pins make the current view's ledger identical to
-				// the record's; stamping it is the conformance upgrade for a
-				// record that predates the ledger (REQ-result-record).
-				if ledger, lerr := targetView.view.TestVariantLedger(targetView.subject); lerr == nil {
-					cached.CompartmentLedger = compartmentLedgerFromView(ledger)
-				} else {
-					// A subject missing from its own view is an internal
-					// fault, not tree drift — the ledger read consults the
-					// capture, never disk.
-					return nil, lerr
-				}
+				// Serving retains the historical ledger, including absent
+				// binding evidence. Current analysis cannot backfill it.
 				// The serve's freshness proof validated every subject's
 				// evidence against the run-start view capture, so provenance
 				// recomputes like a fresh measure's - a dirty-born record
@@ -6128,9 +6119,9 @@ type splicedEvidence struct {
 // pins plus fresh reads" against the recorded pins), reconcile against the
 // record fail-closed (applySplicedUnion), attach the fresh union so
 // post-execution producer validation re-establishes the observation bracket,
-// and stamp the current view's compartment ledger — identical to the
-// record's whenever the pins matched, and the record's conformance upgrade
-// when it predates the ledger (REQ-result-record). Counts folding stays with
+// and advance only an already complete, preserved binding ledger. Missing
+// historical binding evidence is never backfilled by a partial measurement.
+// Counts folding stays with
 // each arm — replacement, append, and survivor-rescore are different truths
 // over the same spine.
 func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, reExecuted map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, foldRecorded, cached bool) (splicedEvidence, error) {
@@ -6153,7 +6144,7 @@ func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Fin
 	if err != nil {
 		return splicedEvidence{}, err
 	}
-	rec.CompartmentLedger = compartmentLedgerFromView(currentLedger)
+	rec.CompartmentLedger = splicedCompartmentLedger(rec.CompartmentLedger, currentLedger)
 	rec.Labels = append([]string(nil), labels...)
 	rec.Cached = cached
 	return splicedEvidence{rec: rec, fresh: freshEvidence, union: union, targetEvidence: targetEvidence, oracleEvidence: oracleEvidence}, nil

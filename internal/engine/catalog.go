@@ -10,7 +10,7 @@ import (
 	"io/fs"
 	"os"
 
-	"golang.org/x/tools/go/packages"
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 type catalog struct {

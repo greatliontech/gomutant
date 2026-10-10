@@ -1702,7 +1702,8 @@ func (m *runtimeMemo) verify(ctx context.Context) (bool, error) {
 
 // killerDriftAttributable reports whether a compartment delta is one the
 // referenced-name walk can fully attribute (REQ-result-stale's killer-drift
-// carve-out): every added, changed, or removed declaration is a plain
+// carve-out): the complete ledgers preserve name bindings, and every
+// added, changed, or removed declaration is a plain
 // function (never TestMain), a method of a compartment-declared receiver
 // type, a const, or a type — kinds whose only route to an unchanged test is
 // a reference chain the walk follows. The rejected kinds each reach
@@ -1713,6 +1714,9 @@ func (m *runtimeMemo) verify(ctx context.Context) (bool, error) {
 // satisfaction observed by production code the ledger cannot see, and an
 // embedded member's bytes feed unchanged code as data.
 func killerDriftAttributable(delta gofresh.TestVariantDelta, recorded, current gofresh.TestVariantLedger) bool {
+	if !delta.BindingsPreserved {
+		return false
+	}
 	// Types are keyed by declaring package: a method's receiver resolves
 	// within its own package only, and the two compartment packages (the
 	// in-package and external variants) may declare same-named types, so a
@@ -1788,6 +1792,7 @@ type compartmentReach struct {
 	byName            map[string][]int
 	methodsByReceiver map[string][]int
 	touchedEntries    map[int]bool
+	baseRoots         []int
 }
 
 func newCompartmentReach(current gofresh.TestVariantLedger, delta gofresh.TestVariantDelta) *compartmentReach {
@@ -1829,6 +1834,19 @@ func newCompartmentReach(current gofresh.TestVariantLedger, delta gofresh.TestVa
 	for _, declaration := range delta.Removed {
 		add(declaration)
 	}
+	// The ledger has file-level production references, not a production
+	// call graph. Every such reference is therefore an unconditional root:
+	// a test helper reached through production cannot hide a changed or
+	// removed declaration from the per-oracle walk.
+	for _, header := range current.BaseFiles {
+		if header.Bindings == nil {
+			continue
+		}
+		for _, name := range header.Bindings.References {
+			reach.baseRoots = append(reach.baseRoots, reach.byName[name]...)
+			reach.baseRoots = append(reach.baseRoots, reach.methodsByReceiver[name]...)
+		}
+	}
 	return reach
 }
 
@@ -1860,13 +1878,14 @@ func (r *compartmentReach) reaches(fn string) (reached, known bool) {
 
 // unconditionalRootReaches reports whether any declaration that runs or
 // wraps every test regardless of references — a package var's initializer,
-// an init function, or TestMain — can reach a delta declaration. The
+// an init function, or TestMain — or any production-file reference can
+// reach a delta declaration. The
 // license bars those kinds from the delta itself, but an unchanged
 // initializer calling a changed plain function mutates state every test
 // observes without any oracle's walk naming the change, so a reaching root
 // refuses the carve-out outright.
 func (r *compartmentReach) unconditionalRootReaches() bool {
-	var seeds []int
+	seeds := slices.Clone(r.baseRoots)
 	for i, entry := range r.entries {
 		if entry.Kind == "var" || entry.Kind == "init" || (entry.Kind == "func" && entry.Name == "TestMain") {
 			seeds = append(seeds, i)
