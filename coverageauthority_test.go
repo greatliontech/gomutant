@@ -195,9 +195,9 @@ func coverageAuthorityRegression(t *testing.T, source, literal, testBody string)
 	bounds := engine.DeriveOracleBounds(-1, 1)
 	const oracleBound = 2 * time.Minute
 	full := testRunRegex(tests)
-	ran, pass, diagnostic, err := engine.TestProbeEnv(ctx, dir, coverageAuthorityPackage, full, oracleBound, nil, env, bounds)
-	if err != nil || !pass || ran != len(tests) {
-		t.Fatalf("full unmutated oracle: ran=%d pass=%v err=%v\n%s", ran, pass, err, diagnostic)
+	baseline, err := engine.TestBaselineEnv(ctx, dir, coverageAuthorityPackage, full, oracleBound, nil, env, bounds)
+	if err != nil || !baseline.Passed || baseline.Ran != len(tests) {
+		t.Fatalf("full unmutated oracle: ran=%d pass=%v err=%v\n%s", baseline.Ran, baseline.Passed, err, baseline.Diagnostic)
 	}
 	entry := bankedCoverage{Plan: len(scheduleBatches(tests))}
 	probe := Survivor{Position: mutant.Position, Extent: mutant.Extent}
@@ -234,6 +234,7 @@ func coverageAuthorityRegression(t *testing.T, source, literal, testBody string)
 	}
 	t.Run("schedule_keeps_every_oracle_test", func(t *testing.T) {
 		w := scheduleTestWork(coverageAuthorityPackage, coverageAuthorityPackage, tests)
+		w.groups[0].passed = baseline.Tests
 		bank := openBaselineBank(dir)
 		bank.putCoverage(coverageKey(w.groups[0], coverageAuthorityPackage), entry)
 		out, killer, _, _, _, err := tr.executeMutant(ctx, w, mutant, runOptions{Options: Options{OracleTimeout: oracleBound}, baselineBank: bank, bounds: bounds}, env)

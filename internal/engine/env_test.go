@@ -27,34 +27,26 @@ func TestComposedKeysReplaceTheAmbientEntryOnce(t *testing.T) {
 	values := []string{"", "1", "x=y", "off", "-tags=a"}
 	composers := []struct {
 		key     string
-		compose func([]string) []string
+		compose func([]string) ([]string, error)
 	}{
-		{"GOMAXPROCS", func(env []string) []string { return oracleCPUEnv(env, 1) }},
-		{"GOMEMLIMIT", func(env []string) []string { return oracleMemoryEnv(env, 1<<30) }},
-		{"GOTOOLCHAIN", func(env []string) []string {
-			out, err := Selection{Toolchain: "go1.27.0"}.applyEnv(env)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return out
+		{"GOMAXPROCS", func(env []string) ([]string, error) { return oracleCPUEnv(env, 1), nil }},
+		{"GOMEMLIMIT", func(env []string) ([]string, error) { return oracleMemoryEnv(env, 1<<30), nil }},
+		{"GOTOOLCHAIN", func(env []string) ([]string, error) {
+			return Selection{Toolchain: "go1.27.0"}.applyEnv(env)
 		}},
-		{"GOFLAGS", func(env []string) []string {
-			out, err := Selection{Tags: []string{"b"}}.applyEnv(env)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return out
+		{"GOFLAGS", func(env []string) ([]string, error) {
+			return Selection{Tags: []string{"b"}}.applyEnv(env)
 		}},
-		{"PWD", func(env []string) []string {
-			return oracleIngestEnv(env, runtimeinput.ProducerFrame{PkgDir: "/pkg"}, OracleBounds{})
+		{"PWD", func(env []string) ([]string, error) {
+			return oracleIngestEnv(env, runtimeinput.ProducerFrame{PkgDir: "/pkg"}, OracleBounds{}), nil
 		}},
-		{"TMPDIR", func(env []string) []string {
+		{"TMPDIR", func(env []string) ([]string, error) {
 			out, _, _, remove, err := oracleScratch(env)
 			if err != nil {
 				t.Fatal(err)
 			}
 			remove()
-			return out
+			return out, nil
 		}},
 	}
 	rng := rand.New(rand.NewSource(246))
@@ -71,7 +63,20 @@ func TestComposedKeysReplaceTheAmbientEntryOnce(t *testing.T) {
 			continue
 		}
 		for _, c := range composers {
-			got := c.compose(env)
+			got, err := c.compose(env)
+			value, _ := gotool.LookupEnv(env, "GOFLAGS")
+			// The generator's non-flag values cannot be composed as GOFLAGS.
+			// Refusal is independently predicted from the finite draw alphabet.
+			invalidFlags := c.key == "GOFLAGS" && value != "" && value != "-tags=a"
+			if invalidFlags {
+				if err == nil || !strings.Contains(err.Error(), "GOFLAGS") {
+					t.Fatalf("draw %d: malformed GOFLAGS %q composed: %v, %v", draw, value, got, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			var others, matching []string
 			for _, entry := range got {
 				if name, _, _ := strings.Cut(entry, "="); gotool.EqualEnvKey(name, c.key) {

@@ -60,10 +60,15 @@ func CheckHarnessEnvironment(dir string, sel Selection) error {
 // the one composition every entry reads — the preparation stage and
 // the ladder's head alike — so a half added to one cannot miss the
 // other: the OS environment's own refusals first, then the composed
-// environment's GODEBUG.
+// environment's oracle selection and GODEBUG.
 func environmentArms(env []string) error {
 	if err := ambientEnvironmentRefused(os.Environ()); err != nil {
 		return err
+	}
+	if flags, _ := gotool.LookupEnv(env, "GOFLAGS"); flags != "" {
+		if err := oracleFlags(flags); err != nil {
+			return err
+		}
 	}
 	return harnessEventsSilenced(env)
 }
@@ -89,12 +94,11 @@ func ambientEnvironmentRefused(env []string) error {
 	return nil
 }
 
-// toolchainGuard is the load's one toolchain ladder, three arms in
-// order: the environment arm (environmentArms — the OS environment's
-// own refusals, then the composed environment's GODEBUG that silences
-// the harness's build-fail events; no process spawned, so first), the
-// skew provenance over the sampled toolchain, then the build-events
-// floor over the same sample — returning the sample; the load and the
+// toolchainGuard is the load's one toolchain ladder: input-decidable environment
+// refusals (including oracle selection and silenced build events), the skew
+// judgment over the sampled toolchain, the build-events floor over that sample,
+// then oracle selection resolved from the go command's configuration. It returns
+// the sample; the load and the
 // pre-write check read this one function, so the two cannot drift
 // (they did: the check once ran the skew half alone).
 func toolchainGuard(ctx context.Context, dir string, env []string) (string, error) {
@@ -110,6 +114,9 @@ func toolchainGuard(ctx context.Context, dir string, env []string) (string, erro
 		return "", err
 	}
 	if err := toolchainSupportsBuildEvents(sampled); err != nil {
+		return "", err
+	}
+	if err := resolvedOracleFlags(ctx, dir, env); err != nil {
 		return "", err
 	}
 	return sampled, nil

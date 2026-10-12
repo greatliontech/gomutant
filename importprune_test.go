@@ -197,10 +197,10 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 	restore := seams.testProbe
 	defer func() { seams.testProbe = restore }()
 	calls := 0
-	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		calls++
 		if calls == 1 {
-			return 0, false, "", crash
+			return engine.Baseline{}, crash
 		}
 		return restore(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}
@@ -213,9 +213,9 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 		t.Fatalf("baseline probed %d times, result %+v; want the crash retried once and the measured survivor", calls, res)
 	}
 	calls = 0
-	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.Baseline, error) {
 		calls++
-		return 0, false, "", crash
+		return engine.Baseline{}, crash
 	}
 	if _, err := tr.RunEphemeral(context.Background(), req); err == nil || !strings.Contains(err.Error(), "compiler crashed twice on the baseline") || calls != 2 {
 		t.Fatalf("two baseline crashes = %v after %d probes; want the crash named after one retry", err, calls)
@@ -223,9 +223,9 @@ func TestEphemeralRetriesABaselineCompilerCrashOnce(t *testing.T) {
 	// A baseline test that FAILS printing crash-shaped output is a
 	// failing test: no retry, the ordinary refusal.
 	calls = 0
-	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.Baseline, error) {
 		calls++
-		return 1, false, "--- FAIL: TestWeak\n    cmd/compile panic: signal: goroutine dump quoted by the test", nil
+		return engine.Baseline{Ran: 1, Diagnostic: "--- FAIL: TestWeak\n    cmd/compile panic: signal: goroutine dump quoted by the test"}, nil
 	}
 	if _, err := tr.RunEphemeral(context.Background(), req); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") || calls != 1 {
 		t.Fatalf("crash-shaped failing test = %v after %d probes; want the failing-baseline refusal without a retry", err, calls)
@@ -253,7 +253,7 @@ func TestEphemeralMixedOutcomeKeepsTheUnexercisedAdvisory(t *testing.T) {
 	seams.runMutantEvidence = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, string, string, error) {
 		calls++
 		if calls == 1 {
-			return engine.MutantKilled, "TestWeak", "planted kill", "", nil
+			return engine.MutantKilled, "example.com/fixture/lib.TestWeak", "planted kill", "", nil
 		}
 		return restore(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env, bounds)
 	}

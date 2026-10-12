@@ -27,14 +27,13 @@ import (
 // the package's on-disk _test.go files directly — every on-disk test file
 // the effective build configuration selects, the snapshot's files re-read
 // and re-matched alike — under a syntactic reproduction of the
-// runnable-test shape (Test/Fuzz name, exactly one *testing.T or *testing.F
-// parameter, the testing import resolved through each file's own import
-// declarations, aliases and dot-imports included), and requires the result
+// runnable-test shape (Test/Fuzz name, exactly one *T or *F parameter,
+// optionally qualified, as cmd/go discovers it), and requires the result
 // to equal the derived set exactly. Any disagreement is a refusal naming
 // the differing tests: measuring against a lagging enumeration would record
 // under-covered evidence as truth. Residual divergences of the syntactic
-// predicate from the type-checked one (pathological shadowing of a bound
-// testing name) refuse loudly rather than guessing.
+// predicate from the type-checked one (an incompatible lookalike type)
+// refuse loudly rather than guessing; compilation also checks compatibility.
 func (t *Tree) VerifyTestEnumerationContext(ctx context.Context, pkgPath string, derived []string) error {
 	moduleDir, packageDir, err := t.PackageContextContext(ctx, pkgPath)
 	if err != nil {
@@ -140,11 +139,18 @@ func (t *Tree) buildMatchContext(ctx context.Context, dir string) (build.Context
 	matcher.GOARCH = snapshot.Value("GOARCH")
 	matcher.CgoEnabled = snapshot.Value("CGO_ENABLED") == "1"
 	matcher.BuildTags = nil
-	for _, flag := range strings.Fields(snapshot.Value("GOFLAGS")) {
+	flags, err := parseGoFlags(snapshot.Value("GOFLAGS"))
+	if err != nil {
+		return build.Context{}, err
+	}
+	for _, flag := range flags {
 		// GOFLAGS accepts single- and double-dash forms, and a repeated
 		// -tags is last-wins, exactly as the go command resolves it.
-		if tags, ok := strings.CutPrefix(strings.TrimLeft(flag, "-"), "tags="); ok {
-			matcher.BuildTags = strings.Split(tags, ",")
+		if name, tags, _ := flag.parts(); name == "tags" {
+			matcher.BuildTags, err = parseBuildTags(tags)
+			if err != nil {
+				return build.Context{}, err
+			}
 		}
 	}
 	if tags := gotool.ReleaseTags(snapshot.Value("GOVERSION")); tags != nil {
@@ -174,49 +180,19 @@ func (t *Tree) buildMatchContext(ctx context.Context, dir string) (build.Context
 // parseTestFunctionNames parses one _test.go file from disk, syntax only,
 // and returns the names of its top-level runnable-shaped test functions:
 // Test/Fuzz prefix with an exported remainder and exactly one parameter of
-// the file's testing import's T or F pointer type.
+// T or F pointer type, optionally qualified. Go discovers this syntactic shape
+// without requiring a testing import in the declaring file; aliases can live
+// in another file or package. Compilation decides type compatibility.
 func parseTestFunctionNames(path string) ([]string, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 	if err != nil {
 		return nil, err
 	}
-	// Resolve every name this file binds to the testing package: the
-	// default name, any alias, or "." for a dot import — a file may import
-	// testing more than once and a test may use any bound name.
-	testingNames := map[string]bool{}
-	for _, imp := range file.Imports {
-		if imp.Path == nil || strings.Trim(imp.Path.Value, `"`) != "testing" {
-			continue
-		}
-		name := "testing"
-		if imp.Name != nil {
-			name = imp.Name.Name
-		}
-		if name != "_" {
-			testingNames[name] = true
-		}
-	}
-	if len(testingNames) == 0 {
-		return nil, nil
-	}
 	var names []string
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil {
-			continue
-		}
-		param := runnableTestNameShape(fn.Name.Name)
-		if param == "" || fn.Type.TypeParams != nil {
-			continue
-		}
-		if fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) > 1 {
-			continue
-		}
-		if !matchesTestingParam(fn.Type.Params.List[0].Type, testingNames, param) {
-			continue
-		}
-		if fn.Type.Results != nil && len(fn.Type.Results.List) != 0 {
+		if !ok || runnableTestParameter(fn) == "" {
 			continue
 		}
 		names = append(names, fn.Name.Name)
@@ -260,20 +236,33 @@ func harnessName(name, prefix string) bool {
 	return true
 }
 
-// matchesTestingParam reports whether a parameter's syntactic type denotes
-// the required testing pointer type ("*<name>.T"/"*<name>.F", or "*T"/"*F"
-// under a dot import) through any of the file's bound testing names.
-func matchesTestingParam(expr ast.Expr, testingNames map[string]bool, param string) bool {
+// runnableTestParameter is cmd/go's top-level test signature shape. Its type
+// name is T or F, independently of how that name is bound. The loaded inventory
+// additionally checks the type's identity, while the disk check needs no load.
+func runnableTestParameter(fn *ast.FuncDecl) string {
+	param := runnableTestNameShape(fn.Name.Name)
+	if param == "" || fn.Recv != nil || fn.Type.TypeParams != nil ||
+		fn.Type.Params == nil || len(fn.Type.Params.List) != 1 || len(fn.Type.Params.List[0].Names) > 1 ||
+		fn.Type.Results != nil && len(fn.Type.Results.List) != 0 {
+		return ""
+	}
+	if !matchesTestingParam(fn.Type.Params.List[0].Type, param) {
+		return ""
+	}
+	return param
+}
+
+// matchesTestingParam follows cmd/go's spelling rule, not an import resolver.
+func matchesTestingParam(expr ast.Expr, param string) bool {
 	star, ok := expr.(*ast.StarExpr)
 	if !ok {
 		return false
 	}
 	switch inner := star.X.(type) {
 	case *ast.Ident:
-		return testingNames["."] && inner.Name == param
+		return inner.Name == param
 	case *ast.SelectorExpr:
-		pkg, ok := inner.X.(*ast.Ident)
-		return ok && testingNames[pkg.Name] && inner.Sel.Name == param
+		return inner.Sel.Name == param
 	default:
 		return false
 	}

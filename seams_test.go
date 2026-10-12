@@ -28,13 +28,13 @@ func TestSeamsDefaultToTheEngine(t *testing.T) {
 		}
 	}
 	same("coveredPositions", d.coveredPositions, engine.CoveredPositions)
-	same("testProbe", d.testProbe, engine.TestProbeEnv)
+	same("testProbe", d.testProbe, engine.TestBaselineEnv)
 	same("runMutantEvidence", d.runMutantEvidence, engine.RunMutantEvidenceEnv)
 	same("runMutantObserved", d.runMutantObserved, engine.RunMutantObservedEnv)
 	same("runMutantShaped", d.runMutantShaped, engine.RunMutantBaselineDirEnv)
-	same("baselineProbe", d.baselineProbe, engine.TestProbeObservedEnv)
+	same("baselineProbe", d.baselineProbe, engine.TestBaselineObservedEnv)
 	same("advisoryProbe", d.advisoryProbe, engine.TestProbeObservedEnv)
-	same("killGround", d.killGround, engine.TestProbeObservedEnv)
+	same("killGround", d.killGround, engine.TestBaselineObservedEnv)
 	if d.probeGateInstalled != nil || d.subjectViewBuild != nil || d.observedUnion != nil || d.proofUnitReleased != nil || d.inspectionSupplementaryView != nil {
 		t.Fatal("an observer is installed by default")
 	}

@@ -70,7 +70,11 @@ override.
 **REQ-exec-attribution** (behavior): A kill MUST be one of exactly three
 attributed events, enforcing REQ-core-attributed-kills: a named oracle test
 that passed in a pre-measurement run of the unmutated tree reporting failure
-in the mutant run's structured output; a timeout — attributed only when the
+in the mutant run's structured output; a sibling's pass, aggregate process
+success or pattern membership cannot supply that test's own structured pass.
+A skipped test can remain in the oracle but cannot be a named killer without
+that pass. A repeated baseline retains the same passing identities, not only
+the same count. The other attributed events are a timeout — attributed only when the
 oracle's own bound fired, discriminated by that bound's own expiry cause: a
 caller's command timeout expiring mid-run is a cancellation, never a kill,
 because a deadline test alone cannot tell the two apart and a parent expiry
@@ -938,8 +942,9 @@ toolchain), the tree root's existence, then the standing vouch set's shape and a
 changed ref's surface (the git seam's read, both in the root just proven to
 exist), the harness environment (the load ladder's input-decidable arm: the
 ambient environment's own refusals — a package driver, an environment the exec
-key=value form cannot express — read from the OS environment alone, then a
-GODEBUG that silences the build-fail events), the bracket paths' shape and
+key=value form cannot express — read from the OS environment alone, then an
+environment-owned GOFLAGS selection refusal and a GODEBUG that silences the
+build-fail events), the bracket paths' shape and
 presence, the exemptions document, the findings document (unreadable, or a
 version this binary does not read), and last the campaign lock — before its
 first tree load, so a refused verb pays nothing it could have refused earlier.
@@ -1021,7 +1026,7 @@ runner, its provenance judgment and refusal words). A verb that mutates
 state before any load (attestation writes the findings document first)
 runs the same check before its write on both faces — the load's whole
 toolchain ladder, the skew refusal, the build-events floor below
-go1.24, and the
+go1.24, the oracle-selection admission below, and the
 refusal of an environment that names a package driver, cannot be
 expressed in the exec key=value form (a duplicate key, a malformed
 entry, a NUL byte), or silences those events (GODEBUG's
@@ -1335,6 +1340,17 @@ preparation, never composed around.
 GOMAXPROCS — `-p` defaults to it — so the environment single-sources
 both dimensions; an explicit flag would override an operator's
 narrower ambient bound.)
+
+**REQ-exec-oracle-selection-admission** (behavior): Oracle preparation MUST
+refuse an effective GOFLAGS skip setting that can subtract tests from the
+declared oracle. Single- and double-dash `skip` and `test.skip` spellings share
+Go's last-setting-wins meaning; an explicitly empty final value subtracts
+nothing. Argument quoting follows the go command's grammar, preserving literal
+spaces inside another flag's value when composing build tags. Environment-owned
+values refuse before package loading, and a value inherited from the go command's
+configuration is resolved and judged before that load. Campaign and ephemeral
+execution apply the same admission. This governs selection flags, not legitimate
+in-test skipping, whose actual baseline disposition remains recorded separately.
 
 **REQ-exec-attribution-symmetry** (behavior): A mutant run and the
 baseline probe that attributes its failure MUST execute under identical

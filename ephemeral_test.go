@@ -170,7 +170,7 @@ func TestEphemeral(t *testing.T) {
 	probes := 0
 	probe := seams.testProbe
 	defer func() { seams.testProbe = probe }()
-	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		probes++
 		return probe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}
@@ -191,8 +191,8 @@ func TestEphemeral(t *testing.T) {
 	// A failing baseline with nothing rendered (an output-less failure)
 	// refuses on one line — no dangling diagnostic separator.
 	counting := seams.testProbe
-	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
-		return 1, false, "", nil
+	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.Baseline, error) {
+		return engine.Baseline{Ran: 1}, nil
 	}
 	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Minute, Runs: 1}); err == nil || !strings.Contains(err.Error(), "does not pass on the unmutated tree") || strings.HasSuffix(err.Error(), "\n") {
 		t.Fatalf("output-less failing baseline: %q; want the one-line refusal", err)
@@ -443,7 +443,7 @@ func TestEphemeralBaselineRunsUnderLeash(t *testing.T) {
 	}
 	restore := seams.testProbe
 	var bounds []time.Duration
-	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, oracleBounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, oracleBounds engine.OracleBounds) (engine.Baseline, error) {
 		bounds = append(bounds, timeout)
 		return restore(ctx, dir, testPkg, run, timeout, binFlags, env, oracleBounds)
 	}

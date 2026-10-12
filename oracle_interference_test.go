@@ -94,7 +94,7 @@ func TestOracleGrowthRemeasuresInterferingTests(t *testing.T) {
 						if initiallyDisabled && (current.Killed == 0 || len(current.Survivors) >= len(prior.Survivors)) || !initiallyDisabled && (current.Killed != 0 || len(current.Survivors) == 0) {
 							t.Fatalf("shared-state control did not reverse outcomes: before=(%d,%d) after=(%d,%d)", prior.Killed, len(prior.Survivors), current.Killed, len(current.Survivors))
 						}
-						if current.OracleExecutionPolicy != "gomutant/full-oracle@2" {
+						if current.OracleExecutionPolicy != "gomutant/full-oracle@3" {
 							t.Fatalf("policy=%q", current.OracleExecutionPolicy)
 						}
 						served, _, dispatch := executionPolicyRun(t, tree, target, Options{Prior: []Finding{current}})

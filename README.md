@@ -70,8 +70,8 @@ Findings live in a versioned JSON document (default
 sibling `findings.json.campaign` file is the campaign lock: the flock
 is the lock and the file deliberately persists between campaigns —
 never commit it (the default `.gomutant/` directory carries a minted
-`.gitignore` for it, for the document lock, and for the MCP server's
-exit log; a document elsewhere needs the ignore added by hand). The pins cover the
+`.gitignore` for it and the document lock; a document elsewhere needs
+the ignore added by hand). The pins cover the
 target and oracle source closures, observed runtime inputs, toolchain and
 build configuration, operator-set version, budget, and effective oracle timeout. A
 run re-measures exactly what a moved pin invalidates and serves the rest from
@@ -81,13 +81,12 @@ recorded prefix. Open findings are survivors minus attested dispositions;
 whether they fail a build is the caller's policy, not gomutant's verdict.
 
 Fresh body and shaped findings record `oracleExecutionPolicy` as
-`gomutant/full-oracle@2`. Default CLI and MCP findings views show that policy
-and any `oracleExecutionPolicyIssue` without loading the tree. Policy-1 body
-records may contain outcomes composed across interfering oracle changes;
-they, and missing or unknown body policy, require whole remeasurement, including
-before extensions or partial re-execution; unknown shaped policy does too.
-Legacy shaped records with no policy or policy 1 retain their unsplit,
-non-composed policy exception. Other evidence checks still apply.
+`gomutant/full-oracle@3`. Default CLI and MCP findings views show that policy
+and any `oracleExecutionPolicyIssue` without loading the tree. Older body and
+shaped policies lack complete oracle-admission and named-baseline-pass facts;
+they, and missing or unknown policy, require whole remeasurement, including
+before extensions or partial re-execution. An unsplit historical pattern does
+not supply those missing facts. Other evidence checks still apply.
 Unsupported counts are shown as historical, not current complete-oracle
 evidence. A supported policy alone does not establish freshness. Version 16
 documents read versions 4–16 and retain version 15's complete ledgers;

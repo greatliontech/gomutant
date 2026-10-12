@@ -226,8 +226,8 @@ func (t *Tree) PackageOfContext(ctx context.Context, symbol string) (pkg, rest s
 // empty run. TestMain is the harness, not a test: its *testing.M parameter
 // fails the signature rule.
 func runnableTest(pkg *packages.Package, fn *ast.FuncDecl) bool {
-	param := runnableTestNameShape(fn.Name.Name)
-	if param == "" || fn.Type.TypeParams != nil {
+	param := runnableTestParameter(fn)
+	if param == "" {
 		// A type-parameterized test is not runnable: the test harness
 		// refuses the package outright, so admitting it would derive an
 		// oracle no invocation executes.
@@ -245,7 +245,7 @@ func runnableTest(pkg *packages.Package, fn *ast.FuncDecl) bool {
 	if !ok {
 		return false
 	}
-	named, ok := ptr.Elem().(*types.Named)
+	named, ok := types.Unalias(ptr.Elem()).(*types.Named)
 	if !ok {
 		return false
 	}

@@ -318,7 +318,7 @@ func TestKillGroundIsTheConfirmationsSeam(t *testing.T) {
 	prior := seams.killGround
 	t.Cleanup(func() { seams.killGround = prior })
 	var grounds atomic.Int64
-	seams.killGround = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.killGround = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		grounds.Add(1)
 		return prior(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 	}

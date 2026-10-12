@@ -638,13 +638,13 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	}
 	report(PreparationEvent{Stage: PreparationBaseline, Symbol: run, Package: testPkg, OracleBudget: baselineBound.String()})
 	baselineStart := time.Now()
-	ran, passed, diagnostic, err := seams.testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
+	baseline, err := seams.testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
 	if baselineCompilerCrashed(err) {
 		// The baseline's compiler died: a toolchain transient, retried
 		// once so it never reads as the baseline failing to build; a
 		// second death is reported as the crash it is.
 		report(PreparationEvent{Stage: PreparationBaseline, Symbol: run + " (compiler crashed; retrying once)", Package: testPkg, OracleBudget: baselineBound.String()})
-		ran, passed, diagnostic, err = seams.testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
+		baseline, err = seams.testProbe(ctx, t.dir, testPkg, run, baselineBound, binFlags, env, bounds)
 		if baselineCompilerCrashed(err) {
 			return nil, fmt.Errorf("compiler crashed twice on the baseline — re-run to confirm; not a verdict, and not the baseline failing to build:\n%w", err)
 		}
@@ -655,17 +655,17 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		}
 		return nil, err
 	}
-	if ran == 0 {
+	if baseline.Ran == 0 {
 		return nil, fmt.Errorf("%q matched no tests in %s: nothing can attribute the mutant", run, testPkg)
 	}
-	if !passed {
+	if !baseline.Passed {
 		// The refusal carries what the oracle saw: a baseline that
 		// fails under the probe but passes for the caller's own go test
 		// is otherwise undiagnosable from either side
 		// (REQ-exec-ephemeral).
 		refusal := fmt.Sprintf("the named test does not pass on the unmutated tree in %s: a kill against it would be fabricated", testPkg)
-		if diagnostic != "" {
-			refusal += "\n" + diagnostic
+		if baseline.Diagnostic != "" {
+			refusal += "\n" + baseline.Diagnostic
 		}
 		return nil, errors.New(refusal)
 	}
@@ -744,6 +744,9 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 			return nil, discardError(files, diagnostic)
 		}
 		if outcome == engine.MutantKilled {
+			if err := baselineAllowsKill(killer, baseline.Tests); err != nil {
+				return nil, err
+			}
 			evidence = timeoutEvidenceForMode(derive, killer, evidence, mutantBudget, measuredBaseline)
 			res.KilledRuns++
 			res.RunVerdicts = append(res.RunVerdicts, "killed: "+killer)

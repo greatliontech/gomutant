@@ -102,10 +102,13 @@ range-shaped bucket), never a reuse input, and a row without one is
 answered by its anchor point — plus per-operator generated, discarded,
 killed, and survived
 counts whose sums equal the finding totals. Fresh body and shaped measurements
-also record `oracleExecutionPolicy` with value `gomutant/full-oracle@2`:
+also record `oracleExecutionPolicy` with value `gomutant/full-oracle@3`:
 each required group ran with its full unsplit pattern, without coverage-based
 negative exemptions or oracle-drift outcome composition, subject to named-killer
-confirmation and the unchanged-input reuse rules. This is independent of the
+confirmation and the unchanged-input reuse rules. Oracle admission includes
+Go's alias-shaped runnable declarations, refuses effective inherited skip
+settings that could subtract tests, and attributes a named kill only to a test
+with its own structured pass in the pre-measurement baseline. This is independent of the
 operator-set version, which identifies the mutation catalog, not the oracle's
 execution policy. An absent or unknown policy is preserved as recorded;
 decoding, writing, changing layers, retargeting, and merely serving a record
@@ -268,15 +271,15 @@ it, naming the probable cause (an older gomutant wrote it).
 **REQ-result-stale** (behavior): gomutant MUST re-measure a target rather
 than serve a record whose oracle execution policy or pins no longer cover
 the request. Policy admission is independent of source and runtime freshness:
-`gomutant/full-oracle@2` permits further evidence judgment. A historical shaped
-record with an absent policy or `gomutant/full-oracle@1` is also admitted:
-its execution was unsplit and never entered the body-only oracle-drift path.
-An unknown shaped policy is not admitted. A body record with policy 1, an
-absent policy or an unknown policy requires whole remeasurement. Policy-1
-records do not distinguish fresh full execution from a later unlicensed
-composition; even apparently exact current pins can cover contaminated
-outcomes. Absence of a historical narrowed bucket proves neither full execution
-nor independent composition. This gate precedes exact reuse, budget extension
+`gomutant/full-oracle@3` permits further evidence judgment. Body and shaped
+records with policy 1, policy 2, an absent policy or an unknown policy require
+whole remeasurement. Policy 2 removed unlicensed oracle-drift composition but
+did not establish complete admission or a named killer's baseline pass; an
+unsplit shaped pattern does not establish those facts either. Policy-1 body
+records additionally fail to distinguish fresh execution from composition.
+Even apparently exact current pins cannot supply missing execution facts.
+Absence of a historical narrowed bucket proves neither full execution nor
+independent composition. This gate precedes exact reuse, budget extension
 and flagged-candidate splices; none can retain historical counts behind a
 failed policy gate. The reason names the missing or unsupported policy and
 the action — re-measure with the complete oracle — independently of every
@@ -674,9 +677,9 @@ result format going out, so a downstream reader — a dashboard, a CI step, or
 a spec-driven producer recovering findings by label — consumes gomutant's contract, never
 its internal store. The current document version is 16 and the reader accepts
 versions 4 through 16. Version 16 carries `oracleExecutionPolicy` on each
-fresh body or shaped finding. `gomutant/full-oracle@2` identifies complete
-execution without oracle-drift composition; policy 1 allowed such composition
-and cannot establish a body record's independent outcome history. Absent,
+fresh body or shaped finding. `gomutant/full-oracle@3` identifies admitted
+complete execution and named baseline-pass attribution without oracle-drift
+composition. Earlier policies lack those guarantees. Absent,
 historical and unknown values remain readable and preserved,
 but their reuse is governed by REQ-result-stale, not inferred from the
 document's version. Upgrading the enclosing document never backfills a row's
@@ -861,12 +864,17 @@ an earlier discarded candidate can therefore reserve an occurrence number.
 **REQ-result-baseline-bank** (behavior): Passing baseline
 measurements MUST bank machine-local — a killed or finished
 campaign's measurement is never discarded by the calendar — in a
-versioned bank file (`baselines.json`, version 2) beside the findings
+versioned bank file (`baselines.json`, version 3) beside the findings
 overlay under the same resolved-tree key, never in the repo document
 (durations and probe identities are one machine's facts). A banked
 baseline entry carries the group's oracle-subject evidence rows as
 its content pins, the passing observation's persisted manifest and
-digest, and the raw wall-clock. Historical coverage payloads — batch tests,
+digest, the raw wall-clock and `passedTests`, the identities with structured
+top-level pass events in that baseline. An absent passing set does not serve.
+Version 2 remains readable as historical data and is written as version 3 on
+the next deposit, with no passing identities admitted from its entries; its
+durations may still lift a measurement leash. Other versions are cache misses.
+Historical coverage payloads in an admitted bank — batch tests,
 spans, timings, positions, plan sizes, and failures — remain readable and
 preserved, but no fresh coverage-bank producer runs. They neither restore
 nor resume a schedule, authorize an omission, contribute a cost saving, nor
@@ -906,10 +914,9 @@ content-valid measurement.
 **REQ-attest-survivor** (behavior): A survivor MUST be dispositionable as
 equivalent with a recorded reason, refused unless the named mutant is among
 the record's current survivors and its oracle execution policy passes
-REQ-result-stale's independent admission. Missing body policy or unsupported
-policy refuses a new disposition with the complete-oracle re-measurement
-action; a legacy shaped record's absent or policy-1 value retains its unsplit
-exception. Equivalence reasoning on a policy-refused record is retained,
+REQ-result-stale's independent admission. Missing or unsupported policy on
+either kind refuses a new disposition with the complete-oracle re-measurement
+action. Equivalence reasoning on a policy-refused record is retained,
 not erased by that refusal, and may carry only after a valid fresh
 full-oracle measurement and
 the ordinary carry checks hold; a fresh kill contradicts it as before.
@@ -1163,8 +1170,7 @@ the recorded `oracleExecutionPolicy` (absent stays absent) and the derived
 `oracleExecutionPolicyIssue` when the record's policy is unsupported. This
 record-only validation loads no tree: its issue names the cause and the
 complete-oracle re-measurement action, and the counts are explicitly flagged
-historical, not complete-oracle evidence. A missing issue, including for a
-legacy shaped record's proven-full policy, establishes no current-tree
+historical, not complete-oracle evidence. A missing issue establishes no current-tree
 freshness. Historical rows are preserved, never declared collectively valid
 by the document's readability. The detail
 view carries the survivor and disposition lists themselves, and the CLI's

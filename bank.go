@@ -36,11 +36,10 @@ import (
 // exactly as the findings overlay is.
 
 // bankVersion is the bank file's format version; a mismatched or
-// unreadable file is discarded whole (a bank is pure cache — the
-// re-measure IS the recovery path). Version 2: the coverage entry is
-// per batch — each batch carries its position in the group's plan,
-// the entry its plan size and its failed batches.
-const bankVersion = 2
+// unreadable file is discarded whole (a bank is pure cache — remeasurement
+// is recovery). Version 3 records actual passing identities. Version 2 keeps
+// its historical payloads, but cannot provide named-baseline authority.
+const bankVersion = 3
 
 // bankFileCeiling bounds the bank read: keys embed oracle patterns,
 // so membership churn orphans entries and the file only grows — a
@@ -64,10 +63,11 @@ type bankedBaseline struct {
 	// Evidence rows pin everything content-shaped — source closures,
 	// guards (toolchain, build config), observation posture, recorded
 	// runtime inputs — through the finding-serve pair discipline.
-	Evidence  []SubjectEvidence `json:"evidence"`
-	Manifest  string            `json:"manifest"`
-	Digest    string            `json:"digest"`
-	RawMillis int64             `json:"rawMillis"`
+	Evidence    []SubjectEvidence `json:"evidence"`
+	Manifest    string            `json:"manifest"`
+	Digest      string            `json:"digest"`
+	RawMillis   int64             `json:"rawMillis"`
+	PassedTests []string          `json:"passedTests"`
 	// MeasuredAtUnix records when — diagnostic only; age never
 	// discards a content-valid entry (see the package note).
 	MeasuredAtUnix int64 `json:"measuredAtUnix"`
@@ -143,8 +143,15 @@ func openBaselineBank(moduleDir string) *baselineBank {
 		return b
 	}
 	var file baselineBankFile
-	if json.Unmarshal(data, &file) != nil || file.Version != bankVersion {
+	if json.Unmarshal(data, &file) != nil || (file.Version != bankVersion && file.Version != 2) {
 		return b
+	}
+	if file.Version == 2 {
+		file.Version = bankVersion
+		for key, entry := range file.Baselines {
+			entry.PassedTests = nil
+			file.Baselines[key] = entry
+		}
 	}
 	b.file = file
 	return b
@@ -247,6 +254,7 @@ func (b *baselineBank) putBaseline(key string, e bankedBaseline) {
 type pendingBankDeposit struct {
 	manifest, digest string
 	raw              time.Duration
+	passed           []string
 }
 
 // bankOracleRowsFor selects a finding's oracle evidence rows for one

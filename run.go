@@ -836,6 +836,7 @@ func SummarizeRun(findings []Finding, sel Selection, packageOf func(string) stri
 // pattern, and the binary's flags.
 type group struct {
 	pkgs                  []string
+	passed                []string
 	runRegex              string
 	flags                 []string
 	moduleDir, packageDir string
@@ -1269,7 +1270,7 @@ func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, o
 // discard, an unscopable killer — falls back to the serial run of the
 // candidate's whole oracle scope, whose verdict scores: a survivor
 // verdict always rests on every complete current oracle group.
-func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, killer string, scopedBaselines map[scopedBaselineKey]bool, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, killer string, scopedBaselines map[scopedBaselineKey][]string, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
 	if opts.confirmScoped != nil {
 		// Emitted off the same w both confirmation paths derive from:
 		// the serial fallback executes w.groups verbatim, and the
@@ -1307,20 +1308,27 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 		}
 		return nil
 	}()
-	if scopedGroup != nil && t.scopedBaselinePasses(ctx, *scopedGroup, scopedBaselines, opts, runEnv) {
+	var scopedPasses []string
+	if scopedGroup != nil {
+		scopedPasses = t.scopedBaselinePasses(ctx, *scopedGroup, scopedBaselines, opts, runEnv)
+	}
+	if slices.Contains(scopedPasses, killer) {
 		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := seams.runMutantObserved(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, confirmBudget, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		if err != nil {
 			return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: killer-scoped confirmation: %w", m.Symbol, m.Position, m.Operator, err)
 		}
 		if diagnostic == "" && out == engine.MutantKilled && gk != TimeoutKiller && !strings.HasPrefix(gk, PackageKillerPrefix) {
-			if aerr := attributedKill(gk, w.oracleSet); aerr != nil {
+			if !w.oracleSet[gk] {
+				aerr := attributedKill(gk, w.oracleSet, scopedPasses)
 				return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, aerr)
 			}
-			merged, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, state)
-			if err != nil {
-				return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+			if slices.Contains(scopedPasses, gk) {
+				merged, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, state)
+				if err != nil {
+					return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+				}
+				return out, gk, confirmMemoryDecided, merged, incomplete, nil
 			}
-			return out, gk, confirmMemoryDecided, merged, incomplete, nil
 		}
 	}
 	// The serial fallback runs the complete oracle scope.
@@ -1334,23 +1342,26 @@ type scopedBaselineKey struct {
 	pkg, run, flags, moduleDir, packageDir string
 }
 
-// scopedBaselinePasses reports whether the killing test passes ALONE
-// on the unmutated tree — the killer-scoped stage's differential
+// scopedBaselinePasses reports the tests that actually passed the scoped
+// unmutated run — the killer-scoped stage's differential
 // ground — memoized in the caller's Run-local map (this Run's probe
 // gate serializes every confirmation, so the memo needs no lock, and
 // Run-locality is what keeps the key complete across bounds). Any
 // non-pass — a standalone failure, a timeout, a probe error —
-// answers false and the confirmation falls back to the full oracle;
+// answers no passes and the confirmation falls back to the full oracle;
 // the probe is best-effort ground, never a campaign abort.
-func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scopedBaselineKey]bool, opts runOptions, runEnv []string) bool {
+func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scopedBaselineKey][]string, opts runOptions, runEnv []string) []string {
 	key := scopedBaselineKey{pkg: g.pkgs[0], run: g.runRegex, flags: strings.Join(g.flags, "\x00"), moduleDir: g.moduleDir, packageDir: g.packageDir}
 	if passed, ok := memo[key]; ok {
 		return passed
 	}
-	ran, passed, _, _, _, err := seams.killGround(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
-	ok := err == nil && ran > 0 && passed
-	memo[key] = ok
-	return ok
+	baseline, err := seams.killGround(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+	var passed []string
+	if err == nil && baseline.Passed {
+		passed = baseline.Tests
+	}
+	memo[key] = passed
+	return passed
 }
 
 // executeMutant runs complete unsplit oracle groups and merges their
@@ -1373,7 +1384,7 @@ func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts 
 			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
 		}
 		if diagnostic == "" && out == engine.MutantKilled && who != TimeoutKiller {
-			if err := attributedKill(who, w.oracleSet); err != nil {
+			if err := attributedKill(who, w.oracleSet, g.passed); err != nil {
 				return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
 			}
 		}
@@ -1944,7 +1955,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// and the lock-free access true (this Run's probe gate serializes
 	// every confirmation; a Tree-scoped map would race across the
 	// MCP server's concurrent campaigns over one cached Tree).
-	scopedBaselines := map[scopedBaselineKey]bool{}
+	scopedBaselines := map[scopedBaselineKey][]string{}
 	coverageCache := map[string]engine.Coverage{}
 	// The bank is WRITTEN by findings-producing runs only (OwnWrites is
 	// their marker, and the campaign lock they hold serializes the
@@ -2427,6 +2438,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	type groupBaseline struct {
 		raw    time.Duration
 		budget time.Duration
+		passed []string
 	}
 	groupBaselines := map[baselineKey]groupBaseline{}
 	// pendingBankDeposits holds really-probed baselines until their
@@ -2485,7 +2497,8 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// itself (REQ-exec-quiescence's baseline locality).
 	probeGroupBaselines := func(ctx context.Context, tg Target, w *work) (string, error) {
 		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
-		for _, group := range w.groups {
+		for gi := range w.groups {
+			group := w.groups[gi]
 			key := keyFor(group)
 			if reason, failed := baselineFailures[key]; failed {
 				return reason, nil
@@ -2511,7 +2524,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					if herr != nil && ctx.Err() != nil {
 						return "", ctx.Err()
 					}
-					if herr == nil && held {
+					if herr == nil && held && len(banked.PassedTests) > 0 {
 						adopted, aerr := runtimeinput.Adopt(banked.Manifest, t.dir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
 						if aerr == nil && adopted.Digest == banked.Digest {
 							reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0], Banked: true})
@@ -2519,12 +2532,12 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 							if deriveOracleBudgets {
 								budget := derivedOracleBudget(raw)
 								groupBudgetMu.Lock()
-								groupBaselines[key] = groupBaseline{raw: raw, budget: budget}
+								groupBaselines[key] = groupBaseline{raw: raw, budget: budget, passed: banked.PassedTests}
 								groupBudgetMu.Unlock()
 								reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: budget.String()})
 							} else {
 								groupBudgetMu.Lock()
-								groupBaselines[key] = groupBaseline{raw: raw}
+								groupBaselines[key] = groupBaseline{raw: raw, passed: banked.PassedTests}
 								groupBudgetMu.Unlock()
 							}
 							state, ok = adopted, true
@@ -2547,8 +2560,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				}
 				baselineStart := time.Now()
 				probeGate.RLock()
-				ran, passed, failedTests, diagnostic, observed, err := seams.baselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+				baseline, err := seams.baselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 				probeGate.RUnlock()
+				ran, passed, failedTests, diagnostic, observed := baseline.Ran, baseline.Passed, baseline.Failed, baseline.Diagnostic, baseline.Observation
 				baselineElapsed := time.Since(baselineStart)
 				var reason string
 				switch {
@@ -2591,7 +2605,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// leash-multiple budget for its group's siblings, and
 				// prices nothing). The raw wall-clock records in every
 				// budget mode; the derived budget only in derive mode.
-				entry := groupBaseline{raw: baselineElapsed}
+				entry := groupBaseline{raw: baselineElapsed, passed: baseline.Tests}
 				if deriveOracleBudgets {
 					entry.budget = derivedOracleBudget(baselineElapsed)
 				}
@@ -2611,7 +2625,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// manifest guard is load-bearing: adoption needs one.
 				if !observed.Unverifiable && observed.Manifest != "" {
 					groupBudgetMu.Lock()
-					pendingBankDeposits[key] = pendingBankDeposit{manifest: observed.Manifest, digest: observed.Digest, raw: baselineElapsed}
+					pendingBankDeposits[key] = pendingBankDeposit{manifest: observed.Manifest, digest: observed.Digest, raw: baselineElapsed, passed: baseline.Tests}
 					groupBudgetMu.Unlock()
 				}
 				if deriveOracleBudgets {
@@ -2624,6 +2638,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				baselineCache[key] = state
 			}
 			w.baselines = append(w.baselines, state)
+			groupBudgetMu.Lock()
+			w.groups[gi].passed = groupBaselines[key].passed
+			groupBudgetMu.Unlock()
 		}
 		return "", nil
 	}
@@ -3389,7 +3406,8 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			}
 			opts.baselineBank.putBaseline(key.persistedKey(bankScope), bankedBaseline{
 				Evidence: rows, Manifest: pd.manifest, Digest: pd.digest,
-				RawMillis: pd.raw.Milliseconds(), MeasuredAtUnix: time.Now().Unix(),
+				PassedTests: pd.passed,
+				RawMillis:   pd.raw.Milliseconds(), MeasuredAtUnix: time.Now().Unix(),
 			})
 			groupBudgetMu.Lock()
 			delete(pendingBankDeposits, key)
@@ -6033,14 +6051,23 @@ func summarizeOperators(candidates []engine.Candidate, outcomes []engine.MutantO
 // probe-confirmed package failure. A named killer outside the oracle means
 // the run pattern matched a test the target never claimed — an
 // unattributable measurement, aborted rather than scored.
-func attributedKill(killer string, oracleSet map[string]bool) error {
+func attributedKill(killer string, oracleSet map[string]bool, baselinePassed []string) error {
 	if killer == TimeoutKiller || strings.HasPrefix(killer, PackageKillerPrefix) {
 		return nil
 	}
 	if oracleSet[killer] {
-		return nil
+		return baselineAllowsKill(killer, baselinePassed)
 	}
 	return fmt.Errorf("killed by %s, which is not in the target's oracle", killer)
+}
+
+// baselineAllowsKill checks the named test's own terminal disposition. Pattern
+// membership and a different test's pass cannot turn a skipped test into a pass.
+func baselineAllowsKill(killer string, passed []string) error {
+	if killer == TimeoutKiller || strings.HasPrefix(killer, PackageKillerPrefix) || slices.Contains(passed, killer) {
+		return nil
+	}
+	return fmt.Errorf("killed by %s, which did not pass in the pre-measurement baseline; no finding recorded", killer)
 }
 
 // TimeoutKiller and PackageKillerPrefix re-export the engine's kill

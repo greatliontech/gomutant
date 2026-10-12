@@ -34,7 +34,7 @@ type runSeams struct {
 	// pinnable by a delegating recorder without constructing a
 	// genuinely slow baseline, and so no verdict is judged for real
 	// behind a stub's back.
-	testProbe func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error)
+	testProbe func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.Baseline, error)
 	// runMutantEvidence is the ephemeral mutant runner: tests plant a
 	// compiler crash the probe must retry once and never read as a
 	// verdict.
@@ -54,7 +54,7 @@ type runSeams struct {
 	// — one seam, so a test counting or bounding the banked baselines
 	// counts every one and neither a kill's (killGround) nor an
 	// advisory's (advisoryProbe).
-	baselineProbe func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error)
+	baselineProbe func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error)
 	// advisoryProbe is the solo-test probe of oracle guidance's
 	// instability attribution — one per oracle test under the group's
 	// advisory leash, ungated and never banked, best-effort: a stub sees
@@ -69,7 +69,7 @@ type runSeams struct {
 	// stubbing the group baselines leaves no kill judged for real
 	// behind its back, and one counting banked baselines never counts
 	// a kill's.
-	killGround func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error)
+	killGround func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error)
 	// probeGateInstalled observes the run's producer-probe gate at its
 	// installation: a test holds the gate's handle and pins, from
 	// inside a confirmation, that the confirmation runs under the gate
@@ -152,13 +152,13 @@ var seams = defaultSeams()
 func defaultSeams() runSeams {
 	return runSeams{
 		coveredPositions:     engine.CoveredPositions,
-		testProbe:            engine.TestProbeEnv,
+		testProbe:            engine.TestBaselineEnv,
 		runMutantEvidence:    engine.RunMutantEvidenceEnv,
 		runMutantObserved:    engine.RunMutantObservedEnv,
 		runMutantShaped:      engine.RunMutantBaselineDirEnv,
 		advisoryProbe:        engine.TestProbeObservedEnv,
-		baselineProbe:        engine.TestProbeObservedEnv,
-		killGround:           engine.TestProbeObservedEnv,
+		baselineProbe:        engine.TestBaselineObservedEnv,
+		killGround:           engine.TestBaselineObservedEnv,
 		ephemeralBudgetFloor: 60 * time.Second,
 	}
 }

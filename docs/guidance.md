@@ -111,13 +111,11 @@ facts by default, cheap at any document size; layer is repo
 reason it is not committable). Rows cap at 50 with the remainder
 counted; the document on disk always carries the full set. Every row also
 reports its recorded oracleExecutionPolicy and any oracleExecutionPolicyIssue
-without loading a tree. An absent or unsupported body policy, or an unknown
-shaped policy, flags the counts as historical and calls for a whole
-complete-oracle re-measurement. Fresh body and shaped records carry
-gomutant/full-oracle@2; a policy-1 body record also needs full remeasurement,
-because its outcomes may have been composed across changed oracles. An absent
-or policy-1 value on a legacy shaped record retains
-its proven-full exception. Policy admission alone never establishes
+without loading a tree. An absent or unsupported policy on either body or
+shaped records flags the counts as historical and calls for a whole
+complete-oracle re-measurement. Fresh records carry gomutant/full-oracle@3;
+policies 1 and 2 lack complete oracle-admission and named baseline-pass evidence.
+An unsplit historical shaped pattern supplies no exception. Policy admission alone never establishes
 freshness. A record's posture at the end of its run is already on the run's
 report; findings re-derives freshness only when a judged question is asked.
 **example:** findings with state=unverifiable after a campaign to
@@ -380,9 +378,8 @@ pass; inspect the assertion or establish equivalence independently.
 `never-executed` and `covering-passed` are historical read categories, never
 freshly minted authority. Recorded views show oracleExecutionPolicy and any
 policy issue, flagging unsupported counts as historical without a tree
-judgment. Missing or unsupported body policy, including policy 1, requires
-whole remeasurement; a legacy shaped record's absent or policy-1 value retains
-its unsplit non-composed exception. Unknown policy grants nothing.
+judgment. Missing or unsupported policy, including policies 1 and 2, requires
+whole remeasurement for body and shaped records alike. Unknown policy grants nothing.
 Current policy permits freshness judgment, never substitutes for it.
 Ephemeral uses the full explicit oracle: negative parent-profile coverage
 refuses plain survival; unknown coverage alone returns an explicitly

@@ -21,12 +21,13 @@ func TestRecordedToolFindingsProjectOracleExecutionPolicy(t *testing.T) {
 		name, policy, issue string
 		shaped              bool
 	}{
-		{"current policy", "gomutant/full-oracle@2", "", false},
+		{"current policy", "gomutant/full-oracle@3", "", false},
+		{"unadmitted inventory", "gomutant/full-oracle@2", issue, false},
 		{"historical body policy", "gomutant/full-oracle@1", issue, false},
-		{"historical full policy", "gomutant/full-oracle@1", "", true},
+		{"historical full policy", "gomutant/full-oracle@1", issue, true},
 		{"legacy body", "", issue, false},
 		{"unknown policy", "gomutant/future-oracle@999", issue, false},
-		{"legacy shaped", "", "", true},
+		{"legacy shaped", "", issue, true},
 		{"unknown shaped", "gomutant/future-oracle@999", issue, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

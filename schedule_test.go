@@ -115,12 +115,13 @@ func TestCompleteGroupsPreserveMembershipAndBounds(t *testing.T) {
 func TestCompleteGroupOutcomes(t *testing.T) {
 	const pkg = "example.com/p"
 	w := scheduleTestWork(pkg, pkg, []string{"TestA", "TestB"})
+	w.groups[0].passed = []string{pkg + ".TestA", pkg + ".TestB"}
 	m := engine.Mutant{Position: "f.go:10:2"}
 	original, ground := seams.runMutantObserved, seams.killGround
 	t.Cleanup(func() { seams.runMutantObserved, seams.killGround = original, ground })
-	seams.killGround = func(context.Context, string, string, string, time.Duration, []string, string, string, []string, []runtimeinput.ScratchNamespace, []string, engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.killGround = func(context.Context, string, string, string, time.Duration, []string, string, string, []string, []runtimeinput.ScratchNamespace, []string, engine.OracleBounds) (engine.Baseline, error) {
 		t.Error("fresh full-group execution paid a subset baseline")
-		return 0, false, nil, "", runtimeinput.Observation{}, nil
+		return engine.Baseline{}, nil
 	}
 	for _, tc := range []struct {
 		name, killer string
@@ -165,7 +166,7 @@ func TestSerialConfirmationRunsUnscheduled(t *testing.T) {
 		patterns = append(patterns, pattern)
 		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
 	}
-	memo := map[scopedBaselineKey]bool{{pkg: pkg, run: "^TestA$"}: false}
+	memo := map[scopedBaselineKey][]string{{pkg: pkg, run: "^TestA$"}: nil}
 	if _, _, _, _, _, err := (&Tree{}).confirmMutant(context.Background(), w, m, pkg+".TestA", memo, runOptions{}, nil); err != nil {
 		t.Fatal(err)
 	}

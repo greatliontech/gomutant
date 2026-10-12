@@ -141,17 +141,20 @@ func TestBudgetCovers(t *testing.T) {
 // any other killer aborts.
 func TestAttributedKill(t *testing.T) {
 	oracle := map[string]bool{"p.TestA": true}
-	if err := attributedKill("p.TestA", oracle); err != nil {
+	if err := attributedKill("p.TestA", oracle, []string{"p.TestA"}); err != nil {
 		t.Fatalf("oracle member rejected: %v", err)
 	}
-	if err := attributedKill(TimeoutKiller, oracle); err != nil {
+	if err := attributedKill(TimeoutKiller, oracle, nil); err != nil {
 		t.Fatalf("timeout rejected: %v", err)
 	}
-	if err := attributedKill(PackageKillerPrefix+"p)", oracle); err != nil {
+	if err := attributedKill(PackageKillerPrefix+"p)", oracle, nil); err != nil {
 		t.Fatalf("package failure rejected: %v", err)
 	}
-	if err := attributedKill("p.TestOutsider", oracle); err == nil {
+	if err := attributedKill("p.TestOutsider", oracle, []string{"p.TestOutsider"}); err == nil {
 		t.Fatal("a killer outside the oracle attributed")
+	}
+	if err := attributedKill("p.TestA", oracle, []string{"p.TestOther"}); err == nil {
+		t.Fatal("another test's pass attributed a skipped killer")
 	}
 }
 

@@ -455,11 +455,11 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 				// but only after the clean twin proves the scratch
 				// infrastructure itself builds, or nothing ran and the
 				// kill would be fabricated.
-				ran, passed, _, cleanErr := seams.testProbe(ctx, cleanScratch, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, cleanEnv, opts.bounds)
-				if cleanErr == nil && ran > 0 && passed {
+				baseline, cleanErr := seams.testProbe(ctx, cleanScratch, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, cleanEnv, opts.bounds)
+				if cleanErr == nil && baseline.Ran > 0 && baseline.Passed {
 					return engine.MutantKilled, "compile: " + firstLine(diagnostic), false, nil
 				}
-				return engine.MutantSurvived, "", false, fmt.Errorf("shaped candidate %s (%s): the clean scratch twin does not pass its oracle (ran=%d passed=%t err=%v), so the compile refusal is a scratch-infrastructure fault, not the probe's: %s", m.Position, m.Operator, ran, passed, cleanErr, diagnostic)
+				return engine.MutantSurvived, "", false, fmt.Errorf("shaped candidate %s (%s): the clean scratch twin does not pass its oracle (ran=%d passed=%t err=%v), so the compile refusal is a scratch-infrastructure fault, not the probe's: %s", m.Position, m.Operator, baseline.Ran, baseline.Passed, cleanErr, diagnostic)
 			}
 			// Any other shaped candidate failing the oracle's build is
 			// a probe fault the caller must see, never a verdict: the
@@ -467,7 +467,7 @@ func (t *Tree) executeShapedCandidate(ctx context.Context, w work, m engine.Muta
 			return engine.MutantSurvived, "", false, fmt.Errorf("shaped candidate %s (%s) does not build in the scratch tree: %s", m.Position, m.Operator, diagnostic)
 		}
 		if err == nil && out == engine.MutantKilled {
-			err = attributedKill(groupKiller, w.oracleSet)
+			err = attributedKill(groupKiller, w.oracleSet, g.passed)
 		}
 		if err != nil {
 			return engine.MutantSurvived, "", false, fmt.Errorf("%s: shaped candidate %s %s: %w", m.Symbol, m.Position, m.Operator, err)

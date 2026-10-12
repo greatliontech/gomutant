@@ -355,7 +355,7 @@ func TestConcurrentProbesSpawnUnderTheirOwnBounds(t *testing.T) {
 	}
 	priorProbe, priorMutant := seams.testProbe, seams.runMutantEvidence
 	defer func() { seams.testProbe, seams.runMutantEvidence = priorProbe, priorMutant }()
-	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		record(run, bounds)
 		return priorProbe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}
@@ -416,7 +416,7 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 	defer func() {
 		seams.testProbe, seams.runMutantEvidence, seams.runMutantObserved, seams.baselineProbe = priorProbe, priorMutant, priorCampaign, priorBaseline
 	}()
-	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		mu.Lock()
 		probeSpawns = append(probeSpawns, bounds)
 		mu.Unlock()
@@ -434,7 +434,7 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 		mu.Unlock()
 		return priorCampaign(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 	}
-	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		mu.Lock()
 		campaignSpawns = append(campaignSpawns, bounds)
 		mu.Unlock()

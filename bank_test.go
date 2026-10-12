@@ -155,7 +155,7 @@ func TestRunServesBankedBaselinesAcrossRuns(t *testing.T) {
 		seams.coveredPositions = restoreCov
 	})
 	var baselineProbes, coverageProbes atomic.Int64
-	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		baselineProbes.Add(1)
 		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 	}
@@ -349,6 +349,47 @@ func TestLegacyCoverageBankDecodesWithoutScheduling(t *testing.T) {
 	}
 	if got, ok := again.baseline("new"); !ok || got.Manifest != "baseline-manifest" || got.Digest != "baseline-digest" || got.RawMillis != 29 {
 		t.Fatalf("baseline deposit=%+v, present=%v", got, ok)
+	}
+}
+
+// A structural bank upgrade retains timing/history, never derives named
+// execution authority from an older producer or a missing field.
+func TestBaselineBankDoesNotUpgradeNamedPassAuthority(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := t.TempDir()
+	path, err := bankPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		version int
+		names   string
+		want    []string
+	}{
+		{2, `,"passedTests":["p.TestInvented"]`, nil},
+		{3, "", nil},
+		{3, `,"passedTests":["p.TestPassed"]`, []string{"p.TestPassed"}},
+	} {
+		data := fmt.Sprintf(`{"version":%d,"baselines":{"p\u0000":{"rawMillis":29%s}}}`, tc.version, tc.names)
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		bank := openBaselineBank(dir)
+		entry, ok := bank.baseline("p\x00")
+		if !ok || !reflect.DeepEqual(entry.PassedTests, tc.want) {
+			t.Fatalf("version %d: %+v, found=%v", tc.version, entry, ok)
+		}
+		if span, ok := bank.longestBaselineFor("p"); !ok || span != 29*time.Millisecond {
+			t.Fatalf("historical duration lost: %v, %v", span, ok)
+		}
+		bank.putBaseline("new", bankedBaseline{PassedTests: []string{"q.TestNew"}})
+		stored, ok := openBaselineBank(dir).baseline("p\x00")
+		if !ok || !reflect.DeepEqual(stored.PassedTests, tc.want) {
+			t.Fatalf("write promoted history: %+v", stored)
+		}
 	}
 }
 

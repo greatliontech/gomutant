@@ -49,7 +49,11 @@ func (s Selection) applyEnv(env []string) ([]string, error) {
 	}
 	if len(s.Tags) > 0 {
 		goflags, _ := gotool.LookupEnv(env, "GOFLAGS")
-		out = gotool.SetEnv(out, "GOFLAGS", replaceTagsFlag(goflags, strings.Join(s.CanonicalTags(), ",")))
+		replaced, err := replaceTagsFlag(goflags, strings.Join(s.CanonicalTags(), ","))
+		if err != nil {
+			return nil, err
+		}
+		out = gotool.SetEnv(out, "GOFLAGS", replaced)
 	}
 	return out, nil
 }
@@ -76,16 +80,19 @@ func (s Selection) Validate() error {
 // replaceTagsFlag rewrites a GOFLAGS value so its one effective -tags
 // flag (single- or double-dash, last-wins as the go command resolves a
 // repeat) is the declared set; other flags pass through untouched.
-func replaceTagsFlag(goflags, tags string) string {
-	fields := strings.Fields(goflags)
-	kept := fields[:0]
+func replaceTagsFlag(goflags, tags string) (string, error) {
+	fields, err := parseGoFlags(goflags)
+	if err != nil {
+		return "", err
+	}
+	var kept []string
 	for _, flag := range fields {
-		if _, ok := strings.CutPrefix(strings.TrimLeft(flag, "-"), "tags="); ok {
+		if name, _, _ := flag.parts(); name == "tags" {
 			continue
 		}
-		kept = append(kept, flag)
+		kept = append(kept, flag.spelling)
 	}
-	return strings.Join(append(kept, "-tags="+tags), " ")
+	return strings.Join(append(kept, "-tags="+tags), " "), nil
 }
 
 // validBuildTag admits exactly the go command's constraint-tag alphabet:

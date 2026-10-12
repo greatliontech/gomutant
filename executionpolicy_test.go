@@ -112,7 +112,7 @@ func TestExecutionPolicyBodyReuse(t *testing.T) {
 		if !strings.Contains(extension.Reason, "prefix of 1 candidate stands") || !slices.Equal(dispatched, []int{1}) {
 			t.Fatalf("current extension = %+v, dispatched %v", extension, dispatched)
 		}
-		for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/future-oracle@999"} {
+		for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", "gomutant/future-oracle@999"} {
 			t.Run(fmt.Sprintf("policy=%q", policy), func(t *testing.T) {
 				prior := current
 				prior.OracleExecutionPolicy = policy
@@ -171,7 +171,7 @@ func TestExecutionPolicyExplicitFreshFor(t *testing.T) {
 	if ok, err := tree.FreshFor(context.Background(), current, target, 1, timeout); err != nil || !ok {
 		t.Fatalf("current explicit-timeout control = %v, %v", ok, err)
 	}
-	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/future-oracle@999"} {
+	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", "gomutant/future-oracle@999"} {
 		prior := current
 		prior.OracleExecutionPolicy = policy
 		if ok, err := tree.FreshFor(context.Background(), prior, target, 1, timeout); err != nil || ok {
@@ -192,7 +192,7 @@ func inspectExecutionPolicyBeforeViews(t *testing.T, tree *Tree, current Finding
 	seams.subjectViewBuild = func([]string) { builds++ }
 	seams.inspectionSupplementaryView = func([]string) { builds++ }
 	t.Cleanup(func() { seams.subjectViewBuild, seams.inspectionSupplementaryView = oldBuild, oldSupplement })
-	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/future-oracle@999"} {
+	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", "gomutant/future-oracle@999"} {
 		prior := current
 		prior.OracleExecutionPolicy = policy
 		got, err := tree.InspectFinding(context.Background(), prior, nil)
@@ -250,7 +250,7 @@ func TestExecutionPolicyOracleChange(t *testing.T) {
 	if !slices.Equal(dispatch, fullDispatch) || decision.Action != "measure" {
 		t.Fatalf("grown oracle did not remeasure whole: %+v, dispatch %v", decision, dispatch)
 	}
-	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/future-oracle@999"} {
+	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", "gomutant/future-oracle@999"} {
 		prior := current
 		prior.OracleExecutionPolicy = policy
 		fresh, decision, dispatch := executionPolicyRun(t, tree, target, Options{Budget: 3, Prior: []Finding{prior}})
@@ -275,7 +275,7 @@ func TestExecutionPolicyFlaggedSplice(t *testing.T) {
 	if !served.Cached || len(dispatch) != 1 || !strings.Contains(decision.Reason, "re-executing 1 candidate") {
 		t.Fatalf("sound flagged-splice control = %+v, dispatch %v", decision, dispatch)
 	}
-	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/future-oracle@999"} {
+	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", "gomutant/future-oracle@999"} {
 		prior := current
 		prior.OracleExecutionPolicy = policy
 		fresh, decision, dispatch := executionPolicyRun(t, tree, target, Options{Prior: []Finding{prior}})
@@ -286,9 +286,8 @@ func TestExecutionPolicyFlaggedSplice(t *testing.T) {
 	}
 }
 
-// A missing field is licensed by the recorded shape, not by a document
-// version or by a lack of narrowed survivor buckets. Unknown policies are
-// never licensed, even for a shape that still derives.
+// Historical shapes remain readable, but unsplit execution alone supplies
+// neither complete oracle admission nor a named killer's baseline pass.
 func TestExecutionPolicyHistoricalShapedReuse(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs real shaped mutant oracles")
@@ -315,7 +314,7 @@ func TestExecutionPolicyHistoricalShapedReuse(t *testing.T) {
 	legacy = historical[0]
 	unsplit := legacy
 	unsplit.OracleExecutionPolicy = "gomutant/full-oracle@1"
-	for _, prior := range []Finding{current, legacy, unsplit} {
+	for _, prior := range []Finding{current} {
 		served, _, dispatched := executionPolicyRun(t, tree, target, Options{Prior: []Finding{prior}})
 		if !served.Cached || len(dispatched) != 0 || served.OracleExecutionPolicy != prior.OracleExecutionPolicy {
 			t.Fatalf("policy %q shaped serve = cached %v, policy %q, dispatch %v", prior.OracleExecutionPolicy, served.Cached, served.OracleExecutionPolicy, dispatched)
@@ -325,27 +324,31 @@ func TestExecutionPolicyHistoricalShapedReuse(t *testing.T) {
 		}
 	}
 	s := legacy.Survivors[0]
-	if err := legacy.Attest(s.Position, s.Operator, "the recipe changes only the unexercised branch"); err != nil {
-		t.Fatalf("legacy shaped attestation refused: %v", err)
+	if err := legacy.Attest(s.Position, s.Operator, "the recipe changes only the unexercised branch"); err == nil {
+		t.Fatal("legacy shaped record authorized a new disposition")
 	}
 	unknown := current
 	unknown.OracleExecutionPolicy = "gomutant/future-oracle@999"
-	got, err := tree.InspectFinding(context.Background(), unknown, nil)
-	if err != nil || got.State != FindingStale {
-		t.Fatalf("unknown shaped inspection = %+v, %v", got, err)
+	policyTwo := current
+	policyTwo.OracleExecutionPolicy = "gomutant/full-oracle@2"
+	for _, prior := range []Finding{legacy, unsplit, policyTwo, unknown} {
+		got, err := tree.InspectFinding(context.Background(), prior, nil)
+		if err != nil || got.State != FindingStale {
+			t.Fatalf("historical shaped inspection = %+v, %v", got, err)
+		}
+		executionPolicyRefusal(t, got.Reason)
+		fresh, decision, dispatched := executionPolicyRun(t, tree, target, Options{Prior: []Finding{prior}})
+		if fresh.Cached || len(dispatched) != 1 || decision.Action != "measure" || fresh.OracleExecutionPolicy != FullOracleExecutionPolicy {
+			t.Fatalf("historical shaped policy served: %+v, dispatch %v, policy %q", decision, dispatched, fresh.OracleExecutionPolicy)
+		}
 	}
-	executionPolicyRefusal(t, got.Reason)
-	fresh, decision, dispatched := executionPolicyRun(t, tree, target, Options{Prior: []Finding{unknown}})
-	if fresh.Cached || len(dispatched) != 1 || decision.Action != "measure" || fresh.OracleExecutionPolicy != FullOracleExecutionPolicy {
-		t.Fatalf("unknown shaped policy served: %+v, dispatch %v, policy %q", decision, dispatched, fresh.OracleExecutionPolicy)
-	}
-	// A policy-free record's shape is still a pin, not a blanket exemption.
+	// The shape itself remains an independent pin.
 	moved := target
 	moved.Manual = &ManualSpec{File: "lib/lib.go", Edits: []ManualEdit{{Find: "return x - 1", Replace: "return x + 2"}}}
-	for _, policy := range []string{"", "gomutant/full-oracle@1", FullOracleExecutionPolicy} {
+	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", FullOracleExecutionPolicy} {
 		prior := legacy
 		prior.OracleExecutionPolicy = policy
-		fresh, _, dispatched = executionPolicyRun(t, tree, moved, Options{Prior: []Finding{prior}})
+		fresh, _, dispatched := executionPolicyRun(t, tree, moved, Options{Prior: []Finding{prior}})
 		if fresh.Cached || len(dispatched) != 1 || len(fresh.Attested) != 0 {
 			t.Fatalf("policy %q changed shape retained evidence: cached=%v attested=%+v dispatch=%v", policy, fresh.Cached, fresh.Attested, dispatched)
 		}
@@ -361,7 +364,7 @@ func TestExecutionPolicyNewAttestation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, shaped := range []bool{false, true} {
-		for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/future-oracle@999"} {
+		for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", "gomutant/future-oracle@999"} {
 			f := base
 			f.Attested = nil
 			f.OracleExecutionPolicy = policy
@@ -369,12 +372,6 @@ func TestExecutionPolicyNewAttestation(t *testing.T) {
 				f.Shape = &TargetShape{Manual: &ManualSpec{File: "p.go", Edits: []ManualEdit{{Find: "old", Replace: "new"}}}}
 			}
 			err := f.Attest(s.Position, s.Operator, "new disposition")
-			if shaped && (policy == "" || policy == "gomutant/full-oracle@1") {
-				if err != nil || len(f.Attested) != 1 {
-					t.Fatalf("legacy shape = %+v, %v", f.Attested, err)
-				}
-				continue
-			}
 			if err == nil || len(f.Attested) != 0 {
 				t.Fatalf("shape %v policy %q accepted a new disposition: %+v, %v", shaped, policy, f.Attested, err)
 			}
@@ -384,7 +381,7 @@ func TestExecutionPolicyNewAttestation(t *testing.T) {
 	if !sameAttestationPins(base, base) {
 		t.Fatal("equal policy pins do not match")
 	}
-	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/future-oracle@999"} {
+	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", "gomutant/future-oracle@999"} {
 		other := base
 		other.OracleExecutionPolicy = policy
 		if sameAttestationPins(base, other) || sameAttestationPins(other, base) {
@@ -400,7 +397,7 @@ func TestExecutionPolicyHistoricalStorage(t *testing.T) {
 	if DocumentVersion != 16 {
 		t.Fatalf("execution-policy reading boundary = %d, want 16", DocumentVersion)
 	}
-	for _, policy := range []string{"", "gomutant/full-oracle@1", FullOracleExecutionPolicy, "gomutant/future-oracle@999"} {
+	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", FullOracleExecutionPolicy, "gomutant/future-oracle@999"} {
 		t.Run(fmt.Sprintf("policy=%q", policy), func(t *testing.T) {
 			original := survivorFinding("p.F")
 			original.OracleExecutionPolicy = policy

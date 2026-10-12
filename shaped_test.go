@@ -304,7 +304,7 @@ func TestShapedWorkspaceCompileKill(t *testing.T) {
 		shapedRuns++
 		return priorShaped(ctx, dir, cleanDir, m, testPkgs, runRegex, timeout, binFlags, env, cleanEnv, bounds)
 	}
-	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		cleanProbes++
 		return priorProbe(ctx, dir, testPkg, run, timeout, binFlags, env, bounds)
 	}

@@ -48,9 +48,9 @@ func TestEphemeralLeashLiftsFromTheBank(t *testing.T) {
 	var bound time.Duration
 	probe := seams.testProbe
 	defer func() { seams.testProbe = probe }()
-	seams.testProbe = func(_ context.Context, _, _, _ string, timeout time.Duration, _, _ []string, bounds engine.OracleBounds) (int, bool, string, error) {
+	seams.testProbe = func(_ context.Context, _, _, _ string, timeout time.Duration, _, _ []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		bound = timeout
-		return 0, false, "", captured
+		return engine.Baseline{}, captured
 	}
 	req := EphemeralRequest{File: "lib/lib.go", Mutant: []byte("package lib\n\nfunc Add(a, b int) int { return a - b }\n"), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", Runs: 1}
 	if _, err := tr.RunEphemeral(context.Background(), req); !errors.Is(err, captured) {
@@ -75,8 +75,8 @@ func TestEphemeralLeashLiftsFromTheBank(t *testing.T) {
 		t.Fatalf("banked leash = %s; want the lift to %s (the package's LONGEST entry; another package's entry must not lift it)", bound, want)
 	}
 	// The command-deadline refusal names the leash that governed.
-	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (int, bool, string, error) {
-		return 0, false, "", fmt.Errorf("running baseline: %w", context.DeadlineExceeded)
+	seams.testProbe = func(context.Context, string, string, string, time.Duration, []string, []string, engine.OracleBounds) (engine.Baseline, error) {
+		return engine.Baseline{}, fmt.Errorf("running baseline: %w", context.DeadlineExceeded)
 	}
 	if _, err := tr.RunEphemeral(context.Background(), req); err == nil || !strings.Contains(err.Error(), want.String()+"-leashed") {
 		t.Fatalf("deadline refusal = %v; want it to name the lifted %s leash", err, want)
@@ -140,7 +140,7 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 		seams.coveredPositions = restoreCov
 	})
 	var bounds, probeBounds []time.Duration
-	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (engine.Baseline, error) {
 		bounds = append(bounds, timeout)
 		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, oracleBounds)
 	}

@@ -993,7 +993,24 @@ func TestProbe(ctx context.Context, dir, testPkg, run string, timeout time.Durat
 // show what the oracle saw.
 func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds OracleBounds) (ran int, passed bool, diagnostic string, err error) {
 	result, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, nil, env, bounds)
-	return result.ran, result.passed, result.diagnostic, err
+	return result.Ran, result.Passed, result.Diagnostic, err
+}
+
+// Baseline is a completed probe's execution account. Tests names only top-level
+// tests with a structured pass event, never tests inferred from a run pattern.
+// A successful process with some passed tests may still contain skipped tests.
+type Baseline struct {
+	Ran         int
+	Passed      bool
+	Tests       []string
+	Failed      []string
+	Diagnostic  string
+	Observation runtimeinput.Observation
+}
+
+// TestBaselineEnv preserves the named baseline dispositions for attribution.
+func TestBaselineEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags, env []string, bounds OracleBounds) (Baseline, error) {
+	return testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, "", "", nil, nil, env, bounds)
 }
 
 // TestProbeObservedEnv is TestProbe under a frozen environment with a
@@ -1001,72 +1018,63 @@ func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Du
 // failing run — reported, or drifting between the discovery and
 // measurement runs — carries the failing tests' output as diagnostic.
 func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (ran int, passed bool, failed []string, diagnostic string, state runtimeinput.Observation, err error) {
+	b, err := TestBaselineObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
+	return b.Ran, b.Passed, b.Failed, b.Diagnostic, b.Observation, err
+}
+
+// TestBaselineObservedEnv preserves named passes beside the scored probe's
+// observation. A repeated probe must preserve the same passing test identities,
+// not merely their count. The second execution supplies the scored account.
+func TestBaselineObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
 	once, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
-	ran, passed, failed, first := once.ran, once.passed, once.failed, once.state
-	if err != nil {
-		return ran, passed, failed, "", first, err
-	}
-	if !passed {
-		return ran, false, failed, once.diagnostic, first, nil
-	}
-	if ran == 0 {
-		return 0, true, nil, "", first, nil
+	if err != nil || !once.Passed || once.Ran == 0 {
+		return once, err
 	}
 	// The repeat guards baseline VALIDITY (a flaky pass fabricating
 	// verdicts), which no observation bracket subsumes: it runs even
 	// when the first observation's evidence is already unverifiable.
 	// Only the empty-observation shortcut below needs verifiable
 	// evidence to be meaningful.
-	if !first.OK {
-		return ran, passed, nil, "", first, err
+	if !once.Observation.OK {
+		return once, nil
 	}
 	empty, err := runtimeinput.Merge(dir, env)
 	if err != nil {
-		return 0, false, nil, "", runtimeinput.Observation{}, err
+		return Baseline{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, false, nil, "", runtimeinput.Observation{}, err
+		return Baseline{}, err
 	}
 	empty, err = runtimeinput.Absolute(empty, dir, env)
 	if err != nil {
-		return 0, false, nil, "", runtimeinput.Observation{}, err
+		return Baseline{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return 0, false, nil, "", runtimeinput.Observation{}, err
+		return Baseline{}, err
 	}
-	if !first.Unverifiable && first.State == empty.State {
-		return ran, passed, nil, "", first, nil
+	if !once.Observation.Unverifiable && once.Observation.State == empty.State {
+		return once, nil
 	}
 	again, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
-	secondRan, secondPassed, secondFailed, second := again.ran, again.passed, again.failed, again.state
 	if err != nil {
-		return secondRan, secondPassed, secondFailed, "", second, err
+		return again, err
 	}
-	if secondRan != ran {
-		return secondRan, secondPassed, secondFailed, "", runtimeinput.Observation{}, fmt.Errorf("baseline test count changed between discovery and measurement")
+	if again.Ran != once.Ran {
+		return Baseline{}, fmt.Errorf("baseline test count changed between discovery and measurement")
 	}
-	if !secondPassed {
-		return secondRan, false, secondFailed, again.diagnostic, runtimeinput.Observation{}, fmt.Errorf("baseline result changed between discovery and measurement (failed: %s)", strings.Join(secondFailed, ", "))
+	if !again.Passed {
+		return again, fmt.Errorf("baseline result changed between discovery and measurement (failed: %s)", strings.Join(again.Failed, ", "))
+	}
+	if !slices.Equal(again.Tests, once.Tests) {
+		return Baseline{}, fmt.Errorf("baseline passing test identities changed between discovery and measurement")
 	}
 	// The repeat guards baseline VALIDITY only; the evidence is the scored
 	// second run's own bracket-vouched observation - the historical
 	// cross-run evidence comparison is retired (REQ-exec-observation).
-	return secondRan, secondPassed, nil, "", second, nil
+	return again, nil
 }
 
-// probeResult is one baseline probe's outcome: the top-level tests that
-// ran, whether the run passed, the failing tests (a reported failure or
-// a crash-truncated run), the diagnostic rendering what the oracle saw
-// when it failed, and the runtime-input observation.
-type probeResult struct {
-	ran        int
-	passed     bool
-	failed     []string
-	diagnostic string
-	state      runtimeinput.Observation
-}
-
-func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (probeResult, error) {
+func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
 	// The oracle bound carries its own cause exactly as the mutant
 	// run's: a parent expiry must read as cancellation, never as the
 	// oracle bound firing (REQ-exec-attribution).
@@ -1074,7 +1082,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	defer cancel()
 	scratchEnv, scratchRoot, sweepScratch, removeScratch, err := oracleScratch(env)
 	if err != nil {
-		return probeResult{}, err
+		return Baseline{}, err
 	}
 	defer removeScratch()
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
@@ -1089,7 +1097,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if capture {
 		tmp, err := os.MkdirTemp("", "gomutant-probe-*")
 		if err != nil {
-			return probeResult{}, err
+			return Baseline{}, err
 		}
 		defer os.RemoveAll(tmp)
 		testlog = filepath.Join(tmp, "baseline.testlog")
@@ -1101,7 +1109,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	}
 	cmd, err := oracleCommand(ctx2, dir, oracleEnv(scratchEnv, bounds), args...)
 	if err != nil {
-		return probeResult{}, err
+		return Baseline{}, err
 	}
 	// The two streams stay apart, as the mutant path keeps them: the
 	// harness's events ride stdout and the go tool's own lines ride
@@ -1117,26 +1125,26 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), ctx2) {
 		state, _, observationErr := processObservationContext(ctx, testlog, dir, "baseline test process timed out", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
-			return probeResult{}, observationErr
+			return Baseline{}, observationErr
 		}
-		return probeResult{state: state}, &BaselineTimeoutError{Bound: timeout}
+		return Baseline{Observation: state}, &BaselineTimeoutError{Bound: timeout}
 	}
 	if oracleRunCancelled(runErr, ctx2) {
 		state, _, observationErr := processObservationContext(ctx, testlog, dir, "baseline test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
-			return probeResult{}, observationErr
+			return Baseline{}, observationErr
 		}
-		return probeResult{state: state}, ctx2.Err()
+		return Baseline{Observation: state}, ctx2.Err()
 	}
 	// As at the mutant site: a rejected build never exits zero.
 	if runErr != nil {
 		if diagnostic, rejected := harnessBuildFailure(stdout.Bytes(), stderr.Bytes()); rejected {
-			return probeResult{}, &BaselineBuildError{Diagnostic: diagnostic}
+			return Baseline{}, &BaselineBuildError{Diagnostic: diagnostic}
 		}
 	}
 	stream, err := parseTestStream(stdout.Bytes())
 	if err != nil {
-		return probeResult{}, fmt.Errorf("parse baseline test output: %w", err)
+		return Baseline{}, fmt.Errorf("parse baseline test output: %w", err)
 	}
 	completionReason := ""
 	if runErr != nil {
@@ -1149,12 +1157,12 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	}
 	state, _, err := processObservationContext(ctx, testlog, dir, completionReason, env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 	if err != nil {
-		return probeResult{}, err
+		return Baseline{}, err
 	}
-	result := probeResult{ran: stream.ran, passed: runErr == nil, state: state}
+	result := Baseline{Ran: stream.ran, Passed: runErr == nil, Tests: stream.passed, Observation: state}
 	if runErr != nil {
-		result.failed = append(append([]string(nil), stream.failed...), stream.truncated...)
-		result.diagnostic = failedTestsDiagnostic(stream)
+		result.Failed = append(append([]string(nil), stream.failed...), stream.truncated...)
+		result.Diagnostic = failedTestsDiagnostic(stream)
 	}
 	return result, nil
 }
@@ -1368,6 +1376,7 @@ func testFailureCompleted(stream []byte, failingTest string) bool {
 // and the package's output outside any test.
 type testStream struct {
 	ran       int
+	passed    []string
 	failed    []string
 	truncated []string
 	outputs   map[string]*strings.Builder
@@ -1377,7 +1386,7 @@ type testStream struct {
 // parseTestStream reads the stream once; a malformed stream is an error
 // (a probe whose output cannot be read has no verdict).
 func parseTestStream(stream []byte) (*testStream, error) {
-	type event struct{ Action, Test, Output string }
+	type event struct{ Action, Test, Output, Package string }
 	ts := &testStream{outputs: map[string]*strings.Builder{}}
 	var order []string
 	started, ended, failed, ran := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
@@ -1419,6 +1428,9 @@ func parseTestStream(stream []byte) (*testStream, error) {
 				order = append(order, e.Test)
 			}
 			ended[e.Test] = true
+			if e.Action == "pass" && e.Package != "" {
+				ts.passed = append(ts.passed, e.Package+"."+e.Test)
+			}
 			if e.Action == "fail" && !failed[e.Test] {
 				failed[e.Test] = true
 				ts.failed = append(ts.failed, e.Test)
@@ -1435,6 +1447,8 @@ func parseTestStream(stream []byte) (*testStream, error) {
 			ts.ran++
 		}
 	}
+	slices.Sort(ts.passed)
+	ts.passed = slices.Compact(ts.passed)
 	return ts, nil
 }
 

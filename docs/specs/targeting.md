@@ -100,7 +100,11 @@ the test binary compiles) with the release tags the tree toolchain's
 language series sets, as go/build derives them, snapshot-present files
 re-matched exactly like
 new ones (a constraint edit after the load is itself a lag) — under the
-same runnable-test shape, and refuse the run on any disagreement,
+same runnable-test shape, including a T or F type alias declared in another
+file or package: the go command discovers the pointer's T/F spelling, optionally
+qualified, and compilation establishes its compatibility with testing. The
+loaded inventory retains that compatibility check after resolving aliases.
+The run refuses on any disagreement,
 naming the differing test identities in both directions. A derived set that
 shrank relative to a prior finding's recorded oracle is named loudly in the
 re-measure reason: a test the record was measured against no longer exists.
