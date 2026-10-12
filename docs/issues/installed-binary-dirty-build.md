@@ -27,8 +27,17 @@ build stamp; the 2026-09-21 installed-binary-skew doc closed at chunk
 282's install and is gone. No doc covers binary provenance, so the
 rows are disjoint and no scheduled trigger is duplicated.
 
+Re-observed by the 2026-10-12 sweep with the fact moved: the line now
+reads SKEW — binary `vcs.revision=2172a8b42bb0`, last build-input
+commit `4b15304438c3` — and the modified flag is gone. The clean
+install at chunk 311's close did happen (the binary anchors to a
+commit again), and the tree has since taken further build-input
+commits, so the installed binary trails HEAD. The remedy is the same
+`go install` from the committed tree; this doc keeps tracking the
+provenance line rather than minting a second trigger for the skew.
+
 Lands: the fleet sweep's next binary-provenance line reading `match`
-without the modified flag (the clean install happened at chunk 311's
-close, 2026-10-05: the one uncommitted tracked file — the tool's own
-findings document, rewritten to version 14 on read — committed, the
-binary rebuilt from the clean tree and installed to both bins).
+without the modified flag — the `go install` from the committed tree
+at gomutant's next chunk close in the active sequence
+(tooling-redesign 5.4), or any earlier clean install, which closes it
+sooner.
