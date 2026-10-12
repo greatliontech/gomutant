@@ -6,6 +6,7 @@ is deleted (git holds history).
 
 | slug | summary | Lands |
 |------|---------|-------|
+| [git-go-native-oracle-reuse](git-go-native-oracle-reuse.md) | separate expected dirty-source placement from external-scratch, testing-context and unavailable-subject reuse refusals in git-go's native-oracle campaign | tooling-redesign 5.4, 7.7/7.8 and 8.3 |
 | [retired-oracle-drift-helper-tests](retired-oracle-drift-helper-tests.md) | retire non-admitted reference/count helper fixtures without losing current-path conservation and historical-record tests | tooling-redesign 5.6 |
 | [oracle-attribution-hides-post-commit-work](oracle-attribution-hides-post-commit-work.md) | synchronous per-test instability attribution delays other target commits without phase progress; audit events reset visible candidate counts | cross-tool train chunk 267 |
 | [campaign-silent-past-its-deadline](campaign-silent-past-its-deadline.md) | a changed-code campaign over pew stopped reporting progress about eight minutes into a ten-minute deadline and was killed by its shell during final observation work — the deadline's own close-out never returned (pew's mutation-oracle-observation, the gomutant half) | cross-tool train chunk 267 (audit 333: the reporting order is 267's; the deadline half reproduced at its open) |
