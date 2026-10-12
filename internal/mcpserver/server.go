@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/greatliontech/gofresh/toolversion"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -440,7 +441,7 @@ func (s *Server) MCP() *mcp.Server {
 func (s *Server) mcpWith(logger *slog.Logger, served *atomic.Int64) *mcp.Server {
 	options := serverOptions()
 	options.Logger = logger
-	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: "v0"}, options)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "gomutant", Version: toolversion.Identity()}, options)
 	srv.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
 			// A handler panic runs on the session's goroutine — past the

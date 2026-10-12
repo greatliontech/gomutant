@@ -1,0 +1,32 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-cli-version"
+  content_hash: "8df32dca6379cd09295686e42d33f5030ee3afec8842a736d8ea186921bcc9aa"
+  source_hash: "e41f71fbbd5bd30031a000ecf35eb0b2f2981f4ca50b4860462c8fe052b0f28c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestVersionSurfaces"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7fd8d286433e0b582b85cb81de4ce0af0daf7c851ddb726c91d04bb9e5ee88b2"
+}
+
+bindings {
+  requirement_id: "REQ-cli-version"
+  content_hash: "8df32dca6379cd09295686e42d33f5030ee3afec8842a736d8ea186921bcc9aa"
+  source_hash: "e41f71fbbd5bd30031a000ecf35eb0b2f2981f4ca50b4860462c8fe052b0f28c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/cmd.TestVersionExecutableNeedsNoGoOrGit"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b4212813b6c07bc9f74ae31e9df21603a347bd0a56b74dd4bf6d1176ca15a632"
+}
+
+bindings {
+  requirement_id: "REQ-cli-version"
+  content_hash: "8df32dca6379cd09295686e42d33f5030ee3afec8842a736d8ea186921bcc9aa"
+  source_hash: "e41f71fbbd5bd30031a000ecf35eb0b2f2981f4ca50b4860462c8fe052b0f28c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/mcpserver.TestInitializeIdentifiesTheRunningBinary"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9ba87e2d78faebe1cdbf7fa5a80feead92e7dfda9d5da34d07946acf2917c086"
+}

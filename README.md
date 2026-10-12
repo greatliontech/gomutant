@@ -20,6 +20,11 @@ retain their own rules.
 
 ## CLI
 
+Use `gomutant version` or `gomutant --version` to identify the installed
+executable before a field report. Both work outside a project and show embedded
+version, revision, modified state, compiler and Gofresh dependency facts,
+followed by the separately labelled findings-format capabilities.
+
 ```
 # Measure every addressable function in the tree against the tests of every in-tree package whose test binary links its package.
 gomutant run

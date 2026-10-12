@@ -19,7 +19,6 @@ func Execute(args []string) error {
 
 // ExecuteContext runs the gomutant command tree with args and cancellation.
 func ExecuteContext(ctx context.Context, args []string) error {
-	startDebugProfiler()
 	ctx, stop := withSoftInterrupt(ctx)
 	defer stop()
 	cmd := newRootCommand()
@@ -37,11 +36,15 @@ func newRootCommand() *cobra.Command {
 		RunE: func(*cobra.Command, []string) error {
 			return fmt.Errorf("a command is required")
 		},
-		// Every command's process runs under the fleet's one ceiling
+		// Working commands run under the fleet's one ceiling
 		// (gofresh/resident: the host's available memory halved,
 		// floored at 1 GiB; an explicit operator GOMEMLIMIT replacing
 		// it), installed before the verb runs — REQ-mcp-resident-set.
-		PersistentPreRun: func(*cobra.Command, []string) {
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+			if cmd.Name() == "version" && cmd.Parent() == cmd.Root() {
+				return
+			}
+			startDebugProfiler()
 			limit := resident.InstallCeiling()
 			if seams.memoryLimitInstalled != nil {
 				seams.memoryLimitInstalled(limit)

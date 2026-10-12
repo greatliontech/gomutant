@@ -35,7 +35,7 @@ func TestEveryCommandInstallsTheFleetCeilingBeforeTheVerb(t *testing.T) {
 		args    []string
 		refuses bool
 	}{
-		{[]string{"version"}, false},
+		{[]string{"guidance"}, false},
 		{[]string{"discover", "--dir", t.TempDir()}, false},
 		{[]string{"discover", "--dir", filepath.Join(t.TempDir(), "absent")}, true},
 	} {

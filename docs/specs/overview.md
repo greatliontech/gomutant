@@ -8,6 +8,22 @@ dispositioned. gomutant measures whether tests have teeth; it never decides
 whether anything is "covered" — that judgment belongs to whatever consumes
 its findings.
 
+## Executable identity
+
+**REQ-cli-version** (behavior): The CLI MUST expose `version` and `--version`
+as project-independent queries of the running binary's embedded identity.
+Both print the same single line: tool name, module version or development
+identity, revision, modified state, compiler and linked Gofresh version or
+replacement. Missing facts remain unknown, never inferred from cwd, git, a
+selected Go command or the network. The shared toolversion metadata rule is
+the source of those facts. Findings write/read format versions remain separately
+labelled capability information. The query loads no project or policy, starts
+no profiler, installs no execution-memory policy and writes no tool state.
+It works with malformed project files and without go or git on PATH. Help
+advertises both forms; the subcommand takes no positional operands. Existing
+MCP initialization reports the running server's same embedded identity rather
+than a constant or another installed binary's identity.
+
 ## Stance
 
 Non-normative orientation; each property is specified in its own document.

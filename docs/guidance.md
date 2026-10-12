@@ -330,9 +330,11 @@ client configuration.
 **surfaces:** cli
 **does:** Print the binary identity and findings document versions.
 **knobs:** none
-**when:** use version when auditing binary/document compatibility —
-it names the findings document version the binary writes and the
-range it reads.
+**when:** use version (or --version) before a field report. It names the running
+binary's module version, revision, modified state, compiler and Gofresh dependency,
+with missing facts explicitly unknown and local replacements named. The findings
+document version and readable range are separate capabilities. No project is
+loaded and no profiler, measurement or store operation starts.
 **example:** version before judging a findings document another
 binary wrote.
 

@@ -158,7 +158,8 @@ rule counts nothing of an in-flight call's held set against the host;
 what its walk cannot see of the call's memory reads as the host's, so
 the room errs low, never cutting a request), so a long-lived server's
 ceiling rises or falls with the host, and by
-every command's shared preamble before the verb runs — a soft limit
+each working command's shared preamble before the verb runs (the metadata-only
+version query is exempt) — a soft limit
 never cuts a request. A server's resident set at idle after a
 run-class request is the runtime's floor — the heap returned at the last
 in-flight call's end, the tree released at the idle window — never the
