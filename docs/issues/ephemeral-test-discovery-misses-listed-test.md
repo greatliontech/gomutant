@@ -62,6 +62,27 @@ filing this issue.
 
 ## Expected behavior and resolution
 
+A second reproduction is not a synctest-shaped test. Weaver's causal-membership
+working tree produced the same mismatch for ordinary Go tests:
+
+```sh
+gomutant ephemeral --batch /tmp/opencode/weaver-causal-token.json --test-pkg ./internal/invocation/gmdbstore --run '^TestCausalRechecksActualCommittingSnapshot$' --runs 3
+```
+
+The edit removes only `current != token` from
+`g != expected || current != token || g == math.MaxUint64` in
+`internal/invocation/gmdbstore/causal.go`. The probe again reported no matching test
+and measured nothing. A campaign selecting `checkCausalParticipants` with oracle
+`TestCausalMalformedHistoryAndBounds` skipped the target because the oracle was
+"not a runnable test" (run `fa4ed2ff84ba766b`; zero measured targets).
+
+In the same tree, Go listed both tests with
+`go test -short -list '^TestCausal(RechecksActualCommittingSnapshot|MalformedHistoryAndBounds)$' ./internal/invocation/gmdbstore`,
+then executed both successfully with `-short -race -count=1 -run` and the same
+pattern (6.726s). Thus the observed discrepancy extends beyond the original
+synctest wrapper. The cause remains unestablished; successful ordinary execution
+does not measure either mutation.
+
 A test-scoped ephemeral probe should discover the matching test that Go lists
 under the same effective package and build selection, then measure and attribute
 the requested edit. If the selections differ, that difference must be identified
