@@ -1,6 +1,6 @@
 # Issue docs
 
-The 52 retained issues below each name one primary open slot in
+The 53 retained issues below each name one primary open slot in
 [tooling-redesign](../../../gofresh/docs/plans/tooling-redesign.md).
 Secondary constituents are stated separately in the issue. Historical measurements
 and consumer reports are evidence to reconcile, not newly executed verification
@@ -16,6 +16,7 @@ baseline for the planned selection-coexisting lifecycle.
 
 | Issue | Current obligation | Primary Lands slot |
 |---|---|---|
+| [cache-cleanup-preserves-local-attestations](cache-cleanup-preserves-local-attestations.md) | 4 GiB user-cache store mixes disposable baselines with local human attestations; preserve records during reclamation | 7.9b |
 | [attest-has-no-replace-or-withdraw](attest-has-no-replace-or-withdraw.md) | Findings-attestation replacement and withdrawal across selection-coexisting records and both layers | tooling-redesign 6.6 |
 | [baseline-measurement-banks-only-at-the-first-commit](baseline-measurement-banks-only-at-the-first-commit.md) | Validated baseline deposits before findings, with shared-tree bank serialization across document paths | tooling-redesign 6.5 |
 | [campaign-silent-past-its-deadline](campaign-silent-past-its-deadline.md) | Cadence through Finish/rendering; reproduce the reported deadline overrun separately | tooling-redesign 6.7 |
