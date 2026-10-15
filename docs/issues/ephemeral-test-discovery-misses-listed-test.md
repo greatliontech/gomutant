@@ -1,6 +1,6 @@
 # Ephemeral test discovery misses a test listed by Go
 
-Lands: when gomutant's Go test discovery or test-pattern matching is next changed, including discovery coverage for tests using the standard-library testing/synctest package.
+Lands: tooling-redesign 5.4.
 
 ## Observation
 
@@ -61,6 +61,12 @@ or mutation sensitivity. These probe and listing commands were not rerun while
 filing this issue.
 
 ## Expected behavior and resolution
+
+Current full-oracle@3 admission includes Go's alias-shaped runnable declarations.
+That repair does not diagnose or close either Weaver observation below: the
+reported tool identity is older, its original failed call did not capture that
+identity, and neither mutation was measured. Preserve both cases until the
+actual effective selection and source state are established.
 
 A second reproduction is not a synctest-shaped test. Weaver's causal-membership
 working tree produced the same mismatch for ordinary Go tests:

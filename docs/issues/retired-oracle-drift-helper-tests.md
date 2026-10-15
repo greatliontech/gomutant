@@ -1,7 +1,6 @@
 # Remove non-admitted drift helper fixtures
 
-Lands: gofresh docs/plans/tooling-redesign.md 5.6, when the consumer's test
-and implementation residues are retired after its unit-boundary migration.
+Lands: tooling-redesign 5.6.
 
 Oracle-drift work state, dispatch narrowing and publication have no admitted
 producer. The remaining forward-reference proposal helpers in freshness.go,
@@ -16,3 +15,9 @@ implementation in tests as replacement coverage. Retire mechanism-only claims
 and enforcement pointers rather than treating their passing tests as proof of
 the current execution policy. The public policy gate and complete dispatch
 remain enforced independently of these helpers throughout.
+
+Current REQ-result-stale requires whole remeasurement when oracle identities or
+evidence change; full-oracle@3 cannot be established by tests of the retired
+composition helpers. Remove their mechanism-only callers after preserving
+admitted-path regressions, rather than treating a surviving old helper pin as
+authority to restore the producer.

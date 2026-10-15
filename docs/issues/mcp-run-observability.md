@@ -89,4 +89,12 @@ new status service, transport extension, or evidence relaxation is prescribed.
 The related `mcp-liveness-cancellation-witness.md` concerns transport lifecycle;
 it does not provide the missing campaign observability or preflight surface.
 
-Lands: cross-tool train chunk 233 (chartered from this report at 207's open)
+Current tokenless responses retain capped preparation/decision/analysis payloads
+at return; that is not a durable recovery service. Execution progress and the
+committed final account can still be lost with the reply, particularly on the
+post-write error path. Build bounded machine-local recovery with explicit run
+and project identity, cumulative counts and terminal disposition. Preserve
+full-oracle@3's complete oracle; the historical preflight numbers and policy-era
+survivor buckets are not current execution authority or an ETA.
+
+Lands: tooling-redesign 6.7.

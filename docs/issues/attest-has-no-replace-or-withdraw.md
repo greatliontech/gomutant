@@ -20,9 +20,10 @@ ephemeral face applies), and a withdraw form that returns the
 survivor to open with the withdrawal reason on record, so the
 attestation history reads forward like the findings document does.
 
-Triage (2026-09-14, during chunk 244): the document face lacks the
-guard the ephemeral face already applies (`--reattest`, chunk 160);
-the replace form is parity, the withdraw form a new lifecycle
-transition recorded forward — both chartered as chunk 256.
+The current findings attestation path still refuses an existing disposition;
+the ephemeral replacement form does not supply findings-record replacement or
+withdrawal. Extend the lifecycle across selection-coexisting records and both
+layers without turning historical equivalence into current execution evidence.
+The admission rules in REQ-result-stale remain independent of a disposition.
 
-Lands: cross-tool train chunk 256
+Lands: tooling-redesign 6.6.

@@ -1,6 +1,6 @@
 # Installed binary built from a dirty tree (fleet sweep 2026-10-05)
 
-The weekly fleet sweep's binary-provenance check reports the installed
+The 2026-10-05 weekly fleet sweep's binary-provenance check reported the installed
 `gomutant` (`~/go/bin/gomutant`) stamped `vcs.revision=9afc5c673c5b`
 with `vcs.modified=true`: DIRTY-BUILD. The revision is the last
 build-input commit (chunk 306's landing, "an explicit oracle superset
@@ -14,18 +14,8 @@ stamp; the stamp cannot tell the two apart and the sweep reads the
 stamp) — is unrecoverable from history, and the sweep's check cannot
 vouch for a binary it cannot anchor.
 
-The standing response is the SKEW response: `go install` in this repo
-from a clean tree (committed HEAD, `git status` empty), then restart
-long-lived readers (`gomutant mcp`). The sweep's next provenance line
-reading `match` without the flag is the check that closes this doc.
-
-Scanned: the index and all 49 docs it lists.
-ephemeral-attestation-lifecycle and
-evidence-fault-rendered-as-dirty-provenance concern the measured
-TREE's dirtiness stamped into records, not the installed binary's
-build stamp; the 2026-09-21 installed-binary-skew doc closed at chunk
-282's install and is gone. No doc covers binary provenance, so the
-rows are disjoint and no scheduled trigger is duplicated.
+The installation obligation covers both binary files and long-lived readers:
+replacing a file does not replace an already-running MCP process.
 
 Re-observed by the 2026-10-12 sweep with the fact moved: the line now
 reads SKEW — binary `vcs.revision=2172a8b42bb0`, last build-input
@@ -36,8 +26,11 @@ commits, so the installed binary trails HEAD. The remedy is the same
 `go install` from the committed tree; this doc keeps tracking the
 provenance line rather than minting a second trigger for the skew.
 
-Lands: the fleet sweep's next binary-provenance line reading `match`
-without the modified flag — the `go install` from the committed tree
-at gomutant's next chunk close in the active sequence
-(tooling-redesign 5.4), or any earlier clean install, which closes it
-sooner.
+The current source audit supplied for this filing records both installed files
+(`~/go/bin/gomutant` and `~/.local/bin/gomutant`) at clean revision `1e5ff06`,
+with `modified=false`. The old dirty/skewed file state is no longer the current
+claim. The live MCP process identity remains unknown and the next fleet sweep
+has not been completed. Close against actual file and process provenance, not
+an inferred restart; this document edit performs neither installation nor sweep.
+
+Lands: tooling-redesign 9.3.

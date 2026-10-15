@@ -1,6 +1,6 @@
 # Oracle attribution hides post-commit work
 
-Lands: cross-tool train chunk 267, with campaign progress and close-out reporting.
+Lands: tooling-redesign 6.3.
 
 A derived-oracle campaign can finish mutation measurement and commit one target,
 then spend most of its remaining lifetime in synchronous instability attribution
@@ -44,3 +44,13 @@ findings; excluding integration tests is not a reporting fix.
 An explicit oracle containing exactly the same tests avoids the advisory sweep
 without changing the test selection. This is a caller workaround, not a fix for
 the derived-oracle progress contract.
+
+The current synchronous advisory path remains separate from the required
+full-oracle@3 verdict. Move it off other targets' commit path and retain partial
+attribution with explicit unknown/failed state. A reuse refusal or volatile
+observation is not itself flip evidence, and neither an explicit oracle nor an
+instrumentation callback should silently change which advisory work executes.
+
+Secondary constituents: tooling-redesign 6.7 preserves cumulative progress
+through closing; 7.2 gives advisory execution and read-only instrumentation
+distinct ownership.

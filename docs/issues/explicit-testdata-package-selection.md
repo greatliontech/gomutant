@@ -1,6 +1,6 @@
 # Explicit fixture package selection cannot load a testdata package
 
-Lands: cross-tool train chunk 188
+Lands: tooling-redesign 5.4.
 
 VMM keeps a guest-helper command and its host-side unit tests in
 `testdata/linux-init`, in the existing module rather than a nested module.
@@ -63,3 +63,8 @@ that boundary and its remedy explicitly rather than treating it as measured.
 supplies this explicit fixture-loading path. The separate
 [external-oracle issue](external-oracle-for-tagged-and-subprocess-targets.md)
 does not cover it.
+
+The current loaded-set boundary still separates explicit selection from Go's
+wildcard inventory. Full-oracle@3's runnable-alias repair does not load an absent
+fixture package. Extend explicit loading without confusing a package filter
+with a load request or borrowing evidence from a different root or selection.

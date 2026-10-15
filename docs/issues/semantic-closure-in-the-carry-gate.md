@@ -1,6 +1,7 @@
 # Semantic closure identity in the disposition carry gate
 
-REQ-attest-survivor keys the disposition carry to the mutation domain
+For unshaped findings, REQ-attest-survivor keys disposition carry to the
+mutation domain
 (body hash + operator set), deliberately excluding the closure. The
 field failure that motivated the rule was a measurement-pin move over
 byte-identical subjects: the dynamic-state strategy pin moved (gofresh
@@ -10,7 +11,7 @@ aborted-run epilogue this change set also fixed). The closure was NOT
 that event's mover — but the same campaign demonstrated the closure's
 own over-triggering separately: a dependency doc-comment edit moved
 four targets' recorded closures ("stale (target: closure)"), because
-the content-hashed closure cannot distinguish a comment edit from a
+the then-content-hashed closure could not distinguish a comment edit from a
 semantic change. Putting the closure in the carry gate would therefore
 shed dispositions on changes provably unable to bear on equivalence.
 
@@ -18,15 +19,12 @@ The accepted risk of excluding it is stated in the requirement: a
 dependency-semantics move can flip an equivalence while a never-executed
 mutant keeps surviving, carrying stale reasoning.
 
-A middle gate would dominate both poles: shed when the closure moved
+The original proposal was a middle gate: shed when the closure moved
 SEMANTICALLY (a change able to bear on the mutant's meaning), carry
-across comment/format-only closure motion. That needs a closure identity
-insensitive to non-semantic edits — gofresh's closure is already
-reachability-scoped (an unreachable edit does not move it) but its hash
-is content-based, so comments and formatting count. If gofresh grows a
-canonicalized closure identity (the analogue of gomutant's canonical
-body hash, over the whole closure), the carry gate adds it as a third
-component and the stated risk clause narrows accordingly.
+across comment/format-only closure motion. It assumed a reachability-scoped
+closure and proposed canonicalizing its content as a third gate component.
+That scoping premise was false; canonicalization alone cannot supply the
+subject-semantic certificate the proposal needs.
 
 The 2026-08-21 review's derivation, for the record: closure-in-the-gate
 as-is sheds on changes provably unable to bear on equivalence; body-only
@@ -56,10 +54,16 @@ hashes included, and a derivation move (gofresh's canonical member form
 @1 → @2 at the v0.102.0 bump) moves those hashes with no source byte
 changed — a shaped disposition sheds and re-attests, an unshaped one
 carries under the domain gate with the derivation named on the carry
-report. Bridging — dropping the two incomparable hashes from the pin
-view when the derivations differ — would carry a disposition over a
-real source edit made in the same window as the bump, which the gate
-cannot tell apart; whether that risk is acceptable for the re-attest
-cost it saves is the design question this issue's chunk opens with.
+report. Dropping the two incomparable hashes from the pin view when the
+derivations differ would also carry across a real source edit made beside the
+bump. Keep shaped hash values: erasing them to manufacture equality is not an
+applicability proof. A derivation move alone supplies no bridge.
 
-Lands: cross-tool train chunk 175 (autonomous since the 2026-09-29 ratification)
+The current unshaped domain rule and shaped pin comparison remain distinct.
+Refine dependency precision only with complete generation identities and an
+explicitly justified transformation; the package-maximal closure cannot serve
+as a subject-semantic certificate merely because it ignores comments. An
+attestation carry also cannot upgrade old oracle execution policy or compose
+outcomes across changed oracle evidence under full-oracle@3.
+
+Lands: tooling-redesign 7.8.

@@ -23,12 +23,14 @@ symlink resolution on both operands; a path outside the tree refuses
 with the site's own message. Never a deletion of a refusal — every
 site's refusal stays, only its coordinate composition moves.
 
-## Why not now
+## Request-scoped ownership
 
-The sites sit in five files across the root and the edit batch; the
-fold changes recorded spellings for a symlinked tree only where a site
-today resolves fewer links than the load — a behaviour move that needs
-its own witness set (a linked tree per site), beyond 246's bump
-coherence.
+The current server has a configured root; the active plan adds a request-scoped
+project context. Consolidate coordinates there without equating evidence root
+and process working directory. Relative requests resolve against the startup
+default, never the preceding call; invalid selections refuse rather than falling
+back. Cache keys, locks, trust and records must use that operation's root.
+Preserve lexical and resolved containment checks and absent-path behavior;
+an Abs/EvalSymlinks pair is not redundant merely because it looks similar.
 
-Lands: cross-tool train chunk 220 (gomutant's named smalls).
+Lands: tooling-redesign 5.5a.

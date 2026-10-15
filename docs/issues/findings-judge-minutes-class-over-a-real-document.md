@@ -10,15 +10,15 @@ dynamic-state discharge by the analysis budget); a second timing point
 after 9afc5c6 (gofresh v0.108.3) is offered, with the run log's phase
 lines.
 
-What the judged walk pays per record is the question: the freshness
-check builds a view per record's subjects — the pass whose discharge
-analysis the budget now bounds, memo-served for an unchanged package —
-and the posture pass judges every record against the current tree; a
-walk that re-derives per record what one view set would derive once is
-the same shape 156.4a collapsed for the campaign ("one admission pass
-and one view set per posture"). The second timing point and the phase
-lines separate the freshness pass from the document walk.
+The current judged walk already shares admission and view sets per posture;
+`viewsFor` refuses prebuilt views of the wrong mode and constructs a supplementary
+set only for missing subjects. This is not evidence of a general one-view-per-
+record construction bug. Measure the residual load, analysis, supplementary
+views, manifest reading and rendering with the same document and tree. Separate
+cold and warm cost and policy-only refusals from actual freshness judgment.
+The offered second timing point has not been executed for this update.
 
-Lands: cross-tool train chunk 302 (gomutant — the findings record and
-its document walk are its domain; the open triages this with protodb's
-second point).
+Secondary constituent: tooling-redesign 7.8 owns any demonstrated redundant
+generation-scoped work; existing sharing must not be rebuilt under another name.
+
+Lands: tooling-redesign 7.7.

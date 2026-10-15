@@ -11,5 +11,10 @@ strips an attestation no commit reported (a record the run serves
 whole while its attested site is gone, or a whole-tree reconcile over
 an attested record) would pin the append on both faces.
 
-Lands: cross-tool train chunk 219 (the test surface — the face-scenario
-table pins the faces decide alike).
+The current run epilogue still has to carry merge-only sheds through both a
+normal response and a post-write failure. The historical surviving mutation is
+the evidence for the missing fixture, not a fresh whole-package test result.
+Exercise a real nonempty residue and preserve the same completed account in
+bounded recovery; merely checking the ledger's root helper is insufficient.
+
+Lands: tooling-redesign 6.7.

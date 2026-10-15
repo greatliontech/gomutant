@@ -17,9 +17,15 @@ explain responses) and an object once (`kept`, `rewrittenCounts`,
 The collapse: one `LayerCounts` the three sites fill, one projection
 on the wire (the object), the total derived; the run tallies keep
 their total-plus-subset rendering as a projection over the pair, never
-a second count. Invariants preserved: a symbol held in both layers is
-two records; the unknown-layer default is one rule (repo, as `add`
-has it) or a refusal.
+a second count. Preserve the population each counter names: physical records in
+two layers, merged findings, and successful commits are not interchangeable
+counts. Resolve the opposite fallback rules from the actual layer domain rather
+than choosing one because it is older. The text above describes divergent
+defaults, not a reachable unknown layer in the current two-layer model.
 
-Lands: cross-tool train chunk 220 (the one-spelling sweep; filed at
-283's change set B from the review's consolidation candidate).
+The current lifecycle object and inspection/run encodings still need one
+reader-facing account. Coordinate the projection with selection-coexisting
+records; do not derive a total by combining overlapping populations. Any wire
+change is explicit and preserves both-layer visibility.
+
+Lands: tooling-redesign 8.3.

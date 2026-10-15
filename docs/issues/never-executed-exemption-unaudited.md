@@ -1,12 +1,10 @@
-# A never-executed verdict is exempt from execution AND from the audit, so a coverage miss is never re-scored
+# Historical negative-coverage exemptions need sound authority before returning
 
-The narrowed survivor's ground is measured batch coverage over the
-mutant's extent: a non-reaching batch is exempt from execution, and
-the standing audit re-scores a sample of NARROWED survivors under
-the full oracle. A mutant whose extent the coverage attributes to
-NO test lands in the never-executed bucket — exempt from every
-batch and, being outside the narrowed class, outside the audit
-sample too. When the attribution is wrong, nothing catches it.
+The original report described a coverage exemption with a sampling blind spot:
+a non-reaching batch was omitted, while the audit sampled narrowed survivors;
+an extent attributed to no test was reported outside that sample too. The later
+none-reaching-arm reproduction below did not establish that omission path.
+Neither account supplies negative-coverage authority for the current tool.
 
 Observed (v0.52.0, downstream workspace wisp, a staged
 `--changed=HEAD` campaign, oracle 59 tests across one package):
@@ -20,22 +18,24 @@ audit lines report 0 disagreements across 13 windows because the
 sampled class excludes this bucket. Dozens of sibling lines the
 same test demonstrably executes carry the same verdict.
 
-Two remedies, either sufficient: sample the never-executed bucket
-into the audit exactly as the narrowed class is sampled (a
-disagreement there is the loudest possible signal — the exemption
-ground itself failed), or restore the full-run requirement for an
-extent whose attribution is empty rather than treating emptiness
-as a sound non-reach.
+Current full-oracle@3 has removed that authority: every required group runs
+unsplit, and historical batch banks cannot restore omissions. Sampling an
+unauthorized exemption is not a sound repair. Parent-profile absence proves
+neither absent child execution nor absent compile-time influence.
 
-Lands: a reproduction on a gomutant carrying the none-reaching arm
-(schedule.go narrowingBatches, 44abf11 — a partition no batch reaches
-runs the group whole, so the extent is never exempt) that records the
-campaign's decision line for the symbol and whether the survivor's
-record was measured in that run or served from a prior finding. The
-chunk-158 triage (2026-09-08) reproduced the report's class over a
+The historical none-reaching arm (44abf11) already ran an empty-reaching
+partition whole. The 2026-09-08 triage reproduced the report's class over a
 switch on string tags: coverage blocks span the switch header and each
 case body but never a case tag, so a tag mutant's extent intersects no
 block — the campaign still killed the tag mutant (whole-group run) and
 the only never-executed survivors were the untested arm's, correctly
 prescribed coverage. The reported open survivor therefore reached its
 verdict by a path the report does not carry.
+
+Any future negative authority requires a complete harness/locality premise AND
+candidate-influence proof, with full-oracle fallback and a positive arithmetic
+control. Recover and remeasure the affected historical population; policy 1/2
+records and their never-executed labels are history, never exemptions or
+equivalence authority. Do not rebuild audits for the removed scheduler.
+
+Lands: tooling-redesign 6.2.

@@ -1,7 +1,9 @@
 # git-go native-oracle observation and reuse refusals
 
-Lands: Gofresh docs/plans/tooling-redesign.md 5.4, with the cost and precision
-questions at 7.7/7.8 and the diagnostic account at 8.3. These are generic tooling
+Lands: tooling-redesign 5.4.
+
+Secondary constituents: tooling-redesign 7.7 measures cost, 7.8 judges sharing
+and precision, and 8.3 owns the diagnostic account. These are generic tooling
 obligations, not authorization to implement git-go features or rerun its campaign.
 
 ## Observed consumer case
@@ -25,6 +27,13 @@ producing-run observations, not a claim that an execution-policy label alone
 establishes complete oracle admission. Reconcile them with
 [the execution-policy admission contract](../specs/results.md)
 before granting authority that the historical record does not establish.
+
+Under current `gomutant/full-oracle@3`, policy 2 is unsupported for both body
+and shaped records. These counts and attestations remain inspectable history;
+none authorizes exact reuse, extension or splicing without whole remeasurement.
+The report's refusal classes still need separate current diagnosis: retiring
+the policy does not explain external scratch, testing-context conservatism or
+an unavailable subject. A reuse refusal is not evidence of an execution flip.
 
 Every record remained machine-local because the consumer worktree was genuinely
 uncommitted. That placement is expected and distinct from the reuse refusals:

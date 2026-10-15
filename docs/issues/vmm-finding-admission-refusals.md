@@ -1,19 +1,15 @@
 # VMM measurements remain unverifiable after successful execution
 
-Lands: cross-tool train chunk 193 (the immutable-after-construction proof; the dynamic-behavior class rides gofresh docs/issues/invoke-targets-narrowed-by-operand.md) — the audit-key half closed at gomutant's gofresh
-bump to v0.99.0 (cross-tool train chunk 163, 2026-09-08: a gomutant built
-from the bumped tree under the stock go1.27.0 toolchain with
-GOEXPERIMENT=nodwarf5 loaded a fixture, ran its baseline, and measured a
-mutant with no toolchain-unaudited notice); the three residual refusal
-classes below are gofresh precision positions, each already owned there:
-`reaches os.ReadFile (file I/O)` is an intended external-effect refusal
-(a subject reading a file is observable by contract; a vouch cannot
-discharge an effect); `testing runtime value escapes analyzable
-receiver` is gofresh docs/issues/immutable-after-construction-objects.md
-(gofresh chunk 193 since the 2026-09-29 ratification); `subject accepts caller-supplied dynamic behavior` is
-gofresh docs/issues/invoke-targets-narrowed-by-operand.md (the chartered
-narrowing). This doc stands until those two decide, as the consumer-level
-record of which VMM targets each governs.
+Lands: tooling-redesign 5.4.
+
+The audit-key half closed historically at the gofresh v0.99.0 bump on
+2026-09-08: a Gomutant built with stock go1.27.0 and GOEXPERIMENT=nodwarf5
+loaded a fixture, ran its baseline and measured a mutant without that notice.
+The remaining report concerns distinct file-input, testing-receiver and dynamic-
+behavior refusals. Reconcile each with the current native producing boundary;
+none is automatically a precision defect or a reason to grant blanket trust.
+Current full-oracle@3 retires these older records' execution authority, not the
+consumer observations. Whole remeasurement is required before reuse.
 
 ## Evidence
 
@@ -29,11 +25,11 @@ The toolchain notice says the release is not listed and disables
 standard-library observation admission. The shared root-cause report already
 exists in gofresh:
 
-https://github.com/greatliontech/gofresh/blob/main/docs/issues/nodwarf5-toolchain-audit-key-mismatch.md
+In the Gofresh repository: `git log --all -- docs/issues/nodwarf5-toolchain-audit-key-mismatch.md`.
 
-Both audit-key lookup and baked-experiment parsing need consistent identity
-handling. This issue owns gomutant adoption and the consumer-level regressions,
-not another implementation of gofresh's toolchain parser.
+That historical identity problem is not the current version-based audit design:
+Gofresh now judges selected standard-library content. This issue owns consumer
+adoption and reduced regressions, not another implementation of that audit.
 
 Repository placement does not settle freshness. The consumer's recorded
 findings have these judgments:
@@ -85,11 +81,11 @@ diagnosis step while that gate is closed.
   after adoption. Previously executed kills must not be promoted into reusable
   evidence without the required proof.
 
-The existing gofresh issue
-`docs/issues/sibling-reason-families-name-their-channels.md` overlaps actionable
-wording for caller-supplied behavior, but does not resolve these consumer proof
-reductions. Existing VMM records are current-generation evidence; no legacy
-findings migration or inheritance of old equivalence judgments is requested.
+The historical reason-wording work is recoverable in Gofresh with
+`git log --all -- docs/issues/sibling-reason-families-name-their-channels.md`.
+It does not resolve these consumer proof reductions. Existing VMM rows are
+historical evidence, not current-generation authority; neither a decoder nor a
+new toolchain audit supplies their missing admission facts.
 
 ## Additional Stash Evidence And Adoption Acceptance
 
@@ -122,3 +118,8 @@ of its measurements are blocked on the upstream fixes. Use tool-owned fixtures
 for acceptance rather than a Stash canary. This shares the adoption work already
 owned by this report; it does not require all VMM or Stash records to become
 cacheable.
+
+The statements about paused VMM/Stash work describe the reports' own boundary,
+not a newly checked consumer status. No consumer campaign or adoption verification
+was executed for this update. Reduce the actual refusing classes independently
+and preserve legitimate identity-only outcomes and file dependencies.

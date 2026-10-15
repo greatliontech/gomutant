@@ -30,4 +30,10 @@ its clause is a read of every test against docs/specs/mcp.md and
 docs/specs/execution.md — the test-surface chunk's work, not a vouch
 change set's.
 
-Lands: cross-tool train chunk 219 (gomutant's test surface).
+All eighteen named tests remain live and unbound in the current source audit.
+Their presence is not a verified clause claim. Read each body against the
+current contract, including full-oracle@3 and the current response shape, before
+authoring a binding or identifying a remaining witness gap. This filing update
+does not run them or bind them automatically.
+
+Lands: tooling-redesign 9.3.

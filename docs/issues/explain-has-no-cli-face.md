@@ -1,6 +1,6 @@
 # explain has no CLI face
 
-Lands: cross-tool train chunk 258
+Lands: tooling-redesign 8.3.
 
 `explain` answers why — a symbol's full machine-local clause list
 and its per-survivor prescriptions, or the whole document's
@@ -26,3 +26,8 @@ not even that.
 The collapse: one `explain` read surface with a CLI face beside the
 MCP one, as `findings` is served, so a `run`'s "machine-local only"
 line is followed by the command that says why.
+
+The current command inventory still lacks `explain`; the MCP reader remains
+the available form. A CLI projection must preserve recorded-versus-judged
+distinctions and full-oracle@3's policy refusal: a historical survivor's
+prescription is not evidence of current reach or reusable execution.

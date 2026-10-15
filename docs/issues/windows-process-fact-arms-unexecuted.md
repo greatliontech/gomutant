@@ -1,14 +1,15 @@
-# Windows process-fact arms are compile-checked, never executed
+# Real-runner execution of Windows process-fact arms remains unverified
 
 The engine's platform-owned process facts — `oracleProcessKilled`'s
 windows reading (the jobCommand `cancelled` flag, set by both
 ctx-driven job kills: the Cancel closure and `terminateJob`), the
 job-object spawn/assign/resume paths, and the timeout-attribution
 behavior built on them (`oracleBudgetFired`, `BaselineTimeoutError`
-flow) — are verified on windows only by `GOOS=windows go build` and
-`go vet`. No test executes them: the exit-state fixture test
-(`TestOracleBudgetFiredDiscriminates`) skips on windows, and the
-development loop has no windows host.
+flow) — have compile/build checks, but this filing has no verified Windows
+runner execution. `internal/engine/process_windows_test.go` already contains
+`TestCommandContextKillsWindowsJob` and its child helper; writing a first job-kill
+test is not the missing work. `TestOracleBudgetFiredDiscriminates` still has a
+Windows skip, so job termination and attribution coverage must be distinguished.
 
 The cost is demonstrated, not theoretical: two windows-only
 attribution defects (the POSIX-only `ExitCode() == -1` reading, and
@@ -22,6 +23,9 @@ with windows-native fixtures (cmd.exe equivalents of the three exit
 states, plus a ctx-driven kill exercising the `cancelled` flag) and
 `TestParentDeadlineIsCancellationNotTimeoutKill`.
 
-Lands: when greatliontech/actions' go-gate.yml gains a runner input
-and a caller passes a windows runner (the fleet's gate owns the runner
-set; today `ubuntu-latest` is fixed in the called workflow).
+Real Windows runner capability and a caller that uses it are prerequisites for
+acceptance. Run the existing job-kill witness and the applicable attribution
+cases there, supplementing missing native cases only where needed. Cross-build
+success is not execution evidence, and this document update performs neither.
+
+Lands: tooling-redesign 9.3.

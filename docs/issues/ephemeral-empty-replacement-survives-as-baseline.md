@@ -1,16 +1,17 @@
-# An ephemeral batch edit with an empty replacement survives as the baseline
+# Reported empty-replacement discrepancy remains unreproduced
 
-Lands: a reproduction on a committed tree — the batch, the tree's revision, and the ephemeral verdict — since the reported tree (ocifs's `pullPolicyUnset` guard and `TestNewStoreRefusesUnnamedPullPolicy`) is on no branch of the repository, and a fixture of the reported shape (a String switch arm deleted with an empty replacement, the error-message test) is killed by both spellings under gomutant 58e0f41-era binaries
+Lands: tooling-redesign 5.4.
 
-A batch edit whose `new_string` is empty — the natural spelling of
+The consumer reported that a batch edit whose `new_string` is empty — the
+natural spelling of
 "delete the guard whole", which the ephemeral guidance itself
 prescribes over neutering — is accepted by the parser (`editbatch.go`
 refuses an empty `old_string` and a byte-identical pair, and
 requires the field present, not non-empty), and the probe then
-reports `SURVIVED` naming a file the edit never touched. The same
-deletion spelled with a comment line as the replacement is killed by
-the same test, so the survivor is the unmutated baseline, or a
-mutant built from the wrong file, rendered as a verdict.
+reported `SURVIVED` naming a file the edit never touched. The same
+deletion spelled with a comment line as the replacement was killed by
+the same test. That discrepancy does not establish whether the replacement
+was ignored, the wrong file was attributed, or another boundary failed.
 
 Field report (greatliontech/ocifs, gomutant
 v0.57.11-0.20260919151557-ee9616fd4b7b), reproduced twice:
@@ -34,15 +35,20 @@ killed    internal/store/types.go  by ...TestNewStoreRefusesUnnamedPullPolicy
       store_test.go:915: error "pull policy Unknown is not one of ...", want "pull policy Unset is not one of ..."
 ```
 
-A hand edit of the tree (the arm deleted, the test run, the file
-restored) fails the same test the same way, so the deletion is a
-kill and the probe's `SURVIVED` is a false verdict — the one
-outcome a probe must never render, since a false survivor reads as
-a vacuous test and sends the operator strengthening a test that is
-already load-bearing.
+A reported hand edit of the tree (the arm deleted, the test run, the file
+restored) failed the same test the same way. The report therefore warrants a
+reproduction with the exact source, edit, executable identity and attribution;
+it does not establish the current primitive's behavior.
 
-Two symptoms to separate at triage: the empty replacement not
-applied (or applied and discarded), and the result naming
-`store.go` for an edit scoped to `types.go` — the second may be the
-first's trace (a mutant with no changed file attributed to the
-package's first file).
+Two observations need separate reproduction: the different verdict for an
+empty replacement and the result naming `store.go` for an edit to `types.go`.
+Neither establishes which bytes the producing compiler actually received.
+
+The reported working tree is on no branch of ocifs. A same-shape fixture
+(a String switch arm deleted, with an error-message assertion) was historically
+killed by both spellings under gomutant 58e0f41-era binaries. Current metadata
+replacement handling distinguishes a nil replacement from a supplied source,
+including the deletion case; there is no basis to diagnose an ignored empty
+replacement from this report. Keep the consumer case open without claiming a
+new execution or reproducer. Full-oracle@3 admission and actual mutant-file
+attribution must both hold when it is reproduced.

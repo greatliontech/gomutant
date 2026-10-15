@@ -13,4 +13,11 @@ Collapse: the table entries decode through the same known-object walk
 the inline findings use (decodeKnownObject over each entry, then the
 typed decode), so one duplicate rule covers every record shape.
 
-Lands: cross-tool train chunk 217.
+The current writer is version 16; versions 14–16 use content-keyed tables,
+while older readable versions retain their decoder paths. Reconcile duplicate
+members in both families and in nested known objects without re-encoding away
+the malformed input before admission. A writer's inability to emit the shape
+does not settle decoder safety. Preserve valid siblings and history, but never
+upgrade missing execution policy or native support through decoding.
+
+Lands: tooling-redesign 9.2.

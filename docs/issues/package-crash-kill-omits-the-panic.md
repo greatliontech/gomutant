@@ -1,15 +1,14 @@
-# A package-crash kill's output head omits the panic
+# Reproduce the reported missing panic on a package-crash kill
 
-Lands: cross-tool train chunk 267 (the run's grammars one source on both faces — the package-crash kill carries the panic's bounded head)
+Lands: tooling-redesign 8.3.
 
-An ephemeral probe whose mutant panics outside any test goroutine
-is attributed, per REQ-exec-attribution, as a package-scope failure
-with no test-level event. The kill line carries an output head of
-one line, the package's `FAIL` summary; the panic itself — its
-message and the frame that raised it — is not shown, so the operator
-sees a kill and not what died. A test-attributed kill carries the
-killing test's bounded output head; the package-crash arm would
-serve the same purpose by carrying the panic's head.
+The historical probe below reported a package-scope kill carrying only the
+package's `FAIL` summary, without the panic message and frame. That is the
+observed report, not a general description of current rendering. The current
+`outputTail` path selects package-level events with `Test == ""`; its existing
+synthetic test retains an unnamed panic event. The remaining investigation
+needs the real crash stream's event attribution and truncation behavior,
+including panic output associated with a named test.
 
 Field report (greatliontech/gitprov at e51aee8, first seen on the
 build installed before 9881159, reproduced on
@@ -39,3 +38,13 @@ operator the kill is the guard's absence rather than an assertion.
 The same probe with the message changed instead of the guard removed
 is attributed to the test with its assertion line, so the gap is the
 crash arm's alone.
+
+Reproduce the supplied failure under the current package-crash attribution path
+and preserve its bounded panic message and frame, without weakening the confirming baseline or treating corrupt
+output as a pass. The current stream readers still need a consistent distinction
+between build rejection, malformed data and a crash-truncated stream.
+
+Secondary constituent: tooling-redesign 5.4 retains charter 269's live
+stream-decoder obligation under REQ-core-attributed-kills and REQ-exec-attribution.
+It does not retain the removed coverage-schedule producer or commission a
+unit-build breaker that retries or skips its historical batches.

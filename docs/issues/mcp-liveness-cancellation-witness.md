@@ -4,8 +4,9 @@ The requirement's keepalive CONFIGURATION is pinned
 (TestServerOptionsCarryKeepalive, bound), but its load-bearing clause —
 a failed keepalive ping write cancels every in-flight request context,
 aborting the campaign under REQ-exec-cancellation's terms — has no test:
-nothing exercises the SDK transport seam's ping-failure path. A binding
-cannot express a per-clause shortfall, so the gap rides here.
+nothing in the named configuration pin exercises the SDK transport seam's
+ping-failure path. That specific cancellation path still needs its own witness;
+the existence of a whole-requirement binding does not establish it.
 
 Fix direction: a witness over the MCP SDK's session seam — a transport
 whose write fails after campaign start, asserting the in-flight run
@@ -28,4 +29,10 @@ no probe running — must stay served or fail with a stated reason (the
 exit log names every end's class and cause once the session reached
 the serve loop; the idle liveness itself is unwitnessed).
 
-Lands: cross-tool train chunk 219 (the test surface; the transport-seam fault injection is a chunk's work, never a passive trigger — audit 317).
+Reconcile these transport facts with bounded run recovery and post-write
+responses. A live heartbeat does not prove forward progress, and a disconnected
+caller must not lose the account of already-persisted work. Use actual transport
+fault injection; the historical idle-session observation is not a reproduced
+current SDK fault.
+
+Lands: tooling-redesign 6.7.

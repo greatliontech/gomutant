@@ -1,4 +1,4 @@
-# A plan's cost is candidate materialization, not observation
+# Candidate materialization remains a cost question requiring remeasurement
 
 Measured 2026-09-07 over gomutant's own `internal/engine` (224 targets,
 8,162 candidates, warm memos, `--plan`, no priors): 73 s wall, of which
@@ -11,14 +11,18 @@ warm construction is a memo hit). A plan decides budget and prices
 candidates; it never executes a mutant, yet it pays the source
 rendering of every one.
 
-Collapse candidates, in order of what a plan and a decision actually
-read: price and count candidates from the mutation table without
-rendering (materialize lazily at execution, per window); or render
-without the whole-file reformat and import pass (a byte-range splice
-at the mutation site keeps the file's formatting and imports as they
-were, and the import pruning the never-reached survivor rule needs is
-per package, not per candidate). Invariants preserved: the candidate
-set, its identities and extents (REQ-target-model), the mutated
-source that executes.
+Current `materializeCandidates` already calls `imports.Process` conditionally
+for removal-capable candidates, rather than unconditionally for every candidate.
+The historical percentages above have not been remeasured and are not a current
+profile. Formatting, deduplication and import repair help decide the actual
+candidate set; an unrendered table count cannot simply replace that result.
 
-Lands: cross-tool train chunk 214 (audit 333: the catalog-table fold is the change set touching candidate materialization).
+Measure the same target/candidate population with cold and warm state and no
+oracle omissions before choosing lazy materialization or another sharing scope.
+Preserve candidate identities, extents, duplicate/discard behavior and actual
+mutated source. Do not revive a never-reached exemption as an import-repair rule.
+
+Secondary constituent: tooling-redesign 7.8 owns generation-scoped sharing once
+the residual cost and complete key are established.
+
+Lands: tooling-redesign 7.7.

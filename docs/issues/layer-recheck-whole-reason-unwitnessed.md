@@ -1,23 +1,28 @@
-# The layer re-check's whole-reason arm has no witness
+# Establish a discriminating witness for the whole-evidence recheck
 
-The provenance stamp's externally-rooted re-check (stampProvenance's
-evidence-fault arm) reproduces a recorded runtime-input evidence whole
-— state, reason, and digest — before an unresolvable external identity
-is taken as unchanged (REQ-result-layers). The reason's comparison is
-load-bearing on exactly one shape: a recorded relative identity that is
-a symbolic link out of the tree, relinked to a second external target
-between measurement and stamp — the digest folds only the external
-marker and the refusal's clause is unchanged, so the resolved target in
-the reason's attribution is the single guard, and a clause reading
-there (built and reverted at gomutant 278's reason-clause change set)
-would launder the relink into "reproduces". No test drives that shape:
-a probe reverting the comparison to the clause survives every
-Stamp/Dirty/travel pin.
+Lands: tooling-redesign 5.4.
 
-Witness: a fixture whose test reads through an in-tree symlink to an
-external directory; measure, relink the symlink to another external
-directory, stamp again — the record is dirty with the evidence fault
-naming the identity; the same run with the link untouched keeps the
-repo layer.
+The provenance stamp rechecks an unresolvable external runtime identity before
+treating it as unchanged. `stampProvenance` compares the resulting state,
+reason and digest as a whole under REQ-result-layers. The need for a fixture
+that independently discriminates each compared field remains.
 
-Lands: cross-tool train chunk 219.
+An earlier proposed fixture relinked an in-tree symlink between two existing
+external directories and expected the whole-reason comparison to catch it.
+That proposal does not establish reachability: `repositoryState.placement`
+in `provenance.go`
+classifies an existing resolvable external target as `placedOutside`, while
+the relevant recheck admits `placedOutsideMissing` and `placedUnknown`.
+A git-visible symlink edit can also dirty the record independently of the
+comparison. A historical surviving clause-only probe is not proof that the
+proposed fixture reaches this arm, nor fresh verification of the current tree.
+
+Construct a missing/unknown-placement case at the actual validation boundary,
+show that it reaches the recheck, and mutate only the comparison under test.
+Establish the unchanged control's actual placement independently; do not assume
+that an external input belongs in the repo layer. Either witness a load-bearing
+whole-state difference or record the demonstrated equivalence of an unreachable
+or redundant arm. A diagnostic-clause split alone supplies no such result.
+
+Secondary constituent: tooling-redesign 9.3 retains the deciding regression
+and its independent mutation evidence after the producing boundary is migrated.

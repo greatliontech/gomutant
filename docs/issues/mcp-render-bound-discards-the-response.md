@@ -14,4 +14,12 @@ layer discards is lost. The render bound wants the same shape — the
 rows built so far banked, the bound named in the result's exit — so a
 committed run's response is never an error text alone.
 
-Lands: cross-tool train chunk 233 (re-aimed at audit 317: the run-state record lives in the tree's state home as the exit log does since 312, never beside the findings document; its path on the run's boundary lines).
+The current post-write error path still returns an error after composing
+`PersistedRiding(ridingAbort(...))`; the typed `Summary` is not preserved by that
+text composition. Recovery must retain the committed structured account, name
+the incomplete rendering and cover errors after the write as well as expiry.
+Keep bounded machine-local run state under the resolved tree's state home, with
+the project identity needed by request-scoped contexts, rather than writing a
+second progress log into the repository.
+
+Lands: tooling-redesign 6.7.

@@ -1,13 +1,12 @@
 # Process-identity reads (/proc/<pid>/stat) have no discharge channel
 
-gmdb's lock liveness reads `/proc/<pid>/stat` to compare a lock
+The reported gmdb lock liveness path reads `/proc/<pid>/stat` to compare a lock
 holder's start time (gmdb `internal/lock/proc_linux.go`). Every gitfs
 oracle opens a gmdb database, so every record is classed
 "unverifiable: volatile OS input: /proc/<pid>/stat" and stays
-machine-local. The input is volatile by construction — a pid's start
-time differs on every process — and behavior-irrelevant to any
-verdict: it identifies the reading process, it does not vary the
-subject's output.
+machine-local in the reported campaign. The input is volatile, but not
+behavior-irrelevant by construction: a holder's start time can decide whether
+a lock is broken and therefore change the subject's behavior.
 
 Neither declared surface fits: `--bracket-path` refuses a path outside
 the tree under a tool-excluded directory, and `--vouch` names a
@@ -16,20 +15,14 @@ dependency variable, not a file read. The only remaining lever is a
 whole-run assertion, both of which assert far more than "this
 process-identity read is fine".
 
-Asked: a class of ephemeral process-identity inputs (`/proc/self`,
-`/proc/<own pid>`, `/proc/<pid>/stat` read for liveness) recognized as
-non-behavioral by construction and never a reuse blocker, or a
-declarable surface for exactly that class carrying the caller's
-assertion the way bracket-path does for tree paths.
+The retained request is a narrowly declared assertion for justified process-
+identity use, not an automatic volatile-input carve-out. It needs an authority
+home, explicit subject/root scope, provenance and revocation semantics.
 
-Triage (2026-09-12, chunk 244's open gate): "non-behavioral by
-construction" does not hold for a liveness read — the holder's start
-time decides whether a lock is broken, an output the subject can vary
-by — so a classification carve-out would be unsound; the sound shape
-is a declared surface carrying the caller's assertion for exactly
-this path class (gofresh REQ-inputs-volatile-os-roots gains the
-declaration, gomutant passes it as bracket-path is passed). A new
-declared surface is product scope.
+A declaration must preserve Gofresh's volatile-input refusal unless the
+explicit permission actually covers that use. It must not grant trust to
+unrelated roots or subjects, and a static purity directive cannot stand in
+for the runtime-input authority it does not carry.
 
 Follow-up evidence (gmdb v0.5.2, gitfs, gomutant v0.57.7): gmdb's
 author put `//gofresh:pure` on `lock.ProcessStartTime`. The plan verb
@@ -47,9 +40,11 @@ issue asks for must cover the observation bracket, and the volatile
 input must not feed the unstable-oracle class (see
 narrowing-exemption-and-freshness-clauses-judged-apart.md).
 
-Lands: two halves (derived 2026-09-29): the scoring half — an observed
-volatile input is a reuse blocker on the record's layer and never scores
-as instability — is a rider on cross-tool train chunk 254; the
-declaration half — the caller's assertion carried for exactly the
-ephemeral process-identity path class — is gofresh chunk 295, gomutant
-passing it at its next bump.
+Full-oracle@3 still runs the complete required oracle. A volatile observation
+can refuse reuse without proving a flip; no declaration licenses test omissions.
+Do not implement a second Gofresh input policy inside Gomutant.
+
+Secondary constituent: tooling-redesign 6.3 separates actual flip evidence from
+reuse refusal and reports incomplete advisory attribution honestly.
+
+Lands: tooling-redesign 7.3.

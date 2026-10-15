@@ -3,8 +3,8 @@
 runOut.AttestationSheds and runOut.AttestationCarried are []string —
 each entry the sentence AttestationShed.Text / AttestationCarry.Text
 renders — while a contradiction is a row (contradictionOut with
-symbol, position, operator, killer, reason). chunk 244's charter named the carry and shed sentences as rows where
-the response's other dispositions are; a client that wants the shed's position or operator parses
+symbol, position, operator, killer, reason). A client that wants the shed's
+position or operator parses
 prose. The move is one row type per disposition on the wire beside
 the sentence the CLI prints, a BREAKING wire change on the run tool's
 response.
@@ -15,6 +15,12 @@ between pins moved under a new derivation and a source move — so a
 structured reader must parse it out of the prose today; the CLI's
 --json face carries it as its own field.
 
-Lands: cross-tool train chunk 267 (derived at the 2026-09-29 replan:
-the structured face is structured by the two-surfaces doctrine; a
-BREAKING wire change declared at its tick).
+The current `runOut` still exposes these dispositions as strings. Publish
+structured rows with the full reason and derivation facts, preserving the CLI
+sentence as a rendering and declaring the wire change. A carried equivalence
+remains a disposition, not a license to reuse historical execution counts.
+
+Secondary constituent: tooling-redesign 6.7 preserves these rows across closing
+and recovery, including post-write failures.
+
+Lands: tooling-redesign 8.3.

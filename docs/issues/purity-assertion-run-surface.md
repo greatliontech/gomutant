@@ -23,9 +23,16 @@ the invoke site in the subject (the call expression and its operand
 type) beside the reached sink, so the consumer can tell an
 over-approximated interface invoke from a real reach.
 
-Triage (2026-09-12, chunk 244's open gate): (1) is gofresh's
-WithAssumePure reaching a run surface on both faces, recorded on the
-evidence as vouches are — chunk 254; (2) is gofresh's downgrade-reason
-composition naming the invoke site — gofresh chunk 255.
+The current run surface still has variable vouches rather than the requested
+explicit purity permission. Derive its authority and consequence before adding
+a knob: bind it to the resolved request root and selected subjects, record the
+asserted class, and make withdrawal refuse applicability based on it. A default
+server's vouches must not silently spread to another project. A caller assertion
+does not prove execution, locality or compile-time non-influence, and must not
+become an implicit trust source for all records in a repository.
 
-Lands: cross-tool train chunk 254 (the reason half at gofresh 255)
+Secondary constituents: tooling-redesign 5.5a provides request-scoped roots;
+5.4 preserves the native producing boundary and reason attribution during
+adoption. Full-oracle@3's complete deciding oracle remains mandatory.
+
+Lands: tooling-redesign 7.3.

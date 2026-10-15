@@ -1,13 +1,11 @@
 # An ephemeral probe's tests write under the caller's tree
 
-Lands: cross-tool train chunk 187 — derived at audit 317 (no fork): containment —
-every probe's oracle through the scratch channel REQ-mut-overlay already
-runs shaped candidates through (a disposable copy of the tree per probe,
-its cost stated per probe, the tree promise kept whole); the spec wins
-over a narrowing of its run-time purity. Audit 333: containment moves the
-oracle's working directory, against which gofresh's observation resolves
-relative inputs — observation construction, so 187 is reported to the
-evidence-model owner before it is implemented.
+Lands: tooling-redesign 5.4.
+
+Contain the oracle's writes while preserving the actual producing directory,
+relative-input identity and complete oracle. An overlay isolates source
+replacement, not arbitrary test side effects. Moving execution to scratch must
+be part of the native producing boundary, not a copied baseline observation.
 
 ## The live half: any relative write of a probed test lands in the tree
 
@@ -48,7 +46,8 @@ where no failfile survives the probe, a file written into the caller's
 cache keyed on that directory's contents (stipulator's runtime-input
 fingerprint), which re-executed its witnesses.
 
-Asks: run the probe's tests with their working directory outside the
-caller's tree (the scratch channel), or at least detect and remove
-files created under the caller's tree during a probe and say so in the
-result.
+Required resolution: execute through an owned scratch boundary and account for
+its cost and path semantics. Detecting and deleting files after execution is not
+equivalent containment: transient writes can invalidate another observer, as the
+historical report illustrates. Do not restore coverage-based omissions to pay
+for the isolation.

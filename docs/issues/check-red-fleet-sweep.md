@@ -23,16 +23,14 @@ moved exactly the mutation-basis and candidate-conservation surfaces
 these bind, which is the place to look first; this doc records the
 fact, not the cause.
 
-Scanned: the index and all 53 docs it lists. None tracks the check
-or names either requirement. retired-oracle-drift-helper-tests
-(Lands: tooling-redesign 5.6) names candidate conservation as a
-surface its fixture retirement must preserve on the surviving paths;
-its rows are the helper fixtures, not these two verdict rows, so the
-sets are disjoint — and that retirement must not close this doc by
-deleting the remaining witnesses. The 2026-09-21 check-red doc closed
-at chunk 278 and is gone.
+The current policy is `gomutant/full-oracle@3`: neither a historical count nor
+an example-only witness establishes the property/analyzer obligation. The
+reported reds have not been re-executed for this document update. Diagnose the
+actual binding classifications and preserve the clauses' evidence bar; deleting
+the remaining witnesses is not a resolution.
 
-Lands: tooling-redesign 5.4 — gomutant's next chunk in the active
-sequence; the two requirements are re-covered there with the evidence
-class their clauses demand, or gapped with a stated reason. The
-sweep's next gomutant verdict reading `pass` closes it.
+Secondary constituent: tooling-redesign 5.6 retires the obsolete helper tests
+tracked in [retired-oracle-drift-helper-tests.md](retired-oracle-drift-helper-tests.md),
+while preserving candidate conservation on admitted paths.
+
+Lands: tooling-redesign 5.4.
