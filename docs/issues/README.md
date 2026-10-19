@@ -36,7 +36,7 @@ baseline for the planned selection-coexisting lifecycle.
 | [findings-records-keyed-by-symbol-alone](findings-records-keyed-by-symbol-alone.md) | Selection-coexisting records across both layers and every lifecycle path, from the live version-16 format | tooling-redesign 6.6 |
 | [findings-row-projections-one-shape](findings-row-projections-one-shape.md) | One faithful row projection preserving delta presence, routing and execution-policy facts | tooling-redesign 8.3 |
 | [git-go-native-oracle-reuse](git-go-native-oracle-reuse.md) | Retire policy-2 authority and independently diagnose native-oracle refusal classes | tooling-redesign 5.4 |
-| [gofresh-corpus-pin-lag](gofresh-corpus-pin-lag.md) | Adopt the released producing boundary; the current module still pins v0.115.1 | tooling-redesign 5.4 |
+| [gofresh-corpus-pin-lag](gofresh-corpus-pin-lag.md) | Adopt the released producing boundary; the current module still pins v0.115.1 against release v0.118.0 (fleet sweep 2026-10-19), three releases of migration obligations accumulated | tooling-redesign 5.4 |
 | [installed-binary-dirty-build](installed-binary-dirty-build.md) | Both files are clean at 1e5ff06; live MCP identity and the next sweep remain unverified | tooling-redesign 9.3 |
 | [interned-table-entries-admit-duplicate-keys](interned-table-entries-admit-duplicate-keys.md) | Consistent duplicate-key admission over legacy and current content-keyed envelopes | tooling-redesign 9.2 |
 | [knob-terse-clause-per-face](knob-terse-clause-per-face.md) | Face-neutral served clauses with list forms and preserved defaults at every schema depth | tooling-redesign 8.3 |

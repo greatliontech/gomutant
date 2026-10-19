@@ -16,4 +16,12 @@ transformed executables. Record the adopted release, compatibility decisions and
 actual installed identities; keep conservative identity-only evidence where no
 outcome method applies. No dependency update or sweep was run for this edit.
 
+Re-observed by the 2026-10-19 sweep with the gap widened: the module still
+pins v0.115.1 while the latest release tag is v0.118.0 (stipulator pins
+v0.118.0 and reads current in the same sweep; pew pins v0.117.6 and carries
+its own filing). Three releases now sit between the pin and the remote, so
+the bump's migration obligations accumulate across all of them, not the
+one release the first observation named. Same remedy, same slot; no second
+trigger minted.
+
 Lands: tooling-redesign 5.4.
