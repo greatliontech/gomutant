@@ -579,7 +579,7 @@ func TestFingerprintRecordKeysRideTheDocumentVersion(t *testing.T) {
 	}
 	got := keysOf(raw)
 	want := []string{"admissionPolicy", "buildConfig", "closureStrategy", "dynamicStateStrategy", "dynamicStateVouches", "inertTestVariantApplicability", "machine", "maximalClosure", "observationAssertion", "observationProof", "packageProcessDischarges", "purityAssertion", "resultKind", "runtimeConfig", "runtimeDigest", "runtimeInputs", "singleSubjectDischarges", "testVariantClosure", "toolchain", "toolchainContent"}
-	if !reflect.DeepEqual(got, want) || DocumentVersion != 16 {
+	if !reflect.DeepEqual(got, want) || DocumentVersion != 17 {
 		t.Fatalf("the record's keys = %v (DocumentVersion %d); a moved key set rides a version bump", got, DocumentVersion)
 	}
 	// The nested proof object has its own strict decoder, so its key

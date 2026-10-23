@@ -82,3 +82,26 @@ func TestKillEvidenceTimeoutAndPackageArms(t *testing.T) {
 		t.Fatalf("package-scope evidence = %q, want package-level output only", got)
 	}
 }
+
+func TestKillEvidencePackageCrashIncludesTestPanicTail(t *testing.T) {
+	stream := jsonStream(t, []map[string]string{
+		{"Action": "run", "Package": "example.com/p", "Test": "TestPass"},
+		{"Action": "output", "Package": "example.com/p", "Test": "TestPass", "Output": "=== RUN   TestPass\n"},
+		{"Action": "pass", "Package": "example.com/p", "Test": "TestPass"},
+		{"Action": "run", "Package": "example.com/p", "Test": "TestCrash/sub"},
+		{"Action": "output", "Package": "example.com/p", "Test": "TestCrash/sub", "Output": "=== RUN   TestCrash/sub\n"},
+		{"Action": "output", "Package": "example.com/p", "Test": "TestCrash/sub", "Output": "panic: runtime error: invalid memory address or nil pointer dereference\n"},
+		{"Action": "output", "Package": "example.com/p", "Test": "TestCrash/sub", "Output": "goroutine 19 [running]:\n"},
+		{"Action": "output", "Package": "example.com/p", "Test": "TestCrash/sub", "Output": "example.com/p.Target(0x0)\n"},
+		{"Action": "output", "Package": "example.com/p", "Test": "", "Output": "exit status 2\n"},
+		{"Action": "output", "Package": "example.com/p", "Test": "", "Output": "FAIL\texample.com/p\t0.004s\n"},
+		{"Action": "fail", "Package": "example.com/p", "Test": ""},
+	})
+	got := killEvidence(stream, PackageKillerPrefix+"example.com/p)", time.Minute)
+	if !strings.Contains(got, "panic: runtime error") || !strings.Contains(got, "example.com/p.Target(0x0)") {
+		t.Fatalf("package-crash evidence omitted test-attributed panic block:\n%s", got)
+	}
+	if strings.Contains(got, "TestPass") {
+		t.Fatalf("completed passing test leaked into package-crash evidence:\n%s", got)
+	}
+}

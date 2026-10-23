@@ -137,13 +137,15 @@ type subjectEngines struct {
 	// analysisBudget bounds each engine's precise-analysis pass — the
 	// observed union's proof capture and every producer validation
 	// (REQ-exec-analysis-budget); zero is unbounded.
-	analysisBudget time.Duration
-	byDir          map[string]*gofresh.Engine
+	analysisBudget  time.Duration
+	purityAssertion bool
+	pureSubjects    map[string]bool
+	byDir           map[string]*gofresh.Engine
 }
 
 func (t *Tree) newSubjectEngines(event func(AnalysisEvent), packageProcess bool, bounds engine.OracleBounds, analysisBudget time.Duration) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{evidenceEnv: engine.OracleEvidenceEnv(env, bounds), bounds: bounds, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, analysisBudget: analysisBudget, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{evidenceEnv: engine.OracleEvidenceEnv(env, bounds), bounds: bounds, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, analysisBudget: analysisBudget, purityAssertion: t.purityAssertion, pureSubjects: maps.Clone(t.pureSubjects), byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
@@ -159,6 +161,14 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	opts := []gofresh.Option{gofresh.WithoutRepositoryVouches(), gofresh.WithDir(dir), gofresh.WithEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir), gofresh.WithGoRunner(engine.GoRunner())}
 	if e.packageProcess {
 		opts = append(opts, gofresh.WithPackageProcessExecution())
+	}
+	if e.purityAssertion {
+		opts = append(opts, gofresh.WithAssumePure(func(gofresh.Subject) bool { return true }))
+	} else if len(e.pureSubjects) > 0 {
+		pure := e.pureSubjects
+		opts = append(opts, gofresh.WithAssumePure(func(s gofresh.Subject) bool {
+			return pure[s.Package+"."+s.Symbol] || pure[s.Symbol]
+		}))
 	}
 	if len(e.vouches) > 0 {
 		opts = append(opts, gofresh.WithDynamicStateVouches(e.vouches...))
@@ -428,6 +438,30 @@ type moduleGroup struct {
 	subjects []gofresh.Subject
 }
 
+func (t *Tree) ensureExplicitTestdataSymbol(ctx context.Context, symbol string) {
+	if pkg := symbolPackage(symbol); engine.HasTestdataSegment(pkg) {
+		_, _ = t.eng.LoadExplicitImportContext(ctx, pkg)
+	}
+}
+
+func (t *Tree) ensureExplicitTestdataTargets(ctx context.Context, targets []Target) {
+	for _, target := range targets {
+		t.ensureExplicitTestdataSymbol(ctx, target.Symbol)
+		for _, oracle := range target.Oracle {
+			t.ensureExplicitTestdataSymbol(ctx, oracle)
+		}
+	}
+}
+
+func (t *Tree) ensureExplicitTestdataFindings(ctx context.Context, findings []Finding) {
+	for _, f := range findings {
+		t.ensureExplicitTestdataSymbol(ctx, f.Symbol)
+		for _, ev := range f.OracleEvidence {
+			t.ensureExplicitTestdataSymbol(ctx, ev.Symbol)
+		}
+	}
+}
+
 // resolveModuleGroups resolves symbols and groups them by module
 // directory. Fault routing is the caller's: fault returning nil records
 // the symbol's failure and drops it from the grouping (the union's
@@ -445,6 +479,7 @@ func (t *Tree) resolveModuleGroups(ctx context.Context, symbols []string, packag
 			continue
 		}
 		seen[symbol] = true
+		t.ensureExplicitTestdataSymbol(ctx, symbol)
 		pkg, local, err := t.eng.PackageOfContext(ctx, symbol)
 		if err != nil {
 			if err := fault(symbol, err); err != nil {
@@ -774,16 +809,26 @@ func producerValidation(ctx context.Context, views *subjectViewSet) (unavailable
 	return "", err
 }
 
-// stampUnverifiable marks a finding's target and every oracle evidence
-// unverifiable under one reason: the evidence a finding carries as a
-// whole — a divergence between its observations, a proof its validation
-// could not re-establish — refuses reuse of the whole record
-// (REQ-exec-observation). Such a reason names no attributed refusal,
-// so the rows carry no attribution.
+// stampUnverifiable records a finding-wide evidence failure — a
+// divergence between its observations, or a proof its validation could
+// not re-establish — on f.EvidenceFault and refuses reuse of the whole
+// record (REQ-exec-observation). Subject evidence rows keep any
+// subject-specific or completed-process union diagnostic they already
+// carry; rows without one adopt the record-wide reason with no
+// attribution.
 func stampUnverifiable(f *Finding, reason string) {
-	f.TargetEvidence.RuntimeUnverifiable, f.TargetEvidence.RuntimeReason, f.TargetEvidence.RuntimeAttribution = true, reason, ""
+	f.EvidenceFault = reason
+	stampRow := func(ev *SubjectEvidence) {
+		ev.RuntimeAttribution = ""
+		if !ev.RuntimeUnverifiable || ev.RuntimeReason == "" {
+			ev.RuntimeUnverifiable, ev.RuntimeReason = true, reason
+		}
+	}
+	if f.Shape == nil {
+		stampRow(&f.TargetEvidence)
+	}
 	for i := range f.OracleEvidence {
-		f.OracleEvidence[i].RuntimeUnverifiable, f.OracleEvidence[i].RuntimeReason, f.OracleEvidence[i].RuntimeAttribution = true, reason, ""
+		stampRow(&f.OracleEvidence[i])
 	}
 }
 
@@ -1000,6 +1045,7 @@ func (t *Tree) InspectFindings(ctx context.Context, findings []Finding, progress
 // every record's outcome; a judged view stops at the first record
 // error, as its per-record loop did.
 func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress func(stage string), bestEffort bool) ([]FindingInspection, []error, error) {
+	t.ensureExplicitTestdataFindings(ctx, findings)
 	report := func(stage string) {
 		if progress != nil {
 			progress(stage)
@@ -1185,6 +1231,9 @@ func (t *Tree) admitFindingContext(ctx context.Context, f Finding, shared *admis
 			return adm, err
 		}
 		if !declared {
+			if f.Selection != SelectionKey(t.selection) {
+				return decided(FindingInspection{State: FindingStale, Reason: fmt.Sprintf("recorded under build selection %q (current tree loaded under %q)", f.Selection, SelectionKey(t.selection))})
+			}
 			return decided(FindingInspection{State: FindingDetached, Reason: "mutated symbol no longer resolves - terminal: no re-measure can revive this record; prune removes it, retarget follows a rename"})
 		}
 		if f.OperatorSet != engine.OperatorSet {
@@ -1276,6 +1325,9 @@ func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgment
 			inspection.Reason = "oracle " + evidence.Symbol + ": " + inspection.Reason
 			return inspection, nil
 		}
+	}
+	if f.EvidenceFault != "" {
+		return FindingInspection{State: FindingUnverifiable, Reason: f.EvidenceFault, Channel: PostureRuntimeInputs}, nil
 	}
 	return FindingInspection{State: FindingCurrent}, nil
 }
@@ -2079,7 +2131,7 @@ func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subje
 }
 
 func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
-	if OracleExecutionPolicyIssue(prior) != "" || prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
+	if prior.EvidenceFault != "" || OracleExecutionPolicyIssue(prior) != "" || prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
 	}
@@ -2112,7 +2164,7 @@ func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, ta
 // the shape digest is compared by the caller as the BodyHash pin
 // (REQ-target-structural, REQ-target-manual-recipes).
 func shapedEvidenceMatchesContext(ctx context.Context, prior Finding, oracle []*subjectView, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (bool, error) {
-	if OracleExecutionPolicyIssue(prior) != "" || prior.OperatorSet != operatorSet || !prior.OracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
+	if prior.EvidenceFault != "" || OracleExecutionPolicyIssue(prior) != "" || prior.OperatorSet != operatorSet || !prior.OracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) ||
 		len(prior.CandidateEvidence) != 0 {
 		return false, nil

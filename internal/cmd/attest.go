@@ -12,6 +12,7 @@ import (
 
 type attestOptions struct {
 	dir, findingsFile, symbol, position, operator, reason string
+	reattest, withdraw                                    bool
 	tags                                                  []string
 	toolchain                                             string
 	vouches                                               []string
@@ -30,6 +31,8 @@ func newAttestCommand() *cobra.Command {
 	f.StringVar(&o.position, "position", "", "")
 	f.StringVar(&o.operator, "operator", "", "")
 	f.StringVar(&o.reason, "reason", "", "")
+	f.BoolVar(&o.reattest, "reattest", false, "")
+	f.BoolVar(&o.withdraw, "withdraw", false, "")
 	f.StringArrayVar(&o.vouches, "vouch", nil, "")
 	return knobbedFlags(cmd, "attest")
 }
@@ -37,6 +40,9 @@ func newAttestCommand() *cobra.Command {
 func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	if o.symbol == "" || o.position == "" || o.operator == "" || o.reason == "" {
 		return fmt.Errorf("attest needs --symbol, --position, --operator, and --reason")
+	}
+	if o.reattest && o.withdraw {
+		return fmt.Errorf("attest cannot combine --reattest and --withdraw")
 	}
 	// The reasoning's shape is a declaration's: refused here, before
 	// the document lock persists anything (REQ-exec-preparation); the
@@ -79,9 +85,15 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 		return err
 	}
 	var attested gomutant.Finding
+	sel := selectionOf(o.tags, o.toolchain)
 	routing, err := store.Update(ctx, func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		var err error
-		all, attested, err = gomutant.AttestFinding(all, o.symbol, o.position, o.operator, o.reason)
+		all, attested, err = gomutant.AttestFindingWithOptions(all, o.symbol, o.position, o.operator, o.reason, gomutant.AttestOptions{
+			Selection:    gomutant.SelectionKey(sel),
+			HasSelection: len(o.tags) > 0 || o.toolchain != "",
+			Reattest:     o.reattest,
+			Withdraw:     o.withdraw,
+		})
 		return all, err
 	})
 	if err != nil {
@@ -97,13 +109,23 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// evidence by a reader who stopped at the echo
 	// (REQ-result-run-posture).
 	layer, layerReason := routing.Of(store, attested)
-	posture := attestedPosture(ctx, o.dir, selectionOf(o.tags, o.toolchain), vouches, attested, rep)
+	loadSel := sel
+	if len(o.tags) == 0 && o.toolchain == "" && attested.Selection != "" {
+		loadSel = gomutant.SelectionOfKey(attested.Selection)
+	}
+	posture := attestedPosture(ctx, o.dir, loadSel, vouches, attested, rep)
 	layerText := gomutant.LayerRepo
 	if layer != gomutant.LayerRepo {
 		layerText = "machine-local (" + layerReason + ")"
 	}
+	verb := "attested"
+	if o.reattest {
+		verb = "re-attested"
+	} else if o.withdraw {
+		verb = "withdrew attestation on"
+	}
 	rep.epilogue(func(w io.Writer) {
-		fmt.Fprintf(w, "attested %s %s; %d open; layer: %s; reuse: %s\n", o.position, o.operator, len(attested.Open()), layerText, posture.Line())
+		fmt.Fprintf(w, "%s %s %s; %d open; layer: %s; reuse: %s\n", verb, o.position, o.operator, len(attested.Open()), layerText, posture.Line())
 		if line := gomutant.RekeyedExemptionsLine(store.RekeyedExemptions()); line != "" {
 			fmt.Fprintln(w, line)
 		}

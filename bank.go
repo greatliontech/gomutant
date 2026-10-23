@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -107,12 +109,13 @@ type baselineBank struct {
 	// mu guards the maps and the dirty flag: the preparation
 	// goroutine consults while the window loop's commit deposits —
 	// the same overlap pendingBankDeposits guards against. (The
-	// campaign lock serializes cross-PROCESS writers of the file;
+	// bank's file lock serializes cross-PROCESS writers of the file;
 	// this mutex serializes this run's own goroutines.)
-	mu    sync.Mutex
-	path  string
-	file  baselineBankFile
-	dirty bool
+	mu        sync.Mutex
+	path      string
+	file      baselineBankFile
+	dirty     bool
+	dirtyKeys map[string]bool
 }
 
 // bankPath derives the bank's machine-local home from the resolved
@@ -168,26 +171,92 @@ func (b *baselineBank) save() {
 	b.persistLocked()
 }
 
-// persistLocked writes the bank atomically; a write failure is
-// silent — the bank is cache, and the measurements it would have
-// carried are re-measurable. Caller holds b.mu.
+// persistLocked writes the bank atomically under an exclusive file lock,
+// merging any concurrent writer's deposits from disk and bounding the
+// serialized file below bankFileCeiling; a write failure is silent — the
+// bank is cache, and the measurements it would have carried are
+// re-measurable. Caller holds b.mu.
 func (b *baselineBank) persistLocked() {
 	if !b.dirty || b.path == "" {
-		return
-	}
-	data, err := json.Marshal(b.file)
-	if err != nil {
 		return
 	}
 	if os.MkdirAll(filepath.Dir(b.path), 0o755) != nil {
 		return
 	}
-	tmp := b.path + ".tmp"
-	if os.WriteFile(tmp, data, 0o644) != nil {
+	release, lockErr := acquireDocumentLock(context.Background(), b.path)
+	if lockErr == nil {
+		defer release()
+	}
+	if info, err := os.Stat(b.path); err == nil && !info.IsDir() && info.Size() <= bankFileCeiling {
+		if diskData, err := os.ReadFile(b.path); err == nil {
+			var diskFile baselineBankFile
+			if json.Unmarshal(diskData, &diskFile) == nil && (diskFile.Version == bankVersion || diskFile.Version == 2) {
+				if diskFile.Version == 2 {
+					for key, entry := range diskFile.Baselines {
+						entry.PassedTests = nil
+						diskFile.Baselines[key] = entry
+					}
+				}
+				for key, entry := range diskFile.Baselines {
+					if b.file.Baselines == nil {
+						b.file.Baselines = map[string]bankedBaseline{}
+					}
+					cur, exists := b.file.Baselines[key]
+					if !exists || (!b.dirtyKeys[key] && entry.MeasuredAtUnix > cur.MeasuredAtUnix) {
+						b.file.Baselines[key] = entry
+					}
+				}
+				for key, entry := range diskFile.Coverage {
+					if b.file.Coverage == nil {
+						b.file.Coverage = map[string]bankedCoverage{}
+					}
+					if _, exists := b.file.Coverage[key]; !exists {
+						b.file.Coverage[key] = entry
+					}
+				}
+			}
+		}
+	}
+	data, err := json.Marshal(b.file)
+	if err != nil {
 		return
 	}
-	if os.Rename(tmp, b.path) == nil {
+	for len(data) > bankFileCeiling && len(b.file.Baselines) > 1 {
+		oldestKey := ""
+		var oldestTime int64
+		first := true
+		for k, e := range b.file.Baselines {
+			if first || e.MeasuredAtUnix < oldestTime || (e.MeasuredAtUnix == oldestTime && k < oldestKey) {
+				oldestKey = k
+				oldestTime = e.MeasuredAtUnix
+				first = false
+			}
+		}
+		delete(b.file.Baselines, oldestKey)
+		data, err = json.Marshal(b.file)
+		if err != nil {
+			return
+		}
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(b.path), ".baselines-*")
+	if err != nil {
+		return
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return
+	}
+	if os.Rename(tmpPath, b.path) == nil {
 		b.dirty = false
+		clear(b.dirtyKeys)
+	} else {
+		os.Remove(tmpPath)
 	}
 }
 
@@ -235,13 +304,122 @@ func (b *baselineBank) putBaseline(key string, e bankedBaseline) {
 	if b.file.Baselines == nil {
 		b.file.Baselines = map[string]bankedBaseline{}
 	}
+	if b.dirtyKeys == nil {
+		b.dirtyKeys = map[string]bool{}
+	}
 	b.file.Baselines[key] = e
+	b.dirtyKeys[key] = true
 	b.dirty = true
 	// Deposits persist IMMEDIATELY: the bank exists to survive killed
 	// campaigns, and an exit-time save dies with the process. Entries
 	// are minutes apart; an atomic rewrite per deposit is noise
 	// beside the probe it records.
 	b.persistLocked()
+}
+
+// depositGroupBaseline banks a passing, verifiable group baseline
+// measurement at probe time — before any mutant executes — so a
+// campaign killed during its first window still preserves the baseline
+// measurement on disk (REQ-result-baseline-bank). It constructs a
+// gofresh.View.Sibling over the group's oracle subjects, attaches the
+// baseline's own observation, validates the producer bracket, and
+// persists immediately. Any non-cancellation attachment or validation
+// failure skips the deposit without aborting the campaign.
+func depositGroupBaseline(ctx context.Context, bank *baselineBank, key string, w work, g group, observed runtimeinput.Observation, runEnv []string, raw time.Duration, passed []string) (bool, error) {
+	if bank == nil || observed.Unverifiable || observed.Manifest == "" || w.producer == nil {
+		return false, nil
+	}
+	views := groupOracleViews(w, g)
+	if len(views) == 0 {
+		return false, nil
+	}
+	type modSubjects struct {
+		mod      *moduleSubjectView
+		subjects []gofresh.Subject
+		views    []*subjectView
+	}
+	var order []*modSubjects
+	byMod := map[*moduleSubjectView]*modSubjects{}
+	for _, v := range views {
+		if v == nil || v.module == nil || v.module.view == nil {
+			return false, nil
+		}
+		ms := byMod[v.module]
+		if ms == nil {
+			ms = &modSubjects{mod: v.module}
+			byMod[v.module] = ms
+			order = append(order, ms)
+		}
+		ms.subjects = append(ms.subjects, v.subject)
+		ms.views = append(ms.views, v)
+	}
+	siblingSet := &subjectViewSet{
+		bySymbol:       make(map[string]*subjectView, len(views)),
+		bounds:         w.producer.bounds,
+		packageProcess: w.producer.packageProcess,
+	}
+	for _, ms := range order {
+		sView, err := ms.mod.view.Sibling(ms.subjects)
+		if err != nil {
+			return false, nil
+		}
+		siblingMod := &moduleSubjectView{
+			view:     sView,
+			validate: sView.Validate,
+			producer: true,
+		}
+		siblingSet.modules = append(siblingSet.modules, siblingMod)
+		for _, v := range ms.views {
+			sv := &subjectView{
+				symbol:      v.symbol,
+				subject:     v.subject,
+				moduleDir:   v.moduleDir,
+				evidenceDir: v.evidenceDir,
+				env:         v.env,
+				view:        sView,
+				fp:          v.fp,
+				sourceFiles: v.sourceFiles,
+				module:      siblingMod,
+			}
+			siblingSet.bySymbol[v.symbol] = sv
+		}
+	}
+	siblingViews := make([]*subjectView, 0, len(views))
+	for _, v := range views {
+		siblingViews = append(siblingViews, siblingSet.bySymbol[v.symbol])
+	}
+	portable := newPortableUnion(observed, runEnv)
+	rows, err := attachOracleEvidence(siblingViews, portable)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, nil
+	}
+	unavailable, err := producerValidation(ctx, siblingSet)
+	if err != nil {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, nil
+	}
+	if unavailable != "" {
+		return false, nil
+	}
+	for _, r := range rows {
+		if r.RuntimeUnverifiable {
+			return false, nil
+		}
+	}
+	bank.putBaseline(key, bankedBaseline{
+		Evidence:       rows,
+		Manifest:       observed.Manifest,
+		Digest:         observed.Digest,
+		PassedTests:    slices.Clone(passed),
+		RawMillis:      raw.Milliseconds(),
+		MeasuredAtUnix: time.Now().Unix(),
+	})
+	return true, nil
 }
 
 // pendingBankDeposit is a really-probed group baseline awaiting its

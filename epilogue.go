@@ -76,8 +76,9 @@ func NewRunLedger(store *Store, prior []Finding, runID string, wholeTree bool) *
 		routed:    Routing{},
 	}
 	for _, f := range prior {
-		l.snapshot[f.Symbol] = append([]Attestation(nil), f.Attested...)
-		l.overlaid[f.Symbol] = store.Overlaid(f.Symbol)
+		key := f.recordKeyString()
+		l.snapshot[key] = append([]Attestation(nil), f.Attested...)
+		l.overlaid[key] = store.Overlaid(key)
 	}
 	return l
 }
@@ -87,12 +88,16 @@ func NewRunLedger(store *Store, prior []Finding, runID string, wholeTree bool) *
 // placement where one of the run's writes routed the record, else the
 // store's classification (the one fallback, spelled once at Of).
 func (l *RunLedger) Layer(f Finding) (layer, reason string) {
+	key := f.recordKeyString()
 	l.mu.Lock()
-	p, ok := l.routed[f.Symbol]
+	p, ok := l.routed[key]
+	if !ok && f.Selection == "" {
+		p, ok = l.routed[f.Symbol]
+	}
 	l.mu.Unlock()
 	var r Routing
 	if ok {
-		r = Routing{f.Symbol: p}
+		r = Routing{key: p}
 	}
 	// The fallback's walk runs outside the mutex: a reader outside the
 	// engine's callback lock never holds up a commit.
@@ -141,6 +146,7 @@ func (l *RunLedger) deliver(d AttestationShed) {
 // persisted, and delivery never runs under the lock.
 func (l *RunLedger) Commit(ctx context.Context) func(Finding) error {
 	return func(finding Finding) error {
+		fKey := finding.recordKeyString()
 		var dropped []AttestationShed
 		routing, err := l.update(ctx, func(current []Finding) ([]Finding, error) {
 			if err := ctx.Err(); err != nil {
@@ -149,8 +155,8 @@ func (l *RunLedger) Commit(ctx context.Context) func(Finding) error {
 			merged, shed := MergeFindings(current, []Finding{finding}, l.snapshot)
 			dropped = shed
 			for _, m := range merged {
-				if m.Symbol == finding.Symbol {
-					l.postMerge[finding.Symbol] = m
+				if m.recordKeyString() == fKey {
+					l.postMerge[fKey] = m
 				}
 			}
 			return merged, nil
@@ -165,7 +171,11 @@ func (l *RunLedger) Commit(ctx context.Context) func(Finding) error {
 		// the store's classification to answer.
 		layer, _ := routing.Of(l.store, finding)
 		l.mu.Lock()
-		l.routed[finding.Symbol] = routing[finding.Symbol]
+		if p, ok := routing[fKey]; ok {
+			l.routed[fKey] = p
+		} else if finding.Selection == "" {
+			l.routed[fKey] = routing[finding.Symbol]
+		}
 		l.mu.Unlock()
 		if l.Committed != nil {
 			l.Committed(finding, layer)
@@ -241,19 +251,21 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 	var finalSheds []AttestationShed
 	var merged []Finding
 	dropped := 0
+	selKey := SelectionKey(sel)
 	routing, err := l.update(ctx, func(current []Finding) ([]Finding, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if l.wholeTree {
-			merged, finalSheds = MergeWholeFindings(current, findings, targets, l.snapshot)
+			merged, finalSheds = MergeWholeFindingsForSelection(current, findings, targets, l.snapshot, selKey)
 			dropped = droppedSymbols(current, merged)
 		} else {
 			merged, finalSheds = MergeFindings(current, findings, l.snapshot)
 		}
 		for _, m := range merged {
-			if _, ran := l.postMerge[m.Symbol]; ran {
-				l.postMerge[m.Symbol] = m
+			mKey := m.recordKeyString()
+			if _, ran := l.postMerge[mKey]; ran {
+				l.postMerge[mKey] = m
 			}
 		}
 		return merged, nil
@@ -281,12 +293,22 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 	// records' (REQ-mcp-findings-doc). The layer is the final write's
 	// routing: the one decision, never the predicate re-run after it.
 	for _, m := range merged {
-		p, routed := routing[m.Symbol]
+		mKey := m.recordKeyString()
+		p, routed := routing[mKey]
+		if !routed && m.Selection == "" {
+			p, routed = routing[m.Symbol]
+		}
 		if !routed {
 			continue
 		}
-		_, standing := l.snapshot[m.Symbol]
-		overlaidAtStart := l.overlaid[m.Symbol]
+		_, standing := l.snapshot[mKey]
+		if !standing && m.Selection == "" {
+			_, standing = l.snapshot[m.Symbol]
+		}
+		overlaidAtStart := l.overlaid[mKey]
+		if !overlaidAtStart && m.Selection == "" {
+			overlaidAtStart = l.overlaid[m.Symbol]
+		}
 		switch {
 		case overlaidAtStart && p.Layer == LayerRepo:
 			outcome.Promoted++
@@ -298,7 +320,12 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 		if f.Skipped != "" {
 			continue
 		}
-		if p, ok := routing[f.Symbol]; ok && p.Layer == LayerLocal {
+		fKey := f.recordKeyString()
+		p, ok := routing[fKey]
+		if !ok && f.Selection == "" {
+			p, ok = routing[f.Symbol]
+		}
+		if ok && p.Layer == LayerLocal {
 			outcome.MachineLocal++
 		}
 	}
@@ -314,19 +341,20 @@ func (o RunOutcome) DropText() string {
 	return fmt.Sprintf("the whole-tree reconcile dropped %d record(s) whose targets left the code", o.Dropped)
 }
 
-// droppedSymbols counts the symbols a reconcile removed — a symbol-set
+// droppedSymbols counts the records a reconcile removed — a record-key
 // difference, so a document hand-edited into duplicate records for one
-// symbol cannot overcount the drop.
+// key cannot overcount the drop.
 func droppedSymbols(current, merged []Finding) int {
 	kept := make(map[string]bool, len(merged))
 	for _, m := range merged {
-		kept[m.Symbol] = true
+		kept[m.recordKeyString()] = true
 	}
 	seen := map[string]bool{}
 	dropped := 0
 	for _, c := range current {
-		if !kept[c.Symbol] && !seen[c.Symbol] {
-			seen[c.Symbol] = true
+		k := c.recordKeyString()
+		if !kept[k] && !seen[k] {
+			seen[k] = true
 			dropped++
 		}
 	}

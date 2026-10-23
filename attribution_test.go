@@ -122,8 +122,11 @@ func TestWholeRecordStampClearsTheAttribution(t *testing.T) {
 		TargetEvidence: SubjectEvidence{Symbol: "p.A", RuntimeUnverifiable: true, RuntimeReason: "external directory input: /", RuntimeAttribution: `open "/" in "p"`},
 		OracleEvidence: []SubjectEvidence{{Symbol: "p.TestA", RuntimeUnverifiable: true, RuntimeReason: "external directory input: /", RuntimeAttribution: `open "/" in "p"`}}}
 	stampUnverifiable(&f, "runtime input observations diverged from the served record's completed-process union")
+	if !strings.HasPrefix(f.EvidenceFault, "runtime input observations diverged") {
+		t.Fatalf("whole-record stamp fault = %q", f.EvidenceFault)
+	}
 	for _, row := range append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...) {
-		if row.RuntimeAttribution != "" || !row.RuntimeUnverifiable || !strings.HasPrefix(row.RuntimeReason, "runtime input observations diverged") {
+		if row.RuntimeAttribution != "" || !row.RuntimeUnverifiable || row.RuntimeReason != "external directory input: /" {
 			t.Fatalf("row %s after the whole-record stamp = %+v", row.Symbol, row)
 		}
 	}

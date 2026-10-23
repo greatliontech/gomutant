@@ -15,10 +15,11 @@ import (
 // reasoning survives the removal - promote-then-delete, never a silent
 // drop (REQ-result-lifecycle).
 type PrunedRecord struct {
-	Symbol string
+	Symbol    string `json:"symbol"`
+	Selection string `json:"selection,omitempty"`
 	// Layer is where the record sat: LayerRepo or LayerLocal.
-	Layer    string
-	Attested []Attestation
+	Layer    string        `json:"layer"`
+	Attested []Attestation `json:"attested,omitempty"`
 }
 
 // LayerCounts counts records per layer of REQ-result-layers: Repo the
@@ -48,6 +49,9 @@ type PruneResult struct {
 	Removed []PrunedRecord
 	Kept    LayerCounts
 	Check   bool
+	// RemovedEphemeral names the ephemeral-equivalence rows whose files,
+	// test package, or commit provenance no longer resolve.
+	RemovedEphemeral []PrunedEphemeralAttestation
 	// ExemptionsRekeyed names the reviewed exemption entries the write
 	// re-keyed to the canonical clause spelling (REQ-result-exemptions).
 	ExemptionsRekeyed []RekeyedExemption
@@ -80,6 +84,7 @@ func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check boo
 		i := sort.SearchStrings(declared, symbol)
 		return i < len(declared) && declared[i] == symbol
 	}
+	selKey := SelectionKey(t.Selection())
 	result := PruneResult{Check: check}
 	decide := func(layer string, f Finding) (Finding, bool, error) {
 		// A shaped finding's identity is declared, never a resolvable
@@ -87,16 +92,23 @@ func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check boo
 		// state, so prune keeps it — retirement is the caller's
 		// explicit edit of the target set and document
 		// (REQ-target-structural, REQ-target-manual-recipes).
-		if f.Shape != nil || resolves(f.Symbol) {
+		// Records measured under another build selection are likewise
+		// spared when pruning under selKey.
+		if f.Shape != nil || f.Selection != selKey || resolves(f.Symbol) {
 			result.Kept.add(layer)
 			return f, true, nil
 		}
-		result.Removed = append(result.Removed, PrunedRecord{Symbol: f.Symbol, Layer: layer, Attested: append([]Attestation(nil), f.AttestedDispositions()...)})
+		result.Removed = append(result.Removed, PrunedRecord{Symbol: f.Symbol, Selection: f.Selection, Layer: layer, Attested: append([]Attestation(nil), f.AttestedDispositions()...)})
 		return f, false, nil
 	}
 	if _, err := store.Revise(ctx, check, decide); err != nil {
 		return PruneResult{}, err
 	}
+	removedEphemeral, err := pruneEphemeralAttestations(ctx, t, store.path, check)
+	if err != nil {
+		return PruneResult{}, err
+	}
+	result.RemovedEphemeral = removedEphemeral
 	result.ExemptionsRekeyed = store.RekeyedExemptions()
 	return result, nil
 }
@@ -105,15 +117,16 @@ func (t *Tree) PruneDetachedContext(ctx context.Context, store *Store, check boo
 // previews, under check) on one stored record — a symbol held in both
 // layers is two records, each rewritten in its own layer.
 type RetargetedRecord struct {
-	From string
-	To   string
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Selection string `json:"selection,omitempty"`
 	// Layer is where the record sits: LayerRepo or LayerLocal.
-	Layer string
+	Layer string `json:"layer"`
 	// Shadowed reports a rewritten document row whose new symbol the
 	// machine-local overlay holds once the retarget has written: every
 	// read serves the overlay's record for it until that entry leaves
 	// (REQ-result-layers).
-	Shadowed bool
+	Shadowed bool `json:"shadowed,omitempty"`
 }
 
 // TouchedRewrite names one evidence-symbol or kill-attribution rewrite
@@ -152,7 +165,10 @@ type RetargetResult struct {
 	// rename moved, rewritten with the records (the same under check,
 	// where nothing is written).
 	Exemptions []RewrittenExemption
-	Check      bool
+	// Ephemeral names the ephemeral-equivalence rows whose files, test
+	// package, or run pattern the rename moved.
+	Ephemeral []RewrittenEphemeralAttestation
+	Check     bool
 	// ExemptionsRekeyed names the reviewed entries the write re-keyed to
 	// the canonical clause spelling (REQ-result-exemptions).
 	ExemptionsRekeyed []RekeyedExemption
@@ -406,6 +422,7 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 	if err != nil {
 		return RetargetResult{}, err
 	}
+	selKey := SelectionKey(t.Selection())
 	result.Check = check
 	decide := func(layer string, f Finding) (Finding, bool, error) {
 		rewritten, symbolChanged, touched, moves, err := retargetFinding(f, from, to)
@@ -414,13 +431,13 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 		}
 		switch {
 		case symbolChanged:
-			// Only a record whose own symbol rewrote owes resolution:
-			// the rename it follows must have happened
-			// (REQ-result-lifecycle).
-			if !resolves(rewritten.Symbol) {
+			// Only a record whose own symbol rewrote under the loaded
+			// selection owes resolution: the rename it follows must have
+			// happened (REQ-result-lifecycle).
+			if f.Selection == selKey && !resolves(rewritten.Symbol) {
 				return Finding{}, false, fmt.Errorf("retarget: %s does not resolve in the current tree - a retarget follows a rename that happened", rewritten.Symbol)
 			}
-			result.Rewritten = append(result.Rewritten, RetargetedRecord{From: f.Symbol, To: rewritten.Symbol, Layer: layer})
+			result.Rewritten = append(result.Rewritten, RetargetedRecord{From: f.Symbol, To: rewritten.Symbol, Selection: f.Selection, Layer: layer})
 			result.RewrittenCounts.add(layer)
 		case touched:
 			result.Touched.add(layer)
@@ -443,7 +460,7 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 	// overlay's record until it leaves.
 	for i := range result.Rewritten {
 		r := &result.Rewritten[i]
-		r.Shadowed = r.Layer == LayerRepo && revision.Overlay[r.To]
+		r.Shadowed = r.Layer == LayerRepo && revision.Overlay[recordKeyOf(r.To, r.Selection)]
 	}
 	// The reviewed entries whose subjects the rename moved were written
 	// with the records, under the lock, ahead of them — the revision's
@@ -452,6 +469,11 @@ func (t *Tree) RetargetContext(ctx context.Context, store *Store, from, to strin
 	if !check {
 		result.Exemptions = revision.Exemptions
 	}
+	ephemeralRewritten, err := retargetEphemeralAttestations(ctx, t, store.path, from, to, check)
+	if err != nil {
+		return RetargetResult{}, fmt.Errorf("retarget: %w", err)
+	}
+	result.Ephemeral = ephemeralRewritten
 	result.ExemptionsRekeyed = store.RekeyedExemptions()
 	return result, nil
 }

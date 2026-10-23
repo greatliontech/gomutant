@@ -248,8 +248,8 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &unreadable); err != nil {
 		t.Fatal(err)
 	}
-	if !unreadable.Dirty {
-		t.Fatal("an unreadable evidence manifest re-stamped clean, want fail-closed dirty")
+	if unreadable.Dirty || !strings.Contains(unreadable.EvidenceFault, "unreadable") || !strings.Contains(unreadable.EvidenceFault, symbol) {
+		t.Fatalf("an unreadable evidence manifest stamped dirty=%v fault=%q, want clean git provenance and named evidence fault", unreadable.Dirty, unreadable.EvidenceFault)
 	}
 	// A STAGED run reaching the same terminal arm refuses instead of
 	// persisting a dirty record — staged records never persist dirty
@@ -266,8 +266,8 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &unknown); err != nil {
 		t.Fatal(err)
 	}
-	if !unknown.Dirty {
-		t.Fatal("evidence naming a subject with no view re-stamped clean, want fail-closed dirty")
+	if unknown.Dirty || !strings.Contains(unknown.EvidenceFault, "no view") || !strings.Contains(unknown.EvidenceFault, "example.com/provenance.Ghost") {
+		t.Fatalf("evidence naming a subject with no view stamped dirty=%v fault=%q, want clean git provenance and named evidence fault", unknown.Dirty, unknown.EvidenceFault)
 	}
 
 }
@@ -427,8 +427,8 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	if _, err := tree.stampProvenance(ctx, repository, view, nil, nil, &unresolvable); err != nil {
 		t.Fatal(err)
 	}
-	if !unresolvable.Dirty {
-		t.Fatal("an unresolvable identity stamped clean, want fail-closed dirty")
+	if unresolvable.Dirty || !strings.Contains(unresolvable.EvidenceFault, "no longer reproduces over externally rooted identities") {
+		t.Fatalf("an unresolvable identity stamped dirty=%v fault=%q, want clean git provenance and named evidence fault", unresolvable.Dirty, unresolvable.EvidenceFault)
 	}
 }
 

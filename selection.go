@@ -151,6 +151,7 @@ func (t *Tree) SelectTargets(ctx context.Context, req SelectionRequest) (TargetS
 	var err error
 	switch {
 	case req.TargetsGiven:
+		t.ensureExplicitTestdataTargets(ctx, req.Targets)
 		sel.Targets = req.Targets
 	case req.Changed != nil:
 		if req.Changed.Ref == nil {

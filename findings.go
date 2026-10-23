@@ -319,6 +319,99 @@ type Survivor struct {
 	// the nondeterministic test by name. Never an equivalence-attestation
 	// candidate: a mutant a test has killed is not equivalent.
 	WithdrawnKiller string `json:"withdrawnKiller,omitempty"`
+	// OtherSelection carries advisory verdicts for the same mutant from
+	// coexisting records of the same symbol under other build selections
+	// whose mutation domain (BodyHash, OperatorSet, and Site) and
+	// oracleExecutionPolicy hold. Advisory only: another selection's kill
+	// or attestation never licenses skipping measurement or suppressing an
+	// open survivor in this selection (REQ-result-record, REQ-result-findings).
+	OtherSelection string `json:"otherSelection,omitempty"`
+}
+
+// SelectionVerdict records how another build selection's coexisting
+// finding for the same symbol judged the same mutant when both records
+// share the same mutation domain and an admitted oracle execution policy.
+type SelectionVerdict struct {
+	Selection   string `json:"selection"`
+	Disposition string `json:"disposition"`
+	Killer      string `json:"killer,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// OtherSelections returns the parsed cross-selection verdicts carried on s.
+func (s Survivor) OtherSelections() []SelectionVerdict {
+	if s.OtherSelection == "" {
+		return nil
+	}
+	verdicts, err := parseSelectionVerdicts(s.OtherSelection)
+	if err != nil {
+		return nil
+	}
+	return verdicts
+}
+
+func formatSelectionVerdict(v SelectionVerdict) string {
+	sel := v.Selection
+	if sel == "" {
+		sel = "default"
+	}
+	switch v.Disposition {
+	case "killed":
+		return sel + ": killed by " + v.Killer
+	case "attested":
+		return sel + ": attested (" + v.Reason + ")"
+	default:
+		return sel + ": survived"
+	}
+}
+
+func formatSelectionVerdicts(verdicts []SelectionVerdict) string {
+	if len(verdicts) == 0 {
+		return ""
+	}
+	lines := make([]string, len(verdicts))
+	for i, v := range verdicts {
+		lines[i] = formatSelectionVerdict(v)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func parseSelectionVerdicts(raw string) ([]SelectionVerdict, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	lines := strings.Split(raw, "\n")
+	out := make([]SelectionVerdict, 0, len(lines))
+	for _, line := range lines {
+		sel, rest, ok := strings.Cut(line, ": ")
+		if !ok || sel == "" || rest == "" {
+			return nil, fmt.Errorf("malformed cross-selection verdict %q", line)
+		}
+		if sel == "default" {
+			sel = ""
+		} else if err := validateSelectionKey(sel); err != nil {
+			return nil, err
+		}
+		switch {
+		case rest == "survived":
+			out = append(out, SelectionVerdict{Selection: sel, Disposition: "survived"})
+		case strings.HasPrefix(rest, "killed by "):
+			killer := strings.TrimPrefix(rest, "killed by ")
+			if killer == "" || strings.TrimSpace(killer) != killer {
+				return nil, fmt.Errorf("malformed cross-selection killed verdict %q", line)
+			}
+			out = append(out, SelectionVerdict{Selection: sel, Disposition: "killed", Killer: killer})
+		case strings.HasPrefix(rest, "attested (") && strings.HasSuffix(rest, ")"):
+			reason := rest[len("attested (") : len(rest)-1]
+			if err := ValidateAttestationReason(reason); err != nil {
+				return nil, fmt.Errorf("cross-selection attested verdict: %w", err)
+			}
+			out = append(out, SelectionVerdict{Selection: sel, Disposition: "attested", Reason: reason})
+		default:
+			return nil, fmt.Errorf("malformed cross-selection verdict %q", line)
+		}
+	}
+	return out, nil
 }
 
 // SurvivorAdvice maps a survivor's execution bucket to the action it
@@ -391,6 +484,17 @@ type Attestation struct {
 	Site string `json:"site,omitempty"`
 }
 
+// WithdrawnAttestation records a formerly attested equivalence disposition
+// that was explicitly withdrawn, returning the survivor to open while
+// preserving the withdrawal reasoning on the finding (REQ-attest-survivor).
+type WithdrawnAttestation struct {
+	Position    string `json:"position"`
+	Operator    string `json:"operator"`
+	PriorReason string `json:"priorReason"`
+	Reason      string `json:"reason"`
+	Site        string `json:"site,omitempty"`
+}
+
 // OperatorSummary accounts for every selected candidate of one operator.
 type OperatorSummary struct {
 	Operator  string `json:"operator"`
@@ -405,12 +509,35 @@ type survivorKey struct {
 	operator string
 }
 
+// RecordKey identifies one finding record by its mutated symbol and
+// the canonical build selection key (SelectionKey) it was measured under
+// (REQ-result-record).
+type RecordKey struct {
+	Symbol    string
+	Selection string
+}
+
+func (k RecordKey) String() string {
+	if k.Selection == "" {
+		return k.Symbol
+	}
+	return k.Symbol + " [" + k.Selection + "]"
+}
+
+func recordKeyOf(symbol, selection string) string {
+	if selection == "" {
+		return symbol
+	}
+	return symbol + "\x00" + selection
+}
+
 // Finding is one target's measurement, keyed by the mutated symbol and
-// carrying the available evidence for deciding reuse (REQ-result-record).
-// Open findings are Survivors less Attested.
+// canonical build selection and carrying the available evidence for
+// deciding reuse (REQ-result-record). Open findings are Survivors less Attested.
 type Finding struct {
-	Symbol string   `json:"symbol"`
-	Labels []string `json:"labels,omitempty"`
+	Symbol    string   `json:"symbol"`
+	Selection string   `json:"selection,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
 
 	// The pins (REQ-result-stale): any moved pin re-measures the whole
 	// target.
@@ -472,6 +599,12 @@ type Finding struct {
 	CompartmentLedger *CompartmentLedger `json:"compartmentLedger,omitempty"`
 	Commit            string             `json:"commit,omitempty"`
 	Dirty             bool               `json:"dirty"`
+	// EvidenceFault records a finding-wide evidence failure — a
+	// validation proof cut by the analysis budget, a runtime-input
+	// observation divergence, or a provenance evidence-walk fault — as
+	// record-level state distinct from git worktree drift (Dirty) and
+	// from per-subject RuntimeReason.
+	EvidenceFault string `json:"evidenceFault,omitempty"`
 	// Run is the identity of the run that last measured any candidate
 	// of the record — a fresh measure, a budget extension, or a serve
 	// that re-executed flagged candidates — never a wholly
@@ -503,10 +636,11 @@ type Finding struct {
 	// entry per kill), and is absent on records measured before attribution
 	// was persisted. Absence supplies no attribution or composition
 	// authority; execution policy and all other pins govern reuse.
-	Kills             []Kill              `json:"kills,omitempty"`
-	Survivors         []Survivor          `json:"survivors,omitempty"`
-	Attested          []Attestation       `json:"attested,omitempty"`
-	CandidateEvidence []CandidateEvidence `json:"candidateEvidence,omitempty"`
+	Kills             []Kill                 `json:"kills,omitempty"`
+	Survivors         []Survivor             `json:"survivors,omitempty"`
+	Attested          []Attestation          `json:"attested,omitempty"`
+	Withdrawn         []WithdrawnAttestation `json:"withdrawn,omitempty"`
+	CandidateEvidence []CandidateEvidence    `json:"candidateEvidence,omitempty"`
 
 	// Run metadata, never persisted: a cached finding was served from the
 	// prior document under matching pins; a skipped one names why nothing
@@ -520,6 +654,15 @@ type Finding struct {
 	// (REQ-result-unreached-bound). The bound persists at the document
 	// level (CoverageBound), never as a record.
 	Unreached bool `json:"-"`
+}
+
+// RecordKey returns f's identity key (Symbol, Selection).
+func (f Finding) RecordKey() RecordKey {
+	return RecordKey{Symbol: f.Symbol, Selection: f.Selection}
+}
+
+func (f Finding) recordKeyString() string {
+	return recordKeyOf(f.Symbol, f.Selection)
 }
 
 // CoverageBound is the document's stated coverage bound for one
@@ -559,6 +702,59 @@ func SelectionKey(sel Selection) string {
 	return strings.Join(parts, ";")
 }
 
+// parseSelectionKey parses a canonical SelectionKey back into a Selection,
+// returning false when s is non-canonical or malformed.
+func parseSelectionKey(s string) (Selection, bool) {
+	if s == "" {
+		return Selection{}, true
+	}
+	var sel Selection
+	for _, part := range strings.Split(s, ";") {
+		switch {
+		case strings.HasPrefix(part, "tags:"):
+			if len(sel.Tags) > 0 {
+				return Selection{}, false
+			}
+			raw := strings.TrimPrefix(part, "tags:")
+			if raw == "" {
+				return Selection{}, false
+			}
+			tags := strings.Split(raw, ",")
+			for _, t := range tags {
+				if t == "" || strings.TrimSpace(t) != t {
+					return Selection{}, false
+				}
+			}
+			sel.Tags = tags
+		case strings.HasPrefix(part, "toolchain:"):
+			if sel.Toolchain != "" {
+				return Selection{}, false
+			}
+			tc := strings.TrimPrefix(part, "toolchain:")
+			if tc == "" || strings.TrimSpace(tc) != tc {
+				return Selection{}, false
+			}
+			sel.Toolchain = tc
+		default:
+			return Selection{}, false
+		}
+	}
+	return sel, SelectionKey(sel) == s
+}
+
+func validateSelectionKey(s string) error {
+	if _, ok := parseSelectionKey(s); !ok {
+		return fmt.Errorf("invalid non-canonical selection key %q", s)
+	}
+	return nil
+}
+
+// SelectionOfKey parses a canonical SelectionKey back into a Selection.
+func SelectionOfKey(s string) Selection {
+	sel, _ := parseSelectionKey(s)
+	return sel
+}
+
 // CoverageBoundOf derives a run's coverage bound from its findings:
 // nil under no declared selection; under one, the bound with its
 // unreached symbols sorted — EMPTY when the leg reached everything, so
@@ -591,6 +787,7 @@ func cloneFinding(f Finding) Finding {
 	f.Kills = slices.Clone(f.Kills)
 	f.Survivors = slices.Clone(f.Survivors)
 	f.Attested = slices.Clone(f.Attested)
+	f.Withdrawn = slices.Clone(f.Withdrawn)
 	f.CandidateEvidence = slices.Clone(f.CandidateEvidence)
 	if f.CompartmentLedger != nil {
 		ledger := *f.CompartmentLedger
@@ -656,6 +853,19 @@ func (f *Finding) AttestedDispositions() []Attestation {
 	return attested
 }
 
+// WithdrawnDispositions returns a canonical copy of the finding's withdrawn
+// attestations for deterministic views.
+func (f *Finding) WithdrawnDispositions() []WithdrawnAttestation {
+	withdrawn := append([]WithdrawnAttestation(nil), f.Withdrawn...)
+	sort.SliceStable(withdrawn, func(i, j int) bool {
+		if withdrawn[i].Position != withdrawn[j].Position {
+			return withdrawn[i].Position < withdrawn[j].Position
+		}
+		return withdrawn[i].Operator < withdrawn[j].Operator
+	})
+	return withdrawn
+}
+
 // Attest records a survivor disposition on the finding, refused unless the
 // named mutant is among its current survivors (REQ-attest-survivor).
 func (f *Finding) Attest(position, operator, reason string) error {
@@ -666,9 +876,11 @@ func (f *Finding) Attest(position, operator, reason string) error {
 		return fmt.Errorf("gomutant: %s: %s", f.Symbol, why)
 	}
 	found := false
+	site := ""
 	for _, s := range f.Survivors {
 		if s.Position == position && s.Operator == operator {
 			found = true
+			site = s.Site
 			break
 		}
 	}
@@ -680,6 +892,53 @@ func (f *Finding) Attest(position, operator, reason string) error {
 			return fmt.Errorf("gomutant: survivor %s %s already attested", position, operator)
 		}
 	}
+	f.Withdrawn = slices.DeleteFunc(f.Withdrawn, func(w WithdrawnAttestation) bool {
+		return w.Position == position && w.Operator == operator
+	})
+	f.Attested = append(f.Attested, Attestation{Position: position, Operator: operator, Reason: reason, Site: site})
+	return nil
+}
+
+// Reattest replaces an existing survivor disposition's reason on the finding,
+// refused unless the named mutant is among its current survivors, is already
+// attested, and the finding's oracle execution policy is admitted
+// (REQ-attest-survivor).
+func (f *Finding) Reattest(position, operator, reason string) error {
+	if reason == "" {
+		return fmt.Errorf("gomutant: attestation needs a reason")
+	}
+	if why := OracleExecutionPolicyIssue(*f); why != "" {
+		return fmt.Errorf("gomutant: %s: %s", f.Symbol, why)
+	}
+	found := false
+	site := ""
+	for _, s := range f.Survivors {
+		if s.Position == position && s.Operator == operator {
+			found = true
+			site = s.Site
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("gomutant: %s has no survivor %s %s", f.Symbol, position, operator)
+	}
+	for i := range f.Attested {
+		if f.Attested[i].Position == position && f.Attested[i].Operator == operator {
+			f.Attested[i].Reason = reason
+			f.Attested[i].Site = site
+			return nil
+		}
+	}
+	return fmt.Errorf("gomutant: survivor %s %s is not attested", position, operator)
+}
+
+// WithdrawAttestation withdraws an existing survivor disposition on the
+// finding, returning the survivor to open and recording the withdrawal reason
+// alongside the prior attestation reason (REQ-attest-survivor).
+func (f *Finding) WithdrawAttestation(position, operator, reason string) error {
+	if reason == "" {
+		return fmt.Errorf("gomutant: withdrawal needs a reason")
+	}
 	site := ""
 	for _, s := range f.Survivors {
 		if s.Position == position && s.Operator == operator {
@@ -687,8 +946,26 @@ func (f *Finding) Attest(position, operator, reason string) error {
 			break
 		}
 	}
-	f.Attested = append(f.Attested, Attestation{Position: position, Operator: operator, Reason: reason, Site: site})
-	return nil
+	for i, a := range f.Attested {
+		if a.Position == position && a.Operator == operator {
+			if site == "" {
+				site = a.Site
+			}
+			f.Attested = slices.Delete(f.Attested, i, i+1)
+			f.Withdrawn = slices.DeleteFunc(f.Withdrawn, func(w WithdrawnAttestation) bool {
+				return w.Position == position && w.Operator == operator
+			})
+			f.Withdrawn = append(f.Withdrawn, WithdrawnAttestation{
+				Position:    position,
+				Operator:    operator,
+				PriorReason: a.Reason,
+				Reason:      reason,
+				Site:        site,
+			})
+			return nil
+		}
+	}
+	return fmt.Errorf("gomutant: survivor %s %s is not attested", position, operator)
 }
 
 // DocumentVersion is the findings document's current version. A bump
@@ -696,20 +973,22 @@ func (f *Finding) Attest(position, operator, reason string) error {
 // (candidate evidence, the compartment pin, the site anchor, the
 // property-regime pin, the dynamic-state strategy) or a shape an older
 // reader cannot re-derive (positional init targets, shaped targets, the
-// interned tables) bumps it, because an older consumer's tolerance would
-// serve verdicts computed under semantics its engine does not implement
-// or destroy records it cannot resolve; so does a field whose absence an
-// older reader would take in the flattering direction (the
-// coverage-bounds table: a dropped bound reads as full coverage); an
+// interned tables, selection-coexisting records) bumps it, because an older
+// consumer's tolerance would serve verdicts computed under semantics its
+// engine does not implement or destroy records it cannot resolve; so does a
+// field whose absence an older reader would take in the flattering direction
+// (the coverage-bounds table: a dropped bound reads as full coverage); an
 // audit field, whose absence widens no claim (a discharge list; a
 // survivor extent, which falls back to the anchor-point bucket), lands
 // without one; version 13 embeds gofresh's published fingerprint record
 // in every evidence row (a shape an older reader cannot re-derive, the
 // flat rows upgraded on read); version 14 references the tables by
 // content key in place of position (a shape an older reader cannot
-// resolve, the positional documents of 11-13 read as they were). The
-// reading range each boundary draws is ParseDocument's.
-const DocumentVersion = 16
+// resolve, the positional documents of 11-13 read as they were); version
+// 17 keys records by (symbol, selection) so build selections coexist in
+// one document and carries withdrawn attestation history and cross-selection
+// survivor verdicts. The reading range each boundary draws is ParseDocument's.
+const DocumentVersion = 17
 
 // ErrVersionAhead marks a findings document (or overlay entry) written
 // by a newer gomutant than this reader: the refusal class a stale
@@ -726,11 +1005,13 @@ var ErrVersionBehind = errors.New("an older gomutant wrote it - this binary does
 
 // RecordFilter selects the records an inspection renders by their
 // recorded facts — an opaque label, the mutated symbol, the run that
-// last measured the record; each empty field admits every record
-// (REQ-result-inspection). The judged state filter is applied after
-// inspection, not here.
+// last measured the record, or the build selection key; each empty field
+// admits every record unless HasSelection scopes explicitly to the
+// default selection (REQ-result-inspection). The judged state filter is
+// applied after inspection, not here.
 type RecordFilter struct {
-	Label, Symbol, Run string
+	Label, Symbol, Run, Selection string
+	HasSelection                  bool
 }
 
 // Admits reports whether f passes every set field of the filter.
@@ -742,6 +1023,9 @@ func (r RecordFilter) Admits(f Finding) bool {
 		return false
 	}
 	if r.Run != "" && f.Run != r.Run {
+		return false
+	}
+	if (r.HasSelection || r.Selection != "") && f.Selection != r.Selection {
 		return false
 	}
 	return true
@@ -973,7 +1257,12 @@ func renderDocument(findings []Finding, bounds []CoverageBound) (data []byte, ke
 		}
 		kept = append(kept, f)
 	}
-	sort.Slice(kept, func(i, j int) bool { return kept[i].Symbol < kept[j].Symbol })
+	sort.Slice(kept, func(i, j int) bool {
+		if kept[i].Symbol != kept[j].Symbol {
+			return kept[i].Symbol < kept[j].Symbol
+		}
+		return kept[i].Selection < kept[j].Selection
+	})
 	interned, err := internDocument(kept)
 	if err != nil {
 		return nil, nil, err
@@ -1041,7 +1330,7 @@ func ParseDocument(data []byte) (Document, error) {
 		return Document{}, &DocumentVersionError{Version: version, Sentinel: ErrVersionBehind}
 	}
 	if version >= 14 {
-		return parseInternedDocument14(data)
+		return parseInternedDocument14(data, version)
 	}
 	if version >= 11 {
 		return parseInternedDocument(data, version)
@@ -1053,7 +1342,30 @@ func ParseDocument(data []byte) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
+	if err := validateVersion17Features(findings, version); err != nil {
+		return Document{}, err
+	}
 	return Document{Findings: findings}, nil
+}
+
+func validateVersion17Features(findings []Finding, version int) error {
+	if version >= 17 {
+		return nil
+	}
+	for i, finding := range findings {
+		if finding.Selection != "" {
+			return fmt.Errorf("gomutant: finding %d carries selection in version-%d document", i, version)
+		}
+		if len(finding.Withdrawn) > 0 {
+			return fmt.Errorf("gomutant: finding %d carries withdrawn attestations in version-%d document", i, version)
+		}
+		for _, survivor := range finding.Survivors {
+			if survivor.OtherSelection != "" {
+				return fmt.Errorf("gomutant: finding %d survivor carries cross-selection verdicts in version-%d document", i, version)
+			}
+		}
+	}
+	return nil
 }
 
 // parseInternedDocument reads an interned document (version 11 or 12),
@@ -1093,6 +1405,9 @@ func parseInternedFindingsAndTables(data []byte, version int) ([]Finding, intern
 			return nil, internedDocument{}, fmt.Errorf("gomutant: findings document field %s is missing or null", name)
 		}
 	}
+	if err := validateInternedV11JSON(top, version); err != nil {
+		return nil, internedDocument{}, err
+	}
 	if version < 13 {
 		if err := upgradeLegacyEvidence(top, true); err != nil {
 			return nil, internedDocument{}, err
@@ -1115,6 +1430,9 @@ func parseInternedFindingsAndTables(data []byte, version int) ([]Finding, intern
 		return nil, internedDocument{}, err
 	}
 	if err := validateInternedRecords(doc); err != nil {
+		return nil, internedDocument{}, err
+	}
+	if err := validateVersion17Features(expanded, version); err != nil {
 		return nil, internedDocument{}, err
 	}
 	return expanded, doc, nil
@@ -1203,12 +1521,339 @@ func parseInlineFindings(top map[string]json.RawMessage) ([]Finding, error) {
 // record (REQ-result-tolerant: unknown fields within a known version
 // are dropped, never refused).
 var inlineFindingFields = map[string]bool{
-	"symbol": true, "labels": true, "bodyHash": true, "operatorSet": true,
-	"budget": true, "targetEvidence": true, "oracleEvidence": true,
-	"oracleExplicit": true, "oracleTimeout": true, "oracleMemoryBytes": true, "propertyRegime": true, "oracleExecutionPolicy": true, "compartmentLedger": true, "commit": true, "dirty": true,
+	"symbol": true, "selection": true, "labels": true, "bodyHash": true, "operatorSet": true,
+	"budget": true, "shape": true, "targetEvidence": true, "oracleEvidence": true,
+	"oracleExplicit": true, "oracleTimeout": true, "oracleTimeoutDerived": true, "oracleMemoryBytes": true,
+	"oracleCeilingDecided": true, "propertyRegime": true, "oracleExecutionPolicy": true,
+	"compartmentLedger": true, "commit": true, "dirty": true, "evidenceFault": true, "run": true, "stagedTree": true, "exempted": true,
 	"candidateCount": true, "generated": true, "mutants": true, "killed": true,
-	"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true,
-	"candidateEvidence": true, "oracleCeilingDecided": true,
+	"discarded": true, "operators": true, "kills": true, "survivors": true, "attested": true, "withdrawn": true,
+	"candidateEvidence": true,
+}
+
+func validateJSONNonNullArray(raw json.RawMessage) ([]json.RawMessage, error) {
+	if isJSONNull(raw) {
+		return nil, fmt.Errorf("expected array")
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	for i, item := range items {
+		if isJSONNull(item) {
+			return nil, fmt.Errorf("element %d is null", i)
+		}
+	}
+	return items, nil
+}
+
+func validateCompartmentFileHeaderJSON(raw json.RawMessage) error {
+	fields, err := validateRequiredObject(raw, map[string]bool{"file": true, "hash": true, "embedded": true, "bindings": true}, []string{"file", "hash"})
+	if err != nil {
+		return err
+	}
+	if bRaw, ok := fields["bindings"]; ok {
+		bFields, err := validateRequiredObject(bRaw, map[string]bool{"package": true, "references": true, "imports": true}, []string{"package"})
+		if err != nil {
+			return fmt.Errorf("bindings: %w", err)
+		}
+		if refRaw, ok := bFields["references"]; ok {
+			if _, err := validateJSONNonNullArray(refRaw); err != nil {
+				return fmt.Errorf("bindings references: %w", err)
+			}
+		}
+		if impRaw, ok := bFields["imports"]; ok {
+			imps, err := validateJSONNonNullArray(impRaw)
+			if err != nil {
+				return fmt.Errorf("bindings imports: %w", err)
+			}
+			for i, imp := range imps {
+				if _, err := validateRequiredObject(imp, map[string]bool{"name": true, "path": true}, []string{"name", "path"}); err != nil {
+					return fmt.Errorf("bindings import %d: %w", i, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateCompartmentLedgerJSON(raw json.RawMessage) error {
+	fields, err := validateRequiredObject(raw, map[string]bool{"bindingStrategy": true, "baseFiles": true, "declarations": true, "fileHeaders": true}, nil)
+	if err != nil {
+		return err
+	}
+	for _, listName := range []string{"baseFiles", "fileHeaders"} {
+		if listRaw, ok := fields[listName]; ok {
+			headers, err := validateJSONNonNullArray(listRaw)
+			if err != nil {
+				return fmt.Errorf("%s: %w", listName, err)
+			}
+			for i, h := range headers {
+				if err := validateCompartmentFileHeaderJSON(h); err != nil {
+					return fmt.Errorf("%s %d: %w", listName, i, err)
+				}
+			}
+		}
+	}
+	if declRaw, ok := fields["declarations"]; ok {
+		decls, err := validateJSONNonNullArray(declRaw)
+		if err != nil {
+			return fmt.Errorf("declarations: %w", err)
+		}
+		for i, d := range decls {
+			if _, err := validateRequiredObject(d, map[string]bool{"file": true, "kind": true, "name": true, "receiver": true, "hash": true, "package": true}, []string{"file", "kind", "name", "hash"}); err != nil {
+				return fmt.Errorf("declaration %d: %w", i, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateTargetShapeJSON(raw json.RawMessage) error {
+	fields, err := validateRequiredObject(raw, map[string]bool{"structural": true, "manual": true}, nil)
+	if err != nil {
+		return err
+	}
+	if sRaw, ok := fields["structural"]; ok {
+		sFields, err := validateRequiredObject(sRaw, map[string]bool{"class": true, "packages": true, "forbidden": true, "type": true, "interface": true}, []string{"class"})
+		if err != nil {
+			return fmt.Errorf("structural: %w", err)
+		}
+		if pkgRaw, ok := sFields["packages"]; ok {
+			if _, err := validateJSONNonNullArray(pkgRaw); err != nil {
+				return fmt.Errorf("structural packages: %w", err)
+			}
+		}
+	}
+	if mRaw, ok := fields["manual"]; ok {
+		mFields, err := validateRequiredObject(mRaw, map[string]bool{"file": true, "edits": true}, []string{"file", "edits"})
+		if err != nil {
+			return fmt.Errorf("manual: %w", err)
+		}
+		edits, err := validateJSONNonNullArray(mFields["edits"])
+		if err != nil {
+			return fmt.Errorf("manual edits: %w", err)
+		}
+		for i, edit := range edits {
+			if _, err := validateRequiredObject(edit, map[string]bool{"find": true, "replace": true}, []string{"find", "replace"}); err != nil {
+				return fmt.Errorf("manual edit %d: %w", i, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateCoverageBoundsJSON(raw json.RawMessage) error {
+	bounds, err := validateJSONNonNullArray(raw)
+	if err != nil {
+		return fmt.Errorf("gomutant: parse coverageBounds: %w", err)
+	}
+	for i, b := range bounds {
+		fields, err := validateRequiredObject(b, map[string]bool{"selection": true, "unreached": true}, []string{"selection", "unreached"})
+		if err != nil {
+			return fmt.Errorf("gomutant: coverage bound %d: %w", i, err)
+		}
+		if _, err := validateJSONNonNullArray(fields["unreached"]); err != nil {
+			return fmt.Errorf("gomutant: coverage bound %d unreached: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func validateFindingNestedObjects(fields map[string]json.RawMessage) error {
+	if raw, ok := fields["labels"]; ok {
+		if _, err := validateJSONNonNullArray(raw); err != nil {
+			return fmt.Errorf("labels: %w", err)
+		}
+	}
+	if raw, ok := fields["shape"]; ok {
+		if err := validateTargetShapeJSON(raw); err != nil {
+			return fmt.Errorf("shape: %w", err)
+		}
+	}
+	if raw, ok := fields["compartmentLedger"]; ok {
+		if err := validateCompartmentLedgerJSON(raw); err != nil {
+			return fmt.Errorf("compartmentLedger: %w", err)
+		}
+	}
+	if raw, ok := fields["kills"]; ok {
+		records, err := validateJSONNonNullArray(raw)
+		if err != nil {
+			return fmt.Errorf("kills: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "killer": true}, []string{"position", "operator", "killer"}); err != nil {
+				return fmt.Errorf("kill %d: %w", i, err)
+			}
+		}
+	}
+	if raw, ok := fields["exempted"]; ok {
+		records, err := validateJSONNonNullArray(raw)
+		if err != nil {
+			return fmt.Errorf("exempted: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record, map[string]bool{"subject": true, "reason": true, "rationale": true}, []string{"subject", "reason", "rationale"}); err != nil {
+				return fmt.Errorf("exemption %d: %w", i, err)
+			}
+		}
+	}
+	if raw, ok := fields["survivors"]; ok {
+		records, err := validateJSONNonNullArray(raw)
+		if err != nil {
+			return fmt.Errorf("survivors: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record, map[string]bool{
+				"position": true, "operator": true, "extent": true, "site": true,
+				"execution": true, "withdrawnKiller": true, "otherSelection": true,
+			}, []string{"position", "operator"}); err != nil {
+				return fmt.Errorf("survivor %d: %w", i, err)
+			}
+		}
+	}
+	if raw, ok := fields["operators"]; ok {
+		records, err := validateJSONNonNullArray(raw)
+		if err != nil {
+			return fmt.Errorf("operators: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record,
+				map[string]bool{"operator": true, "generated": true, "discarded": true, "killed": true, "survived": true},
+				[]string{"operator", "generated", "discarded", "killed", "survived"}); err != nil {
+				return fmt.Errorf("operator summary %d: %w", i, err)
+			}
+		}
+	}
+	if raw, ok := fields["candidateEvidence"]; ok {
+		records, err := validateJSONNonNullArray(raw)
+		if err != nil {
+			return fmt.Errorf("candidateEvidence: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record,
+				map[string]bool{"position": true, "operator": true, "reason": true, "disposition": true},
+				[]string{"position", "operator", "reason", "disposition"}); err != nil {
+				return fmt.Errorf("candidate evidence %d: %w", i, err)
+			}
+		}
+	}
+	if raw, ok := fields["attested"]; ok {
+		records, err := validateJSONNonNullArray(raw)
+		if err != nil {
+			return fmt.Errorf("attested: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "reason": true, "site": true}, []string{"position", "operator", "reason"}); err != nil {
+				return fmt.Errorf("attestation %d: %w", i, err)
+			}
+		}
+	}
+	if raw, ok := fields["withdrawn"]; ok {
+		records, err := validateJSONNonNullArray(raw)
+		if err != nil {
+			return fmt.Errorf("withdrawn: %w", err)
+		}
+		for i, record := range records {
+			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "priorReason": true, "reason": true, "site": true}, []string{"position", "operator", "priorReason", "reason"}); err != nil {
+				return fmt.Errorf("withdrawn attestation %d: %w", i, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateInternedFindingRowJSON(raw json.RawMessage, i int) error {
+	rowFields, err := validateRequiredObject(raw, map[string]bool{
+		"finding": true, "targetEvidence": true, "oracleEvidence": true, "compartmentLedger": true,
+	}, []string{"finding", "oracleEvidence"})
+	if err != nil {
+		return fmt.Errorf("gomutant: finding row %d: %w", i, err)
+	}
+	if _, err := validateJSONNonNullArray(rowFields["oracleEvidence"]); err != nil {
+		return fmt.Errorf("gomutant: finding row %d oracleEvidence: %w", i, err)
+	}
+	fFields, err := decodeKnownObject(rowFields["finding"], inlineFindingFields)
+	if err != nil {
+		return fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+	}
+	for name, value := range fFields {
+		if name == "oracleEvidence" {
+			continue
+		}
+		if isJSONNull(value) {
+			return fmt.Errorf("gomutant: finding %d field %s is null", i, name)
+		}
+	}
+	if err := validateFindingNestedObjects(withoutKey(fFields, "operators")); err != nil {
+		return fmt.Errorf("gomutant: parse finding %d: %w", i, err)
+	}
+	if rawOps, ok := fFields["operators"]; ok {
+		records, err := validateJSONNonNullArray(rawOps)
+		if err != nil {
+			return fmt.Errorf("gomutant: parse finding %d: operators: %w", i, err)
+		}
+		for j, record := range records {
+			if _, err := validateRequiredObject(record,
+				map[string]bool{"operator": true, "generated": true, "discarded": true, "killed": true, "survived": true},
+				[]string{"operator", "generated", "killed"}); err != nil {
+				return fmt.Errorf("gomutant: parse finding %d: operator summary %d: %w", i, j, err)
+			}
+		}
+	}
+	return nil
+}
+
+func withoutKey(m map[string]json.RawMessage, drop string) map[string]json.RawMessage {
+	if _, ok := m[drop]; !ok {
+		return m
+	}
+	cp := make(map[string]json.RawMessage, len(m)-1)
+	for k, v := range m {
+		if k != drop {
+			cp[k] = v
+		}
+	}
+	return cp
+}
+
+func validateInternedV11JSON(top map[string]json.RawMessage, version int) error {
+	if _, err := validateJSONNonNullArray(top["runtimeInputsTable"]); err != nil {
+		return fmt.Errorf("gomutant: parse runtimeInputsTable: %w", err)
+	}
+	evEntries, err := validateJSONNonNullArray(top["evidenceTable"])
+	if err != nil {
+		return fmt.Errorf("gomutant: parse evidenceTable: %w", err)
+	}
+	for i, entry := range evEntries {
+		if _, err := validateRequiredObject(entry, map[string]bool{"evidence": true, "runtimeInputs": true}, []string{"evidence", "runtimeInputs"}); err != nil {
+			return fmt.Errorf("gomutant: evidence table entry %d: %w", i, err)
+		}
+	}
+	ledgerEntries, err := validateJSONNonNullArray(top["ledgerTable"])
+	if err != nil {
+		return fmt.Errorf("gomutant: parse ledgerTable: %w", err)
+	}
+	for i, entry := range ledgerEntries {
+		if err := validateCompartmentLedgerJSON(entry); err != nil {
+			return fmt.Errorf("gomutant: ledger table entry %d: %w", i, err)
+		}
+	}
+	if version >= 12 {
+		if err := validateCoverageBoundsJSON(top["coverageBounds"]); err != nil {
+			return err
+		}
+	}
+	rows, err := validateJSONNonNullArray(top["findings"])
+	if err != nil {
+		return fmt.Errorf("gomutant: parse findings: %w", err)
+	}
+	for i, row := range rows {
+		if err := validateInternedFindingRowJSON(row, i); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // decodeInlineFinding validates and decodes one inline finding record
@@ -1262,6 +1907,12 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 		if isJSONNull(value) {
 			return false, fmt.Errorf("field %s is null", name)
 		}
+	}
+	if err := validateFindingNestedObjects(fields); err != nil {
+		return false, err
+	}
+	if err := validateSelectionKey(finding.Selection); err != nil {
+		return false, err
 	}
 	if finding.Shape != nil {
 		// A shaped finding's subject is its declared shape: target
@@ -1361,17 +2012,6 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 	}
 	survivors := make(map[survivorKey]bool, len(finding.Survivors))
 	survivorsByOperator := map[string]int{}
-	if raw, ok := fields["survivors"]; ok {
-		var records []json.RawMessage
-		if err := json.Unmarshal(raw, &records); err != nil {
-			return false, fmt.Errorf("survivors: %w", err)
-		}
-		for i, record := range records {
-			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "execution": true, "site": true}, []string{"position", "operator"}); err != nil {
-				return false, fmt.Errorf("survivor %d: %w", i, err)
-			}
-		}
-	}
 	for _, survivor := range finding.Survivors {
 		if survivor.Position == "" || survivor.Operator == "" {
 			return false, fmt.Errorf("survivor identity is incomplete")
@@ -1382,22 +2022,31 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 		}
 		survivors[key] = true
 		survivorsByOperator[survivor.Operator]++
-	}
-	if raw, ok := fields["operators"]; ok {
-		var records []json.RawMessage
-		if err := json.Unmarshal(raw, &records); err != nil {
-			return false, fmt.Errorf("operators: %w", err)
+		if survivor.OtherSelection != "" {
+			others, err := parseSelectionVerdicts(survivor.OtherSelection)
+			if err != nil {
+				return false, fmt.Errorf("survivor %s %s otherSelection: %w", survivor.Position, survivor.Operator, err)
+			}
+			seenSel := map[string]bool{}
+			for idx, other := range others {
+				if other.Selection == finding.Selection {
+					return false, fmt.Errorf("survivor %s %s otherSelection repeats finding selection %q", survivor.Position, survivor.Operator, other.Selection)
+				}
+				if seenSel[other.Selection] {
+					return false, fmt.Errorf("survivor %s %s duplicate otherSelection %q", survivor.Position, survivor.Operator, other.Selection)
+				}
+				seenSel[other.Selection] = true
+				if idx > 0 && others[idx-1].Selection >= other.Selection {
+					return false, fmt.Errorf("survivor %s %s otherSelection is not canonically ordered", survivor.Position, survivor.Operator)
+				}
+			}
 		}
+	}
+	if _, ok := fields["operators"]; ok {
 		previous := ""
 		remainingGenerated, remainingDiscarded := finding.Generated, finding.Discarded
 		remainingKilled, remainingSurvived := finding.Killed, len(finding.Survivors)
-		for i, record := range records {
-			if _, err := validateRequiredObject(record,
-				map[string]bool{"operator": true, "generated": true, "discarded": true, "killed": true, "survived": true},
-				[]string{"operator", "generated", "discarded", "killed", "survived"}); err != nil {
-				return false, fmt.Errorf("operator summary %d: %w", i, err)
-			}
-			summary := finding.Operators[i]
+		for i, summary := range finding.Operators {
 			if summary.Operator == "" || summary.Generated <= 0 || summary.Discarded < 0 || summary.Killed < 0 || summary.Survived < 0 ||
 				summary.Discarded > summary.Generated || summary.Killed > summary.Generated-summary.Discarded ||
 				summary.Survived != summary.Generated-summary.Discarded-summary.Killed {
@@ -1420,19 +2069,6 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 		}
 		if remainingGenerated != 0 || remainingDiscarded != 0 || remainingKilled != 0 || remainingSurvived != 0 {
 			return false, fmt.Errorf("operator summaries do not match finding totals")
-		}
-	}
-	if raw, ok := fields["candidateEvidence"]; ok {
-		var records []json.RawMessage
-		if err := json.Unmarshal(raw, &records); err != nil {
-			return false, fmt.Errorf("candidateEvidence: %w", err)
-		}
-		for i, record := range records {
-			if _, err := validateRequiredObject(record,
-				map[string]bool{"position": true, "operator": true, "reason": true, "disposition": true},
-				[]string{"position", "operator", "reason", "disposition"}); err != nil {
-				return false, fmt.Errorf("candidate evidence %d: %w", i, err)
-			}
 		}
 	}
 	flaggedSeen := map[survivorKey]bool{}
@@ -1479,17 +2115,6 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 		}
 	}
 	attested := map[survivorKey]bool{}
-	if raw, ok := fields["attested"]; ok {
-		var records []json.RawMessage
-		if err := json.Unmarshal(raw, &records); err != nil {
-			return false, fmt.Errorf("attested: %w", err)
-		}
-		for i, record := range records {
-			if _, err := validateRequiredObject(record, map[string]bool{"position": true, "operator": true, "reason": true, "site": true}, []string{"position", "operator", "reason"}); err != nil {
-				return false, fmt.Errorf("attestation %d: %w", i, err)
-			}
-		}
-	}
 	for _, attestation := range finding.Attested {
 		key := survivorKey{attestation.Position, attestation.Operator}
 		if attestation.Position == "" || attestation.Operator == "" || attestation.Reason == "" {
@@ -1502,6 +2127,23 @@ func validateFindingEncoding(fields map[string]json.RawMessage, finding *Finding
 			return false, fmt.Errorf("duplicate attestation %s %s", attestation.Position, attestation.Operator)
 		}
 		attested[key] = true
+	}
+	withdrawnSeen := map[survivorKey]bool{}
+	for _, w := range finding.Withdrawn {
+		key := survivorKey{w.Position, w.Operator}
+		if w.Position == "" || w.Operator == "" || w.PriorReason == "" || w.Reason == "" {
+			return false, fmt.Errorf("withdrawn attestation is incomplete")
+		}
+		if !survivors[key] {
+			return false, fmt.Errorf("withdrawn attestation does not name a survivor")
+		}
+		if attested[key] {
+			return false, fmt.Errorf("withdrawn attestation %s %s is also attested", w.Position, w.Operator)
+		}
+		if withdrawnSeen[key] {
+			return false, fmt.Errorf("duplicate withdrawn attestation %s %s", w.Position, w.Operator)
+		}
+		withdrawnSeen[key] = true
 	}
 	return complete, nil
 }
@@ -1989,14 +2631,115 @@ func (t *Tree) freshForContext(ctx context.Context, f Finding, tg Target, budget
 func RenderedFindings(findings []Finding, postMerge map[string]Finding) []Finding {
 	rendered := make([]Finding, len(findings))
 	for i, f := range findings {
-		if m, ok := postMerge[f.Symbol]; ok {
+		if m, ok := postMerge[f.recordKeyString()]; ok {
 			m.Cached, m.Skipped, m.Unreached = f.Cached, f.Skipped, f.Unreached
 			rendered[i] = m
+		} else if f.Selection == "" {
+			if m, ok := postMerge[f.Symbol]; ok {
+				m.Cached, m.Skipped, m.Unreached = f.Cached, f.Skipped, f.Unreached
+				rendered[i] = m
+				continue
+			}
+			rendered[i] = f
 		} else {
 			rendered[i] = f
 		}
 	}
 	return rendered
+}
+
+// AnnotateSelectionVerdicts populates each survivor's OtherSelections with
+// the advisory verdicts recorded for the same mutant in coexisting records of
+// the same symbol under other build selections whose mutation domain
+// (BodyHash, OperatorSet, and Site) and oracleExecutionPolicy hold
+// (REQ-result-record, REQ-result-findings).
+func AnnotateSelectionVerdicts(findings []Finding) []Finding {
+	bySymbol := map[string][]int{}
+	for i, f := range findings {
+		if f.Skipped != "" {
+			continue
+		}
+		bySymbol[f.Symbol] = append(bySymbol[f.Symbol], i)
+	}
+	out := make([]Finding, len(findings))
+	for i := range findings {
+		out[i] = cloneFinding(findings[i])
+	}
+	for _, indices := range bySymbol {
+		if len(indices) < 2 {
+			continue
+		}
+		for _, idx := range indices {
+			f := &out[idx]
+			if OracleExecutionPolicyIssue(*f) != "" {
+				for si := range f.Survivors {
+					f.Survivors[si].OtherSelection = ""
+				}
+				continue
+			}
+			for si := range f.Survivors {
+				s := &f.Survivors[si]
+				key := survivorKey{s.Position, s.Operator}
+				var verdicts []SelectionVerdict
+				for _, otherIdx := range indices {
+					if otherIdx == idx {
+						continue
+					}
+					other := out[otherIdx]
+					if other.Selection == f.Selection {
+						continue
+					}
+					if OracleExecutionPolicyIssue(other) != "" {
+						continue
+					}
+					if other.BodyHash != f.BodyHash || other.OperatorSet != f.OperatorSet {
+						continue
+					}
+					if verdict, ok := selectionVerdictFrom(other, key, s.Site); ok {
+						verdicts = append(verdicts, verdict)
+					}
+				}
+				sort.Slice(verdicts, func(i, j int) bool {
+					return verdicts[i].Selection < verdicts[j].Selection
+				})
+				s.OtherSelection = formatSelectionVerdicts(verdicts)
+			}
+		}
+	}
+	return out
+}
+
+func selectionVerdictFrom(other Finding, key survivorKey, site string) (SelectionVerdict, bool) {
+	for _, k := range other.Kills {
+		if k.Position == key.position && k.Operator == key.operator {
+			return SelectionVerdict{
+				Selection:   other.Selection,
+				Disposition: "killed",
+				Killer:      k.Killer,
+			}, true
+		}
+	}
+	for _, os := range other.Survivors {
+		if os.Position == key.position && os.Operator == key.operator {
+			if site != "" && os.Site != "" && site != os.Site {
+				return SelectionVerdict{}, false
+			}
+			for _, a := range other.Attested {
+				if a.Position == key.position && a.Operator == key.operator {
+					return SelectionVerdict{
+						Selection:   other.Selection,
+						Disposition: "attested",
+						Reason:      a.Reason,
+					}, true
+				}
+			}
+			return SelectionVerdict{
+				Selection:   other.Selection,
+				Disposition: "survived",
+			}, true
+		}
+	}
+	return SelectionVerdict{}, false
 }
 
 // DedupeAttestationSheds keeps each shed mutant's first report: the
@@ -2018,23 +2761,23 @@ func DedupeAttestationSheds(sheds []AttestationShed) []AttestationShed {
 }
 
 // MergeFindings merges a run's fresh findings into the prior document's
-// records — a fresh record replaces the prior for its symbol, a prior
-// record with no fresh counterpart stands — grafting attested
+// records — a fresh record replaces the prior for its (symbol, selection)
+// key, a prior record with no fresh counterpart stands — grafting attested
 // dispositions against snapshot, the caller's run-start snapshot of
-// attested dispositions per symbol, and reporting the ones it shed.
+// attested dispositions per record key, and reporting the ones it shed.
 // With the snapshot in hand the graft is pin-correct
 // (REQ-attest-survivor): a disposition the fresh record already carries
-// rode the domain-hold re-measure carry and stays; a disposition
-// present in the live document but absent from the snapshot is a
-// concurrent attestation and grafts onto a still-reported survivor;
-// every other prior disposition was judged afresh and rejected — its
-// mutation domain moved — and sheds loudly. Without a snapshot the
-// graft anchors on survivor identity and site alone.
+// rode the domain-hold re-measure carry and stays unless withdrawn or
+// re-attested concurrently; a disposition present in the live document
+// but absent from the snapshot is a concurrent attestation and grafts onto
+// a still-reported survivor; every other prior disposition was judged
+// afresh and rejected — its mutation domain moved — and sheds loudly.
+// Without a snapshot the graft anchors on survivor identity and site alone.
 func MergeFindings(prior, fresh []Finding, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
 	var shed []AttestationShed
-	bySym := map[string]Finding{}
+	byKey := map[string]Finding{}
 	for _, f := range prior {
-		bySym[f.Symbol] = f
+		byKey[f.recordKeyString()] = f
 	}
 	for _, f := range fresh {
 		// A skipped result measured nothing: it must never shadow a symbol's
@@ -2044,34 +2787,39 @@ func MergeFindings(prior, fresh []Finding, snapshot map[string][]Attestation) ([
 		if f.Skipped != "" {
 			continue
 		}
+		rKey := f.recordKeyString()
 		// Replacement never sheds a disposition the document already holds for
 		// a survivor the replacement still reports: an attestation added
 		// between a run's snapshot — or its incremental commit — and this
 		// merge rides survivor identity, so it grafts onto the fresh record
 		// rather than being clobbered by it.
-		if prior, ok := bySym[f.Symbol]; ok {
+		if priorRec, ok := byKey[rKey]; ok {
 			var dropped []AttestationShed
 			snap, snapped := (map[survivorKey]Attestation)(nil), false
 			if snapshot != nil {
 				snapped = true
 				snap = map[survivorKey]Attestation{}
-				for _, a := range snapshot[f.Symbol] {
+				snapList, hasSnap := snapshot[rKey]
+				if !hasSnap && f.Selection == "" {
+					snapList = snapshot[f.Symbol]
+				}
+				for _, a := range snapList {
 					snap[survivorKey{a.Position, a.Operator}] = a
 				}
 			}
-			f.Attested, dropped = graftAttestationsAgainst(prior.Attested, f.Attested, f.Survivors, snap, snapped)
+			f.Attested, f.Withdrawn, dropped = graftDispositionsAgainst(priorRec.Attested, f.Attested, priorRec.Withdrawn, f.Withdrawn, f.Survivors, snap, snapped)
 			for _, d := range dropped {
 				d.Symbol = f.Symbol
 				shed = append(shed, d)
 			}
 		}
-		bySym[f.Symbol] = f
+		byKey[rKey] = f
 	}
-	out := make([]Finding, 0, len(bySym))
-	for _, f := range bySym {
+	out := make([]Finding, 0, len(byKey))
+	for _, f := range byKey {
 		out = append(out, f)
 	}
-	return out, shed
+	return AnnotateSelectionVerdicts(out), shed
 }
 
 // AttestationShed is one disposition that failed to carry only because
@@ -2112,6 +2860,11 @@ func graftAttestations(prior, fresh []Attestation, survivors []Survivor) ([]Atte
 // snapshot) graft. A disposition whose survivor the fresh record no
 // longer reports sheds loudly in every mode - never silently dropped.
 func graftAttestationsAgainst(prior, fresh []Attestation, survivors []Survivor, snapshot map[survivorKey]Attestation, snapped bool) ([]Attestation, []AttestationShed) {
+	att, _, shed := graftDispositionsAgainst(prior, fresh, nil, nil, survivors, snapshot, snapped)
+	return att, shed
+}
+
+func graftDispositionsAgainst(prior, fresh []Attestation, priorWithdrawn, freshWithdrawn []WithdrawnAttestation, survivors []Survivor, snapshot map[survivorKey]Attestation, snapped bool) ([]Attestation, []WithdrawnAttestation, []AttestationShed) {
 	siteOf := make(map[survivorKey]string, len(survivors))
 	surviving := make(map[survivorKey]bool, len(survivors))
 	for _, survivor := range survivors {
@@ -2119,11 +2872,41 @@ func graftAttestationsAgainst(prior, fresh []Attestation, survivors []Survivor, 
 		surviving[key] = true
 		siteOf[key] = survivor.Site
 	}
-	attested := make(map[survivorKey]bool, len(fresh))
-	for _, attestation := range fresh {
-		attested[survivorKey{attestation.Position, attestation.Operator}] = true
+	priorAttByKey := make(map[survivorKey]Attestation, len(prior))
+	for _, a := range prior {
+		priorAttByKey[survivorKey{a.Position, a.Operator}] = a
 	}
-	out := append([]Attestation(nil), fresh...)
+	priorWithdrawnByKey := make(map[survivorKey]WithdrawnAttestation, len(priorWithdrawn))
+	for _, w := range priorWithdrawn {
+		priorWithdrawnByKey[survivorKey{w.Position, w.Operator}] = w
+	}
+	attested := make(map[survivorKey]bool, len(fresh))
+	out := make([]Attestation, 0, len(fresh))
+	for _, attestation := range fresh {
+		key := survivorKey{attestation.Position, attestation.Operator}
+		if snapped {
+			if snapAtt, held := snapshot[key]; held && snapAtt.Reason == attestation.Reason {
+				// If the live document withdrew this disposition concurrently,
+				// honor the withdrawal rather than resurrecting the snapshot's
+				// disposition from the in-run carry.
+				if _, stillInPrior := priorAttByKey[key]; !stillInPrior {
+					if _, wasWithdrawn := priorWithdrawnByKey[key]; wasWithdrawn {
+						continue
+					}
+				}
+				// If the live document re-attested this disposition concurrently
+				// with a new reason, adopt the updated reason.
+				if pAtt, stillInPrior := priorAttByKey[key]; stillInPrior && pAtt.Reason != attestation.Reason {
+					if pAtt.Site == "" || pAtt.Site == siteOf[key] {
+						attestation.Reason = pAtt.Reason
+						attestation.Site = siteOf[key]
+					}
+				}
+			}
+		}
+		attested[key] = true
+		out = append(out, attestation)
+	}
 	var shed []AttestationShed
 	for _, attestation := range prior {
 		key := survivorKey{attestation.Position, attestation.Operator}
@@ -2166,17 +2949,48 @@ func graftAttestationsAgainst(prior, fresh []Attestation, survivors []Survivor, 
 			}
 		}
 		attestation.Site = siteOf[key]
+		attested[key] = true
 		out = append(out, attestation)
 	}
-	return out, shed
+	withdrawnSeen := make(map[survivorKey]bool, len(freshWithdrawn)+len(priorWithdrawn))
+	var outWithdrawn []WithdrawnAttestation
+	appendWithdrawn := func(w WithdrawnAttestation) {
+		key := survivorKey{w.Position, w.Operator}
+		if attested[key] || withdrawnSeen[key] || !surviving[key] {
+			return
+		}
+		if w.Site != "" && w.Site != siteOf[key] {
+			return
+		}
+		w.Site = siteOf[key]
+		withdrawnSeen[key] = true
+		outWithdrawn = append(outWithdrawn, w)
+	}
+	for _, w := range priorWithdrawn {
+		appendWithdrawn(w)
+	}
+	for _, w := range freshWithdrawn {
+		appendWithdrawn(w)
+	}
+	return out, outWithdrawn, shed
 }
 
-// MergeWholeFindings is MergeFindings for a whole-tree run: a prior
-// record whose symbol the run did not discover is dropped — the symbol
-// is gone from the tree (REQ-result-hygiene) — while a discovered or
-// shaped symbol's record stands, re-measured or not; the shed reports
-// against snapshot exactly as MergeFindings does.
+// MergeWholeFindings is MergeFindings for a whole-tree run under the
+// default selection: a prior default-selection record whose symbol the
+// run did not discover is dropped — the symbol is gone from the tree
+// (REQ-result-hygiene) — while a discovered, shaped, or other-selection
+// record stands, re-measured or not; the shed reports against snapshot
+// exactly as MergeFindings does.
 func MergeWholeFindings(prior, fresh []Finding, discovered []Target, snapshot map[string][]Attestation) ([]Finding, []AttestationShed) {
+	return MergeWholeFindingsForSelection(prior, fresh, discovered, snapshot, "")
+}
+
+// MergeWholeFindingsForSelection is MergeWholeFindings scoped to selKey:
+// only records belonging to selKey whose symbol was not discovered by the
+// whole-tree run are dropped as detached; records measured under other
+// build selections stand untouched and cross-selection survivor verdicts
+// are re-annotated across the merged set.
+func MergeWholeFindingsForSelection(prior, fresh []Finding, discovered []Target, snapshot map[string][]Attestation, selKey string) ([]Finding, []AttestationShed) {
 	current := make(map[string]bool, len(discovered))
 	for _, target := range discovered {
 		current[target.Symbol] = true
@@ -2188,12 +3002,13 @@ func MergeWholeFindings(prior, fresh []Finding, discovered []Target, snapshot ma
 		// the whole-tree target set is its normal state, so the shed
 		// spares it exactly as lifecycle pruning does — retirement is
 		// the caller's explicit edit (REQ-target-structural,
-		// REQ-target-manual-recipes).
-		if current[finding.Symbol] || finding.Shape != nil {
+		// REQ-target-manual-recipes). Records belonging to another build
+		// selection are likewise spared by a whole-tree run of selKey.
+		if finding.Selection != selKey || current[finding.Symbol] || finding.Shape != nil {
 			kept = append(kept, finding)
 		}
 	}
-	return kept, shed
+	return AnnotateSelectionVerdicts(kept), shed
 }
 
 // UpdateDocument applies update to the findings document at path under the
@@ -2391,6 +3206,18 @@ func SkippedPackageRadius(findings []Finding, packageOf func(string) string) []P
 	return radius
 }
 
+// AttestOptions configures AttestFindingWithOptions: Selection and
+// HasSelection scope the target record when a symbol has findings across
+// multiple build selections; Reattest replaces an existing attestation's
+// reason; Withdraw withdraws an existing attestation and records the
+// withdrawal reason alongside the prior reason (REQ-attest-survivor).
+type AttestOptions struct {
+	Selection    string
+	HasSelection bool
+	Reattest     bool
+	Withdraw     bool
+}
+
 // AttestFinding records one equivalence disposition on the named
 // symbol's finding in a document's rows — the one disposition both
 // faces' update callbacks apply, and the one home of the reasoning
@@ -2398,16 +3225,67 @@ func SkippedPackageRadius(findings []Finding, packageOf func(string) string) []P
 // ephemeral attestation's does) — returning the rows and the record
 // as attested; a symbol with no finding refuses (REQ-attest-survivor).
 func AttestFinding(all []Finding, symbol, position, operator, reason string) ([]Finding, Finding, error) {
+	return AttestFindingWithOptions(all, symbol, position, operator, reason, AttestOptions{})
+}
+
+// AttestFindingWithOptions applies an attestation, re-attestation, or
+// withdrawal to the finding record matching symbol and opts.Selection,
+// re-annotating cross-selection survivor verdicts across the document's rows.
+func AttestFindingWithOptions(all []Finding, symbol, position, operator, reason string, opts AttestOptions) ([]Finding, Finding, error) {
+	if opts.Reattest && opts.Withdraw {
+		return nil, Finding{}, fmt.Errorf("gomutant: cannot combine --reattest and --withdraw")
+	}
 	if err := ValidateAttestationReason(reason); err != nil {
 		return nil, Finding{}, err
 	}
-	for i := range all {
-		if all[i].Symbol == symbol {
-			if err := all[i].Attest(position, operator, reason); err != nil {
-				return nil, Finding{}, err
+	targetIdx := -1
+	if opts.HasSelection || opts.Selection != "" {
+		for i := range all {
+			if all[i].Symbol == symbol && all[i].Selection == opts.Selection {
+				targetIdx = i
+				break
 			}
-			return all, all[i], nil
+		}
+		if targetIdx < 0 {
+			if opts.Selection != "" {
+				return nil, Finding{}, fmt.Errorf("no finding for %s [%s]", symbol, opts.Selection)
+			}
+			return nil, Finding{}, fmt.Errorf("no finding for %s", symbol)
+		}
+	} else {
+		var nonDefault []int
+		for i := range all {
+			if all[i].Symbol == symbol {
+				if all[i].Selection == "" {
+					targetIdx = i
+					break
+				}
+				nonDefault = append(nonDefault, i)
+			}
+		}
+		if targetIdx < 0 {
+			switch len(nonDefault) {
+			case 0:
+				return nil, Finding{}, fmt.Errorf("no finding for %s", symbol)
+			case 1:
+				targetIdx = nonDefault[0]
+			default:
+				return nil, Finding{}, fmt.Errorf("multiple findings for %s across selections; specify a selection", symbol)
+			}
 		}
 	}
-	return nil, Finding{}, fmt.Errorf("no finding for %s", symbol)
+	var err error
+	switch {
+	case opts.Withdraw:
+		err = all[targetIdx].WithdrawAttestation(position, operator, reason)
+	case opts.Reattest:
+		err = all[targetIdx].Reattest(position, operator, reason)
+	default:
+		err = all[targetIdx].Attest(position, operator, reason)
+	}
+	if err != nil {
+		return nil, Finding{}, err
+	}
+	all = AnnotateSelectionVerdicts(all)
+	return all, all[targetIdx], nil
 }

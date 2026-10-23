@@ -269,7 +269,7 @@ func killEvidence(stream []byte, killer string, timeout time.Duration) string {
 	case killer == TimeoutKiller:
 		return fmt.Sprintf("oracle timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", timeout)
 	case strings.HasPrefix(killer, PackageKillerPrefix):
-		if excerpt := outputTail(stream, func(pkg, test string) bool { return test == "" }); excerpt != "" {
+		if excerpt := packageCrashTail(stream); excerpt != "" {
 			return excerpt
 		}
 		return tail(string(stream), 400)
@@ -278,6 +278,62 @@ func killEvidence(stream []byte, killer string, timeout time.Duration) string {
 			return pkg+"."+test == killer
 		})
 	}
+}
+
+func isPackageFailTrailer(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return trimmed == "" || trimmed == "FAIL" || strings.HasPrefix(trimmed, "FAIL\t") || strings.HasPrefix(trimmed, "exit status ")
+}
+
+// packageCrashTail extracts the bounded tail for a package-scope crash:
+// package-level output (Test == ""), plus any panic/fatal stack block
+// test2json attributed to the test that was running when the process
+// died (Test != "" with no completion event).
+func packageCrashTail(stream []byte) string {
+	type event struct {
+		Action  string
+		Package string
+		Test    string
+		Output  string
+	}
+	completed := map[string]bool{}
+	hasSubstantivePkgOutput := false
+	dec := json.NewDecoder(bytes.NewReader(stream))
+	for {
+		var e event
+		if err := dec.Decode(&e); err != nil {
+			break
+		}
+		name := e.Test
+		if i := strings.Index(name, "/"); i >= 0 {
+			name = name[:i]
+		}
+		switch e.Action {
+		case "pass", "fail", "skip":
+			if name != "" {
+				completed[e.Package+"."+name] = true
+			}
+		case "output":
+			if name == "" && !isPackageFailTrailer(e.Output) {
+				hasSubstantivePkgOutput = true
+			}
+		}
+	}
+	inPanic := map[string]bool{}
+	return outputTailLine(stream, func(pkg, test, line string) bool {
+		if test == "" {
+			return true
+		}
+		key := pkg + "." + test
+		if completed[key] {
+			return false
+		}
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "panic:") || strings.HasPrefix(trimmed, "fatal error:") {
+			inPanic[key] = true
+		}
+		return inPanic[key] || !hasSubstantivePkgOutput
+	})
 }
 
 // outputTail collects the last killerOutputLines non-empty output
@@ -289,6 +345,12 @@ func killEvidence(stream []byte, killer string, timeout time.Duration) string {
 // last: a head would bury the failure reason under run banners and
 // force exactly the parallel re-run the evidence exists to remove.
 func outputTail(stream []byte, keep func(pkg, test string) bool) string {
+	return outputTailLine(stream, func(pkg, test, _ string) bool {
+		return keep(pkg, test)
+	})
+}
+
+func outputTailLine(stream []byte, keep func(pkg, test, line string) bool) string {
 	type event struct {
 		Action  string
 		Package string
@@ -311,11 +373,11 @@ func outputTail(stream []byte, keep func(pkg, test string) bool) string {
 		if i := strings.Index(name, "/"); i >= 0 {
 			name = name[:i]
 		}
-		if !keep(e.Package, name) {
-			continue
-		}
 		line := strings.TrimRight(e.Output, "\n")
 		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !keep(e.Package, name, line) {
 			continue
 		}
 		if len(line) > killerOutputLineCap {

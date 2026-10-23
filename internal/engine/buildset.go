@@ -42,6 +42,8 @@ func (t *Tree) buildIndex() *buildSet {
 
 // HasPackage reports whether path names a loaded package import path.
 func (t *Tree) HasPackage(path string) bool {
+	t.loadMu.Lock()
+	defer t.loadMu.Unlock()
 	return t.buildIndex().packages[path]
 }
 
@@ -50,6 +52,8 @@ func (t *Tree) HasPackage(path string) bool {
 // not in any loaded package's GoFiles, so an overlay of it can never be
 // exercised.
 func (t *Tree) BuildCompilesFile(abs string) bool {
+	t.loadMu.Lock()
+	defer t.loadMu.Unlock()
 	return t.buildIndex().files[filepath.Clean(abs)]
 }
 
@@ -58,6 +62,8 @@ func (t *Tree) BuildCompilesFile(abs string) bool {
 // profile's file keys are import-path-qualified, so classifying a
 // replacement against a profile starts here.
 func (t *Tree) FileImportPath(abs string) string {
+	t.loadMu.Lock()
+	defer t.loadMu.Unlock()
 	return t.buildIndex().filePkg[filepath.Clean(abs)]
 }
 

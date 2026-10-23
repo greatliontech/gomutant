@@ -54,6 +54,8 @@ type DirectiveCoverageView struct {
 // DirectiveCoverage builds the seam's view once per Tree — a pure
 // function of the loaded syntax and line tables.
 func (t *Tree) DirectiveCoverage() DirectiveCoverageView {
+	t.loadMu.Lock()
+	defer t.loadMu.Unlock()
 	t.directiveOnce.Do(func() {
 		// Guard sets are per BASE package path. The VALUE side unions
 		// every variant's compiled files (external _test packages

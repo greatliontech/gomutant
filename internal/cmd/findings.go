@@ -40,27 +40,29 @@ func (o findingsOptions) judged() bool {
 }
 
 type findingView struct {
-	Symbol                     string                `json:"symbol"`
-	Labels                     []string              `json:"labels,omitempty"`
-	State                      gomutant.FindingState `json:"state"`
-	Reason                     string                `json:"reason,omitempty"`
-	Layer                      string                `json:"layer"`
-	LayerReason                string                `json:"layerReason,omitempty"`
-	Run                        string                `json:"run,omitempty"`
-	OracleExecutionPolicy      string                `json:"oracleExecutionPolicy,omitempty"`
-	OracleExecutionPolicyIssue string                `json:"oracleExecutionPolicyIssue,omitempty"`
+	Symbol                     string                          `json:"symbol"`
+	Selection                  string                          `json:"selection,omitempty"`
+	Labels                     []string                        `json:"labels,omitempty"`
+	State                      gomutant.FindingState           `json:"state"`
+	Reason                     string                          `json:"reason,omitempty"`
+	Layer                      string                          `json:"layer"`
+	LayerReason                string                          `json:"layerReason,omitempty"`
+	Run                        string                          `json:"run,omitempty"`
+	OracleExecutionPolicy      string                          `json:"oracleExecutionPolicy,omitempty"`
+	OracleExecutionPolicyIssue string                          `json:"oracleExecutionPolicyIssue,omitempty"`
 	// DeltaOpen is present exactly when a changed-ref cut ran (an
 	// empty list is "cut ran, none on the delta").
-	DeltaOpen      *[]gomutant.Survivor         `json:"deltaOpen,omitempty"`
-	CandidateCount int                          `json:"candidateCount"`
-	Generated      int                          `json:"generated"`
-	Mutants        int                          `json:"mutants"`
-	Killed         int                          `json:"killed"`
-	Discarded      int                          `json:"discarded"`
-	Operators      []gomutant.OperatorSummary   `json:"operators"`
-	Open           []gomutant.Survivor          `json:"open"`
-	Attested       []gomutant.Attestation       `json:"attested"`
-	Candidates     []gomutant.CandidateEvidence `json:"candidateEvidence,omitempty"`
+	DeltaOpen      *[]gomutant.Survivor            `json:"deltaOpen,omitempty"`
+	CandidateCount int                             `json:"candidateCount"`
+	Generated      int                             `json:"generated"`
+	Mutants        int                             `json:"mutants"`
+	Killed         int                             `json:"killed"`
+	Discarded      int                             `json:"discarded"`
+	Operators      []gomutant.OperatorSummary      `json:"operators"`
+	Open           []gomutant.Survivor             `json:"open"`
+	Attested       []gomutant.Attestation          `json:"attested"`
+	Withdrawn      []gomutant.WithdrawnAttestation `json:"withdrawn,omitempty"`
+	Candidates     []gomutant.CandidateEvidence    `json:"candidateEvidence,omitempty"`
 	// split marks the on-delta survivors for the human detail face.
 	split gomutant.DeltaSurvivors
 }
@@ -110,7 +112,14 @@ func findingsCommand(ctx context.Context, o findingsOptions, out io.Writer) erro
 		return err
 	}
 	document := gomutant.FindingsPathAt(o.dir, o.findingsFile)
-	filter := gomutant.RecordFilter{Label: o.label, Symbol: o.symbol, Run: o.run}
+	sel := selectionOf(o.tags, o.toolchain)
+	filter := gomutant.RecordFilter{
+		Label:        o.label,
+		Symbol:       o.symbol,
+		Run:          o.run,
+		Selection:    gomutant.SelectionKey(sel),
+		HasSelection: len(o.tags) > 0 || o.toolchain != "",
+	}
 	// Judging derives freshness against the current tree — the
 	// expensive truth — and a cut loads the tree too; the default path
 	// loads no tree at all: the document's recorded facts answer
@@ -285,11 +294,18 @@ func renderDocumentTail(out io.Writer, tail documentTail) {
 // (REQ-result-inspection).
 func renderFindingSummaries(w io.Writer, views []findingView, inspection gomutant.Inspection, judged bool, cut bool) {
 	for _, view := range views {
-		fmt.Fprintf(w, "%s  %s%s  %d open", view.State, view.Symbol, layerMarker(view.Layer), len(view.Open))
+		sel := ""
+		if view.Selection != "" {
+			sel = " [" + view.Selection + "]"
+		}
+		fmt.Fprintf(w, "%s  %s%s%s  %d open", view.State, view.Symbol, sel, layerMarker(view.Layer), len(view.Open))
 		if cut && view.DeltaOpen != nil {
 			fmt.Fprintf(w, " (%d on the delta)", len(*view.DeltaOpen))
 		}
 		fmt.Fprintf(w, ", %d attested", len(view.Attested))
+		if len(view.Withdrawn) > 0 {
+			fmt.Fprintf(w, ", %d withdrawn", len(view.Withdrawn))
+		}
 		if view.Reason != "" {
 			fmt.Fprintf(w, "  (%s)", view.Reason)
 		}
@@ -306,6 +322,32 @@ func renderFindingSummaries(w io.Writer, views []findingView, inspection gomutan
 	fmt.Fprintln(w)
 }
 
+func formatOtherSelections(others []gomutant.SelectionVerdict) string {
+	if len(others) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(others))
+	for _, o := range others {
+		sel := o.Selection
+		if sel == "" {
+			sel = "default"
+		}
+		switch o.Disposition {
+		case "killed":
+			if o.Killer != "" {
+				parts = append(parts, fmt.Sprintf("%s: killed by %s", sel, o.Killer))
+			} else {
+				parts = append(parts, fmt.Sprintf("%s: killed", sel))
+			}
+		case "attested":
+			parts = append(parts, fmt.Sprintf("%s: attested (%s)", sel, o.Reason))
+		default:
+			parts = append(parts, fmt.Sprintf("%s: %s", sel, o.Disposition))
+		}
+	}
+	return "  [other selections: " + strings.Join(parts, "; ") + "]"
+}
+
 func renderFindingViews(w io.Writer, views []findingView, inspection gomutant.Inspection) {
 	repoCount, localOnly := inspection.Repo, inspection.Local
 	for _, view := range views {
@@ -314,13 +356,21 @@ func renderFindingViews(w io.Writer, views []findingView, inspection gomutant.In
 			labels = []string{"(unlabeled)"}
 		}
 		fmt.Fprintf(w, "%s\n", strings.Join(labels, ", "))
-		fmt.Fprintf(w, "  %s  %s", view.State, view.Symbol)
+		sel := ""
+		if view.Selection != "" {
+			sel = " [" + view.Selection + "]"
+		}
+		fmt.Fprintf(w, "  %s  %s%s", view.State, view.Symbol, sel)
 		fmt.Fprintf(w, "  %d/%d candidates, %d mutants, %d killed, %d discarded; %d open",
 			view.Generated, view.CandidateCount, view.Mutants, view.Killed, view.Discarded, len(view.Open))
 		if view.DeltaOpen != nil {
 			fmt.Fprintf(w, " (%d on the delta)", len(*view.DeltaOpen))
 		}
-		fmt.Fprintf(w, ", %d attested\n", len(view.Attested))
+		fmt.Fprintf(w, ", %d attested", len(view.Attested))
+		if len(view.Withdrawn) > 0 {
+			fmt.Fprintf(w, ", %d withdrawn", len(view.Withdrawn))
+		}
+		fmt.Fprintln(w)
 		// The cause leads: a record that cannot be reused says why before
 		// anything it found (REQ-result-inspection).
 		if view.Reason != "" {
@@ -332,6 +382,7 @@ func renderFindingViews(w io.Writer, views []findingView, inspection gomutant.In
 			if view.split.IsOnDelta(i) {
 				mark = "  [delta]"
 			}
+			mark += formatOtherSelections(survivor.OtherSelections())
 			if survivor.Execution != "" {
 				fmt.Fprintf(w, "    survivor %s %s  [%s]%s\n", survivor.Position, survivor.Operator, survivor.Execution, mark)
 				continue
@@ -344,6 +395,9 @@ func renderFindingViews(w io.Writer, views []findingView, inspection gomutant.In
 		}
 		for _, attestation := range view.Attested {
 			fmt.Fprintf(w, "    attested %s %s  (%s)\n", attestation.Position, attestation.Operator, attestation.Reason)
+		}
+		for _, wAtt := range view.Withdrawn {
+			fmt.Fprintf(w, "    withdrawn %s %s  (%s; was: %s)\n", wAtt.Position, wAtt.Operator, wAtt.Reason, wAtt.PriorReason)
 		}
 		if view.Layer == gomutant.LayerLocal {
 			fmt.Fprintf(w, "    machine-local: %s\n", view.LayerReason)
@@ -397,13 +451,14 @@ func inspectFindings(ctx context.Context, tree *gomutant.Tree, store *gomutant.S
 			onDelta = &listed
 		}
 		views = append(views, findingView{
-			Symbol: finding.Symbol, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
+			Symbol: finding.Symbol, Selection: finding.Selection, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
 			OracleExecutionPolicy: finding.OracleExecutionPolicy, OracleExecutionPolicyIssue: gomutant.OracleExecutionPolicyIssue(finding),
 			Layer: row.Layer, LayerReason: row.LayerReason, Run: finding.Run, DeltaOpen: onDelta, split: split,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
 			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
+			Withdrawn:  append([]gomutant.WithdrawnAttestation(nil), finding.WithdrawnDispositions()...),
 			Candidates: row.Inspection.CandidateEvidence,
 		})
 	}

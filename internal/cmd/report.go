@@ -230,6 +230,10 @@ func (r *runReporter) decision(d gomutant.RunDecision) {
 
 func (r *runReporter) executing(e gomutant.ExecutionEvent) {
 	r.mu.Lock()
+	if e.CandidatesTotal == 0 && r.lastExec.CandidatesTotal > 0 {
+		e.CandidatesDone = r.lastExec.CandidatesDone
+		e.CandidatesTotal = r.lastExec.CandidatesTotal
+	}
 	r.lastExec = e
 	if e.Phase == "tick" {
 		// The pace anchor: elapsed-per-candidate measures from the

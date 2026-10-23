@@ -205,8 +205,13 @@ type Routing map[string]Placement
 // routes — as the store's answer stated once, never a zero placement
 // (REQ-result-layers).
 func (r Routing) Of(store *Store, f Finding) (layer, reason string) {
-	if p, ok := r[f.Symbol]; ok && p.Layer != "" {
+	if p, ok := r[f.recordKeyString()]; ok && p.Layer != "" {
 		return p.Layer, p.Reason()
+	}
+	if f.Selection == "" {
+		if p, ok := r[f.Symbol]; ok && p.Layer != "" {
+			return p.Layer, p.Reason()
+		}
 	}
 	return store.Layer(f)
 }
@@ -523,6 +528,11 @@ func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopA
 	// exactly the unverifiable clause (REQ-result-exemptions); every
 	// other portable-line clause still applies.
 	_, exempted := coveredExemptions(&f, exemptions)
+	if f.EvidenceFault != "" && !exempted {
+		if add(f.EvidenceFault) {
+			return reasons
+		}
+	}
 	subjects := append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...)
 	for _, ev := range subjects {
 		if ev.RuntimeUnverifiable && !exempted {
@@ -621,14 +631,15 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 	// foreign names — and remembers every name for the symbol's next
 	// write (REQ-result-layers).
 	serve := func(f Finding, name string) {
-		served[f.Symbol] = append(served[f.Symbol], name)
-		if i, ok := chosen[f.Symbol]; ok {
-			if name == filepath.Base(s.entryPath(f.Symbol)) {
+		key := f.recordKeyString()
+		served[key] = append(served[key], name)
+		if i, ok := chosen[key]; ok {
+			if name == filepath.Base(s.entryPath(key)) {
 				out[i] = f
 			}
 			return
 		}
-		chosen[f.Symbol] = len(out)
+		chosen[key] = len(out)
 		out = append(out, f)
 	}
 	for _, entry := range entries {
@@ -706,14 +717,19 @@ func (s *Store) loadOverlay(ctx context.Context) ([]Finding, error) {
 	s.served = served
 	s.servedRecord = make(map[string]Finding, len(out))
 	for _, f := range out {
-		s.servedRecord[f.Symbol] = f
+		s.servedRecord[f.recordKeyString()] = f
 	}
 	for name := range s.cache {
 		if !retained[name] {
 			delete(s.cache, name)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Symbol != out[j].Symbol {
+			return out[i].Symbol < out[j].Symbol
+		}
+		return out[i].Selection < out[j].Selection
+	})
 	// The store's views of the read — the cache, the served names, the
 	// served records — alias one parse each and are written only whole;
 	// a caller gets clones at this one boundary, so an in-place edit of
@@ -891,7 +907,7 @@ func (s *Store) Load(ctx context.Context) ([]Finding, error) {
 		return nil, err
 	}
 	s.noteOverlaid(overlay)
-	return mergeLayers(repo, overlay), nil
+	return AnnotateSelectionVerdicts(mergeLayers(repo, overlay)), nil
 }
 
 // noteOverlaid records which symbols the read just served from the
@@ -899,7 +915,7 @@ func (s *Store) Load(ctx context.Context) ([]Finding, error) {
 func (s *Store) noteOverlaid(overlay []Finding) {
 	overlaid := make(map[string]bool, len(overlay))
 	for _, f := range overlay {
-		overlaid[f.Symbol] = true
+		overlaid[f.recordKeyString()] = true
 	}
 	s.mu.Lock()
 	s.overlaid = overlaid
@@ -1027,20 +1043,25 @@ func cloneFindings(findings []Finding) []Finding {
 }
 
 // mergeLayers merges the two persistence layers, the overlay winning per
-// symbol.
+// (symbol, selection) record key.
 func mergeLayers(repo, overlay []Finding) []Finding {
 	merged := make(map[string]Finding, len(repo)+len(overlay))
 	for _, f := range repo {
-		merged[f.Symbol] = f
+		merged[f.recordKeyString()] = f
 	}
 	for _, f := range overlay {
-		merged[f.Symbol] = f
+		merged[f.recordKeyString()] = f
 	}
 	out := make([]Finding, 0, len(merged))
 	for _, f := range merged {
 		out = append(out, f)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Symbol != out[j].Symbol {
+			return out[i].Symbol < out[j].Symbol
+		}
+		return out[i].Selection < out[j].Selection
+	})
 	return out
 }
 
@@ -1073,14 +1094,15 @@ func (s *Store) installEntry(f Finding) error {
 	// concurrent writer's later replacement carries a different stat and
 	// re-parses as usual.
 	info, statErr := os.Stat(tmpPath)
-	if err := os.Rename(tmpPath, s.entryPath(f.Symbol)); err != nil {
+	entryDest := s.entryPath(f.recordKeyString())
+	if err := os.Rename(tmpPath, entryDest); err != nil {
 		return err
 	}
 	if statErr == nil {
 		// The cache holds what a parse of the written bytes yields — the
 		// row the install's own validating parse produced.
 		s.mu.Lock()
-		s.cache[filepath.Base(s.entryPath(f.Symbol))] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: row}
+		s.cache[filepath.Base(entryDest)] = overlayCacheEntry{size: info.Size(), modTime: info.ModTime(), finding: row}
 		s.mu.Unlock()
 	}
 	return nil
@@ -1104,6 +1126,7 @@ func persistedForm(f Finding) Finding {
 	form.Kills = absentWhenEmpty(form.Kills)
 	form.Survivors = absentWhenEmpty(form.Survivors)
 	form.Attested = absentWhenEmpty(form.Attested)
+	form.Withdrawn = absentWhenEmpty(form.Withdrawn)
 	form.CandidateEvidence = absentWhenEmpty(form.CandidateEvidence)
 	form.Exempted = absentWhenEmpty(form.Exempted)
 	form.OracleEvidence = presentWhenAbsent(form.OracleEvidence)
@@ -1145,14 +1168,15 @@ func presentWhenAbsent[T any](list []T) []T {
 // memo, never re-walked. The reasons ride the memo so a write's routing
 // report costs no second walk.
 func (s *Store) route(f, form Finding) (bool, []string) {
-	if memo, ok := s.judged[f.Symbol]; ok && reflect.DeepEqual(memo.finding, form) {
+	key := f.recordKeyString()
+	if memo, ok := s.judged[key]; ok && reflect.DeepEqual(memo.finding, form) {
 		return memo.committable, memo.reasons
 	}
 	if s.hooks.walk != nil {
 		s.hooks.walk(f.Symbol)
 	}
 	reasons := CommittableReasons(f, s.moduleDir, s.exemptions)
-	s.judged[f.Symbol] = judgedRecord{finding: form, committable: len(reasons) == 0, reasons: reasons}
+	s.judged[key] = judgedRecord{finding: form, committable: len(reasons) == 0, reasons: reasons}
 	return len(reasons) == 0, reasons
 }
 
@@ -1201,12 +1225,12 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			return nil, err
 		}
 		for _, f := range overlay {
-			held[f.Symbol] = f
+			held[f.recordKeyString()] = f
 		}
 		current := mergeLayers(repoPrior, overlay)
 		view := make(map[string]Finding, len(current))
 		for _, f := range current {
-			view[f.Symbol] = f
+			view[f.recordKeyString()] = f
 		}
 		next, err = update(current)
 		if err != nil {
@@ -1214,7 +1238,8 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		}
 		nextSymbols := make(map[string]bool, len(next))
 		for _, f := range next {
-			nextSymbols[f.Symbol] = true
+			key := f.recordKeyString()
+			nextSymbols[key] = true
 			// A skipped record measured nothing: it persists nothing and
 			// evicts nothing — the symbol keeps whatever record it holds
 			// in whichever layer (the merge rule that nothing-measured
@@ -1223,15 +1248,15 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			if f.Skipped != "" {
 				continue
 			}
-			forms[f.Symbol] = persistedForm(f)
-			ok, reasons := s.route(f, forms[f.Symbol])
-			committable[f.Symbol] = ok
+			forms[key] = persistedForm(f)
+			ok, reasons := s.route(f, forms[key])
+			committable[key] = ok
 			layer := LayerRepo
 			if !ok {
 				layer = LayerLocal
 			}
 			// The routing's slice is its own: the memo keeps the store's.
-			routing[f.Symbol] = Placement{Layer: layer, Reasons: slices.Clone(reasons)}
+			routing[key] = Placement{Layer: layer, Reasons: slices.Clone(reasons)}
 		}
 		byRepo := make(map[string]Finding, len(repoPrior))
 		for _, f := range repoPrior {
@@ -1245,7 +1270,7 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			if form := persistedForm(f); s.committable(f, form) {
 				// The store's own copy: the callback holds the view this
 				// row came from, and the cache outlives the commit.
-				byRepo[f.Symbol] = form
+				byRepo[f.recordKeyString()] = form
 			}
 		}
 		// Every document row is a parsed form: a record unchanged from
@@ -1258,11 +1283,12 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 		// the symbol map admits no duplicate, and the interned shape is
 		// this binary's own construction.
 		for _, f := range next {
-			if !committable[f.Symbol] {
+			key := f.recordKeyString()
+			if !committable[key] {
 				continue
 			}
-			if prior, held := view[f.Symbol]; held && reflect.DeepEqual(persistedForm(prior), forms[f.Symbol]) {
-				byRepo[f.Symbol] = persistedForm(prior)
+			if prior, held := view[key]; held && reflect.DeepEqual(persistedForm(prior), forms[key]) {
+				byRepo[key] = persistedForm(prior)
 				continue
 			}
 			if s.hooks.recordParse != nil {
@@ -1272,26 +1298,32 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			if err != nil {
 				return nil, err
 			}
-			byRepo[f.Symbol] = row
+			byRepo[key] = row
 		}
 		// A symbol removed from the set entirely (a pruned target)
 		// leaves the repo document too, and its overlay entry goes with
 		// it: a resurrected local entry would shadow the reconciliation.
 		for _, layer := range [][]Finding{repoPrior, overlay} {
 			for _, f := range layer {
-				if !nextSymbols[f.Symbol] {
-					pruned = append(pruned, f.Symbol)
+				key := f.recordKeyString()
+				if !nextSymbols[key] {
+					pruned = append(pruned, key)
 				}
 			}
 		}
 		out := make([]Finding, 0, len(byRepo))
-		for symbol, f := range byRepo {
-			if !nextSymbols[symbol] {
+		for key, f := range byRepo {
+			if !nextSymbols[key] {
 				continue
 			}
 			out = append(out, f)
 		}
-		sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].Symbol != out[j].Symbol {
+				return out[i].Symbol < out[j].Symbol
+			}
+			return out[i].Selection < out[j].Selection
+		})
 		return out, nil
 	}, export: func(next []Finding) ([]byte, error) {
 		bounds = s.mergedBounds()
@@ -1318,13 +1350,14 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			if f.Skipped != "" {
 				continue
 			}
-			prior, holds := held[f.Symbol]
+			key := f.recordKeyString()
+			prior, holds := held[key]
 			switch {
-			case committable[f.Symbol]:
+			case committable[key]:
 				if holds {
-					edits = append(edits, overlayRemoval(f.Symbol))
+					edits = append(edits, overlayRemoval(key))
 				}
-			case holds && reflect.DeepEqual(prior, forms[f.Symbol]):
+			case holds && reflect.DeepEqual(prior, forms[key]):
 				// The overlay already holds this record: nothing to rewrite.
 			default:
 				edits = append(edits, overlayInstall(f))

@@ -115,7 +115,12 @@ func InspectDocument(ctx context.Context, tree *Tree, store *Store, matched []Fi
 		}
 		result.Rows = append(result.Rows, row)
 	}
-	sort.Slice(result.Rows, func(i, j int) bool { return result.Rows[i].Finding.Symbol < result.Rows[j].Finding.Symbol })
+	sort.Slice(result.Rows, func(i, j int) bool {
+		if result.Rows[i].Finding.Symbol != result.Rows[j].Finding.Symbol {
+			return result.Rows[i].Finding.Symbol < result.Rows[j].Finding.Symbol
+		}
+		return result.Rows[i].Finding.Selection < result.Rows[j].Finding.Selection
+	})
 	return result, nil
 }
 
@@ -151,6 +156,9 @@ func (f RecordFilter) Given() string {
 	}
 	if f.Run != "" {
 		given = append(given, "run")
+	}
+	if f.HasSelection || f.Selection != "" {
+		given = append(given, "selection")
 	}
 	return strings.Join(given, "/")
 }

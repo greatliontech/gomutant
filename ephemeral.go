@@ -142,6 +142,10 @@ func OracleMemoryBytesFromMiB(mib int64) int64 {
 	if mib <= 0 {
 		return mib
 	}
+	const maxBytes = int64(^uint64(0) >> 1)
+	if mib > maxBytes>>20 {
+		return maxBytes
+	}
 	return mib << 20
 }
 
@@ -274,16 +278,27 @@ func (t *Tree) ephemeral(ctx context.Context, file string, mutant []byte, testPk
 // tree, or names no loaded package's directory, refuses before any
 // process launches.
 func (t *Tree) resolveTestPackage(testPkg string) (string, error) {
+	return t.resolveTestPackageContext(context.Background(), testPkg)
+}
+
+func (t *Tree) resolveTestPackageContext(ctx context.Context, testPkg string) (string, error) {
 	if testPkg == "." || testPkg == ".." || strings.HasPrefix(testPkg, "./") || strings.HasPrefix(testPkg, "../") {
 		clean := path.Clean(testPkg)
 		if clean == ".." || strings.HasPrefix(clean, "../") {
 			return "", fmt.Errorf("test package directory %q escapes the tree root", testPkg)
 		}
-		importPath, ok := t.eng.PackageAtDir(filepath.Join(t.dir, filepath.FromSlash(clean)))
+		absDir := filepath.Join(t.dir, filepath.FromSlash(clean))
+		importPath, ok := t.eng.PackageAtDir(absDir)
+		if !ok && engine.HasTestdataSegment(clean) {
+			importPath, ok, _ = t.eng.LoadExplicitDirContext(ctx, absDir)
+		}
 		if !ok {
 			return "", fmt.Errorf("test package directory %q holds no loaded package (relative to the tree root %s)", testPkg, t.dir)
 		}
 		return importPath, nil
+	}
+	if !t.eng.HasPackage(testPkg) && engine.HasTestdataSegment(testPkg) {
+		_, _ = t.eng.LoadExplicitImportContext(ctx, testPkg)
 	}
 	if !t.eng.HasPackage(testPkg) {
 		return "", fmt.Errorf("test package %q is not a loaded package import path", testPkg)
@@ -575,11 +590,14 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 	// present, and a test package in a go test option position changes
 	// the invocation being measured - both refuse before any process
 	// launches (REQ-exec-ephemeral).
-	testPkg, err = t.resolveTestPackage(testPkg)
+	testPkg, err = t.resolveTestPackageContext(ctx, testPkg)
 	if err != nil {
 		return nil, err
 	}
 	for _, replacement := range replacements {
+		if !t.eng.BuildCompilesFile(replacement.Abs) && engine.HasTestdataSegment(filepath.ToSlash(replacement.File)) {
+			_, _, _ = t.eng.LoadExplicitDirContext(ctx, filepath.Dir(replacement.Abs))
+		}
 		if !t.eng.BuildCompilesFile(replacement.Abs) {
 			return nil, fmt.Errorf("replacement %s is not compiled by the loaded build (build-constraint-excluded, or not a Go source of any loaded package): the mutation would never be exercised", replacement.File)
 		}
@@ -775,7 +793,15 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// runs under the measurement leash in both modes. Its expiry is
 		// the advisory posture, never a verdict — CoverageUnknown, the
 		// label absent — and the command timeout still bounds.
-		if coverage, err := seams.coveredPositions(ctx, t.dir, testPkg, run, "./...", probeLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage(), bounds); err != nil {
+		coverPkg := "./..."
+		seenCover := map[string]bool{}
+		for _, replacement := range replacements {
+			if pkg := t.eng.FileImportPath(replacement.Abs); pkg != "" && engine.HasTestdataSegment(pkg) && !seenCover[pkg] {
+				seenCover[pkg] = true
+				coverPkg += "," + pkg
+			}
+		}
+		if coverage, err := seams.coveredPositions(ctx, t.dir, testPkg, run, coverPkg, probeLeash, binFlags, t.eng.GoEnv(), t.eng.DirectiveCoverage(), bounds); err != nil {
 			// Every measured file is unknown; a mutated test file is
 			// never measured, so it is not unknown either.
 			for _, file := range files {

@@ -521,7 +521,7 @@ func capRunFindings(ctx context.Context, findings []gomutant.Finding, layer func
 		// consults it: the bound alone ends a render that outlives it
 		// (the context is detached from the request), cut or no cut.
 		if err := ctx.Err(); err != nil {
-			return nil, 0, 0, err
+			return rows, len(findings) - len(rows), deltaOpen, err
 		}
 		// The cut is derived for every measured or cached record — the
 		// summary's total counts rows past the cap too — and listed on
@@ -545,10 +545,10 @@ func capRunFindings(ctx context.Context, findings []gomutant.Finding, layer func
 		}
 		row := findingOut{
 			oracleExecutionPolicyOut: oracleExecutionPolicyRow(f),
-			Symbol:                   f.Symbol, Labels: f.Labels,
+			Symbol:                   f.Symbol, Selection: f.Selection, Labels: f.Labels,
 			CandidateCount: f.CandidateCount, Generated: f.Generated,
 			Mutants: f.Mutants, Killed: f.Killed, Discarded: f.Discarded,
-			Attested: len(f.Attested), Open: open,
+			Attested: len(f.Attested), Withdrawn: len(f.Withdrawn), Open: open,
 			OmittedOpen: omittedOpen,
 			Cached:      f.Cached, Skipped: f.Skipped, Run: f.Run,
 		}
@@ -818,6 +818,7 @@ type runIn struct {
 type findingOut struct {
 	oracleExecutionPolicyOut
 	Symbol           string                   `json:"symbol"`
+	Selection        string                   `json:"selection,omitempty"`
 	Labels           []string                 `json:"labels,omitempty"`
 	CandidateCount   int                      `json:"candidateCount"`
 	Generated        int                      `json:"generated"`
@@ -825,6 +826,7 @@ type findingOut struct {
 	Killed           int                      `json:"killed"`
 	Discarded        int                      `json:"discarded"`
 	Attested         int                      `json:"attested,omitempty"`
+	Withdrawn        int                      `json:"withdrawn,omitempty"`
 	Open             []gomutant.Survivor      `json:"open,omitempty"`
 	OmittedOpen      int                      `json:"omittedOpen,omitempty" jsonschema:"open survivors beyond the response cap; the findings tool serves the full set"`
 	Cached           bool                     `json:"cached,omitempty"`
@@ -1293,17 +1295,13 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 		}
 	}
 	var deltaOpen int
-	if out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(ctx, rendered, ledger.Layer, onDelta); err == nil {
-		for i := range out.Findings {
-			if p, ok := postures[out.Findings[i].Symbol]; ok {
-				out.Findings[i].Reuse, out.Findings[i].Reasons, out.Findings[i].Analysis = string(p.Reuse), p.Reasons, p.Analysis
-			}
+	out.Findings, out.OmittedFindings, deltaOpen, err = capRunFindings(ctx, rendered, ledger.Layer, onDelta)
+	for i := range out.Findings {
+		if p, ok := postures[out.Findings[i].Symbol]; ok {
+			out.Findings[i].Reuse, out.Findings[i].Reasons, out.Findings[i].Analysis = string(p.Reuse), p.Reasons, p.Analysis
 		}
 	}
-	if err != nil {
-		return outcome.PersistedRiding(ridingAbort(err, out))
-	}
-	if sel.Cut != nil {
+	if sel.Cut != nil && err == nil {
 		out.Summary.Delta = &gomutant.DeltaSummary{Ref: sel.Cut.Ref, Open: deltaOpen}
 	}
 	out.Residue, out.OmittedResidue = capRows(out.Residue)
@@ -1312,15 +1310,11 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// committed, so the response says it happened (REQ-mcp-findings-doc).
 	out.recordOutcome(outcome)
 	out.Document = gomutant.FindingsPathAt(s.dir, in.Findings)
-	// The advisory lists cap like every row surface; the drift error
-	// still folds over the FULL shed list, capped by its own exemplar
-	// bound - a capped response list must not shrink what the error
-	// names (REQ-mcp-envelope).
-	// Every whole-tree reconcile's document write is owned by the
-	// response, not only the zero-target one: dropped records are a
-	// state change git does not show until committed (REQ-mcp-envelope).
 	if line := outcome.DropText(); line != "" {
 		out.Note = line
+	}
+	if err != nil {
+		return outcome.PersistedRiding(ridingAbort(err, out))
 	}
 	fullSheds := out.capAdvisories()
 	// A drift-refused campaign persists its completed findings and still
@@ -1549,6 +1543,7 @@ type findingsIn struct {
 type findingSummary struct {
 	oracleExecutionPolicyOut
 	Symbol    string                `json:"symbol"`
+	Selection string                `json:"selection,omitempty"`
 	State     gomutant.FindingState `json:"state"`
 	Reason    string                `json:"reason,omitempty"`
 	Layer     string                `json:"layer"`
@@ -1556,27 +1551,30 @@ type findingSummary struct {
 	Open      int                   `json:"open"`
 	DeltaOpen *int                  `json:"deltaOpen,omitempty" jsonschema:"under changed: the open survivors on lines added since the ref"`
 	Attested  int                   `json:"attested"`
+	Withdrawn int                   `json:"withdrawn,omitempty"`
 }
 
 type inspectedFinding struct {
 	oracleExecutionPolicyOut
-	Symbol         string                       `json:"symbol"`
-	Labels         []string                     `json:"labels,omitempty"`
-	State          gomutant.FindingState        `json:"state"`
-	Reason         string                       `json:"reason,omitempty"`
-	Layer          string                       `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
-	LayerReason    string                       `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
-	Run            string                       `json:"run,omitempty" jsonschema:"identity of the run that last measured the record"`
-	DeltaOpen      []gomutant.Survivor          `json:"deltaOpen,omitempty" jsonschema:"under changed: the open survivors on lines added since the ref, listed distinctly"`
-	CandidateCount int                          `json:"candidateCount"`
-	Generated      int                          `json:"generated"`
-	Mutants        int                          `json:"mutants"`
-	Killed         int                          `json:"killed"`
-	Discarded      int                          `json:"discarded"`
-	Operators      []gomutant.OperatorSummary   `json:"operators"`
-	Open           []gomutant.Survivor          `json:"open"`
-	Attested       []gomutant.Attestation       `json:"attested"`
-	Candidates     []gomutant.CandidateEvidence `json:"candidateEvidence,omitempty"`
+	Symbol         string                          `json:"symbol"`
+	Selection      string                          `json:"selection,omitempty"`
+	Labels         []string                        `json:"labels,omitempty"`
+	State          gomutant.FindingState           `json:"state"`
+	Reason         string                          `json:"reason,omitempty"`
+	Layer          string                          `json:"layer" jsonschema:"repo when the record is committable, local when it stays in the machine-local overlay"`
+	LayerReason    string                          `json:"layerReason,omitempty" jsonschema:"why a local record is not portable repo evidence"`
+	Run            string                          `json:"run,omitempty" jsonschema:"identity of the run that last measured the record"`
+	DeltaOpen      []gomutant.Survivor             `json:"deltaOpen,omitempty" jsonschema:"under changed: the open survivors on lines added since the ref, listed distinctly"`
+	CandidateCount int                             `json:"candidateCount"`
+	Generated      int                             `json:"generated"`
+	Mutants        int                             `json:"mutants"`
+	Killed         int                             `json:"killed"`
+	Discarded      int                             `json:"discarded"`
+	Operators      []gomutant.OperatorSummary      `json:"operators"`
+	Open           []gomutant.Survivor             `json:"open"`
+	Attested       []gomutant.Attestation          `json:"attested"`
+	Withdrawn      []gomutant.WithdrawnAttestation `json:"withdrawn,omitempty"`
+	Candidates     []gomutant.CandidateEvidence    `json:"candidateEvidence,omitempty"`
 }
 
 // coverageBoundOut is one served coverage bound: the document's row
@@ -1627,7 +1625,13 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, out, err
 	}
-	filter := gomutant.RecordFilter{Label: in.Label, Symbol: in.Symbol, Run: in.Run}
+	filter := gomutant.RecordFilter{
+		Label:        in.Label,
+		Symbol:       in.Symbol,
+		Run:          in.Run,
+		Selection:    gomutant.SelectionKey(in.selection()),
+		HasSelection: len(in.Tags) > 0 || in.Toolchain != "",
+	}
 	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
@@ -1715,8 +1719,9 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		if !in.Detail {
 			out.Summary = append(out.Summary, findingSummary{
 				oracleExecutionPolicyOut: oracleExecutionPolicyRow(finding),
-				Symbol:                   finding.Symbol, State: row.Inspection.State, Reason: row.Inspection.Reason,
+				Symbol:                   finding.Symbol, Selection: finding.Selection, State: row.Inspection.State, Reason: row.Inspection.Reason,
 				Layer: row.Layer, Run: finding.Run, Open: len(finding.Open()), DeltaOpen: deltaCount, Attested: len(finding.AttestedDispositions()),
+				Withdrawn: len(finding.WithdrawnDispositions()),
 			})
 			continue
 		}
@@ -1724,12 +1729,13 @@ func (s *Server) toolFindings(ctx context.Context, req *mcp.CallToolRequest, in 
 		sort.Strings(labels)
 		out.Findings = append(out.Findings, inspectedFinding{
 			oracleExecutionPolicyOut: oracleExecutionPolicyRow(finding),
-			Symbol:                   finding.Symbol, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
+			Symbol:                   finding.Symbol, Selection: finding.Selection, Labels: labels, State: row.Inspection.State, Reason: row.Inspection.Reason,
 			Layer: row.Layer, LayerReason: row.LayerReason, Run: finding.Run, DeltaOpen: onDelta,
 			CandidateCount: finding.CandidateCount, Generated: finding.Generated,
 			Mutants: finding.Mutants, Killed: finding.Killed, Discarded: finding.Discarded,
 			Operators: append([]gomutant.OperatorSummary{}, finding.Operators...),
 			Open:      append([]gomutant.Survivor{}, finding.Open()...), Attested: append([]gomutant.Attestation{}, finding.AttestedDispositions()...),
+			Withdrawn:  append([]gomutant.WithdrawnAttestation(nil), finding.WithdrawnDispositions()...),
 			Candidates: row.Inspection.CandidateEvidence,
 		})
 	}
@@ -1768,6 +1774,7 @@ type promotionGroup struct {
 
 type explainOut struct {
 	Symbol              string                `json:"symbol,omitempty"`
+	Selection           string                `json:"selection,omitempty"`
 	State               gomutant.FindingState `json:"state,omitempty"`
 	Reason              string                `json:"reason,omitempty"`
 	Layer               string                `json:"layer,omitempty"`
@@ -1776,6 +1783,7 @@ type explainOut struct {
 	Open                []explainedSurvivor   `json:"open,omitempty"`
 	OmittedOpen         int                   `json:"omittedOpen,omitempty"`
 	Attested            int                   `json:"attested,omitempty"`
+	Withdrawn           int                   `json:"withdrawn,omitempty"`
 	RepoCommittable     *int                  `json:"repoCommittable,omitempty" jsonschema:"document arm: records portable enough for the committed findings document"`
 	Document            string                `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
 	LocalOnly           *int                  `json:"localOnly,omitempty" jsonschema:"document arm: records held in the machine-local overlay"`
@@ -1801,15 +1809,40 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 		return nil, explainOut{}, err
 	}
 	if in.Symbol != "" {
+		if err := ctx.Err(); err != nil {
+			return nil, explainOut{}, err
+		}
+		selKey := gomutant.SelectionKey(in.selection())
+		hasSel := len(in.Tags) > 0 || in.Toolchain != ""
+		var matches []gomutant.Finding
 		for _, finding := range all {
-			if err := ctx.Err(); err != nil {
-				return nil, explainOut{}, err
-			}
 			if finding.Symbol != in.Symbol {
 				continue
 			}
+			if hasSel && finding.Selection != selKey {
+				continue
+			}
+			matches = append(matches, finding)
+		}
+		if len(matches) > 1 {
+			for _, m := range matches {
+				if m.Selection == selKey {
+					matches = []gomutant.Finding{m}
+					break
+				}
+			}
+		}
+		if len(matches) > 1 {
+			return nil, explainOut{}, fmt.Errorf("explain: multiple finding records for %s across build selections; specify tags or toolchain", in.Symbol)
+		}
+		if len(matches) == 1 {
+			finding := matches[0]
 			notify := progressNotifier(ctx, req)
-			tree, err := s.loadTreeReporting(ctx, notify, in.selection())
+			loadSel := in.selection()
+			if !hasSel && finding.Selection != "" {
+				loadSel = gomutant.SelectionOfKey(finding.Selection)
+			}
+			tree, err := s.loadTreeReporting(ctx, notify, loadSel)
 			if err != nil {
 				return nil, explainOut{}, err
 			}
@@ -1824,10 +1857,11 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 			}
 			layer, layerReasons := store.LayerReasons(finding)
 			out := explainOut{
-				Symbol: finding.Symbol, State: inspection.State, Reason: inspection.Reason,
+				Symbol: finding.Symbol, Selection: finding.Selection, State: inspection.State, Reason: inspection.Reason,
 				Layer: layer, LayerReasons: gomutant.RollUpMachineLocalInputs(layerReasons),
-				Attested: len(finding.AttestedDispositions()),
-				Document: gomutant.FindingsPathAt(s.dir, in.Findings),
+				Attested:  len(finding.AttestedDispositions()),
+				Withdrawn: len(finding.WithdrawnDispositions()),
+				Document:  gomutant.FindingsPathAt(s.dir, in.Findings),
 			}
 			if len(out.LayerReasons) > envelope.reasons {
 				out.OmittedLayerReasons = len(out.LayerReasons) - envelope.reasons
@@ -1850,11 +1884,13 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 	}
 	repo, local := 0, 0
 	groups := map[string][]string{}
+	hasSel := len(in.Tags) > 0 || in.Toolchain != ""
+	selKey := gomutant.SelectionKey(in.selection())
 	for _, finding := range all {
 		if err := ctx.Err(); err != nil {
 			return nil, explainOut{}, err
 		}
-		if !(gomutant.RecordFilter{Label: in.Label}).Admits(finding) {
+		if !(gomutant.RecordFilter{Label: in.Label, Selection: selKey, HasSelection: hasSel}).Admits(finding) {
 			continue
 		}
 		layer, layerReasons := store.LayerReasons(finding)
@@ -1864,7 +1900,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 		}
 		local++
 		for _, reason := range gomutant.RollUpMachineLocalInputs(layerReasons) {
-			groups[reason] = append(groups[reason], finding.Symbol)
+			groups[reason] = append(groups[reason], finding.RecordKey().String())
 		}
 	}
 	out := explainOut{RepoCommittable: &repo, LocalOnly: &local, Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
@@ -1912,15 +1948,19 @@ type attestIn struct {
 	Position string `json:"position"`
 	Operator string `json:"operator"`
 	Reason   string `json:"reason"`
+	Reattest bool   `json:"reattest,omitempty"`
+	Withdraw bool   `json:"withdraw,omitempty"`
 	Findings string `json:"findings,omitempty"`
 }
 
 // attestedEcho restates a recorded disposition in structured fields —
 // operators contain spaces, so a joined string would be unparseable.
 type attestedEcho struct {
-	Symbol   string `json:"symbol"`
-	Position string `json:"position"`
-	Operator string `json:"operator"`
+	Symbol    string `json:"symbol"`
+	Selection string `json:"selection,omitempty"`
+	Position  string `json:"position"`
+	Operator  string `json:"operator"`
+	Withdrawn bool   `json:"withdrawn,omitempty"`
 }
 
 type attestOut struct {
@@ -1939,6 +1979,9 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 		if f == "" {
 			return nil, out, fmt.Errorf("attest_survivor needs symbol, position, operator, and reason")
 		}
+	}
+	if in.Reattest && in.Withdraw {
+		return nil, out, fmt.Errorf("attest_survivor cannot combine reattest and withdraw")
 	}
 	// The reasoning's shape is a declaration's: refused before the
 	// document lock persists anything (REQ-exec-preparation).
@@ -1966,9 +2009,15 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	if err != nil {
 		return nil, out, err
 	}
+	sel := in.selection()
 	routing, err := s.updateStore(ctx, store, gomutant.FindingsPathAt(s.dir, in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		var err error
-		all, attested, err = gomutant.AttestFinding(all, in.Symbol, in.Position, in.Operator, in.Reason)
+		all, attested, err = gomutant.AttestFindingWithOptions(all, in.Symbol, in.Position, in.Operator, in.Reason, gomutant.AttestOptions{
+			Selection:    gomutant.SelectionKey(sel),
+			HasSelection: len(in.Tags) > 0 || in.Toolchain != "",
+			Reattest:     in.Reattest,
+			Withdraw:     in.Withdraw,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -1978,7 +2027,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	if err != nil {
 		return nil, out, err
 	}
-	out.Recorded = &attestedEcho{Symbol: in.Symbol, Position: in.Position, Operator: in.Operator}
+	out.Recorded = &attestedEcho{Symbol: in.Symbol, Selection: attested.Selection, Position: in.Position, Operator: in.Operator, Withdrawn: in.Withdraw}
 	// The echo states where the record lives and whether it can serve
 	// as it stands: a disposition on a record whose pins moved is
 	// judged afresh - and shed if rejected - by the next measure
@@ -1989,7 +2038,11 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	out.Layer, out.LayerReason = routing.Of(store, attested)
 	out.ExemptionsRekeyed, out.OmittedExemptionsRekeyed = rekeyedRows(store.RekeyedExemptions())
 	notify := progressNotifier(ctx, req)
-	tree, err := s.loadTreeReporting(ctx, notify, in.selection())
+	loadSel := in.selection()
+	if len(in.Tags) == 0 && in.Toolchain == "" && attested.Selection != "" {
+		loadSel = gomutant.SelectionOfKey(attested.Selection)
+	}
+	tree, err := s.loadTreeReporting(ctx, notify, loadSel)
 	if err != nil {
 		out.Posture = gomutant.RecordedPosture(attested, gomutant.FindingInspection{}, err)
 		return nil, out, nil
@@ -2003,27 +2056,57 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 
 type pruneIn struct {
 	selectionIn
-	Check    bool   `json:"check,omitempty"`
-	Findings string `json:"findings,omitempty"`
+	Check               bool   `json:"check,omitempty"`
+	Cache               bool   `json:"cache,omitempty"`
+	AllTrees            bool   `json:"all_trees,omitempty"`
+	MaxBytes            *int64 `json:"max_bytes,omitempty"`
+	IncludeLocalRecords bool   `json:"include_local_records,omitempty"`
+	IncludeAttested     bool   `json:"include_attested,omitempty"`
+	Findings            string `json:"findings,omitempty"`
 }
 
 type prunedOut struct {
-	Symbol   string                 `json:"symbol"`
-	Layer    string                 `json:"layer" jsonschema:"repo when the record sat in the findings document, local when it sat in the machine-local overlay — a symbol held in both layers is two rows"`
-	Attested []gomutant.Attestation `json:"attested,omitempty" jsonschema:"the removed record's dispositions, echoed so the reasoning survives the removal"`
+	Symbol    string                 `json:"symbol"`
+	Selection string                 `json:"selection,omitempty"`
+	Layer     string                 `json:"layer" jsonschema:"repo when the record sat in the findings document, local when it sat in the machine-local overlay — a symbol held in both layers is two rows"`
+	Attested  []gomutant.Attestation `json:"attested,omitempty" jsonschema:"the removed record's dispositions, echoed so the reasoning survives the removal"`
 }
 
 type pruneOut struct {
-	Removed                  []prunedOut                 `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
-	Kept                     layerCountsOut              `json:"kept" jsonschema:"records kept, counted per layer: repo the committed document's rows, local the machine-local overlay's"`
-	Check                    bool                        `json:"check,omitempty"`
-	Document                 string                      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
-	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed to canonical path or bracket-root spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
-	OmittedExemptionsRekeyed int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
+	Removed                  []prunedOut                          `json:"removed" jsonschema:"never truncated - for overlay-resident records this echo is the disposition reasoning's last home"`
+	RemovedEphemeral         []gomutant.PrunedEphemeralAttestation `json:"removedEphemeral,omitempty" jsonschema:"committed ephemeral-equivalence attestations whose testPkg no longer resolves in the tree, echoed in full"`
+	Kept                     layerCountsOut                       `json:"kept" jsonschema:"records kept, counted per layer: repo the committed document's rows, local the machine-local overlay's"`
+	Cache                    *gomutant.CachePruneResult           `json:"cache,omitempty" jsonschema:"present when cache=true: summary of reclaimed baseline banks and gofresh memos and preserved local overlay records"`
+	Check                    bool                                 `json:"check,omitempty"`
+	Document                 string                               `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	ExemptionsRekeyed        []gomutant.RekeyedExemption          `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed to canonical path or bracket-root spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	OmittedExemptionsRekeyed int                                  `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
 func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pruneIn) (*mcp.CallToolResult, pruneOut, error) {
 	out := pruneOut{Removed: []prunedOut{}, Document: gomutant.FindingsPathAt(s.dir, in.Findings)}
+	if !in.Cache && (in.AllTrees || in.MaxBytes != nil || in.IncludeLocalRecords || in.IncludeAttested) {
+		return nil, out, fmt.Errorf("prune: all_trees, max_bytes, include_local_records, and include_attested require cache=true")
+	}
+	if in.Cache {
+		var maxBytes int64
+		if in.MaxBytes != nil {
+			maxBytes = *in.MaxBytes
+		}
+		res, err := gomutant.PruneCacheContext(ctx, s.dir, gomutant.CachePruneOptions{
+			Check:               in.Check,
+			AllTrees:            in.AllTrees,
+			MaxBytes:            maxBytes,
+			IncludeLocalRecords: in.IncludeLocalRecords,
+			IncludeAttested:     in.IncludeAttested,
+		})
+		if err != nil {
+			return nil, out, err
+		}
+		out.Cache = &res
+		out.Check = res.Check
+		return nil, out, nil
+	}
 	store, err := gomutant.OpenStore(gomutant.FindingsPathAt(s.dir, in.Findings), s.dir)
 	if err != nil {
 		return nil, out, err
@@ -2038,6 +2121,7 @@ func (s *Server) toolPrune(ctx context.Context, req *mcp.CallToolRequest, in pru
 		return nil, out, err
 	}
 	out.Kept, out.Check = layerCountsRow(result.Kept), result.Check
+	out.RemovedEphemeral = result.RemovedEphemeral
 	out.ExemptionsRekeyed, out.OmittedExemptionsRekeyed = rekeyedRows(result.ExemptionsRekeyed)
 	// The removal echo is never truncated: for an overlay-resident
 	// record the response is the disposition reasoning's last home, and
@@ -2060,10 +2144,11 @@ type retargetIn struct {
 // rewrittenOut is one record whose mutated symbol a retarget rewrote,
 // in its own layer.
 type rewrittenOut struct {
-	From     string `json:"from"`
-	To       string `json:"to"`
-	Layer    string `json:"layer" jsonschema:"repo when the record sits in the findings document, local when it sits in the machine-local overlay — a symbol held in both layers is two rows"`
-	Shadowed bool   `json:"shadowed,omitempty" jsonschema:"a document row whose new symbol the machine-local overlay holds once the retarget has written: every read serves the overlay's record until that entry leaves"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Selection string `json:"selection,omitempty"`
+	Layer     string `json:"layer" jsonschema:"repo when the record sits in the findings document, local when it sits in the machine-local overlay — a symbol held in both layers is two rows"`
+	Shadowed  bool   `json:"shadowed,omitempty" jsonschema:"a document row whose new symbol the machine-local overlay holds once the retarget has written: every read serves the overlay's record until that entry leaves"`
 }
 
 // touchedOut is one field rewrite on a record whose own symbol stayed.
@@ -2104,11 +2189,11 @@ func rekeyedRows(rekeyed []gomutant.RekeyedExemption) ([]gomutant.RekeyedExempti
 // wire projections — every field copied by name, the projection pin
 // comparing values through them.
 func prunedRow(r gomutant.PrunedRecord) prunedOut {
-	return prunedOut{Symbol: r.Symbol, Layer: r.Layer, Attested: r.Attested}
+	return prunedOut{Symbol: r.Symbol, Selection: r.Selection, Layer: r.Layer, Attested: r.Attested}
 }
 
 func rewrittenRow(r gomutant.RetargetedRecord) rewrittenOut {
-	return rewrittenOut{From: r.From, To: r.To, Layer: r.Layer, Shadowed: r.Shadowed}
+	return rewrittenOut{From: r.From, To: r.To, Selection: r.Selection, Layer: r.Layer, Shadowed: r.Shadowed}
 }
 
 func touchedRow(m gomutant.TouchedRewrite) touchedOut {
@@ -2116,19 +2201,21 @@ func touchedRow(m gomutant.TouchedRewrite) touchedOut {
 }
 
 type retargetOut struct {
-	Rewritten                []rewrittenOut              `json:"rewritten" jsonschema:"records whose mutated symbol changed, each in its own layer"`
-	RewrittenCounts          layerCountsOut              `json:"rewrittenCounts" jsonschema:"records whose own symbol the rename rewrote, counted per layer (repo, local) - the count leads where the rewrites list is capped"`
-	Touched                  layerCountsOut              `json:"touched" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface) - counted per layer (repo, local)"`
-	TouchedRewrites          []touchedOut                `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
-	OmittedRewritten         int                         `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
-	OmittedTouched           int                         `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
-	Check                    bool                        `json:"check,omitempty"`
-	Document                 string                      `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
-	Exemptions               []rewrittenExemptionOut     `json:"exemptions,omitempty" jsonschema:"reviewed exemption entries whose subjects the rename moved, rewritten with the records - the reason and rationale untouched; capped at 50"`
-	OmittedExemptions        int                         `json:"omittedExemptions,omitempty" jsonschema:"rewritten exemption subjects beyond the response cap - counted, not listed"`
-	Note                     string                      `json:"note,omitempty" jsonschema:"set when the rename touched nothing: no record and no reviewed exemption subject moved, and the findings tool lists the recorded symbols"`
-	ExemptionsRekeyed        []gomutant.RekeyedExemption `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed to canonical path or bracket-root spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
-	OmittedExemptionsRekeyed int                         `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
+	Rewritten                []rewrittenOut                            `json:"rewritten" jsonschema:"records whose mutated symbol changed, each in its own layer"`
+	RewrittenCounts          layerCountsOut                            `json:"rewrittenCounts" jsonschema:"records whose own symbol the rename rewrote, counted per layer (repo, local) - the count leads where the rewrites list is capped"`
+	Touched                  layerCountsOut                            `json:"touched" jsonschema:"records the rename's closure updated without renaming their own symbol (an oracle or killer in the renamed surface) - counted per layer (repo, local)"`
+	TouchedRewrites          []touchedOut                              `json:"touchedRewrites,omitempty" jsonschema:"the touched records' field rewrites - the surface no resolution gate reaches, echoed for audit"`
+	OmittedRewritten         int                                       `json:"omittedRewritten,omitempty" jsonschema:"rewritten rows beyond the response cap - counted, not listed; under check they are previews"`
+	OmittedTouched           int                                       `json:"omittedTouched,omitempty" jsonschema:"touched rewrite rows beyond the response cap - counted, not listed"`
+	Check                    bool                                      `json:"check,omitempty"`
+	Document                 string                                    `json:"document,omitempty" jsonschema:"the findings document path carrying the full uncapped set"`
+	Exemptions               []rewrittenExemptionOut                   `json:"exemptions,omitempty" jsonschema:"reviewed exemption entries whose subjects the rename moved, rewritten with the records - the reason and rationale untouched; capped at 50"`
+	OmittedExemptions        int                                       `json:"omittedExemptions,omitempty" jsonschema:"rewritten exemption subjects beyond the response cap - counted, not listed"`
+	Ephemeral                []gomutant.RewrittenEphemeralAttestation  `json:"ephemeral,omitempty" jsonschema:"committed ephemeral-equivalence attestations whose testPkg moved under the rename, rewritten with the records; capped at 50"`
+	OmittedEphemeral         int                                       `json:"omittedEphemeral,omitempty" jsonschema:"rewritten ephemeral attestations beyond the response cap - counted, not listed"`
+	Note                     string                                    `json:"note,omitempty" jsonschema:"set when the rename touched nothing: no record and no reviewed exemption subject moved, and the findings tool lists the recorded symbols"`
+	ExemptionsRekeyed        []gomutant.RekeyedExemption               `json:"exemptionsRekeyed,omitempty" jsonschema:"reviewed exemption entries whose clause this call's write re-keyed to canonical path or bracket-root spelling - the subject, the clause as it was, the clause as it matches now; present exactly when the record was rewritten"`
+	OmittedExemptionsRekeyed int                                       `json:"omittedExemptionsRekeyed,omitempty" jsonschema:"re-keyed entries beyond the response cap - counted, not listed"`
 }
 
 func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in retargetIn) (*mcp.CallToolResult, retargetOut, error) {
@@ -2162,11 +2249,12 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 		out.Exemptions = append(out.Exemptions, rewrittenExemptionOut{From: e.From, To: e.To})
 	}
 	out.Exemptions, out.OmittedExemptions = capRows(out.Exemptions)
+	out.Ephemeral, out.OmittedEphemeral = capRows(result.Ephemeral)
 	out.ExemptionsRekeyed, out.OmittedExemptionsRekeyed = rekeyedRows(result.ExemptionsRekeyed)
 	// A rename that moved nothing is an answer with a next step, not an
 	// empty success: the prefix either mismatches the recorded spelling
 	// or the rewrite already landed (REQ-mcp-envelope).
-	if len(result.Rewritten) == 0 && result.Touched.Total() == 0 && len(result.Exemptions) == 0 {
+	if len(result.Rewritten) == 0 && result.Touched.Total() == 0 && len(result.Exemptions) == 0 && len(result.Ephemeral) == 0 {
 		out.Note = fmt.Sprintf("prefix %q matched no records; the findings tool lists the recorded symbols", in.From)
 	}
 	out.Rewritten, out.OmittedRewritten = capRows(out.Rewritten)

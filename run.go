@@ -1483,7 +1483,7 @@ func maxGroupBudget(w work, opts runOptions) time.Duration {
 // recorded flip is evidence exactly like a bucket; rebuilding from the
 // bucket alone silently dropped the killer's name).
 func carrySurvivor(candidate engine.Candidate, prior Survivor) Survivor {
-	return Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution, WithdrawnKiller: prior.WithdrawnKiller}
+	return Survivor{Position: candidate.Position, Operator: candidate.Operator, Site: candidate.Site, Extent: candidate.Extent, Execution: prior.Execution, WithdrawnKiller: prior.WithdrawnKiller, OtherSelection: prior.OtherSelection}
 }
 
 // newSurvivor is the ONE survivor-row constructor: every assembly path
@@ -1781,6 +1781,7 @@ func preflightBracketPaths(ctx context.Context, treeDir string, paths []string) 
 // cannot attribute an outcome aborts without findings
 // (REQ-core-attributed-kills).
 func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Finding, error) {
+	t.ensureExplicitTestdataTargets(ctx, targets)
 	// The run counts itself: the tallies are installed on the caller's
 	// callbacks and delivered on every exit once measurement began, and
 	// on every completed or drifted run.
@@ -1895,14 +1896,36 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	runEnv := engine.OracleEvidenceEnv(t.eng.GoEnv(), opts.bounds)
 	// The pin the run's evidence records and compares.
 	oracleMemoryPin := opts.bounds.MemoryBytes
-	// First match wins; duplicate symbols occur only in hand-edited
-	// documents.
+	selKey := SelectionKey(t.selection)
+	// First match for this run's selection wins; duplicate symbols occur
+	// only in hand-edited documents.
 	prior := map[string]*Finding{}
+	var crossSelectionPrior []Finding
 	for i := range opts.Prior {
 		f := &opts.Prior[i]
+		if f.Selection != selKey {
+			crossSelectionPrior = append(crossSelectionPrior, *f)
+			continue
+		}
 		if _, ok := prior[f.Symbol]; !ok {
 			prior[f.Symbol] = f
 		}
+	}
+	annotateCrossSelection := func(f Finding) Finding {
+		if len(crossSelectionPrior) == 0 || f.Skipped != "" {
+			return f
+		}
+		bundle := make([]Finding, 0, 1+len(crossSelectionPrior))
+		bundle = append(bundle, f)
+		for _, other := range crossSelectionPrior {
+			if other.Symbol == f.Symbol {
+				bundle = append(bundle, other)
+			}
+		}
+		if len(bundle) < 2 {
+			return f
+		}
+		return AnnotateSelectionVerdicts(bundle)[0]
 	}
 
 	// Phase one, sequential: resolve every target to a terminal finding
@@ -2027,7 +2050,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			return nil, err
 		}
 		f := &findings[i]
-		*f = Finding{Symbol: tg.Symbol, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.explicitOracle(), OracleTimeout: opts.OracleTimeout.String(), OracleMemoryBytes: oracleMemoryPin}
+		*f = Finding{Symbol: tg.Symbol, Selection: selKey, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.explicitOracle(), OracleTimeout: opts.OracleTimeout.String(), OracleMemoryBytes: oracleMemoryPin}
 		if deriveOracleBudgets {
 			// The derived record's bound starts at the floor and raises
 			// to the loosest budget any verdict runs under
@@ -2624,9 +2647,15 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// guard only keeps dead weight out of the bank. The
 				// manifest guard is load-bearing: adoption needs one.
 				if !observed.Unverifiable && observed.Manifest != "" {
-					groupBudgetMu.Lock()
-					pendingBankDeposits[key] = pendingBankDeposit{manifest: observed.Manifest, digest: observed.Digest, raw: baselineElapsed, passed: baseline.Tests}
-					groupBudgetMu.Unlock()
+					deposited, derr := depositGroupBaseline(ctx, opts.baselineBank, key.persistedKey(bankScope), *w, group, observed, runEnv, baselineElapsed, baseline.Tests)
+					if derr != nil {
+						return "", derr
+					}
+					if !deposited {
+						groupBudgetMu.Lock()
+						pendingBankDeposits[key] = pendingBankDeposit{manifest: observed.Manifest, digest: observed.Digest, raw: baselineElapsed, passed: baseline.Tests}
+						groupBudgetMu.Unlock()
+					}
 				}
 				if deriveOracleBudgets {
 					reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: entry.budget.String()})
@@ -2705,6 +2734,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// re-stamps and staged drift refuses exactly as a
 				// symbol serve (REQ-result-layers).
 				served := snapshotFindings([]Finding{*rec})[0]
+				served.Selection = selKey
 				served.Labels = append([]string(nil), tg.Labels...)
 				served.Cached = true
 				if stagedDrift, err := t.stampProvenance(ctx, repository, nil, oracleViews, resolved.shapedFiles, &served); err != nil {
@@ -2713,6 +2743,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					refuseSkipped(i, "staged drift: "+stagedDrift, true)
 					return nil, nil
 				}
+				served = annotateCrossSelection(served)
 				*f = served
 				cacheTarget(i, "served: shape and oracle pins unchanged"+resolved.oracleNote)
 				return nil, nil
@@ -2942,6 +2973,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			}
 			if matches && len(rec.CandidateEvidence) == 0 {
 				cached := *rec
+				cached.Selection = selKey
 				cached.Labels = append([]string(nil), tg.Labels...)
 				cached.Cached = true
 				// Serving retains the historical ledger, including absent
@@ -2963,6 +2995,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					refuseSkipped(i, "staged drift: "+stagedDrift, true)
 					return nil, nil
 				}
+				cached = annotateCrossSelection(cached)
 				findings[i] = cached
 				// Commit precedes the decision: a caller canceling at the
 				// decision callback still holds the persisted finding
@@ -3381,6 +3414,8 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// drift error, and everything else must pass through here.
 	committed := make([]bool, len(targets))
 	commitAndAttribute := func(ctx context.Context, f Finding, w work) error {
+		f.Selection = selKey
+		f = annotateCrossSelection(f)
 		findings[w.target] = f
 		if err := commitFinding(ctx, opts.Commit, f); err != nil {
 			return err
@@ -3841,10 +3876,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 						}
 					}
 				}
-				// The exemption record is derived after every unverifiable stamp
-				// the record can carry, never before one (the exemptions'
-				// derived-state rule).
-				stampExemptions(&spliced, opts.Exemptions)
 				// Served prefix + re-executed candidates both validated
 				// against the current tree; provenance recomputes like a
 				// fresh measure's (REQ-result-stale, REQ-result-layers).
@@ -3854,6 +3885,15 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					refuseTarget(w.target, stagedDrift+residue())
 					continue
 				}
+				if spliced.EvidenceFault != "" && unstableForBuckets(&spliced, opts.Exemptions) {
+					if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
+						return err
+					}
+				}
+				// The exemption record is derived after every unverifiable stamp
+				// the record can carry, never before one (the exemptions'
+				// derived-state rule).
+				stampExemptions(&spliced, opts.Exemptions)
 				spliced.Run = opts.RunID
 				// Evidence beats attestation on the flagged re-execution
 				// exactly as on a fresh measure: an attested flagged
@@ -3901,21 +3941,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 						}
 					}
 				}
-				// The exemption record is derived after every unverifiable stamp
-				// the record can carry, never before one (the exemptions'
-				// derived-state rule).
-				stampExemptions(&extended, opts.Exemptions)
-				// Advisory execution buckets: a verifiable extension's suffix
-				// survivors earn theirs from the current probe like any measured
-				// run's, while carried prefix survivors keep their recorded
-				// buckets verbatim; a divergence-stamped extension's suffix
-				// survivors were already classified unstable by the splice, and
-				// a validation-stamped record's every survivor above.
-				if !unstableForBuckets(&extended, opts.Exemptions) {
-					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
-						return err
-					}
-				}
 				// Served prefix + measured suffix both validated against the
 				// current tree; provenance recomputes like a fresh measure's
 				// (REQ-result-stale, REQ-result-layers).
@@ -3925,6 +3950,25 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 					refuseTarget(w.target, stagedDrift+residue())
 					continue
 				}
+				// Advisory execution buckets: a verifiable extension's suffix
+				// survivors earn theirs from the current probe like any measured
+				// run's, while carried prefix survivors keep their recorded
+				// buckets verbatim; a divergence-stamped extension's suffix
+				// survivors were already classified unstable by the splice, and
+				// a validation- or provenance-stamped record's every survivor.
+				if extended.EvidenceFault != "" && unstableForBuckets(&extended, opts.Exemptions) {
+					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, 0); err != nil {
+						return err
+					}
+				} else if !unstableForBuckets(&extended, opts.Exemptions) {
+					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
+						return err
+					}
+				}
+				// The exemption record is derived after every unverifiable stamp
+				// the record can carry, never before one (the exemptions'
+				// derived-state rule).
+				stampExemptions(&extended, opts.Exemptions)
 				extended.Run = opts.RunID
 				if err := commitAndAttribute(ctx, extended, w); err != nil {
 					return err
@@ -4076,6 +4120,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			if rec, ok := prior[targets[w.target].Symbol]; ok && domainHeld(*rec) {
 				kept, siteSheds, gone := carryAnchoredAttestations(rec.Attested, f.Survivors)
 				f.Attested = append(f.Attested, kept...)
+				f.Withdrawn = carryAnchoredWithdrawn(rec.Withdrawn, f.Attested, f.Survivors)
 				// A carry across moved pins is an acceptance that outlives
 				// the environment it was judged in - reported distinctly
 				// at the moment it rides, so it is auditable
@@ -4872,20 +4917,24 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		if base == "" {
 			// Terminal: later evidence goes unexamined, fail-closed. A
 			// staged run refuses here — its records never persist dirty
-			// (REQ-result-staged) — with the evidence fault named.
-			f.Dirty = true
+			// (REQ-result-staged) — with the evidence fault named; a
+			// worktree run stamps the evidence fault on the record and
+			// still judges git provenance separately.
+			fault := "an evidence manifest names a subject with no view (" + evidence.Symbol + ")"
 			if repository.staged {
-				return "an evidence manifest names a subject with no view (" + evidence.Symbol + "); the staged snapshot cannot vouch for it", nil
+				return fault + "; the staged snapshot cannot vouch for it", nil
 			}
-			return "", nil
+			evidenceFaults = append(evidenceFaults, fault)
+			break
 		}
 		paths, perr := runtimeinput.Paths(evidence.RuntimeInputs, base)
 		if perr != nil {
-			f.Dirty = true
+			fault := "an evidence manifest is unreadable (" + evidence.Symbol + ")"
 			if repository.staged {
-				return "an evidence manifest is unreadable (" + evidence.Symbol + "); the staged snapshot cannot vouch for it", nil
+				return fault + "; the staged snapshot cannot vouch for it", nil
 			}
-			return "", nil
+			evidenceFaults = append(evidenceFaults, fault)
+			break
 		}
 		// An identity outside the repository is not git's to vouch for:
 		// dirty means git-visible drift, and the portable line already
@@ -4940,7 +4989,15 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 	if err != nil {
 		return "", err
 	}
-	f.Dirty = dirty || len(evidenceFaults) != 0
+	f.Dirty = dirty
+	if len(evidenceFaults) != 0 {
+		faultText := strings.Join(evidenceFaults, "; ")
+		if f.EvidenceFault != "" && f.EvidenceFault != faultText {
+			f.EvidenceFault += "; " + faultText
+		} else {
+			f.EvidenceFault = faultText
+		}
+	}
 	dirtyCauses = append(evidenceFaults, dirtyCauses...)
 	// The capture commit is read at stamp time, not served from the
 	// run-start snapshot — the record names the repository state the
@@ -4980,7 +5037,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		} else if moved {
 			return "the index snapshot was re-staged mid-run; the recorded tree no longer names the measured content", nil
 		}
-		if f.Dirty {
+		if f.Dirty || len(evidenceFaults) != 0 {
 			// The refusal names every differing input (capped, counted):
 			// an unnamed refusal on a visually clean tree is
 			// indistinguishable from a tool fault — the drift may be an
@@ -5038,6 +5095,40 @@ func carryAnchoredAttestations(prior []Attestation, survivors []Survivor) (kept 
 		kept = append(kept, a)
 	}
 	return kept, siteSheds, gone
+}
+
+// carryAnchoredWithdrawn carries withdrawn dispositions whose survivor still
+// exists at the same site and has not been re-attested.
+func carryAnchoredWithdrawn(prior []WithdrawnAttestation, attested []Attestation, survivors []Survivor) []WithdrawnAttestation {
+	if len(prior) == 0 {
+		return nil
+	}
+	siteOf := make(map[survivorKey]string, len(survivors))
+	surviving := make(map[survivorKey]bool, len(survivors))
+	for _, s := range survivors {
+		key := survivorKey{s.Position, s.Operator}
+		surviving[key] = true
+		siteOf[key] = s.Site
+	}
+	attSet := make(map[survivorKey]bool, len(attested))
+	for _, a := range attested {
+		attSet[survivorKey{a.Position, a.Operator}] = true
+	}
+	var kept []WithdrawnAttestation
+	seen := make(map[survivorKey]bool, len(prior))
+	for _, w := range prior {
+		key := survivorKey{w.Position, w.Operator}
+		if !surviving[key] || attSet[key] || seen[key] {
+			continue
+		}
+		if w.Site != "" && w.Site != siteOf[key] {
+			continue
+		}
+		w.Site = siteOf[key]
+		seen[key] = true
+		kept = append(kept, w)
+	}
+	return kept
 }
 
 // driftFindingCounts replaces each re-measured candidate's disposition with
@@ -5172,6 +5263,7 @@ func driftFindingCounts(ctx context.Context, rec Finding, candidates []engine.Ca
 		}
 	}
 	rec.Attested = kept
+	rec.Withdrawn = carryAnchoredWithdrawn(rec.Withdrawn, rec.Attested, rec.Survivors)
 	return rec, shed, nil
 }
 
@@ -5652,6 +5744,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 			rec.Attested[i].Site = extendSiteOf[survivorKey{rec.Attested[i].Position, rec.Attested[i].Operator}]
 		}
 	}
+	rec.Withdrawn = carryAnchoredWithdrawn(rec.Withdrawn, rec.Attested, rec.Survivors)
 	return rec, nil
 }
 
@@ -6013,6 +6106,7 @@ func spliceFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 		}
 	}
 	rec.Attested = kept
+	rec.Withdrawn = carryAnchoredWithdrawn(rec.Withdrawn, rec.Attested, rec.Survivors)
 	return rec, nil
 }
 

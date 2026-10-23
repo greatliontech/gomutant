@@ -292,12 +292,59 @@ func expandDocument14(doc internedDocument14, placeholder bool) ([]Finding, erro
 	return findings, nil
 }
 
-// parseInternedDocument14 reads a version-14 document: its tables
+func validateInternedV14JSON(top map[string]json.RawMessage) error {
+	manifests, err := validateJSONNonNullArray(top["runtimeInputsTable"])
+	if err != nil {
+		return fmt.Errorf("gomutant: parse runtimeInputsTable: %w", err)
+	}
+	for i, entry := range manifests {
+		if _, err := validateRequiredObject(entry, map[string]bool{"key": true, "manifest": true}, []string{"key", "manifest"}); err != nil {
+			return fmt.Errorf("gomutant: runtime-inputs table entry %d: %w", i, err)
+		}
+	}
+	evEntries, err := validateJSONNonNullArray(top["evidenceTable"])
+	if err != nil {
+		return fmt.Errorf("gomutant: parse evidenceTable: %w", err)
+	}
+	for i, entry := range evEntries {
+		if _, err := validateRequiredObject(entry, map[string]bool{"key": true, "evidence": true, "runtimeInputs": true}, []string{"key", "evidence", "runtimeInputs"}); err != nil {
+			return fmt.Errorf("gomutant: evidence table entry %d: %w", i, err)
+		}
+	}
+	ledgerEntries, err := validateJSONNonNullArray(top["ledgerTable"])
+	if err != nil {
+		return fmt.Errorf("gomutant: parse ledgerTable: %w", err)
+	}
+	for i, entry := range ledgerEntries {
+		fields, err := validateRequiredObject(entry, map[string]bool{"key": true, "ledger": true}, []string{"key", "ledger"})
+		if err != nil {
+			return fmt.Errorf("gomutant: ledger table entry %d: %w", i, err)
+		}
+		if err := validateCompartmentLedgerJSON(fields["ledger"]); err != nil {
+			return fmt.Errorf("gomutant: ledger table entry %d: %w", i, err)
+		}
+	}
+	if err := validateCoverageBoundsJSON(top["coverageBounds"]); err != nil {
+		return err
+	}
+	rows, err := validateJSONNonNullArray(top["findings"])
+	if err != nil {
+		return fmt.Errorf("gomutant: parse findings: %w", err)
+	}
+	for i, row := range rows {
+		if err := validateInternedFindingRowJSON(row, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parseInternedDocument14 reads a version-14..17 document: its tables
 // expanded by key and the expanded set re-validated through the inline
 // path, one record at a time over manifest placeholders — every
 // inline-era semantic check applies verbatim, bounded by the document
 // on disk rather than the inline form it stands for.
-func parseInternedDocument14(data []byte) (Document, error) {
+func parseInternedDocument14(data []byte, version int) (Document, error) {
 	top, err := decodeKnownObject(data, map[string]bool{
 		"version": true, "runtimeInputsTable": true, "evidenceTable": true, "ledgerTable": true, "findings": true, "coverageBounds": true,
 	})
@@ -309,6 +356,9 @@ func parseInternedDocument14(data []byte) (Document, error) {
 		if !ok || isJSONNull(value) {
 			return Document{}, fmt.Errorf("gomutant: findings document field %s is missing or null", name)
 		}
+	}
+	if err := validateInternedV14JSON(top); err != nil {
+		return Document{}, err
 	}
 	var doc internedDocument14
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -323,11 +373,14 @@ func parseInternedDocument14(data []byte) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
+	if err := validateVersion17Features(expanded, version); err != nil {
+		return Document{}, err
+	}
 	small, err := expandDocument14(doc, true)
 	if err != nil {
 		return Document{}, err
 	}
-	symbols := map[string]bool{}
+	seen := map[string]bool{}
 	for i, finding := range small {
 		inline, err := json.Marshal(finding)
 		if err != nil {
@@ -336,10 +389,14 @@ func parseInternedDocument14(data []byte) (Document, error) {
 		if _, err := decodeInlineFinding(inline, i); err != nil {
 			return Document{}, err
 		}
-		if symbols[finding.Symbol] {
-			return Document{}, fmt.Errorf("gomutant: duplicate finding symbol %s", finding.Symbol)
+		key := finding.Symbol
+		if version >= 17 {
+			key = finding.recordKeyString()
 		}
-		symbols[finding.Symbol] = true
+		if seen[key] {
+			return Document{}, fmt.Errorf("gomutant: duplicate finding symbol %s", finding.RecordKey())
+		}
+		seen[key] = true
 	}
 	bounds := slices.Clone(doc.CoverageBounds)
 	if bounds == nil {

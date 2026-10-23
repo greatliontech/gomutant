@@ -306,7 +306,7 @@ func TestExecutionPolicyHistoricalShapedReuse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data = bytes.Replace(data, []byte(`"version": 16`), []byte(`"version": 15`), 1)
+	data = bytes.Replace(data, []byte(fmt.Sprintf(`"version": %d`, DocumentVersion)), []byte(`"version": 15`), 1)
 	historical, err := ParseFindings(data)
 	if err != nil || len(historical) != 1 || historical[0].OracleExecutionPolicy != "" || !reflect.DeepEqual(historical[0].Shape, current.Shape) {
 		t.Fatalf("historical shaped record = %+v, %v", historical, err)
@@ -394,8 +394,8 @@ func TestExecutionPolicyNewAttestation(t *testing.T) {
 // expansion, overlay admission, and current export preserve historical
 // policy absence and historical dispositions as facts, including v15 rows.
 func TestExecutionPolicyHistoricalStorage(t *testing.T) {
-	if DocumentVersion != 16 {
-		t.Fatalf("execution-policy reading boundary = %d, want 16", DocumentVersion)
+	if DocumentVersion != 17 {
+		t.Fatalf("execution-policy reading boundary = %d, want 17", DocumentVersion)
 	}
 	for _, policy := range []string{"", "gomutant/full-oracle@1", "gomutant/full-oracle@2", FullOracleExecutionPolicy, "gomutant/future-oracle@999"} {
 		t.Run(fmt.Sprintf("policy=%q", policy), func(t *testing.T) {
@@ -428,7 +428,7 @@ func TestExecutionPolicyHistoricalStorage(t *testing.T) {
 			// The pre-epoch document has the same content-keyed evidence
 			// form; replace only the outer version, never re-encode its keys.
 			if policy == "" {
-				old := bytes.Replace(data, []byte(`"version": 16`), []byte(`"version": 15`), 1)
+				old := bytes.Replace(data, []byte(fmt.Sprintf(`"version": %d`, DocumentVersion)), []byte(`"version": 15`), 1)
 				if bytes.Equal(old, data) {
 					t.Fatal("historical fixture did not change the version")
 				}

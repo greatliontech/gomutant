@@ -51,7 +51,8 @@ type Tree struct {
 	// Fset-absolute file paths back to the tree-relative paths callers speak.
 	dir string
 	// build lazily indexes the loaded build for ephemeral validation.
-	build buildSet
+	loadMu sync.Mutex
+	build  buildSet
 	// linked caches each test package's linked dependency set (the
 	// import paths `go test` compiles into its binary), derived once
 	// per test package: the loaded build is immutable for the tree's
@@ -233,6 +234,12 @@ func (t *Tree) PackageContextContext(ctx context.Context, pkgPath string) (modul
 // false when no loaded package is rooted there. dir is compared in
 // its symlink-resolved form, as the loader reports directories.
 func (t *Tree) PackageAtDir(dir string) (string, bool) {
+	t.loadMu.Lock()
+	defer t.loadMu.Unlock()
+	return t.packageAtDirLocked(dir)
+}
+
+func (t *Tree) packageAtDirLocked(dir string) (string, bool) {
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		return "", false
@@ -252,6 +259,129 @@ func (t *Tree) PackageAtDir(dir string) (string, bool) {
 		}
 	}
 	return fallback, fallback != ""
+}
+
+// HasTestdataSegment reports whether a slash-separated package or
+// directory path traverses a testdata directory segment (which Go's
+// "./..." wildcard skips unless explicitly named).
+func HasTestdataSegment(slashPath string) bool {
+	for _, seg := range strings.Split(slashPath, "/") {
+		if seg == "testdata" {
+			return true
+		}
+	}
+	return false
+}
+
+// LoadExplicitDirContext loads an in-tree package directory that
+// "./..." skipped (such as a package under testdata/) when explicitly
+// selected by directory or import path.
+func (t *Tree) LoadExplicitDirContext(ctx context.Context, absDir string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	if imp, ok := t.PackageAtDir(absDir); ok {
+		return imp, true, nil
+	}
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		return "", false, nil
+	}
+	hasGo := false
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") {
+			hasGo = true
+			break
+		}
+	}
+	if !hasGo {
+		return "", false, nil
+	}
+	digests := &sourceDigestCapture{pins: map[string][sha256.Size]byte{}}
+	cfg := &packages.Config{
+		Context: ctx,
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
+			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedModule |
+			packages.NeedForTest | packages.NeedEmbedFiles,
+		Dir:       absDir,
+		Env:       t.env,
+		Tests:     true,
+		ParseFile: digests.parseAndPin,
+	}
+	loaded, err := packages.Load(cfg, ".")
+	if err != nil {
+		return "", false, err
+	}
+	t.loadMu.Lock()
+	defer t.loadMu.Unlock()
+	existing := make(map[string]bool, len(t.pkgs))
+	for _, pkg := range t.pkgs {
+		existing[pkg.ID] = true
+	}
+	added := false
+	for _, pkg := range loaded {
+		if len(pkg.GoFiles) == 0 || existing[pkg.ID] {
+			continue
+		}
+		existing[pkg.ID] = true
+		t.pkgs = append(t.pkgs, pkg)
+		added = true
+	}
+	if !added {
+		imp, ok := t.packageAtDirLocked(absDir)
+		return imp, ok, nil
+	}
+	if t.sourceDigests == nil {
+		t.sourceDigests = map[string][sha256.Size]byte{}
+	}
+	for path, sum := range digests.snapshot() {
+		t.sourceDigests[path] = sum
+	}
+	sort.Slice(t.pkgs, func(i, j int) bool { return t.pkgs[i].ID < t.pkgs[j].ID })
+	t.build = buildSet{}
+	t.directiveOnce = sync.Once{}
+	t.directiveView = DirectiveCoverageView{}
+	imp, ok := t.packageAtDirLocked(absDir)
+	return imp, ok, nil
+}
+
+// LoadExplicitImportContext loads an in-tree testdata package by its
+// full module-prefixed import path when explicitly requested.
+func (t *Tree) LoadExplicitImportContext(ctx context.Context, pkgPath string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if t.HasPackage(pkgPath) {
+		return true, nil
+	}
+	if !HasTestdataSegment(pkgPath) {
+		return false, nil
+	}
+	t.loadMu.Lock()
+	seenMods := map[string]string{}
+	for _, pkg := range t.pkgs {
+		if pkg.Module != nil && pkg.Module.Main && pkg.Module.Path != "" && pkg.Module.Dir != "" {
+			seenMods[pkg.Module.Path] = pkg.Module.Dir
+		}
+	}
+	t.loadMu.Unlock()
+	for modPath, modDir := range seenMods {
+		if !strings.HasPrefix(pkgPath, modPath+"/") {
+			continue
+		}
+		rel := strings.TrimPrefix(pkgPath, modPath+"/")
+		if !filepath.IsLocal(filepath.FromSlash(rel)) {
+			continue
+		}
+		absDir := filepath.Join(modDir, filepath.FromSlash(rel))
+		if _, _, err := t.LoadExplicitDirContext(ctx, absDir); err != nil {
+			return false, err
+		}
+		if t.HasPackage(pkgPath) {
+			return true, nil
+		}
+	}
+	return t.HasPackage(pkgPath), nil
 }
 
 // workspaceMembers returns the tree's Go module directories, relative to

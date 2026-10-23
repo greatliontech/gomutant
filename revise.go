@@ -72,7 +72,7 @@ type overlayEdit struct {
 func overlayRemoval(symbol string) overlayEdit { return overlayEdit{symbol: symbol, removed: true} }
 
 // overlayInstall is the edit installing f at its own path.
-func overlayInstall(f Finding) overlayEdit { return overlayEdit{symbol: f.Symbol, next: f} }
+func overlayInstall(f Finding) overlayEdit { return overlayEdit{symbol: f.recordKeyString(), next: f} }
 
 // Revise applies edit to every stored record in its own layer, under
 // the document lock, and writes exactly the change it decided: the
@@ -122,11 +122,12 @@ func (s *Store) ReviseExemptions(ctx context.Context, check bool, edit RecordEdi
 				repoChanged = true
 				continue
 			}
-			if seen[n.Symbol] {
-				return nil, &RecordCollisionError{Symbol: n.Symbol, Layer: LayerRepo}
+			nKey := n.recordKeyString()
+			if seen[nKey] {
+				return nil, &RecordCollisionError{Symbol: n.RecordKey().String(), Layer: LayerRepo}
 			}
-			seen[n.Symbol] = true
-			if n.Symbol == f.Symbol && reflect.DeepEqual(persistedForm(n), persistedForm(f)) {
+			seen[nKey] = true
+			if nKey == f.recordKeyString() && reflect.DeepEqual(persistedForm(n), persistedForm(f)) {
 				// The row as parsed: byte-stable across the rewrite.
 				next = append(next, f)
 				continue
@@ -138,30 +139,37 @@ func (s *Store) ReviseExemptions(ctx context.Context, check bool, edit RecordEdi
 			}
 			next = append(next, row)
 		}
-		sort.Slice(next, func(i, j int) bool { return next[i].Symbol < next[j].Symbol })
+		sort.Slice(next, func(i, j int) bool {
+			if next[i].Symbol != next[j].Symbol {
+				return next[i].Symbol < next[j].Symbol
+			}
+			return next[i].Selection < next[j].Selection
+		})
 		seenLocal := make(map[string]bool, len(overlay))
 		for _, f := range overlay {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
+			fKey := f.recordKeyString()
 			n, keep, err := edit(LayerLocal, f)
 			if err != nil {
 				return nil, err
 			}
 			if !keep {
-				edits = append(edits, overlayRemoval(f.Symbol))
+				edits = append(edits, overlayRemoval(fKey))
 				continue
 			}
-			if seenLocal[n.Symbol] {
-				return nil, &RecordCollisionError{Symbol: n.Symbol, Layer: LayerLocal}
+			nKey := n.recordKeyString()
+			if seenLocal[nKey] {
+				return nil, &RecordCollisionError{Symbol: n.RecordKey().String(), Layer: LayerLocal}
 			}
-			seenLocal[n.Symbol] = true
-			revision.Overlay[n.Symbol] = true
-			if n.Symbol == f.Symbol && reflect.DeepEqual(persistedForm(n), persistedForm(f)) {
+			seenLocal[nKey] = true
+			revision.Overlay[nKey] = true
+			if nKey == fKey && reflect.DeepEqual(persistedForm(n), persistedForm(f)) {
 				continue
 			}
-			if n.Symbol != f.Symbol {
-				edits = append(edits, overlayRemoval(f.Symbol))
+			if nKey != fKey {
+				edits = append(edits, overlayRemoval(fKey))
 			}
 			edits = append(edits, overlayInstall(n))
 		}
@@ -289,7 +297,7 @@ func (s *Store) applyOverlayEdits(ctx context.Context, documentRewritten bool, e
 		if _, err := s.installAt(f); err != nil {
 			return partial(err)
 		}
-		if err := s.removeServed(f.Symbol, destinations); err != nil {
+		if err := s.removeServed(f.recordKeyString(), destinations); err != nil {
 			return partial(err)
 		}
 		landed++
@@ -347,7 +355,7 @@ func (s *Store) rehomeParked(ctx context.Context, destinations, leaving map[stri
 // aside first, never overwritten (REQ-result-layers) — and returns the
 // path.
 func (s *Store) installAt(f Finding) (string, error) {
-	home := s.entryPath(f.Symbol)
+	home := s.entryPath(f.recordKeyString())
 	if err := s.sidelineLegacy(home); err != nil {
 		return home, err
 	}

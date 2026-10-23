@@ -367,6 +367,9 @@ func coveredExemptions(f *Finding, exemptions []Exemption) ([]Exemption, bool) {
 			continue
 		}
 		e := exemptionFor(exemptions, ev.Symbol, ev.RuntimeReason)
+		if e == nil && f.EvidenceFault != "" && ev.RuntimeReason == f.EvidenceFault {
+			e = exemptionFor(exemptions, f.Symbol, f.EvidenceFault)
+		}
 		if e == nil {
 			return nil, false
 		}
@@ -389,6 +392,23 @@ func coveredExemptions(f *Finding, exemptions []Exemption) ([]Exemption, bool) {
 			return nil, false
 		}
 		note(e)
+	}
+	if f.EvidenceFault != "" {
+		e := exemptionFor(exemptions, f.Symbol, f.EvidenceFault)
+		if e != nil {
+			note(e)
+		}
+		for _, oracle := range f.OracleEvidence {
+			if oe := exemptionFor(exemptions, oracle.Symbol, f.EvidenceFault); oe != nil {
+				note(oe)
+				if e == nil {
+					e = oe
+				}
+			}
+		}
+		if e == nil {
+			return nil, false
+		}
 	}
 	if len(matched) == 0 {
 		return nil, false
@@ -413,7 +433,7 @@ func stampExemptions(f *Finding, exemptions []Exemption) {
 // (REQ-exec-survivor-evidence): runtime evidence counts unstable when
 // it is unverifiable and the exemption record does not accept it.
 func unstableForBuckets(f *Finding, exemptions []Exemption) bool {
-	if !f.TargetEvidence.RuntimeUnverifiable {
+	if !f.TargetEvidence.RuntimeUnverifiable && f.EvidenceFault == "" {
 		return false
 	}
 	_, ok := coveredExemptions(f, exemptions)

@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+
+	"github.com/greatliontech/gomutant/internal/gitcmd"
 )
 
 // EphemeralAttestation is one reviewed entry of the committed
@@ -300,6 +303,245 @@ func RecordEphemeralAttestation(ctx context.Context, path string, att EphemeralA
 		}
 	}
 	kept = append(kept, att)
+	sort.Slice(kept, func(i, j int) bool { return kept[i].EditDigest < kept[j].EditDigest })
+	data, err := json.MarshalIndent(ephemeralAttestationsDocument{Version: ephemeralAttestationsVersion, Attestations: kept}, "", "  ")
+	if err != nil {
+		return err
+	}
+	mode, err := recordFileMode(path)
+	if err != nil {
+		return err
+	}
+	return writeRecordFile(ctx, path, append(data, '\n'), mode)
+}
+
+// PrunedEphemeralAttestation names one ephemeral-equivalence row a prune
+// removed (or would remove, under check), echoing the row and the reason it
+// was judged detached (REQ-result-ephemeral-attest, REQ-result-lifecycle).
+type PrunedEphemeralAttestation struct {
+	Attestation EphemeralAttestation `json:"attestation"`
+	Reason      string               `json:"reason"`
+}
+
+// RewrittenEphemeralAttestation names one ephemeral-equivalence row whose
+// files, oracle package, or test pattern a retarget rewrote (or would
+// rewrite, under check) while preserving the row's original producing
+// provenance (REQ-result-ephemeral-attest, REQ-result-lifecycle).
+type RewrittenEphemeralAttestation struct {
+	EditDigest  string   `json:"editDigest"`
+	FromFiles   []string `json:"fromFiles,omitempty"`
+	ToFiles     []string `json:"toFiles,omitempty"`
+	FromTestPkg string   `json:"fromTestPkg,omitempty"`
+	ToTestPkg   string   `json:"toTestPkg,omitempty"`
+	FromRun     string   `json:"fromRun,omitempty"`
+	ToRun       string   `json:"toRun,omitempty"`
+}
+
+func pruneEphemeralAttestations(ctx context.Context, t *Tree, findingsPath string, check bool) ([]PrunedEphemeralAttestation, error) {
+	if findingsPath == "" {
+		return nil, nil
+	}
+	path := EphemeralAttestationsPathFor(findingsPath)
+	atts, err := LoadEphemeralAttestations(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(atts) == 0 {
+		return nil, nil
+	}
+	state, err := captureRepositoryStateContext(ctx, t.dir, false)
+	if err != nil {
+		return nil, err
+	}
+	selKey := SelectionKey(t.Selection())
+	var removed []PrunedEphemeralAttestation
+	var kept []EphemeralAttestation
+	for _, a := range atts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		detachReason := ""
+		for _, f := range a.Files {
+			abs := filepath.Join(t.dir, filepath.FromSlash(f))
+			if _, statErr := os.Stat(abs); os.IsNotExist(statErr) {
+				detachReason = fmt.Sprintf("file %s no longer exists", f)
+				break
+			}
+		}
+		if detachReason == "" && selKey == "" && !t.eng.HasPackage(a.TestPkg) {
+			detachReason = fmt.Sprintf("test package %s no longer resolves", a.TestPkg)
+		}
+		if detachReason == "" && a.Commit != "" && state.available {
+			if _, cerr := gitcmd.Output(ctx, state.root, "cat-file", "-e", a.Commit+"^{commit}"); cerr != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				detachReason = fmt.Sprintf("provenance commit %s is unreachable", a.Commit)
+			}
+		}
+		if detachReason != "" {
+			removed = append(removed, PrunedEphemeralAttestation{Attestation: a, Reason: detachReason})
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if !check && len(removed) > 0 {
+		if err := writeEphemeralAttestationsLocked(ctx, path, kept); err != nil {
+			return nil, err
+		}
+	}
+	return removed, nil
+}
+
+func relativeDirRename(fromPkg, toPkg string) (oldRel, newRel string, ok bool) {
+	if fromPkg == "" || toPkg == "" || fromPkg == toPkg {
+		return "", "", false
+	}
+	fromParts := strings.Split(fromPkg, "/")
+	toParts := strings.Split(toPkg, "/")
+	common := 0
+	for common < len(fromParts) && common < len(toParts) && fromParts[common] == toParts[common] {
+		common++
+	}
+	if common == 0 {
+		return "", "", false
+	}
+	oldRel = strings.Join(fromParts[common:], "/")
+	newRel = strings.Join(toParts[common:], "/")
+	if oldRel == "" || newRel == "" {
+		return "", "", false
+	}
+	return oldRel, newRel, true
+}
+
+func rewriteFileUnderPrefix(file, oldPrefix, newPrefix string) (string, bool) {
+	if oldPrefix == "" || newPrefix == "" {
+		return file, false
+	}
+	if file == oldPrefix {
+		return newPrefix, true
+	}
+	if strings.HasPrefix(file, oldPrefix+"/") {
+		return newPrefix + file[len(oldPrefix):], true
+	}
+	return file, false
+}
+
+func rewriteRunPattern(run, fromLocal, toLocal string) (string, bool) {
+	if fromLocal == "" || toLocal == "" || fromLocal == toLocal {
+		return run, false
+	}
+	switch {
+	case run == fromLocal:
+		return toLocal, true
+	case run == "^"+fromLocal+"$":
+		return "^" + toLocal + "$", true
+	case strings.HasPrefix(run, fromLocal+"/"):
+		return toLocal + run[len(fromLocal):], true
+	case strings.HasPrefix(run, "^"+fromLocal+"/"):
+		return "^" + toLocal + run[len("^"+fromLocal):], true
+	}
+	return run, false
+}
+
+func retargetEphemeralAttestations(ctx context.Context, t *Tree, findingsPath, from, to string, check bool) ([]RewrittenEphemeralAttestation, error) {
+	if findingsPath == "" {
+		return nil, nil
+	}
+	path := EphemeralAttestationsPathFor(findingsPath)
+	atts, err := LoadEphemeralAttestations(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(atts) == 0 {
+		return nil, nil
+	}
+	fromPkg, fromLocal := retargetPrefixParts(from)
+	toPkg, toLocal := retargetPrefixParts(to)
+	oldRel, newRel, hasRelRename := relativeDirRename(fromPkg, toPkg)
+	var rewritten []RewrittenEphemeralAttestation
+	nextAtts := make([]EphemeralAttestation, len(atts))
+	for i, a := range atts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		next := a
+		next.Files = slices.Clone(a.Files)
+		filesChanged := false
+		pkgChanged := false
+		runChanged := false
+		if fromLocal == "" && toLocal == "" {
+			if nextPkg, ok := retargetPackagePath(a.TestPkg, fromPkg, toPkg); ok && nextPkg != a.TestPkg {
+				if !t.eng.HasPackage(nextPkg) {
+					return nil, fmt.Errorf("ephemeral attestation %s: rewritten test package %s does not resolve in the current tree", a.EditDigest, nextPkg)
+				}
+				next.TestPkg = nextPkg
+				pkgChanged = true
+			}
+			for fi, f := range next.Files {
+				nextFile, ok := f, false
+				if hasRelRename {
+					nextFile, ok = rewriteFileUnderPrefix(f, oldRel, newRel)
+				}
+				if !ok {
+					nextFile, ok = rewriteFileUnderPrefix(f, fromPkg, toPkg)
+				}
+				if ok && nextFile != f {
+					abs := filepath.Join(t.dir, filepath.FromSlash(nextFile))
+					if _, statErr := os.Stat(abs); statErr != nil {
+						return nil, fmt.Errorf("ephemeral attestation %s: rewritten file %s does not exist in the current tree", a.EditDigest, nextFile)
+					}
+					next.Files[fi] = nextFile
+					filesChanged = true
+				}
+			}
+		} else if a.TestPkg == fromPkg && fromPkg == toPkg {
+			if nextRun, ok := rewriteRunPattern(a.Run, fromLocal, toLocal); ok {
+				if err := t.refuseUnselectedRun(ctx, next.TestPkg, nextRun); err != nil {
+					return nil, fmt.Errorf("ephemeral attestation %s: rewritten run %s in %s does not resolve: %w", a.EditDigest, nextRun, next.TestPkg, err)
+				}
+				next.Run = nextRun
+				runChanged = true
+			}
+		}
+		if filesChanged || pkgChanged || runChanged {
+			r := RewrittenEphemeralAttestation{EditDigest: a.EditDigest}
+			if filesChanged {
+				r.FromFiles = slices.Clone(a.Files)
+				r.ToFiles = slices.Clone(next.Files)
+			}
+			if pkgChanged {
+				r.FromTestPkg = a.TestPkg
+				r.ToTestPkg = next.TestPkg
+			}
+			if runChanged {
+				r.FromRun = a.Run
+				r.ToRun = next.Run
+			}
+			rewritten = append(rewritten, r)
+		}
+		nextAtts[i] = next
+	}
+	if !check && len(rewritten) > 0 {
+		if err := writeEphemeralAttestationsLocked(ctx, path, nextAtts); err != nil {
+			return nil, err
+		}
+	}
+	return rewritten, nil
+}
+
+func writeEphemeralAttestationsLocked(ctx context.Context, path string, kept []EphemeralAttestation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	release, err := acquireDocumentLock(ctx, path)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if kept == nil {
+		kept = []EphemeralAttestation{}
+	}
 	sort.Slice(kept, func(i, j int) bool { return kept[i].EditDigest < kept[j].EditDigest })
 	data, err := json.MarshalIndent(ephemeralAttestationsDocument{Version: ephemeralAttestationsVersion, Attestations: kept}, "", "  ")
 	if err != nil {

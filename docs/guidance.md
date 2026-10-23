@@ -146,16 +146,21 @@ document is unexpectedly empty.
 - `symbol` (mcp, cli) — the mutated symbol.
 - `position` (mcp, cli) — the survivor's position (file.go:line:col), as reported.
 - `operator` (mcp, cli) — the survivor's operator, as reported.
-- `reason` (mcp, cli) — why the mutant is equivalent.
+- `reason` (mcp, cli) — why the mutant is equivalent (or why the prior attestation is being withdrawn when `withdraw` is set).
+- `reattest` (mcp, cli) — replace an existing attestation's reasoning on the survivor instead of refusing.
+- `withdraw` (mcp, cli) — withdraw an existing attestation on the survivor, returning it to open and recording this withdrawal reason alongside the prior reasoning.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
-- `tags` (mcp, cli as `tag`) — build tags for this call's selection.
+- `tags` (mcp, cli as `tag`) — build tags for this call's selection (selects the matching `(symbol, selection)` record when multiple selections exist for the symbol).
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection.
 - `vouch` (cli) — dynamic-state vouch IMPORT-PATH:VARIABLE (repeatable), extending the tree root's `vouches` file; the posture is judged under these acceptances.
 - `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use attestation only after judging a survivor genuinely
 equivalent — refused unless the mutant is among the finding's
 current survivors and its oracle execution policy is supported (the
-provenance guards judge under this call's selection). A missing body policy
+provenance guards judge under this call's selection). Use `reattest` to
+replace the equivalence reasoning on an already-attested survivor, or
+`withdraw` to return an attested survivor to open while recording the
+withdrawal reason and prior reasoning on the record (`withdrawn`). A missing body policy
 or unsupported policy requires whole remeasurement with the complete oracle
 before a new attestation. Historical reasoning may carry after that valid
 fresh measurement under the normal carry checks; a kill still contradicts it.
@@ -169,25 +174,42 @@ version is re-judged. The verdict line carries the record's layer and its reuse 
 the equivalence argument as the reason.
 
 ### prune
-**does:** Remove records whose mutated symbol no longer resolves.
+**does:** Remove records whose mutated symbol no longer resolves, or reclaim disposable machine-local caches while preserving local attestations.
 **knobs:**
-- `check` (mcp, cli) — preview the removals without touching the document.
+- `check` (mcp, cli) — preview the removals or cache reclamation without writing or deleting.
+- `cache` (mcp, cli) — reclaim disposable machine-local baseline banks and shared gofresh analysis memos instead of pruning detached symbols; preserves machine-local findings overlay records and human-authored dispositions by default.
+- `all_trees` (mcp, cli as `all-trees`) — with `cache`: sweep machine-local baseline banks and overlays across every cached repository tree, not only the current tree.
+- `max_bytes` (mcp, cli as `max-bytes`) — with `cache`: maximum bytes to retain per baseline bank and in the shared gofresh memo store (0 reclaims all disposable baseline banks and memos).
+- `include_local_records` (mcp, cli as `include-local-records`) — with `cache`: also discard unattested machine-local findings overlay records (records carrying human-authored attestations, withdrawals, or legacy versions remain preserved unless `include_attested` is also set).
+- `include_attested` (mcp, cli as `include-attested`) — with `cache` and `include_local_records`: also discard machine-local findings overlay records carrying human-authored attestations or withdrawals and preserved legacy overlay records (permanent data loss of local equivalence reasoning).
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
-- `tags` (mcp, cli as `tag`) — build tags for this call's selection — here the selection decides which records are deleted: a symbol gated behind a tag resolves only under it, so pruning under the wrong selection classifies its records detached and removes them.
+- `tags` (mcp, cli as `tag`) — build tags for this call's selection — here the selection decides which untagged records are deleted: a symbol gated behind a tag resolves only under it, while a record carrying its own recorded `selection` resolves against that recorded selection.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection; the same deletion predicate applies.
 - `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use prune after a refactor for the terminal records no
-re-measure can revive — resolution under THIS call's selection is
-the deletion predicate, so run it under the selection the records
-were measured with; refuses when any package did not load cleanly,
+re-measure can revive — each record carrying a recorded `selection`
+is checked against its own selection's tree, and untagged records
+against THIS call's selection; refuses when any package did not load cleanly,
 and each removed record's attested dispositions are echoed in the
 response, never truncated — the reasoning survives the removal.
+Committed `ephemeral-attestations.json` entries whose `testPkg` no
+longer resolves in the tree are pruned in the same pass and echoed in
+`removedEphemeral`.
 Shaped findings (structural targets) are kept unconditionally:
 declaration absence is their normal state, never detachment. The kept
 count is stated per layer — the committed document's rows and the
 machine-local overlay's.
 Prune acts on both layers: a record in the machine-local overlay is
 removed there, and each removed record names its layer.
+With `cache`, prune reclaims disposable machine-local caches —
+baseline banks (`$XDG_STATE_HOME/gomutant/repos/<key>/baseline-bank.json`,
+whose removal costs baseline re-probes on the next cold run) and
+shared gofresh analysis memos (`$XDG_CACHE_HOME/gofresh/memo/v1`,
+whose removal costs cold static-analysis recomputation) — while
+preserving machine-local findings overlay records (`overlay/*.json`)
+and their human-authored equivalence attestations and withdrawals by
+default unless `include_local_records` (and `include_attested` for
+attested or legacy records) is explicitly set.
 **example:** a check preview at a chunk close to lint for dead
 records.
 
@@ -198,19 +220,21 @@ records.
 - `to` (mcp, cli) — new symbol prefix, terminated like from.
 - `check` (mcp, cli) — preview the rewrites without touching the document.
 - `findings` (mcp, cli) — findings document path (default .gomutant/findings.json).
-- `tags` (mcp, cli as `tag`) — build tags for this call's selection — each rewritten target must resolve under it, so a tag-gated symbol retargets only under its tag; the wrong selection refuses the batch.
+- `tags` (mcp, cli as `tag`) — build tags for this call's selection — each rewritten untagged target must resolve under it, while a record carrying its own recorded `selection` resolves against that selection; the wrong selection refuses the batch.
 - `toolchain` (mcp, cli) — GOTOOLCHAIN directive for this call's selection; the same resolution predicate applies.
 - `dir` (cli) — tree root (module or workspace); the findings path resolves against it.
 **when:** use retarget after a rename — records whose symbol-bearing
 fields carry the from prefix rewrite, surviving attestations follow
 their mutants by position, operator, and site, never symbol text, and
-each rewritten target must resolve in the current tree under this
-call's selection. Rows cap at 50 with the remainder counted. Run a
+each rewritten target must resolve in the current tree under its
+recorded selection (or this call's selection when untagged). Rows cap at 50 with the remainder counted. Run a
 check preview first. Retarget acts on both layers — a record in the
 machine-local overlay rewrites there, each row naming its layer, the
 rewritten and touched counts stated per layer, a document row whose
 new symbol the overlay holds said to be shadowed — and rewrites the
-reviewed exemption entries whose subjects the rename moves, with the
+reviewed exemption entries whose subjects the rename moves and
+committed `ephemeral-attestations.json` entries whose `testPkg`
+carries a renamed package prefix, with the
 records, listing them; the reason and rationale stay as reviewed.
 Identity only moves: manifests, ledgers, and exemption stamps stay as
 measured.
