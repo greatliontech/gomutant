@@ -103,7 +103,7 @@ func TestCount(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":2}`))
+	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":4}`))
 	current, err := runtimeinput.Current(ctx, emptyManifest, dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)

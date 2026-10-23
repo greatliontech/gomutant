@@ -24,3 +24,6 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 )
+
+replace github.com/greatliontech/gofresh => ../gofresh
+

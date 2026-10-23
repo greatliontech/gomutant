@@ -91,7 +91,7 @@ func TestToolExplainAnswersSymbolAndTriage(t *testing.T) {
 		t.Fatalf("absent document triage = %+v, %v", empty, err)
 	}
 
-	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":2}`))
+	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":4}`))
 	multi := seededFinding("example.com/current.Gone")
 	multi.Commit = ""
 	multi.TargetEvidence.RuntimeInputs = emptyManifest
@@ -204,7 +204,7 @@ func TestToolExplainCapsEveryRowSet(t *testing.T) {
 	for i := range entries {
 		entries[i] = fmt.Sprintf(`{"k":"abs","p":"/outside%02d/f","d":"0123456789abcdef0123456789abcdef"}`, i)
 	}
-	wideManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":2,"paths":[` + strings.Join(entries, ",") + `]}`))
+	wideManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":4,"paths":[` + strings.Join(entries, ",") + `]}`))
 	big := seededFinding("example.com/current.Big")
 	big.Commit = "abc"
 	big.TargetEvidence.RuntimeInputs = wideManifest
@@ -220,7 +220,7 @@ func TestToolExplainCapsEveryRowSet(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		f := seededFinding(fmt.Sprintf("example.com/current.D%02d", i))
 		f.Commit = "abc"
-		f.TargetEvidence.RuntimeInputs = base64.RawURLEncoding.EncodeToString([]byte(`{"v":2}`))
+		f.TargetEvidence.RuntimeInputs = base64.RawURLEncoding.EncodeToString([]byte(`{"v":4}`))
 		f.OracleEvidence[0].RuntimeInputs = f.TargetEvidence.RuntimeInputs
 		seeds = append(seeds, f)
 	}

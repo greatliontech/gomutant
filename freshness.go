@@ -107,13 +107,13 @@ type subjectViewSet struct {
 // still constructed per call: a producer view's capture-attach-validate
 // transaction is per subject set and cannot be shared across targets.
 type subjectEngines struct {
-	env []string
-	// evidenceEnv is the environment oracle evidence digests under -
-	// env with the injected resource bounds
-	// (engine.OracleEvidenceEnv). It is the engines' declared producer
-	// env and every subject view's revalidation env; env alone keeps
-	// serving loads and analysis. Captured at construction, so the
-	// bounds derivation must precede newSubjectEngines.
+	// evidenceEnv is the complete environment oracle `go test` commands
+	// compile and execute under — the tree's frozen environment with the
+	// injected resource bounds (engine.OracleEvidenceEnv). Every engine's
+	// analysis and every subject view's runtime-input revalidation runs
+	// under it, because the oracle command compiles as well as executes.
+	// Captured at construction, so the bounds derivation must precede
+	// newSubjectEngines.
 	evidenceEnv []string
 	// bounds are the oracle resource bounds evidenceEnv carries.
 	bounds  engine.OracleBounds
@@ -143,7 +143,7 @@ type subjectEngines struct {
 
 func (t *Tree) newSubjectEngines(event func(AnalysisEvent), packageProcess bool, bounds engine.OracleBounds, analysisBudget time.Duration) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{env: env, evidenceEnv: engine.OracleEvidenceEnv(env, bounds), bounds: bounds, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, analysisBudget: analysisBudget, byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{evidenceEnv: engine.OracleEvidenceEnv(env, bounds), bounds: bounds, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, analysisBudget: analysisBudget, byDir: map[string]*gofresh.Engine{}}
 }
 
 func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
@@ -156,7 +156,7 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
 	// second home (REQ-exec-preparation).
 	// The engine's own go commands ride the tree's runner — one
 	// process boundary for every go child gomutant owns.
-	opts := []gofresh.Option{gofresh.WithoutRepositoryVouches(), gofresh.WithDir(dir), gofresh.WithEnv(e.env...), gofresh.WithProducerEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir), gofresh.WithGoRunner(engine.GoRunner())}
+	opts := []gofresh.Option{gofresh.WithoutRepositoryVouches(), gofresh.WithDir(dir), gofresh.WithEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir), gofresh.WithGoRunner(engine.GoRunner())}
 	if e.packageProcess {
 		opts = append(opts, gofresh.WithPackageProcessExecution())
 	}

@@ -578,7 +578,7 @@ func TestFingerprintRecordKeysRideTheDocumentVersion(t *testing.T) {
 		return got
 	}
 	got := keysOf(raw)
-	want := []string{"buildConfig", "closureStrategy", "dynamicStateStrategy", "dynamicStateVouches", "inertTestVariantApplicability", "machine", "maximalClosure", "observationAssertion", "observationProof", "packageProcessDischarges", "purityAssertion", "resultKind", "runtimeConfig", "runtimeDigest", "runtimeInputs", "singleSubjectDischarges", "testVariantClosure", "toolchain"}
+	want := []string{"admissionPolicy", "buildConfig", "closureStrategy", "dynamicStateStrategy", "dynamicStateVouches", "inertTestVariantApplicability", "machine", "maximalClosure", "observationAssertion", "observationProof", "packageProcessDischarges", "purityAssertion", "resultKind", "runtimeConfig", "runtimeDigest", "runtimeInputs", "singleSubjectDischarges", "testVariantClosure", "toolchain", "toolchainContent"}
 	if !reflect.DeepEqual(got, want) || DocumentVersion != 16 {
 		t.Fatalf("the record's keys = %v (DocumentVersion %d); a moved key set rides a version bump", got, DocumentVersion)
 	}
