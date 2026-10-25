@@ -40,16 +40,16 @@ func (o findingsOptions) judged() bool {
 }
 
 type findingView struct {
-	Symbol                     string                          `json:"symbol"`
-	Selection                  string                          `json:"selection,omitempty"`
-	Labels                     []string                        `json:"labels,omitempty"`
-	State                      gomutant.FindingState           `json:"state"`
-	Reason                     string                          `json:"reason,omitempty"`
-	Layer                      string                          `json:"layer"`
-	LayerReason                string                          `json:"layerReason,omitempty"`
-	Run                        string                          `json:"run,omitempty"`
-	OracleExecutionPolicy      string                          `json:"oracleExecutionPolicy,omitempty"`
-	OracleExecutionPolicyIssue string                          `json:"oracleExecutionPolicyIssue,omitempty"`
+	Symbol                     string                `json:"symbol"`
+	Selection                  string                `json:"selection,omitempty"`
+	Labels                     []string              `json:"labels,omitempty"`
+	State                      gomutant.FindingState `json:"state"`
+	Reason                     string                `json:"reason,omitempty"`
+	Layer                      string                `json:"layer"`
+	LayerReason                string                `json:"layerReason,omitempty"`
+	Run                        string                `json:"run,omitempty"`
+	OracleExecutionPolicy      string                `json:"oracleExecutionPolicy,omitempty"`
+	OracleExecutionPolicyIssue string                `json:"oracleExecutionPolicyIssue,omitempty"`
 	// DeltaOpen is present exactly when a changed-ref cut ran (an
 	// empty list is "cut ran, none on the delta").
 	DeltaOpen      *[]gomutant.Survivor            `json:"deltaOpen,omitempty"`

@@ -39,8 +39,8 @@ func TestPillarM4ExplainCommandTriageAndSymbolArms(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := t.TempDir()
 	for name, content := range map[string]string{
-		"go.mod":     "module example.com/expmod\n\ngo 1.24\n",
-		"lib.go":     "package expmod\n\nfunc Value() int { return 1 }\n",
+		"go.mod":      "module example.com/expmod\n\ngo 1.24\n",
+		"lib.go":      "package expmod\n\nfunc Value() int { return 1 }\n",
 		"lib_test.go": "package expmod\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) { if Value() != 1 { t.Fatal() } }\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
