@@ -670,3 +670,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "b355b4d593f6d2534fe1c3066c4d038b8c757d6195079d6b638840b6a35348ca"
 }
+
+bindings {
+  requirement_id: "REQ-target-model"
+  content_hash: "8d86425702943ce81b1be6030762dbe9557564b66e1de56617bc0a917482b898"
+  source_hash: "a3017117e5f896efb2ea8d41aac5ae093b1b4f5d909006bb2f3f3794f95e9dff"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestTargetModelShape"
+  role: BINDING_ROLE_PROVES
+  shape_hash: "6fc0abe47ad2ad09b2580a12216cdcae75f22acff35104968723a9cd81e68ab3"
+}

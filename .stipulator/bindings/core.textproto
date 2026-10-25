@@ -30,3 +30,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "f175b81b4a80e87f2f6ec85d2ab5fa57ff519ff5a70f80dc7c61a883956be732"
 }
+
+bindings {
+  requirement_id: "REQ-core-attributed-kills"
+  content_hash: "5b0ff67def90a453642e9fc4cc1c6fec992c07bc4329c8e662aafcd983dc6b80"
+  source_hash: "6666629acd9d47496f2beb84b24b9c7371db7c6e0ea4cdf04bcf326953c18089"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.FuzzKillAttributionAllOrNothing"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5d887c2cb142fedfcddce8475b4667de250a99a75f3e2fd554ca53b3b6aa8771"
+}

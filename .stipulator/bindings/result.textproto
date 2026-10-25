@@ -2520,3 +2520,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "f2a01340840821445baf1f8e53c195c104b9a59ace98a0092d4b8fe19760b07c"
 }
+
+bindings {
+  requirement_id: "REQ-result-export"
+  content_hash: "23d9350785535494c355da6f084a3a18bf9766c287787d228fb2c3078873cedc"
+  source_hash: "4bfe3e8e2df63329650ae99feb42eda2ab6d7b75a92bf22640d771122496dbef"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestResultExportDocumentShape"
+  role: BINDING_ROLE_PROVES
+  shape_hash: "5ddfb310ac951e8f16271793e03afcbdcc6247405d55957b2231ff76cb95e120"
+}

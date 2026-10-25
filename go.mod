@@ -8,6 +8,7 @@ require (
 	github.com/greatliontech/go-x-tools v0.50.1-0.20261009182129-f5608c7b7b28
 	github.com/greatliontech/gofresh v0.115.1
 	github.com/greatliontech/gofresh/toolversion v0.0.0-20261012210745-f5a40c0055e1
+	github.com/greatliontech/stipulator/stipulate/structural v0.3.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
@@ -26,4 +27,3 @@ require (
 )
 
 replace github.com/greatliontech/gofresh => ../gofresh
-
