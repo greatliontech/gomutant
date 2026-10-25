@@ -209,17 +209,8 @@ import (
 )
 
 func TestF(t *testing.T) {
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for d := wd; ; d = filepath.Dir(d) {
-		if _, err := os.Stat(filepath.Join(d, "go.mod")); err == nil {
-			break
-		}
-		if filepath.Dir(d) == d {
-			t.Fatal("no go.mod above working directory")
-		}
+	if _, err := os.Stat(filepath.Join("..", "go.mod")); err != nil {
+		t.Fatal("no go.mod above working directory")
 	}
 	if F(5) != 5 {
 		t.Fatal()
