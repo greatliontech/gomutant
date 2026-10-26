@@ -6,7 +6,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/greatliontech/glob v0.1.0
 	github.com/greatliontech/go-x-tools v0.50.1-0.20261009182129-f5608c7b7b28
-	github.com/greatliontech/gofresh v0.118.1
+	github.com/greatliontech/gofresh v0.119.1
 	github.com/greatliontech/gofresh/toolversion v0.0.0-20261012210745-f5a40c0055e1
 	github.com/greatliontech/stipulator/stipulate/structural v0.3.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
@@ -25,5 +25,3 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 )
-
-replace github.com/greatliontech/gofresh => ../gofresh
