@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"go/ast"
 	"go/format"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"sort"
 
@@ -203,17 +205,55 @@ func applySourceEdits(source []byte, edits []sourceEdit) ([]byte, error) {
 	return mutated, nil
 }
 
+func declImportReferences(catalog *catalog) (alwaysProcess bool, pkgNameOffsets []int) {
+	if catalog == nil || catalog.file == nil || len(catalog.file.Imports) == 0 {
+		return false, nil
+	}
+	if catalog.pkg == nil || catalog.pkg.TypesInfo == nil || catalog.tokens == nil || catalog.fd == nil {
+		return true, nil
+	}
+	for _, imp := range catalog.file.Imports {
+		if imp.Name != nil && imp.Name.Name == "." {
+			return true, nil
+		}
+	}
+	ast.Inspect(catalog.fd, func(n ast.Node) bool {
+		ident, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if _, isPkg := catalog.pkg.TypesInfo.Uses[ident].(*types.PkgName); isPkg {
+			pkgNameOffsets = append(pkgNameOffsets, catalog.tokens.Offset(ident.Pos()))
+		}
+		return true
+	})
+	return false, pkgNameOffsets
+}
+
+func specTouchesPkgName(offsets []int, edits []sourceEdit) bool {
+	for _, edit := range edits {
+		for _, offset := range offsets {
+			if offset >= edit.start && offset < edit.end {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symbol string, specs []candidateSpec, positions, sites []string) ([]Candidate, error) {
 	baseline, err := format.Source(catalog.source)
 	if err != nil {
 		return nil, fmt.Errorf("format baseline: %w", err)
 	}
+	customImportProcessor := t.importProcessor != nil
 	processImports := t.importProcessor
 	if processImports == nil {
 		processImports = func(_ context.Context, filename string, source []byte) ([]byte, error) {
 			return imports.Process(filename, source, nil)
 		}
 	}
+	alwaysProcessImports, pkgNameOffsets := declImportReferences(catalog)
 	extents := candidateExtents(catalog.pkg, specs)
 	renderedSeen := map[string]bool{string(baseline): true}
 	effectiveSeen := map[string]bool{string(baseline): true}
@@ -236,7 +276,7 @@ func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symb
 			continue
 		}
 		renderedSeen[string(mutated)] = true
-		if !spec.preservesImportReferences {
+		if !spec.preservesImportReferences && (customImportProcessor || alwaysProcessImports || specTouchesPkgName(pkgNameOffsets, spec.edits)) {
 			mutated, err = processImports(ctx, catalog.path, mutated)
 			if cancelErr := ctx.Err(); cancelErr != nil {
 				return nil, cancelErr

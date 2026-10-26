@@ -100,12 +100,9 @@ func (t *Tree) RunSelectableNamesContext(ctx context.Context, pkgPath string) ([
 // names the selector admits.
 func (t *Tree) testFileNames(ctx context.Context, pkgPath string, admit func(*packages.Package, *ast.FuncDecl) (string, bool)) ([]string, error) {
 	seen := map[string]bool{}
-	for _, pkg := range t.pkgs {
+	for _, pkg := range t.pkgsByBase(pkgPath) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
-		}
-		if basePackagePath(pkg) != pkgPath {
-			continue
 		}
 		for _, f := range pkg.Syntax {
 			if err := ctx.Err(); err != nil {
@@ -143,6 +140,7 @@ func (t *Tree) ValidateOracle(symbols []string) error {
 // ValidateOracleContext is ValidateOracle with cooperative cancellation.
 func (t *Tree) ValidateOracleContext(ctx context.Context, symbols []string) error {
 	seen := map[string]bool{}
+	candidatesByPkg := map[string]map[string]bool{}
 	for _, symbol := range symbols {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -158,27 +156,25 @@ func (t *Tree) ValidateOracleContext(ctx context.Context, symbols []string) erro
 		if pkgPath == "" || name == "" || strings.Contains(name, ".") {
 			return fmt.Errorf("oracle %s does not name a top-level test", symbol)
 		}
-		runnable := false
-		candidates, err := t.TestsOfContext(ctx, pkgPath)
-		if err != nil {
-			return err
-		}
-		for _, candidate := range candidates {
-			if candidate == symbol {
-				runnable = true
-				break
+		pkgCandidates, ok := candidatesByPkg[pkgPath]
+		if !ok {
+			candidates, err := t.TestsOfContext(ctx, pkgPath)
+			if err != nil {
+				return err
 			}
+			pkgCandidates = make(map[string]bool, len(candidates))
+			for _, candidate := range candidates {
+				pkgCandidates[candidate] = true
+			}
+			candidatesByPkg[pkgPath] = pkgCandidates
 		}
-		if !runnable {
+		if !pkgCandidates[symbol] {
 			return fmt.Errorf("oracle %s is not a runnable test", symbol)
 		}
 		declarations := map[string]bool{}
-		for _, pkg := range t.pkgs {
+		for _, pkg := range t.pkgsByBase(pkgPath) {
 			if err := ctx.Err(); err != nil {
 				return err
-			}
-			if basePackagePath(pkg) != pkgPath {
-				continue
 			}
 			for _, file := range pkg.Syntax {
 				if err := ctx.Err(); err != nil {

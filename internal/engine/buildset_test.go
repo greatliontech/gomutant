@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -211,5 +212,108 @@ func TestDerivedOracleRefusesLaggingEnumeration(t *testing.T) {
 	}
 	if !slices.Contains(after, "example.com/lagmod/a.TestA") || !slices.Contains(after, "example.com/lagmod/b.TestB") {
 		t.Fatalf("fresh derivation = %v, want both packages' tests", after)
+	}
+}
+
+func TestCleanLinkedImportPathAndBatchWarm(t *testing.T) {
+	if got := cleanLinkedImportPath("example.com/pkg_test [example.com/pkg.test]"); got != "example.com/pkg_test" {
+		t.Fatalf("cleanLinkedImportPath(bracketed) = %q, want example.com/pkg_test", got)
+	}
+	if got := cleanLinkedImportPath("example.com/pkg"); got != "example.com/pkg" {
+		t.Fatalf("cleanLinkedImportPath(plain) = %q, want example.com/pkg", got)
+	}
+
+	tr := fixtureTree(t)
+	ctx := context.Background()
+	tr.linkedMu.Lock()
+	savedLinked := tr.linked
+	tr.linked = nil
+	tr.linkedMu.Unlock()
+	tr.derivedMu.Lock()
+	savedDerived := tr.derivedOracles
+	tr.derivedOracles = nil
+	tr.derivedMu.Unlock()
+	defer func() {
+		tr.linkedMu.Lock()
+		tr.linked = savedLinked
+		tr.linkedMu.Unlock()
+		tr.derivedMu.Lock()
+		tr.derivedOracles = savedDerived
+		tr.derivedMu.Unlock()
+	}()
+
+	var log spawnLog
+	defer ObserveGoCommandsForTest(log.observe)()
+
+	// Warm with a zero-import plain package (prop) first in the batch so leading-tab parsing is exercised.
+	runtimesFirst, err := tr.PropertyRuntimesContext(ctx, []string{"example.com/fixture/prop", "example.com/fixture/gopterprop"})
+	if err != nil || !slices.Contains(runtimesFirst["example.com/fixture/prop"], "rapid") || !slices.Contains(runtimesFirst["example.com/fixture/gopterprop"], "gopter") {
+		t.Fatalf("PropertyRuntimesContext = %v, %v", runtimesFirst, err)
+	}
+	if set := tr.linked["example.com/fixture/prop"]; set[""] {
+		t.Fatalf("batch-warmed linked set for prop contains empty import path: %v", set)
+	}
+	tr.linkedMu.Lock()
+	tr.linked = nil
+	tr.linkedMu.Unlock()
+	log.dirs = nil
+
+	oracleGenp, stoodDown, err := tr.DerivedOracleContext(ctx, "example.com/fixture/genp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stoodDown) != 0 || !slices.Contains(oracleGenp, "example.com/fixture/lib.TestGenpDelta") {
+		t.Fatalf("DerivedOracleContext(genp) = %v, stoodDown=%v", oracleGenp, stoodDown)
+	}
+	listCalls := 0
+	for _, spawn := range log.dirs {
+		if len(spawn) > 1 && spawn[1] == "list" {
+			listCalls++
+		}
+	}
+	if listCalls != 1 {
+		t.Fatalf("go list calls during initial DerivedOracleContext = %d, want 1:\n%s", listCalls, &log)
+	}
+
+	// Subsequent DerivedOracleContext and PropertyRuntimesContext calls hit the warmed memos without spawning go list.
+	log.dirs = nil
+	oracleLib, _, err := tr.DerivedOracleContext(ctx, "example.com/fixture/lib")
+	if err != nil || !slices.Contains(oracleLib, "example.com/fixture/lib.TestAdd") {
+		t.Fatalf("DerivedOracleContext(lib) = %v, %v", oracleLib, err)
+	}
+	runtimes, err := tr.PropertyRuntimesContext(ctx, []string{"example.com/fixture/prop", "example.com/fixture/gopterprop"})
+	if err != nil || !slices.Contains(runtimes["example.com/fixture/prop"], "rapid") || !slices.Contains(runtimes["example.com/fixture/gopterprop"], "gopter") {
+		t.Fatalf("PropertyRuntimesContext = %v, %v", runtimes, err)
+	}
+	for _, spawn := range log.dirs {
+		if len(spawn) > 1 && spawn[1] == "list" {
+			t.Fatalf("unexpected go list spawn after warm:\n%s", &log)
+		}
+	}
+
+	// Verify exact set equality between batch warm (including zero-import first package) and single-package LinkedTestPackagesContext.
+	checkPkgs := []string{"example.com/fixture/bodyless", "example.com/fixture/gopterprop", "example.com/fixture/lib", "example.com/fixture/prop"}
+	batchSets := make(map[string]map[string]bool, len(checkPkgs))
+	for _, p := range checkPkgs {
+		set, err := tr.LinkedTestPackagesContext(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if set[""] {
+			t.Fatalf("batch-warmed linked set for %s contains empty import path", p)
+		}
+		batchSets[p] = maps.Clone(set)
+	}
+	tr.linkedMu.Lock()
+	tr.linked = nil
+	tr.linkedMu.Unlock()
+	for _, p := range checkPkgs {
+		singleSet, err := tr.LinkedTestPackagesContext(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !maps.Equal(batchSets[p], singleSet) {
+			t.Fatalf("batch set for %s != single set:\nbatch:  %v\nsingle: %v", p, batchSets[p], singleSet)
+		}
 	}
 }

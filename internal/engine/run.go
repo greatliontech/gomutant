@@ -95,24 +95,12 @@ func (t *Tree) SplitRapidPkgsContext(ctx context.Context, testPkgs []string) (ra
 // runtime, so each earns its own statement; packages importing none
 // are absent.
 func (t *Tree) PropertyRuntimesContext(ctx context.Context, testPkgs []string) (map[string][]string, error) {
-	byPath := map[string]map[string]bool{}
-	for _, pkg := range t.pkgs {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		for _, f := range pkg.Syntax {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			for _, imp := range f.Imports {
-				if name := propertyRuntimeNames[strings.Trim(imp.Path.Value, `"`)]; name != "" {
-					if byPath[pkg.PkgPath] == nil {
-						byPath[pkg.PkgPath] = map[string]bool{}
-					}
-					byPath[pkg.PkgPath][name] = true
-				}
-			}
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	byPath := t.propertyImportsByPath()
+	if err := t.warmLinkedTestPackagesContext(ctx, testPkgs); err != nil {
+		return nil, err
 	}
 	runtimes := map[string][]string{}
 	for _, p := range testPkgs {

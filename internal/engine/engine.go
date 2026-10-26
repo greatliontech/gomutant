@@ -209,11 +209,11 @@ func (t *Tree) PackageContext(pkgPath string) (moduleDir, packageDir string, err
 // PackageContextContext is PackageContext with cancellation while scanning loaded packages.
 func (t *Tree) PackageContextContext(ctx context.Context, pkgPath string) (moduleDir, packageDir string, err error) {
 	var fallback *packages.Package
-	for _, pkg := range t.pkgs {
+	for _, pkg := range t.pkgsByBase(pkgPath) {
 		if err := ctx.Err(); err != nil {
 			return "", "", err
 		}
-		if basePackagePath(pkg) != pkgPath || pkg.Module == nil || len(pkg.GoFiles) == 0 {
+		if pkg.Module == nil || len(pkg.GoFiles) == 0 {
 			continue
 		}
 		if pkg.PkgPath == pkgPath && pkg.ForTest == "" {
@@ -341,6 +341,10 @@ func (t *Tree) LoadExplicitDirContext(ctx context.Context, absDir string) (strin
 	t.build = buildSet{}
 	t.directiveOnce = sync.Once{}
 	t.directiveView = DirectiveCoverageView{}
+	t.derivedMu.Lock()
+	t.derivedOracles = nil
+	t.verifiedTests = nil
+	t.derivedMu.Unlock()
 	imp, ok := t.packageAtDirLocked(absDir)
 	return imp, ok, nil
 }

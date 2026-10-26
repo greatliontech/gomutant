@@ -505,3 +505,40 @@ func TestMutantsContextCancellationRestoresSyntax(t *testing.T) {
 	}
 	t.Fatal("syntax was not restored after cancelled import processing")
 }
+
+func TestDeclImportReferencesAndSpecTouchesPkgName(t *testing.T) {
+	if always, offsets := declImportReferences(nil); always || len(offsets) != 0 {
+		t.Fatalf("declImportReferences(nil) = %v, %v", always, offsets)
+	}
+	tr := fixtureTree(t)
+	ctx := context.Background()
+
+	// Mixed is in lib/lib.go (which imports genp outside Mixed), so Mixed has zero PkgName uses.
+	mixedCat, err := tr.candidateCatalog(ctx, "example.com/fixture/lib.Mixed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if always, offsets := declImportReferences(mixedCat); always || len(offsets) != 0 {
+		t.Fatalf("declImportReferences(Mixed) = %v, %v; want false, empty", always, offsets)
+	}
+
+	// Logs calls fmt.Sprintf inside its body, so Logs has one PkgName use.
+	logsCat, err := tr.candidateCatalog(ctx, "example.com/fixture/lib.Logs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	always, offsets := declImportReferences(logsCat)
+	if always || len(offsets) != 1 {
+		t.Fatalf("declImportReferences(Logs) = %v, %v; want false, 1 offset", always, offsets)
+	}
+	off := offsets[0]
+	if specTouchesPkgName(offsets, []sourceEdit{{start: 0, end: off}}) {
+		t.Fatalf("specTouchesPkgName before offset %d = true, want false", off)
+	}
+	if specTouchesPkgName(offsets, []sourceEdit{{start: off + 1, end: off + 5}}) {
+		t.Fatalf("specTouchesPkgName after offset %d = true, want false", off)
+	}
+	if !specTouchesPkgName(offsets, []sourceEdit{{start: off, end: off + 1}}) {
+		t.Fatalf("specTouchesPkgName covering offset %d = false, want true", off)
+	}
+}

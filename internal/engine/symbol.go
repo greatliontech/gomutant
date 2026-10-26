@@ -153,24 +153,11 @@ func (t *Tree) funcDeclContext(ctx context.Context, symbol string) (*ast.FuncDec
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, pkg := range t.pkgs {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, err
-		}
-		for _, f := range pkg.Syntax {
-			if err := ctx.Err(); err != nil {
-				return nil, nil, err
-			}
-			for _, decl := range f.Decls {
-				fd, ok := decl.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
-				if pkg.TypesInfo.Defs[fd.Name] == obj {
-					return fd, pkg, nil
-				}
-			}
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	if fd, pkg, ok := t.funcDeclByObject(obj); ok {
+		return fd, pkg, nil
 	}
 	return nil, nil, fmt.Errorf("symbol %s: %w", symbol, ErrNotFunction)
 }
@@ -200,12 +187,9 @@ func (t *Tree) objectContext(ctx context.Context, symbol string) (types.Object, 
 	if len(parts) == 0 || len(parts) > 2 {
 		return nil, fmt.Errorf("symbol %s: want <pkg>.<Ident> or <pkg>.<Receiver>.<Method>", symbol)
 	}
-	for _, pkg := range t.pkgs {
+	for _, pkg := range t.pkgsBySymbolPath(pkgPath) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
-		}
-		if pkg.PkgPath != pkgPath && pkg.PkgPath != pkgPath+"_test" {
-			continue
 		}
 		if len(pkg.Errors) > 0 {
 			return nil, fmt.Errorf("package %s has load errors: %v", pkg.ID, pkg.Errors[0])
@@ -262,12 +246,9 @@ func (t *Tree) initObjectContext(ctx context.Context, symbol, pkgPath, file stri
 	if strings.HasSuffix(file, "_test.go") {
 		return nil, fmt.Errorf("symbol %s does not resolve: test sources are oracles, never targets", symbol)
 	}
-	for _, pkg := range t.pkgs {
+	for _, pkg := range t.pkgsByBase(pkgPath) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
-		}
-		if basePackagePath(pkg) != pkgPath {
-			continue
 		}
 		if len(pkg.Errors) > 0 {
 			return nil, fmt.Errorf("package %s has load errors: %v", pkg.ID, pkg.Errors[0])
@@ -308,20 +289,15 @@ func (t *Tree) initObjectContext(ctx context.Context, symbol, pkgPath, file stri
 // the package that declares it, while a real main package in a
 // directory ending in .test keeps resolving to itself.
 func (t *Tree) splitSymbol(symbol string) (string, string) {
-	best := ""
-	for _, pkg := range t.pkgs {
-		if len(pkg.GoFiles) == 1 && !strings.HasSuffix(pkg.GoFiles[0], ".go") {
-			continue
-		}
-		p := basePackagePath(pkg)
-		if strings.HasPrefix(symbol, p+".") && len(p) > len(best) {
-			best = p
+	t.loadMu.Lock()
+	basePackages := t.buildIndex().basePackages
+	t.loadMu.Unlock()
+	for i := strings.LastIndexByte(symbol, '.'); i > 0; i = strings.LastIndexByte(symbol[:i], '.') {
+		if basePackages[symbol[:i]] {
+			return symbol[:i], symbol[i+1:]
 		}
 	}
-	if best == "" {
-		return "", ""
-	}
-	return best, strings.TrimPrefix(symbol, best+".")
+	return "", ""
 }
 
 // PackagePath returns the loaded Go import path that owns symbol.
