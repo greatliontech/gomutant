@@ -163,12 +163,8 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	}
 	rep.epilogue(func(w io.Writer) { renderEphemeralVerdict(w, res) })
 	if o.attest != "" {
-		att, err := gomutant.AttestEphemeralEquivalence(ctx, o.dir, res, o.attest)
+		att, path, err := gomutant.CommitEphemeralEquivalence(ctx, o.dir, o.findingsFile, res, o.attest, o.reattest)
 		if err != nil {
-			return err
-		}
-		path := gomutant.EphemeralAttestationsPathFor(gomutant.FindingsPathAt(o.dir, o.findingsFile))
-		if err := gomutant.RecordEphemeralAttestation(ctx, path, att, o.reattest); err != nil {
 			return err
 		}
 		line := fmt.Sprintf("equivalence recorded  %s  %s — %s", att.EditDigest[:min(12, len(att.EditDigest))], path, att.Reason)

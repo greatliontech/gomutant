@@ -601,3 +601,28 @@ func TestEphemeralAttestationRecordFollowsTheTreeRelativeDocument(t *testing.T) 
 		t.Fatalf("the standing row beside the tree-relative document was not read: %+v", row)
 	}
 }
+
+func TestCommitEphemeralEquivalence(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	res := EphemeralResult{Files: []string{"f.go"}, TestPkg: "example.com/p", Run: "^T$", Runs: 1, EditDigest: "d1", RawEditDigest: "r1"}
+	killed := res
+	killed.Killed, killed.KilledRuns = true, 1
+	if _, _, err := CommitEphemeralEquivalence(ctx, dir, "findings.json", &killed, "why", false); err == nil {
+		t.Fatal("CommitEphemeralEquivalence(killed) succeeded")
+	}
+	att, path, err := CommitEphemeralEquivalence(ctx, dir, "findings.json", &res, "initial reason", false)
+	if err != nil {
+		t.Fatalf("CommitEphemeralEquivalence(initial): %v", err)
+	}
+	if att.EditDigest != "d1" || att.Reason != "initial reason" || path != EphemeralAttestationsPathFor(filepath.Join(dir, "findings.json")) {
+		t.Fatalf("CommitEphemeralEquivalence(initial) = %+v, %q", att, path)
+	}
+	if _, _, err := CommitEphemeralEquivalence(ctx, dir, "findings.json", &res, "updated reason", false); err == nil {
+		t.Fatal("CommitEphemeralEquivalence(duplicate without reattest) succeeded")
+	}
+	att2, _, err := CommitEphemeralEquivalence(ctx, dir, "findings.json", &res, "updated reason", true)
+	if err != nil || att2.Reason != "updated reason" {
+		t.Fatalf("CommitEphemeralEquivalence(reattest) = %+v, %v", att2, err)
+	}
+}

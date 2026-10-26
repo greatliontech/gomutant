@@ -205,3 +205,35 @@ func TestPrepareCampaignReadsTheTargetInputsInOrder(t *testing.T) {
 		t.Fatalf("a refused preparation left the campaign lock: %v", err)
 	}
 }
+
+func TestPrepareAttestationAndAttestedLoadSelection(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := PrepareAttestation(ctx, filepath.Join(dir, "missing"), Selection{}); err == nil || !strings.Contains(err.Error(), "tree root") {
+		t.Fatalf("PrepareAttestation(missing) = %v, want tree root refusal", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vouches"), []byte("bad\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareAttestation(ctx, dir, Selection{}); err == nil || !strings.Contains(err.Error(), "vouches") {
+		t.Fatalf("PrepareAttestation(malformed vouches) = %v, want vouches refusal", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "vouches")); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareAttestation(ctx, dir, Selection{Tags: []string{"bad tag"}}); err == nil {
+		t.Fatal("PrepareAttestation(malformed selection) succeeded")
+	}
+
+	explicit := Selection{Tags: []string{"integration"}}
+	attested := Finding{Selection: SelectionKey(Selection{Tags: []string{"other"}})}
+	if got := AttestedLoadSelection(explicit, true, attested); len(got.Tags) != 1 || got.Tags[0] != "integration" {
+		t.Fatalf("AttestedLoadSelection(explicit) = %+v, want explicit selection", got)
+	}
+	if got := AttestedLoadSelection(Selection{}, false, attested); len(got.Tags) != 1 || got.Tags[0] != "other" {
+		t.Fatalf("AttestedLoadSelection(unscoped) = %+v, want attested record's selection", got)
+	}
+	if got := AttestedLoadSelection(Selection{}, false, Finding{}); len(got.Tags) != 0 || got.Toolchain != "" {
+		t.Fatalf("AttestedLoadSelection(unscoped empty) = %+v, want zero selection", got)
+	}
+}

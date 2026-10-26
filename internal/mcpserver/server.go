@@ -1838,10 +1838,7 @@ func (s *Server) toolExplain(ctx context.Context, req *mcp.CallToolRequest, in e
 		if len(matches) == 1 {
 			finding := matches[0]
 			notify := progressNotifier(ctx, req)
-			loadSel := in.selection()
-			if !hasSel && finding.Selection != "" {
-				loadSel = gomutant.SelectionOfKey(finding.Selection)
-			}
+			loadSel := gomutant.AttestedLoadSelection(in.selection(), hasSel, finding)
 			tree, err := s.loadTreeReporting(ctx, notify, loadSel)
 			if err != nil {
 				return nil, explainOut{}, err
@@ -1988,20 +1985,11 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	if err := gomutant.ValidateAttestationReason(in.Reason); err != nil {
 		return nil, out, err
 	}
-	// The root's existence and the standing vouch set's shape refuse
-	// before the write, as on the CLI (REQ-exec-preparation).
-	if err := gomutant.CheckTreeRoot(s.dir); err != nil {
-		return nil, out, err
-	}
-	if _, err := gomutant.StandingVouches(s.dir); err != nil {
-		return nil, out, err
-	}
-	// The load ladder BEFORE the write, as the CLI runs it: attest
-	// mutates the findings document first, and a binary the ladder
-	// refuses — skewed, below the build-events floor, or under a
-	// silenced harness — must refuse outright rather than write, echo
-	// success, and then fail (REQ-exec-provenance, both faces).
-	if err := gomutant.CheckToolchainProvenance(ctx, s.dir, in.selection()); err != nil {
+	// The root's existence, the standing vouch set's shape, and the
+	// load ladder refuse before the write, as on the CLI
+	// (REQ-exec-preparation, REQ-exec-provenance).
+	sel := in.selection()
+	if err := gomutant.PrepareAttestation(ctx, s.dir, sel); err != nil {
 		return nil, out, err
 	}
 	var attested gomutant.Finding
@@ -2009,12 +1997,12 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	if err != nil {
 		return nil, out, err
 	}
-	sel := in.selection()
+	hasSel := len(in.Tags) > 0 || in.Toolchain != ""
 	routing, err := s.updateStore(ctx, store, gomutant.FindingsPathAt(s.dir, in.Findings), func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		var err error
 		all, attested, err = gomutant.AttestFindingWithOptions(all, in.Symbol, in.Position, in.Operator, in.Reason, gomutant.AttestOptions{
 			Selection:    gomutant.SelectionKey(sel),
-			HasSelection: len(in.Tags) > 0 || in.Toolchain != "",
+			HasSelection: hasSel,
 			Reattest:     in.Reattest,
 			Withdraw:     in.Withdraw,
 		})
@@ -2038,10 +2026,7 @@ func (s *Server) toolAttest(ctx context.Context, req *mcp.CallToolRequest, in at
 	out.Layer, out.LayerReason = routing.Of(store, attested)
 	out.ExemptionsRekeyed, out.OmittedExemptionsRekeyed = rekeyedRows(store.RekeyedExemptions())
 	notify := progressNotifier(ctx, req)
-	loadSel := in.selection()
-	if len(in.Tags) == 0 && in.Toolchain == "" && attested.Selection != "" {
-		loadSel = gomutant.SelectionOfKey(attested.Selection)
-	}
+	loadSel := gomutant.AttestedLoadSelection(sel, hasSel, attested)
 	tree, err := s.loadTreeReporting(ctx, notify, loadSel)
 	if err != nil {
 		out.Posture = gomutant.RecordedPosture(attested, gomutant.FindingInspection{}, err)
@@ -2386,12 +2371,8 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	}
 	out := &ephemeralOut{EphemeralResult: res}
 	if in.Attest != "" {
-		att, err := gomutant.AttestEphemeralEquivalence(ctx, s.dir, res, in.Attest)
+		att, path, err := gomutant.CommitEphemeralEquivalence(ctx, s.dir, in.Findings, res, in.Attest, in.Reattest)
 		if err != nil {
-			return nil, nil, err
-		}
-		path := gomutant.EphemeralAttestationsPathFor(gomutant.FindingsPathAt(s.dir, in.Findings))
-		if err := gomutant.RecordEphemeralAttestation(ctx, path, att, in.Reattest); err != nil {
 			return nil, nil, err
 		}
 		out.AttestationRecorded = att.EditDigest

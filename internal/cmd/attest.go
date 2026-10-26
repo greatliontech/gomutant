@@ -56,18 +56,11 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// The root's existence, then the standing vouch set's shape read in
-	// it — the preparation order every verb keeps (REQ-exec-preparation).
-	if err := gomutant.CheckTreeRoot(o.dir); err != nil {
-		return err
-	}
-	if _, err := gomutant.StandingVouches(o.dir); err != nil {
-		return err
-	}
-	// Provenance BEFORE the write: attest mutates the findings
-	// document first, and a skewed binary must refuse outright rather
-	// than write, echo success, and then fail (REQ-exec-provenance).
-	if err := gomutant.CheckToolchainProvenance(ctx, o.dir, selectionOf(o.tags, o.toolchain)); err != nil {
+	// The root's existence, the standing vouch set's shape, and
+	// provenance BEFORE the write — the preparation order both faces
+	// keep (REQ-exec-preparation, REQ-exec-provenance).
+	sel := selectionOf(o.tags, o.toolchain)
+	if err := gomutant.PrepareAttestation(ctx, o.dir, sel); err != nil {
 		return err
 	}
 	// The cadence starts before the store and the document lock — a
@@ -85,12 +78,12 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 		return err
 	}
 	var attested gomutant.Finding
-	sel := selectionOf(o.tags, o.toolchain)
+	hasSel := len(o.tags) > 0 || o.toolchain != ""
 	routing, err := store.Update(ctx, func(all []gomutant.Finding) ([]gomutant.Finding, error) {
 		var err error
 		all, attested, err = gomutant.AttestFindingWithOptions(all, o.symbol, o.position, o.operator, o.reason, gomutant.AttestOptions{
 			Selection:    gomutant.SelectionKey(sel),
-			HasSelection: len(o.tags) > 0 || o.toolchain != "",
+			HasSelection: hasSel,
 			Reattest:     o.reattest,
 			Withdraw:     o.withdraw,
 		})
@@ -109,10 +102,7 @@ func attestCommand(ctx context.Context, o attestOptions, out io.Writer) error {
 	// evidence by a reader who stopped at the echo
 	// (REQ-result-run-posture).
 	layer, layerReason := routing.Of(store, attested)
-	loadSel := sel
-	if len(o.tags) == 0 && o.toolchain == "" && attested.Selection != "" {
-		loadSel = gomutant.SelectionOfKey(attested.Selection)
-	}
+	loadSel := gomutant.AttestedLoadSelection(sel, hasSel, attested)
 	posture := attestedPosture(ctx, o.dir, loadSel, vouches, attested, rep)
 	layerText := gomutant.LayerRepo
 	if layer != gomutant.LayerRepo {

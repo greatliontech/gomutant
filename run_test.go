@@ -290,466 +290,393 @@ func TestRunConservesCandidateDiscards(t *testing.T) {
 	}
 }
 
-func TestRunAccountsForComparisonFamilies(t *testing.T) {
+func TestRunAccountsForOperatorFamilies(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
 	}
 	tr := fixtureTree(t)
-	targets := []Target{
+	comparisonTargets := []Target{
 		{Symbol: "example.com/fixture/lib.Boundary", Oracle: []string{"example.com/fixture/lib.TestBoundary"}},
 		{Symbol: "example.com/fixture/lib.EqualityLogical", Oracle: []string{"example.com/fixture/lib.TestEqualityLogical"}},
 	}
-	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 1})
-	if err != nil {
-		t.Fatal(err)
+	controlOracle := []string{"example.com/fixture/lib.TestControlOutcomes"}
+	controlTargets := []Target{
+		{Symbol: "example.com/fixture/lib.IfCondition", Oracle: controlOracle},
+		{Symbol: "example.com/fixture/lib.ForCondition", Oracle: controlOracle},
+		{Symbol: "example.com/fixture/lib.ConditionlessOutcome", Oracle: controlOracle},
+		{Symbol: "example.com/fixture/lib.RangeOnce", Oracle: controlOracle},
+		{Symbol: "example.com/fixture/lib.BreakValue", Oracle: controlOracle},
+		{Symbol: "example.com/fixture/lib.ContinueValue", Oracle: controlOracle},
+		{Symbol: "example.com/fixture/lib.LogicalDefined", Oracle: controlOracle},
+		{Symbol: "example.com/fixture/lib.LogicalGeneric", Oracle: controlOracle},
 	}
-	if len(findings) != 2 {
-		t.Fatalf("comparison finding = %+v", findings)
-	}
-	for _, finding := range findings {
-		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
-			t.Fatalf("comparison finding = %+v", finding)
+	vacuousOracle := []string{"example.com/fixture/lib.TestVacuous"}
+	makeTargets := func(symbols ...string) []Target {
+		out := make([]Target, 0, len(symbols))
+		for _, symbol := range symbols {
+			out = append(out, Target{Symbol: "example.com/fixture/lib." + symbol, Oracle: vacuousOracle})
 		}
+		return out
 	}
-	operators := map[string]OperatorSummary{}
-	for _, finding := range findings {
-		for _, summary := range finding.Operators {
-			operators[summary.Operator] = summary
-		}
-	}
-	for _, operator := range []string{"relational boundary: < -> <=", "relational negation: < -> >="} {
-		summary, ok := operators[operator]
-		if !ok || summary.Generated != 1 || summary.Killed != 1 || summary.Discarded != 0 || summary.Survived != 0 {
-			t.Errorf("%s summary = %+v", operator, summary)
-		}
-	}
-	for _, operator := range []string{"equality: == -> !=", "logical: && -> ||"} {
-		summary, ok := operators[operator]
-		if !ok || summary.Generated != 1 || summary.Killed != 1 || summary.Discarded != 0 || summary.Survived != 0 {
-			t.Errorf("%s summary = %+v", operator, summary)
-		}
-	}
-	if summary := operators["boolean operand: -> true"]; summary.Generated != 2 || summary.Killed != 2 || summary.Discarded != 0 || summary.Survived != 0 {
-		t.Errorf("boolean operand summary = %+v", summary)
-	}
-	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/5"
-	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/5 finding under current basis = fresh %v, err %v", fresh, err)
-	}
-}
-
-func TestRunAccountsForControlFamilies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test per mutant")
-	}
-	tr := fixtureTree(t)
-	oracle := []string{"example.com/fixture/lib.TestControlOutcomes"}
-	targets := []Target{
-		{Symbol: "example.com/fixture/lib.IfCondition", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ForCondition", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ConditionlessOutcome", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.RangeOnce", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.BreakValue", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ContinueValue", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.LogicalDefined", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.LogicalGeneric", Oracle: oracle},
-	}
-	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != len(targets) {
-		t.Fatalf("control findings = %d, want %d", len(findings), len(targets))
-	}
-	operators := map[string]OperatorSummary{}
-	for _, finding := range findings {
-		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
-			t.Fatalf("control finding = %+v", finding)
-		}
-		for _, summary := range finding.Operators {
-			total := operators[summary.Operator]
-			total.Operator = summary.Operator
-			total.Generated += summary.Generated
-			total.Discarded += summary.Discarded
-			total.Killed += summary.Killed
-			total.Survived += summary.Survived
-			operators[summary.Operator] = total
-		}
-	}
-	for operator, want := range map[string]OperatorSummary{
-		"condition: negate":               {Generated: 4, Killed: 4},
-		"condition: force true":           {Generated: 3, Killed: 2, Survived: 1},
-		"condition: force false":          {Generated: 5, Killed: 5},
-		"range body: prepend break":       {Generated: 3, Killed: 2, Survived: 1},
-		"loop control: break -> continue": {Generated: 1, Killed: 1},
-		"loop control: continue -> break": {Generated: 1, Killed: 1},
-		"boolean operand: -> true":        {Generated: 4, Survived: 4},
-		"boolean operand: -> false":       {Generated: 8, Survived: 8},
-	} {
-		summary := operators[operator]
-		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
-			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
-		}
-	}
-	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/6"
-	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/6 finding under go/7 = fresh %v, err %v", fresh, err)
-	}
-}
-
-func TestRunAccountsForArithmeticFamilies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test per mutant")
-	}
-	tr := fixtureTree(t)
-	oracle := []string{"example.com/fixture/lib.TestVacuous"}
-	targets := []Target{
-		{Symbol: "example.com/fixture/lib.ArithmeticDefined", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticFloat", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticComplex", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticGeneric", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.RemainderGeneric", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticMulZero", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticAlias", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticIntersected", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticUntyped", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticIota", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ArithmeticImaginary", Oracle: oracle},
-	}
-	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != len(targets) {
-		t.Fatalf("arithmetic findings = %d, want %d", len(findings), len(targets))
-	}
-	operators := map[string]OperatorSummary{}
-	for _, finding := range findings {
-		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
-			t.Fatalf("arithmetic finding = %+v", finding)
-		}
-		for _, summary := range finding.Operators {
-			total := operators[summary.Operator]
-			total.Operator = summary.Operator
-			total.Generated += summary.Generated
-			total.Discarded += summary.Discarded
-			total.Killed += summary.Killed
-			total.Survived += summary.Survived
-			operators[summary.Operator] = total
-		}
-	}
-	for operator, want := range map[string]OperatorSummary{
-		"arithmetic: + -> -": {Generated: 9, Survived: 9},
-		"arithmetic: - -> +": {Generated: 5, Survived: 5},
-		"arithmetic: * -> /": {Generated: 6, Discarded: 1, Survived: 5},
-		"arithmetic: / -> *": {Generated: 5, Survived: 5},
-		"arithmetic: % -> *": {Generated: 2, Survived: 2},
-	} {
-		summary := operators[operator]
-		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
-			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
-		}
-	}
-	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/6"
-	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/6 finding under go/7 = fresh %v, err %v", fresh, err)
-	}
-}
-
-func TestRunAccountsForBitwiseFamilies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test per mutant")
-	}
-	tr := fixtureTree(t)
-	oracle := []string{"example.com/fixture/lib.TestVacuous"}
-	targets := []Target{
-		{Symbol: "example.com/fixture/lib.BitwiseDefined", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.BitwiseGeneric", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.BitwiseConstants", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.BitwiseAlias", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ShiftDefined", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ShiftGeneric", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ShiftConstants", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.BitwiseDuplicate", Oracle: oracle},
-		{Symbol: "example.com/fixture/lib.ShiftOverflow", Oracle: oracle},
-	}
-	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != len(targets) {
-		t.Fatalf("bitwise findings = %d, want %d", len(findings), len(targets))
-	}
-	operators := map[string]OperatorSummary{}
-	for _, finding := range findings {
-		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
-			t.Fatalf("bitwise finding = %+v", finding)
-		}
-		for _, summary := range finding.Operators {
-			total := operators[summary.Operator]
-			total.Operator = summary.Operator
-			total.Generated += summary.Generated
-			total.Discarded += summary.Discarded
-			total.Killed += summary.Killed
-			total.Survived += summary.Survived
-			operators[summary.Operator] = total
-		}
-	}
-	for operator, want := range map[string]OperatorSummary{
-		"bitwise: & -> |":  {Generated: 4, Survived: 4},
-		"bitwise: | -> &":  {Generated: 3, Survived: 3},
-		"bitwise: ^ -> &":  {Generated: 4, Discarded: 1, Survived: 3},
-		"bitwise: &^ -> &": {Generated: 3, Survived: 3},
-		"shift: << -> >>":  {Generated: 3, Survived: 3},
-		"shift: >> -> <<":  {Generated: 4, Discarded: 1, Survived: 3},
-	} {
-		summary := operators[operator]
-		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
-			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
-		}
-	}
-	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/7"
-	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/7 finding under go/8 = fresh %v, err %v", fresh, err)
-	}
-}
-
-func TestRunAccountsForUnaryAssignmentFamilies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test per mutant")
-	}
-	tr := fixtureTree(t)
-	oracle := []string{"example.com/fixture/lib.TestVacuous"}
-	symbols := []string{
+	arithmeticTargets := makeTargets(
+		"ArithmeticDefined", "ArithmeticFloat", "ArithmeticComplex", "ArithmeticGeneric",
+		"RemainderGeneric", "ArithmeticMulZero", "ArithmeticAlias", "ArithmeticIntersected",
+		"ArithmeticUntyped", "ArithmeticIota", "ArithmeticImaginary",
+	)
+	bitwiseTargets := makeTargets(
+		"BitwiseDefined", "BitwiseGeneric", "BitwiseConstants", "BitwiseAlias",
+		"ShiftDefined", "ShiftGeneric", "ShiftConstants", "BitwiseDuplicate", "ShiftOverflow",
+	)
+	unaryTargets := makeTargets(
 		"UnaryPlus", "UnaryMinus", "UnaryNot", "UnaryXor",
 		"CompoundAdd", "CompoundSub", "CompoundMul", "CompoundDiv", "CompoundRem",
 		"CompoundAnd", "CompoundOr", "CompoundXor", "CompoundClear", "CompoundShiftLeft", "CompoundShiftRight",
 		"Increment", "Decrement", "UnaryOverflow", "CompoundDivideByZero",
-	}
-	targets := make([]Target, 0, len(symbols))
-	for _, symbol := range symbols {
-		targets = append(targets, Target{Symbol: "example.com/fixture/lib." + symbol, Oracle: oracle})
-	}
-	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != len(targets) {
-		t.Fatalf("unary/assignment findings = %d, want %d", len(findings), len(targets))
-	}
-	operators := map[string]OperatorSummary{}
-	for _, finding := range findings {
-		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
-			t.Fatalf("unary/assignment finding = %+v", finding)
-		}
-		for _, summary := range finding.Operators {
-			total := operators[summary.Operator]
-			total.Operator = summary.Operator
-			total.Generated += summary.Generated
-			total.Discarded += summary.Discarded
-			total.Killed += summary.Killed
-			total.Survived += summary.Survived
-			operators[summary.Operator] = total
-		}
-	}
-	want := map[string]OperatorSummary{
-		"unary: + -> -": {Generated: 1, Survived: 1}, "unary: - -> +": {Generated: 2, Discarded: 1, Survived: 1},
-		"unary: ! -> identity": {Generated: 1, Survived: 1}, "unary: ^ -> identity": {Generated: 1, Survived: 1},
-		"compound arithmetic: += -> -=": {Generated: 1, Survived: 1}, "compound arithmetic: -= -> +=": {Generated: 1, Survived: 1},
-		"compound arithmetic: *= -> /=": {Generated: 2, Discarded: 1, Survived: 1}, "compound arithmetic: /= -> *=": {Generated: 1, Survived: 1},
-		"compound arithmetic: %= -> *=": {Generated: 1, Survived: 1},
-		"compound bitwise: &= -> |=":    {Generated: 1, Survived: 1}, "compound bitwise: |= -> &=": {Generated: 1, Survived: 1},
-		"compound bitwise: ^= -> &=": {Generated: 1, Survived: 1}, "compound bitwise: &^= -> &=": {Generated: 1, Survived: 1},
-		"compound shift: <<= -> >>=": {Generated: 1, Survived: 1}, "compound shift: >>= -> <<=": {Generated: 1, Survived: 1},
-		"increment/decrement: ++ -> --": {Generated: 1, Survived: 1}, "increment/decrement: -- -> ++": {Generated: 1, Survived: 1},
-	}
-	for _, operator := range []string{"+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&^=", "<<=", ">>="} {
-		generated := 1
-		if operator == "*=" {
-			generated = 2
-		}
-		want["compound store: "+operator+" -> ="] = OperatorSummary{Generated: generated, Survived: generated}
-	}
-	for operator, expected := range want {
-		summary := operators[operator]
-		if summary.Generated != expected.Generated || summary.Killed != expected.Killed || summary.Discarded != expected.Discarded || summary.Survived != expected.Survived {
-			t.Errorf("%s summary = %+v, want %+v", operator, summary, expected)
-		}
-	}
-	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/8"
-	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/8 finding under go/9 = fresh %v, err %v", fresh, err)
-	}
-}
-
-func TestRunAccountsForScalarLiteralFamilies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test per mutant")
-	}
-	tr := fixtureTree(t)
-	oracle := []string{"example.com/fixture/lib.TestVacuous"}
-	symbols := []string{
+	)
+	scalarTargets := makeTargets(
 		"LiteralInteger", "LiteralRune", "LiteralFloat", "LiteralImaginary",
 		"LiteralTrue", "LiteralFalse", "LiteralNonempty", "LiteralEmpty",
 		"IntegerLiteralOverflow", "IntegerLiteralDuplicate", "RuneLiteralDuplicate",
 		"FloatLiteralDuplicate", "ImaginaryLiteralCases", "BooleanLiteralCases", "StringLiteralDuplicate",
-	}
-	targets := make([]Target, 0, len(symbols))
-	for _, symbol := range symbols {
-		targets = append(targets, Target{Symbol: "example.com/fixture/lib." + symbol, Oracle: oracle})
-	}
-	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != len(targets) {
-		t.Fatalf("scalar literal findings = %d, want %d", len(findings), len(targets))
-	}
-	operators := map[string]OperatorSummary{}
-	for _, finding := range findings {
-		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
-			t.Fatalf("scalar literal finding = %+v", finding)
-		}
-		for _, summary := range finding.Operators {
-			total := operators[summary.Operator]
-			total.Operator = summary.Operator
-			total.Generated += summary.Generated
-			total.Discarded += summary.Discarded
-			total.Killed += summary.Killed
-			total.Survived += summary.Survived
-			operators[summary.Operator] = total
-		}
-	}
-	for operator, want := range map[string]OperatorSummary{
-		"integer literal: magnitude +1":     {Generated: 4, Discarded: 2, Survived: 2},
-		"rune literal: value +1":            {Generated: 3, Discarded: 1, Survived: 2},
-		"float literal: value +1":           {Generated: 3, Discarded: 1, Survived: 2},
-		"imaginary literal: value +1":       {Generated: 3, Survived: 3},
-		"boolean literal: true -> false":    {Generated: 2, Survived: 2},
-		"boolean literal: false -> true":    {Generated: 2, Survived: 2},
-		"string literal: nonempty -> empty": {Generated: 2, Discarded: 1, Survived: 1},
-		"string literal: empty -> nonempty": {Generated: 2, Discarded: 1, Survived: 1},
-	} {
-		summary := operators[operator]
-		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
-			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
-		}
-	}
-	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/9"
-	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/9 finding under go/10 = fresh %v, err %v", fresh, err)
-	}
-}
-
-func TestRunAccountsForReturnSubstitutions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test per mutant")
-	}
-	tr := fixtureTree(t)
-	oracle := []string{"example.com/fixture/lib.TestVacuous"}
-	symbols := []string{
+	)
+	returnTargets := makeTargets(
 		"ReturnBoolean", "ReturnNumber", "ReturnString", "ReturnPointer",
 		"ReturnDefined", "ReturnAliases", "ReturnNilDomains", "ReturnDefinedNilDomains", "ReturnDeclaredInterface",
 		"ReturnFalseLiteral", "ReturnTrueLiteral", "ReturnZeroLiteral", "ReturnEmptyLiteral", "ReturnNilLiteral",
-	}
-	targets := make([]Target, 0, len(symbols))
-	for _, symbol := range symbols {
-		targets = append(targets, Target{Symbol: "example.com/fixture/lib." + symbol, Oracle: oracle})
-	}
-	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != len(targets) {
-		t.Fatalf("return findings = %d, want %d", len(findings), len(targets))
-	}
-	operators := map[string]OperatorSummary{}
-	for _, finding := range findings {
-		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
-			t.Fatalf("return finding = %+v", finding)
-		}
-		for _, summary := range finding.Operators {
-			total := operators[summary.Operator]
-			total.Operator = summary.Operator
-			total.Generated += summary.Generated
-			total.Discarded += summary.Discarded
-			total.Killed += summary.Killed
-			total.Survived += summary.Survived
-			operators[summary.Operator] = total
-		}
-	}
-	for operator, want := range map[string]OperatorSummary{
-		"return: false": {Generated: 4, Discarded: 2, Survived: 2},
-		"return: true":  {Generated: 4, Discarded: 2, Survived: 2},
-		"return: zero":  {Generated: 9, Discarded: 2, Survived: 7},
-		"return: nil":   {Generated: 18, Discarded: 1, Survived: 17},
-	} {
-		summary := operators[operator]
-		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
-			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
-		}
-	}
-	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/10"
-	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/10 finding under go/11 = fresh %v, err %v", fresh, err)
-	}
-}
+	)
+	statementTargets := makeTargets("StatementBlocks", "StatementKinds", "StatementDropStores", "StatementExcluded")
 
-func TestRunAccountsForStatementFamilies(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test per mutant")
+	var allTargets []Target
+	for _, group := range [][]Target{
+		comparisonTargets, controlTargets, arithmeticTargets, bitwiseTargets,
+		unaryTargets, scalarTargets, returnTargets, statementTargets,
+	} {
+		allTargets = append(allTargets, group...)
 	}
-	tr := fixtureTree(t)
-	oracle := []string{"example.com/fixture/lib.TestVacuous"}
-	symbols := []string{"StatementBlocks", "StatementKinds", "StatementDropStores", "StatementExcluded"}
-	targets := make([]Target, 0, len(symbols))
-	for _, symbol := range symbols {
-		targets = append(targets, Target{Symbol: "example.com/fixture/lib." + symbol, Oracle: oracle})
-	}
-	findings, err := tr.Run(context.Background(), targets, Options{Jobs: 2})
+	allFindings, err := tr.Run(context.Background(), allTargets, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	operators := map[string]OperatorSummary{}
-	for _, finding := range findings {
-		if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
-			t.Fatalf("statement finding = %+v", finding)
-		}
-		if finding.TargetEvidence.RuntimeUnverifiable && !strings.Contains(finding.TargetEvidence.RuntimeReason, "failed to build") {
-			t.Fatalf("pre-execution statement-family discard added incomplete process evidence without a launched compiler rejection: %+v", finding.TargetEvidence)
-		}
-		for _, summary := range finding.Operators {
-			total := operators[summary.Operator]
-			total.Operator = summary.Operator
-			total.Generated += summary.Generated
-			total.Discarded += summary.Discarded
-			total.Killed += summary.Killed
-			total.Survived += summary.Survived
-			operators[summary.Operator] = total
-		}
+	if len(allFindings) != len(allTargets) {
+		t.Fatalf("operator family findings = %d, want %d", len(allFindings), len(allTargets))
 	}
-	for operator, want := range map[string]OperatorSummary{
-		"block: empty":           {Generated: 8, Discarded: 4, Survived: 4},
-		"statement: delete":      {Generated: 24, Discarded: 4, Survived: 20},
-		"assignment: drop store": {Generated: 7, Discarded: 1, Survived: 6},
-	} {
-		summary := operators[operator]
-		if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
-			t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+	findingBySymbol := make(map[string]Finding, len(allFindings))
+	for _, f := range allFindings {
+		findingBySymbol[f.Symbol] = f
+	}
+	findingsFor := func(targets []Target) []Finding {
+		out := make([]Finding, len(targets))
+		for i, tg := range targets {
+			out[i] = findingBySymbol[tg.Symbol]
 		}
+		return out
 	}
-	oldBasis := findings[0]
-	oldBasis.OperatorSet = "go/11"
-	if fresh, err := tr.Fresh(context.Background(), oldBasis, targets[0], 0); err != nil || fresh {
-		t.Fatalf("go/11 finding under go/12 = fresh %v, err %v", fresh, err)
-	}
+
+	t.Run("Comparison", func(t *testing.T) {
+		findings := findingsFor(comparisonTargets)
+		for _, finding := range findings {
+			if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+				t.Fatalf("comparison finding = %+v", finding)
+			}
+		}
+		operators := map[string]OperatorSummary{}
+		for _, finding := range findings {
+			for _, summary := range finding.Operators {
+				operators[summary.Operator] = summary
+			}
+		}
+		for _, operator := range []string{"relational boundary: < -> <=", "relational negation: < -> >="} {
+			summary, ok := operators[operator]
+			if !ok || summary.Generated != 1 || summary.Killed != 1 || summary.Discarded != 0 || summary.Survived != 0 {
+				t.Errorf("%s summary = %+v", operator, summary)
+			}
+		}
+		for _, operator := range []string{"equality: == -> !=", "logical: && -> ||"} {
+			summary, ok := operators[operator]
+			if !ok || summary.Generated != 1 || summary.Killed != 1 || summary.Discarded != 0 || summary.Survived != 0 {
+				t.Errorf("%s summary = %+v", operator, summary)
+			}
+		}
+		if summary := operators["boolean operand: -> true"]; summary.Generated != 2 || summary.Killed != 2 || summary.Discarded != 0 || summary.Survived != 0 {
+			t.Errorf("boolean operand summary = %+v", summary)
+		}
+		oldBasis := findings[0]
+		oldBasis.OperatorSet = "go/5"
+		if fresh, err := tr.Fresh(context.Background(), oldBasis, comparisonTargets[0], 0); err != nil || fresh {
+			t.Fatalf("go/5 finding under current basis = fresh %v, err %v", fresh, err)
+		}
+	})
+
+	t.Run("Control", func(t *testing.T) {
+		findings := findingsFor(controlTargets)
+		operators := map[string]OperatorSummary{}
+		for _, finding := range findings {
+			if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+				t.Fatalf("control finding = %+v", finding)
+			}
+			for _, summary := range finding.Operators {
+				total := operators[summary.Operator]
+				total.Operator = summary.Operator
+				total.Generated += summary.Generated
+				total.Discarded += summary.Discarded
+				total.Killed += summary.Killed
+				total.Survived += summary.Survived
+				operators[summary.Operator] = total
+			}
+		}
+		for operator, want := range map[string]OperatorSummary{
+			"condition: negate":               {Generated: 4, Killed: 4},
+			"condition: force true":           {Generated: 3, Killed: 2, Survived: 1},
+			"condition: force false":          {Generated: 5, Killed: 5},
+			"range body: prepend break":       {Generated: 3, Killed: 2, Survived: 1},
+			"loop control: break -> continue": {Generated: 1, Killed: 1},
+			"loop control: continue -> break": {Generated: 1, Killed: 1},
+			"boolean operand: -> true":        {Generated: 4, Survived: 4},
+			"boolean operand: -> false":       {Generated: 8, Survived: 8},
+		} {
+			summary := operators[operator]
+			if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+				t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+			}
+		}
+		oldBasis := findings[0]
+		oldBasis.OperatorSet = "go/6"
+		if fresh, err := tr.Fresh(context.Background(), oldBasis, controlTargets[0], 0); err != nil || fresh {
+			t.Fatalf("go/6 finding under go/7 = fresh %v, err %v", fresh, err)
+		}
+	})
+
+	t.Run("Arithmetic", func(t *testing.T) {
+		findings := findingsFor(arithmeticTargets)
+		operators := map[string]OperatorSummary{}
+		for _, finding := range findings {
+			if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+				t.Fatalf("arithmetic finding = %+v", finding)
+			}
+			for _, summary := range finding.Operators {
+				total := operators[summary.Operator]
+				total.Operator = summary.Operator
+				total.Generated += summary.Generated
+				total.Discarded += summary.Discarded
+				total.Killed += summary.Killed
+				total.Survived += summary.Survived
+				operators[summary.Operator] = total
+			}
+		}
+		for operator, want := range map[string]OperatorSummary{
+			"arithmetic: + -> -": {Generated: 9, Survived: 9},
+			"arithmetic: - -> +": {Generated: 5, Survived: 5},
+			"arithmetic: * -> /": {Generated: 6, Discarded: 1, Survived: 5},
+			"arithmetic: / -> *": {Generated: 5, Survived: 5},
+			"arithmetic: % -> *": {Generated: 2, Survived: 2},
+		} {
+			summary := operators[operator]
+			if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+				t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+			}
+		}
+		oldBasis := findings[0]
+		oldBasis.OperatorSet = "go/6"
+		if fresh, err := tr.Fresh(context.Background(), oldBasis, arithmeticTargets[0], 0); err != nil || fresh {
+			t.Fatalf("go/6 finding under go/7 = fresh %v, err %v", fresh, err)
+		}
+	})
+
+	t.Run("Bitwise", func(t *testing.T) {
+		findings := findingsFor(bitwiseTargets)
+		operators := map[string]OperatorSummary{}
+		for _, finding := range findings {
+			if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+				t.Fatalf("bitwise finding = %+v", finding)
+			}
+			for _, summary := range finding.Operators {
+				total := operators[summary.Operator]
+				total.Operator = summary.Operator
+				total.Generated += summary.Generated
+				total.Discarded += summary.Discarded
+				total.Killed += summary.Killed
+				total.Survived += summary.Survived
+				operators[summary.Operator] = total
+			}
+		}
+		for operator, want := range map[string]OperatorSummary{
+			"bitwise: & -> |":  {Generated: 4, Survived: 4},
+			"bitwise: | -> &":  {Generated: 3, Survived: 3},
+			"bitwise: ^ -> &":  {Generated: 4, Discarded: 1, Survived: 3},
+			"bitwise: &^ -> &": {Generated: 3, Survived: 3},
+			"shift: << -> >>":  {Generated: 3, Survived: 3},
+			"shift: >> -> <<":  {Generated: 4, Discarded: 1, Survived: 3},
+		} {
+			summary := operators[operator]
+			if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+				t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+			}
+		}
+		oldBasis := findings[0]
+		oldBasis.OperatorSet = "go/7"
+		if fresh, err := tr.Fresh(context.Background(), oldBasis, bitwiseTargets[0], 0); err != nil || fresh {
+			t.Fatalf("go/7 finding under go/8 = fresh %v, err %v", fresh, err)
+		}
+	})
+
+	t.Run("UnaryAssignment", func(t *testing.T) {
+		findings := findingsFor(unaryTargets)
+		operators := map[string]OperatorSummary{}
+		for _, finding := range findings {
+			if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+				t.Fatalf("unary/assignment finding = %+v", finding)
+			}
+			for _, summary := range finding.Operators {
+				total := operators[summary.Operator]
+				total.Operator = summary.Operator
+				total.Generated += summary.Generated
+				total.Discarded += summary.Discarded
+				total.Killed += summary.Killed
+				total.Survived += summary.Survived
+				operators[summary.Operator] = total
+			}
+		}
+		want := map[string]OperatorSummary{
+			"unary: + -> -": {Generated: 1, Survived: 1}, "unary: - -> +": {Generated: 2, Discarded: 1, Survived: 1},
+			"unary: ! -> identity": {Generated: 1, Survived: 1}, "unary: ^ -> identity": {Generated: 1, Survived: 1},
+			"compound arithmetic: += -> -=": {Generated: 1, Survived: 1}, "compound arithmetic: -= -> +=": {Generated: 1, Survived: 1},
+			"compound arithmetic: *= -> /=": {Generated: 2, Discarded: 1, Survived: 1}, "compound arithmetic: /= -> *=": {Generated: 1, Survived: 1},
+			"compound arithmetic: %= -> *=": {Generated: 1, Survived: 1},
+			"compound bitwise: &= -> |=":    {Generated: 1, Survived: 1}, "compound bitwise: |= -> &=": {Generated: 1, Survived: 1},
+			"compound bitwise: ^= -> &=": {Generated: 1, Survived: 1}, "compound bitwise: &^= -> &=": {Generated: 1, Survived: 1},
+			"compound shift: <<= -> >>=": {Generated: 1, Survived: 1}, "compound shift: >>= -> <<=": {Generated: 1, Survived: 1},
+			"increment/decrement: ++ -> --": {Generated: 1, Survived: 1}, "increment/decrement: -- -> ++": {Generated: 1, Survived: 1},
+		}
+		for _, operator := range []string{"+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "&^=", "<<=", ">>="} {
+			generated := 1
+			if operator == "*=" {
+				generated = 2
+			}
+			want["compound store: "+operator+" -> ="] = OperatorSummary{Generated: generated, Survived: generated}
+		}
+		for operator, expected := range want {
+			summary := operators[operator]
+			if summary.Generated != expected.Generated || summary.Killed != expected.Killed || summary.Discarded != expected.Discarded || summary.Survived != expected.Survived {
+				t.Errorf("%s summary = %+v, want %+v", operator, summary, expected)
+			}
+		}
+		oldBasis := findings[0]
+		oldBasis.OperatorSet = "go/8"
+		if fresh, err := tr.Fresh(context.Background(), oldBasis, unaryTargets[0], 0); err != nil || fresh {
+			t.Fatalf("go/8 finding under go/9 = fresh %v, err %v", fresh, err)
+		}
+	})
+
+	t.Run("ScalarLiteral", func(t *testing.T) {
+		findings := findingsFor(scalarTargets)
+		operators := map[string]OperatorSummary{}
+		for _, finding := range findings {
+			if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+				t.Fatalf("scalar literal finding = %+v", finding)
+			}
+			for _, summary := range finding.Operators {
+				total := operators[summary.Operator]
+				total.Operator = summary.Operator
+				total.Generated += summary.Generated
+				total.Discarded += summary.Discarded
+				total.Killed += summary.Killed
+				total.Survived += summary.Survived
+				operators[summary.Operator] = total
+			}
+		}
+		for operator, want := range map[string]OperatorSummary{
+			"integer literal: magnitude +1":     {Generated: 4, Discarded: 2, Survived: 2},
+			"rune literal: value +1":            {Generated: 3, Discarded: 1, Survived: 2},
+			"float literal: value +1":           {Generated: 3, Discarded: 1, Survived: 2},
+			"imaginary literal: value +1":       {Generated: 3, Survived: 3},
+			"boolean literal: true -> false":    {Generated: 2, Survived: 2},
+			"boolean literal: false -> true":    {Generated: 2, Survived: 2},
+			"string literal: nonempty -> empty": {Generated: 2, Discarded: 1, Survived: 1},
+			"string literal: empty -> nonempty": {Generated: 2, Discarded: 1, Survived: 1},
+		} {
+			summary := operators[operator]
+			if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+				t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+			}
+		}
+		oldBasis := findings[0]
+		oldBasis.OperatorSet = "go/9"
+		if fresh, err := tr.Fresh(context.Background(), oldBasis, scalarTargets[0], 0); err != nil || fresh {
+			t.Fatalf("go/9 finding under go/10 = fresh %v, err %v", fresh, err)
+		}
+	})
+
+	t.Run("ReturnSubstitutions", func(t *testing.T) {
+		findings := findingsFor(returnTargets)
+		operators := map[string]OperatorSummary{}
+		for _, finding := range findings {
+			if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+				t.Fatalf("return finding = %+v", finding)
+			}
+			for _, summary := range finding.Operators {
+				total := operators[summary.Operator]
+				total.Operator = summary.Operator
+				total.Generated += summary.Generated
+				total.Discarded += summary.Discarded
+				total.Killed += summary.Killed
+				total.Survived += summary.Survived
+				operators[summary.Operator] = total
+			}
+		}
+		for operator, want := range map[string]OperatorSummary{
+			"return: false": {Generated: 4, Discarded: 2, Survived: 2},
+			"return: true":  {Generated: 4, Discarded: 2, Survived: 2},
+			"return: zero":  {Generated: 9, Discarded: 2, Survived: 7},
+			"return: nil":   {Generated: 18, Discarded: 1, Survived: 17},
+		} {
+			summary := operators[operator]
+			if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+				t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+			}
+		}
+		oldBasis := findings[0]
+		oldBasis.OperatorSet = "go/10"
+		if fresh, err := tr.Fresh(context.Background(), oldBasis, returnTargets[0], 0); err != nil || fresh {
+			t.Fatalf("go/10 finding under go/11 = fresh %v, err %v", fresh, err)
+		}
+	})
+
+	t.Run("Statement", func(t *testing.T) {
+		findings := findingsFor(statementTargets)
+		operators := map[string]OperatorSummary{}
+		for _, finding := range findings {
+			if finding.Generated != finding.CandidateCount || finding.Generated != finding.Mutants+finding.Discarded {
+				t.Fatalf("statement finding = %+v", finding)
+			}
+			if finding.TargetEvidence.RuntimeUnverifiable && !strings.Contains(finding.TargetEvidence.RuntimeReason, "failed to build") {
+				t.Fatalf("pre-execution statement-family discard added incomplete process evidence without a launched compiler rejection: %+v", finding.TargetEvidence)
+			}
+			for _, summary := range finding.Operators {
+				total := operators[summary.Operator]
+				total.Operator = summary.Operator
+				total.Generated += summary.Generated
+				total.Discarded += summary.Discarded
+				total.Killed += summary.Killed
+				total.Survived += summary.Survived
+				operators[summary.Operator] = total
+			}
+		}
+		for operator, want := range map[string]OperatorSummary{
+			"block: empty":           {Generated: 8, Discarded: 4, Survived: 4},
+			"statement: delete":      {Generated: 24, Discarded: 4, Survived: 20},
+			"assignment: drop store": {Generated: 7, Discarded: 1, Survived: 6},
+		} {
+			summary := operators[operator]
+			if summary.Generated != want.Generated || summary.Killed != want.Killed || summary.Discarded != want.Discarded || summary.Survived != want.Survived {
+				t.Errorf("%s summary = %+v, want %+v", operator, summary, want)
+			}
+		}
+		oldBasis := findings[0]
+		oldBasis.OperatorSet = "go/11"
+		if fresh, err := tr.Fresh(context.Background(), oldBasis, statementTargets[0], 0); err != nil || fresh {
+			t.Fatalf("go/11 finding under go/12 = fresh %v, err %v", fresh, err)
+		}
+	})
 }
 
 func TestRunDecisionsAndCancellation(t *testing.T) {

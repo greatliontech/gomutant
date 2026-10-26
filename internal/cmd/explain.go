@@ -125,10 +125,7 @@ func explainCommand(ctx context.Context, o explainOptions, out io.Writer) error 
 			return fmt.Errorf("explain: no finding for %s; gomutant findings lists the recorded symbols", o.symbol)
 		}
 		finding := matches[0]
-		loadSel := sel
-		if !hasSel && finding.Selection != "" {
-			loadSel = gomutant.SelectionOfKey(finding.Selection)
-		}
+		loadSel := gomutant.AttestedLoadSelection(sel, hasSel, finding)
 		tree, err := gomutant.LoadContextSelection(ctx, o.dir, loadSel)
 		if err != nil {
 			return err

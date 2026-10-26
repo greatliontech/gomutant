@@ -205,6 +205,21 @@ func AttestEphemeralEquivalence(ctx context.Context, dir string, res *EphemeralR
 	return att, nil
 }
 
+// CommitEphemeralEquivalence validates and records an ephemeral
+// equivalence attestation beside findingsPath, returning the recorded
+// row and the attestation record path.
+func CommitEphemeralEquivalence(ctx context.Context, dir, findingsFile string, res *EphemeralResult, reason string, reattest bool) (EphemeralAttestation, string, error) {
+	att, err := AttestEphemeralEquivalence(ctx, dir, res, reason)
+	if err != nil {
+		return EphemeralAttestation{}, "", err
+	}
+	path := EphemeralAttestationsPathFor(FindingsPathAt(dir, findingsFile))
+	if err := RecordEphemeralAttestation(ctx, path, att, reattest); err != nil {
+		return EphemeralAttestation{}, "", err
+	}
+	return att, path, nil
+}
+
 // ephemeralAttestationsVersion is the record format every write
 // carries; a version-1 record is read with its rows' digest form named.
 const ephemeralAttestationsVersion = 2
