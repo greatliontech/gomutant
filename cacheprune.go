@@ -6,9 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"time"
 
 	"github.com/greatliontech/gofresh"
 )
@@ -57,7 +55,6 @@ type CachePruneResult struct {
 	SkippedActiveTrees      int   `json:"skippedActiveTrees,omitempty"`
 	MemosRemoved            int   `json:"memosRemoved"`
 	MemoReclaimedBytes      int64 `json:"memoReclaimedBytes"`
-	MemosRetained           int   `json:"memosRetained"`
 	MemoRetainedBytes       int64 `json:"memoRetainedBytes"`
 }
 
@@ -131,17 +128,17 @@ func PruneCacheContext(ctx context.Context, moduleDir string, opts CachePruneOpt
 	if memoLimit <= 0 && opts.MaxBytes > 0 {
 		memoLimit = opts.MaxBytes
 	}
+	pruneMemos := gofresh.PruneMemos
 	if opts.Check {
-		previewMemos(memoLimit, &res)
-	} else {
-		report, memoErr := gofresh.PruneMemos(memoLimit)
-		if memoErr != nil {
-			return CachePruneResult{}, memoErr
-		}
-		res.MemosRemoved = report.RemovedEntries
-		res.MemoReclaimedBytes = report.ReclaimedBytes
-		res.MemoRetainedBytes = report.RemainingBytes
+		pruneMemos = gofresh.PreviewPruneMemos
 	}
+	report, memoErr := pruneMemos(memoLimit)
+	if memoErr != nil {
+		return CachePruneResult{}, memoErr
+	}
+	res.MemosRemoved = report.RemovedEntries
+	res.MemoReclaimedBytes = report.ReclaimedBytes
+	res.MemoRetainedBytes = report.RemainingBytes
 	return res, nil
 }
 
@@ -352,55 +349,3 @@ func writeBoundedBankFile(path string, data []byte) error {
 	return nil
 }
 
-func previewMemos(maxBytes int64, res *CachePruneResult) {
-	cacheRoot, err := os.UserCacheDir()
-	if err != nil || cacheRoot == "" {
-		return
-	}
-	dir := filepath.Join(cacheRoot, "gofresh")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	type memoEntry struct {
-		name    string
-		size    int64
-		modTime time.Time
-	}
-	var memos []memoEntry
-	var total int64
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, "closure-") || !strings.HasSuffix(name, ".gob") {
-			continue
-		}
-		info, statErr := entry.Info()
-		if statErr != nil {
-			continue
-		}
-		memos = append(memos, memoEntry{name: name, size: info.Size(), modTime: info.ModTime()})
-		total += info.Size()
-	}
-	slices.SortFunc(memos, func(a, b memoEntry) int {
-		if !a.modTime.Equal(b.modTime) {
-			if a.modTime.Before(b.modTime) {
-				return -1
-			}
-			return 1
-		}
-		return strings.Compare(a.name, b.name)
-	})
-	for _, m := range memos {
-		if total > maxBytes {
-			res.MemosRemoved++
-			res.MemoReclaimedBytes += m.size
-			total -= m.size
-		} else {
-			res.MemosRetained++
-			res.MemoRetainedBytes += m.size
-		}
-	}
-}

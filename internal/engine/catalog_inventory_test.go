@@ -2,8 +2,13 @@ package engine
 
 import (
 	"context"
+	"go/token"
 	"maps"
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 func TestComprehensiveCatalogInventory(t *testing.T) {
@@ -66,3 +71,45 @@ func TestComprehensiveCatalogInventory(t *testing.T) {
 		t.Fatalf("catalog inventory = %v, want %v", got, want)
 	}
 }
+
+func FuzzCandidateSpecOrderingAndPositionDisambiguation(f *testing.F) {
+	f.Add(uint8(1), uint8(5), uint8(1), uint8(0), uint8(1), uint8(5), uint8(1), uint8(0), true)
+	f.Add(uint8(2), uint8(8), uint8(3), uint8(1), uint8(1), uint8(4), uint8(2), uint8(0), false)
+	f.Fuzz(func(t *testing.T, s1, e1, fam1, var1, s2, e2, fam2, var2 uint8, sameOp bool) {
+		fset := token.NewFileSet()
+		file := fset.AddFile("f.go", -1, 1024)
+		pkg := &packages.Package{Fset: fset}
+		startA := file.Pos(int(s1)%256 + 1)
+		endA := file.Pos(int(s1)%256 + int(e1)%256 + 1)
+		startB := file.Pos(int(s2)%256 + 1)
+		endB := file.Pos(int(s2)%256 + int(e2)%256 + 1)
+		opB := "op-b"
+		if sameOp {
+			opB = "op-a"
+		}
+		a := candidateSpec{operator: "op-a", start: startA, end: endA, position: startA, family: int(fam1), variant: int(var1), index: 0}
+		b := candidateSpec{operator: opB, start: startB, end: endB, position: startB, family: int(fam2), variant: int(var2), index: 1}
+		forward := []candidateSpec{a, b}
+		reverse := []candidateSpec{b, a}
+		orderCandidateSpecs(forward)
+		orderCandidateSpecs(reverse)
+		if !slices.EqualFunc(forward, reverse, func(x, y candidateSpec) bool { return x.index == y.index }) {
+			t.Fatalf("orderCandidateSpecs not canonical across permutations: %+v vs %+v", forward, reverse)
+		}
+		if forward[1].less(forward[0]) {
+			t.Fatalf("ordered specs inverted less: %+v", forward)
+		}
+		positions := candidatePositions(pkg, forward)
+		if len(positions) != 2 {
+			t.Fatalf("positions = %v", positions)
+		}
+		if forward[0].position == forward[1].position && forward[0].operator == forward[1].operator {
+			if !strings.HasSuffix(positions[1], "#2") || positions[1] != positions[0]+"#2" {
+				t.Fatalf("duplicate (position, operator) not disambiguated: %v", positions)
+			}
+		} else if strings.Contains(positions[0], "#") || strings.Contains(positions[1], "#") {
+			t.Fatalf("distinct (position, operator) received occurrence suffix: %v", positions)
+		}
+	})
+}
+

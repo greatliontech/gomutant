@@ -2530,3 +2530,13 @@ bindings {
   role: BINDING_ROLE_PROVES
   shape_hash: "5ddfb310ac951e8f16271793e03afcbdcc6247405d55957b2231ff76cb95e120"
 }
+
+bindings {
+  requirement_id: "REQ-result-candidate-conservation"
+  content_hash: "f08be78bdb42c4d0bea81c994b0227d88a13daddbf26b7c52d3a563eb3617d29"
+  source_hash: "15b5905a73b562f233308e6d558779c3c7cfe2e7e7720596ac20b2229925d61e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.FuzzFindingCandidateConservation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "aa8bd052835aed825b21caca4804db875b9e8b92e77725f6240f8d5ab0fc7e01"
+}

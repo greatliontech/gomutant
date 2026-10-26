@@ -180,3 +180,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "2fb16af69256f3fbdb679550051566802c04ca66c4c39f839d3872b97f1df165"
 }
+
+bindings {
+  requirement_id: "REQ-mut-comprehensive-basis"
+  content_hash: "c4190284ace5181ea421703a26a83b0f67b1d8cba370fb3c8690351abce092f1"
+  source_hash: "8f2fb6f65938d457e6a7d558efc7dfed30cf572e39d3b2c816bb31bd69a9a6fb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.FuzzCandidateSpecOrderingAndPositionDisambiguation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "26bf311853db5c60688b6154bd39e82dac9448798b33f9ca333ff37089aae92f"
+}

@@ -6,9 +6,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 )
 
@@ -210,3 +212,132 @@ func FuzzKillAttributionAllOrNothing(f *testing.F) {
 		}
 	})
 }
+
+func FuzzFindingCandidateConservation(f *testing.F) {
+	f.Add(uint8(3), uint8(1), uint8(0), uint8(2), uint8(1))
+	f.Add(uint8(5), uint8(2), uint8(3), uint8(1), uint8(4))
+	f.Fuzz(func(t *testing.T, nRaw, flagMask, priorMask, freshMask, splitRaw uint8) {
+		n := int(nRaw%6) + 1
+		runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
+		candidates := make([]engine.Candidate, n)
+		operators := map[string]*OperatorSummary{}
+		var kills []Kill
+		var survivors []Survivor
+		var evidence []CandidateEvidence
+		flagged := map[int]bool{}
+		outcomes := make([]engine.MutantOutcome, n)
+		killers := make([]string, n)
+
+		for i := range n {
+			op := "op-a"
+			if i%2 == 1 {
+				op = "op-b"
+			}
+			pos := fmt.Sprintf("f.go:%d:1", i+1)
+			candidates[i] = engine.Candidate{Symbol: "p.F", Operator: op, Position: pos, Replacements: runnable}
+			sum := operators[op]
+			if sum == nil {
+				sum = &OperatorSummary{Operator: op}
+				operators[op] = sum
+			}
+			sum.Generated++
+			var disp string
+			switch (int(priorMask) >> (i % 4)) & 3 {
+			case 0, 1:
+				disp = "killed"
+				sum.Killed++
+				kills = append(kills, Kill{Position: pos, Operator: op, Killer: "p.TestA"})
+			case 2:
+				disp = "survived"
+				sum.Survived++
+				survivors = append(survivors, Survivor{Position: pos, Operator: op})
+			default:
+				disp = "discarded"
+				sum.Discarded++
+			}
+			if (int(flagMask)>>i)&1 == 1 {
+				flagged[i] = true
+				evidence = append(evidence, CandidateEvidence{Position: pos, Operator: op, Reason: "unverifiable", Disposition: disp})
+			}
+			switch (int(freshMask) >> (i % 4)) & 3 {
+			case 0, 1:
+				outcomes[i] = engine.MutantKilled
+				killers[i] = "p.TestFresh"
+			case 2:
+				outcomes[i] = engine.MutantSurvived
+			default:
+				outcomes[i] = engine.MutantDiscarded
+			}
+		}
+		var opSlice []OperatorSummary
+		for _, op := range []string{"op-a", "op-b"} {
+			if sum := operators[op]; sum != nil {
+				opSlice = append(opSlice, *sum)
+			}
+		}
+		killed, discarded, survived := sumOperatorTotals(opSlice)
+		rec := Finding{
+			Symbol: "p.F", CandidateCount: n, Generated: n,
+			Mutants: killed + survived, Killed: killed, Discarded: discarded,
+			Operators: opSlice, Kills: kills, Survivors: survivors, CandidateEvidence: evidence,
+		}
+		assertConserved := func(label string, got Finding) {
+			t.Helper()
+			if got.Generated != got.Mutants+got.Discarded || got.Mutants != got.Killed+len(got.Survivors) || len(got.Kills) != got.Killed {
+				t.Fatalf("%s finding totals do not conserve: %+v", label, got)
+			}
+			sumGen, sumKill, sumDisc, sumSurv := 0, 0, 0, 0
+			for _, s := range got.Operators {
+				if s.Generated != s.Killed+s.Discarded+s.Survived {
+					t.Fatalf("%s operator %s does not conserve: %+v", label, s.Operator, s)
+				}
+				sumGen += s.Generated
+				sumKill += s.Killed
+				sumDisc += s.Discarded
+				sumSurv += s.Survived
+			}
+			if sumGen != got.Generated || sumKill != got.Killed || sumDisc != got.Discarded || sumSurv != len(got.Survivors) {
+				t.Fatalf("%s operator sums (%d,%d,%d,%d) != finding (%d,%d,%d,%d)", label, sumGen, sumKill, sumDisc, sumSurv, got.Generated, got.Killed, got.Discarded, len(got.Survivors))
+			}
+		}
+		spliced, err := spliceFindingCounts(context.Background(), rec, candidates, flagged, windowScores{outcomes: outcomes, killers: killers}, nil, nil, 0, time.Minute, false)
+		if err != nil {
+			t.Fatalf("spliceFindingCounts: %v", err)
+		}
+		assertConserved("splice", spliced)
+
+		from := int(splitRaw) % n
+		prefixOps := map[string]*OperatorSummary{}
+		var prefixKills []Kill
+		var prefixSurvivors []Survivor
+		for i := range from {
+			c := candidates[i]
+			sum := prefixOps[c.Operator]
+			if sum == nil {
+				sum = &OperatorSummary{Operator: c.Operator}
+				prefixOps[c.Operator] = sum
+			}
+			sum.Generated++
+			sum.Killed++
+			prefixKills = append(prefixKills, Kill{Position: c.Position, Operator: c.Operator, Killer: "p.TestPrefix"})
+		}
+		var prefixOpSlice []OperatorSummary
+		for _, op := range []string{"op-a", "op-b"} {
+			if sum := prefixOps[op]; sum != nil {
+				prefixOpSlice = append(prefixOpSlice, *sum)
+			}
+		}
+		pKilled, pDiscarded, pSurvived := sumOperatorTotals(prefixOpSlice)
+		prefixRec := Finding{
+			Symbol: "p.F", Budget: from, CandidateCount: n, Generated: from,
+			Mutants: pKilled + pSurvived, Killed: pKilled, Discarded: pDiscarded,
+			Operators: prefixOpSlice, Kills: prefixKills, Survivors: prefixSurvivors,
+		}
+		extended, err := extendFindingCounts(context.Background(), prefixRec, candidates, from, windowScores{outcomes: outcomes, killers: killers}, nil, n, nil, 0, time.Minute, false)
+		if err != nil {
+			t.Fatalf("extendFindingCounts: %v", err)
+		}
+		assertConserved("extend", extended)
+	})
+}
+

@@ -61,32 +61,6 @@ func TestCompartmentBindingsRoundTrip(t *testing.T) {
 	}
 }
 
-// TestKillerDriftRequiresPreservedBindings pins source-name shadowing and
-// import rebinding as whole-remeasurement boundaries (REQ-result-stale).
-func TestKillerDriftRequiresPreservedBindings(t *testing.T) {
-	before := bindingLedger()
-	for _, mode := range []string{"preserved", "missing", "unknown", "shadowed", "import", "base"} {
-		after := compartmentLedgerFromView(before).ledger()
-		prior := compartmentLedgerFromView(before).ledger()
-		switch mode {
-		case "missing":
-			prior.BindingStrategy = ""
-		case "unknown":
-			prior.BindingStrategy = "unknown"
-		case "shadowed":
-			after.Declarations = append(after.Declarations, gofresh.TestVariantDeclaration{File: "p_test.go", Package: "p", Kind: "const", Name: "true", Hash: "new"})
-		case "import":
-			after.FileHeaders[0].Bindings.Imports[0].Path = "example.com/testing"
-		case "base":
-			after.BaseFiles[0].Bindings.References = []string{"different"}
-		}
-		delta := gofresh.DiffTestVariantLedgers(prior, after)
-		if got := killerDriftAttributable(delta, prior, after); got != (mode == "preserved") {
-			t.Errorf("%s: attributable=%v", mode, got)
-		}
-	}
-}
-
 // TestPartialSpliceNeverBackfillsBindingEvidence preserves a legacy record's
 // absence instead of turning current analysis into historical support
 // (REQ-result-record).

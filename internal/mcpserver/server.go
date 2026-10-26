@@ -584,7 +584,7 @@ type guidanceOut struct {
 	Suggestion           string            `json:"suggestion"`
 }
 
-// contradictionOut is one shed attestation report (a drift serve's added
+// contradictionOut is one shed attestation report (a re-measurement's added
 // or moved tests killed an attested survivor).
 type contradictionOut struct {
 	Symbol   string `json:"symbol"`
@@ -863,7 +863,7 @@ type runOut struct {
 	OmittedFindings           int                         `json:"omittedFindings,omitempty" jsonschema:"finding rows beyond the response cap; the document carries the full set"`
 	Guidance                  []guidanceOut               `json:"oracleGuidance,omitempty" jsonschema:"oracle-instability attributions aggregated per oracle set: targets sharing one unstable oracle share one entry"`
 	OmittedGuidance           int                         `json:"omittedOracleGuidance,omitempty" jsonschema:"guidance rows beyond the response cap - counted, never silent"`
-	Contradictions            []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a drift serve's added or moved tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
+	Contradictions            []contradictionOut          `json:"attestationContradictions,omitempty" jsonschema:"attested survivors a re-measurement's added or moved tests killed: each attestation was shed because evidence beats attestation, and the equivalence judgment wants re-review"`
 	OmittedContradictions     int                         `json:"omittedAttestationContradictions,omitempty" jsonschema:"contradiction rows beyond the response cap; the findings tool serves every open survivor"`
 	PropertyOracles           []string                    `json:"propertyOracles,omitempty" jsonschema:"property-runtime prerequisite statements per oracle package: what the run pinned itself (rapid: seed and reproducer files), or what the caller must ensure (gopter: an in-suite fixed seed) for reproducible verdicts"`
 	OmittedPropertyOracles    int                         `json:"omittedPropertyOracles,omitempty" jsonschema:"property-oracle rows beyond the response cap"`

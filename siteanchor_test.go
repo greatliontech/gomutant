@@ -8,9 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/greatliontech/gomutant/internal/engine"
 )
 
 // The attestation anchor keys site content beside position and operator:
@@ -292,28 +289,3 @@ func TestCarryAnchoredAttestationsPartition(t *testing.T) {
 	}
 }
 
-// The carve-out carries stamp (adopt) sites onto grandfathered pre-site
-// dispositions - the pre-site window closes at first contact on every
-// carry path (here the drift splice's).
-func TestDriftCarryAdoptsSitesOntoGrandfatheredDispositions(t *testing.T) {
-	runnable := []engine.Replacement{{File: "f.go", Source: []byte("x")}}
-	candidates := []engine.Candidate{
-		{Symbol: "p.F", Operator: "op-b", Position: "f.go:3:3", Site: "cafe0123cafe0123", Replacements: runnable},
-	}
-	rec := Finding{
-		Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1,
-		Operators: []OperatorSummary{{Operator: "op-b", Generated: 1, Survived: 1}},
-		Survivors: []Survivor{{Position: "f.go:3:3", Operator: "op-b", Execution: "executed-and-passed"}},
-		Attested:  []Attestation{{Position: "f.go:3:3", Operator: "op-b", Reason: "pre-site disposition"}},
-	}
-	drifted, shed, err := driftFindingCounts(context.Background(), rec, candidates, map[int]bool{0: true}, windowScores{outcomes: []engine.MutantOutcome{engine.MutantSurvived}}, nil, nil, 0, time.Minute, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(shed) != 0 || len(drifted.Attested) != 1 || drifted.Attested[0].Site != "cafe0123cafe0123" {
-		t.Fatalf("grandfathered disposition not adopted on the drift carry: %+v shed %+v", drifted.Attested, shed)
-	}
-	if len(drifted.Survivors) != 1 || drifted.Survivors[0].Site != "cafe0123cafe0123" {
-		t.Fatalf("survivor site not restamped: %+v", drifted.Survivors)
-	}
-}

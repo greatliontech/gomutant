@@ -1,38 +1,12 @@
 package engine
 
 import (
-	"bufio"
-	"os"
 	"os/exec"
-	"strconv"
-	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
 const memoryCeilingSupported = true
-
-// totalRAMBytes reads MemTotal from /proc/meminfo; 0 when unreadable —
-// an unknown total disables the derived default rather than guessing.
-func totalRAMBytes() int64 {
-	f, err := os.Open("/proc/meminfo")
-	if err != nil {
-		return 0
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 3 && fields[0] == "MemTotal:" && fields[2] == "kB" {
-			kb, err := strconv.ParseInt(fields[1], 10, 64)
-			if err != nil {
-				return 0
-			}
-			return kb * 1024
-		}
-	}
-	return 0
-}
 
 // applyMemoryCeiling installs the hard cap on a started oracle process:
 // RLIMIT_DATA (data-segment mappings, which is where Go allocations

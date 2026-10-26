@@ -8,14 +8,26 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/greatliontech/gofresh/resident"
 )
 
 // The derived default is RAM/(2 x jobs) floored at 1 GiB; an unreadable
 // total disables rather than guesses (REQ-exec-oracle-memory).
 func TestDefaultOracleMemoryLimit(t *testing.T) {
-	total := totalRAMBytes()
-	if total <= 0 {
-		t.Skip("total RAM unreadable on this host")
+	m, ok := resident.HostMemory()
+	if !ok {
+		if runtime.GOOS == "linux" {
+			t.Fatal("resident.HostMemory failed on linux")
+		}
+		if got := DefaultOracleMemoryLimit(4); got != 0 {
+			t.Fatalf("DefaultOracleMemoryLimit(4) without host memory = %d, want 0", got)
+		}
+		return
+	}
+	total := int64(m.TotalBytes)
+	if got := totalRAMBytes(); got != total {
+		t.Fatalf("totalRAMBytes() = %d, want %d", got, total)
 	}
 	want := total / 8
 	if want < memoryFloorBytes {

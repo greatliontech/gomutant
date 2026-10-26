@@ -2383,75 +2383,6 @@ func TestServeMatchingBatchesEvidenceChecksPerView(t *testing.T) {
 	}
 }
 
-// TestGrowthGateRefusesPinMovedBehindCompartmentVerdict pins the growth
-// gate's plain-validity bar (REQ-result-stale): gofresh orders the
-// compartment comparison before the environment tiers, so a moved pin can
-// hide behind the stale "test variants" verdict — the gate must refuse a
-// record whose toolchain pin moved even though the compartment delta is
-// inert, and accept the same record with its pins intact.
-func TestDriftGateRefusesPinMovedBehindCompartmentVerdict(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test")
-	}
-	dir := t.TempDir()
-	for name, content := range map[string]string{
-		"go.mod":  "module example.com/driftgate\n\ngo 1.26.5\n",
-		"gate.go": "package driftgate\nfunc Value(x int) int {\n\tif x > 100 {\n\t\treturn x * 3\n\t}\n\treturn x + 1\n}\n",
-		"gate_test.go": "package driftgate\n\nimport \"testing\"\n\n" +
-			"func TestSmall(t *testing.T) {\n\tif Value(1) != 2 {\n\t\tt.Fail()\n\t}\n}\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tr, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	targets := []Target{{Symbol: "example.com/driftgate.Value"}}
-	prior, err := tr.Run(context.Background(), targets, Options{Budget: 1})
-	if err != nil || len(prior) != 1 || prior[0].CompartmentLedger == nil {
-		t.Fatalf("seed measurement = %+v, %v", prior, err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "more_test.go"),
-		[]byte("package driftgate\n\nimport \"testing\"\n\nfunc TestMore(t *testing.T) {\n\tif Value(200) != 600 {\n\t\tt.Fail()\n\t}\n}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	grown, err := Load(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	views, err := grown.newSubjectViews(context.Background(), []string{
-		"example.com/driftgate.Value", "example.com/driftgate.TestSmall", "example.com/driftgate.TestMore",
-	}, false, engine.OracleBounds{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	target := views.bySymbol["example.com/driftgate.Value"]
-	oracle := []*subjectView{
-		views.bySymbol["example.com/driftgate.TestSmall"],
-		views.bySymbol["example.com/driftgate.TestMore"],
-	}
-	moved, added, ok, _, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleTimeoutDerived, prior[0].OracleMemoryBytes, "")
-	if err != nil || !ok || len(moved) != 0 || len(added) != 1 || added[0] != "example.com/driftgate.TestMore" {
-		t.Fatalf("intact pins refused the drift gate: moved=%v added=%v ok=%v err=%v", moved, added, ok, err)
-	}
-	// The compartment comparison never hides a moved pin: the evidence
-	// tiers judge the refreshed evidence, so a tampered toolchain
-	// refuses even though the compartment delta classifies attributable.
-	tampered := prior[0]
-	tampered.TargetEvidence.Guards.Toolchain = "go0.0-never"
-	if _, _, ok, _, err := evidenceSetCoversKillerDriftContext(context.Background(), tampered, target, oracle, false, engine.OperatorSet, prior[0].OracleTimeout, tampered.OracleTimeoutDerived, tampered.OracleMemoryBytes, ""); err != nil || ok {
-		t.Fatalf("a moved toolchain hid behind the compartment verdict: ok=%v err=%v", ok, err)
-	}
-	// The oracle mode is a pin: an explicit request over a DERIVED record
-	// is a changed selection, never growth — the explicit composition
-	// needs the mode equal on both sides.
-	if _, _, ok, _, err := evidenceSetCoversKillerDriftContext(context.Background(), prior[0], target, oracle, true, engine.OperatorSet, prior[0].OracleTimeout, prior[0].OracleTimeoutDerived, prior[0].OracleMemoryBytes, ""); err != nil || ok {
-		t.Fatalf("an explicit request rode a derived record's growth composition: ok=%v err=%v", ok, err)
-	}
-}
-
 // Explicit oracle growth, replacement and cross-package selection require
 // complete remeasurement. A new oracle's kills are attributed, and every
 // executed candidate retains the complete selected pattern.
@@ -5711,15 +5642,6 @@ func TestFlipReachesEveryAssemblyMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFlip("extend", extended.Survivors)
-
-	drec := Finding{Symbol: "p.F", CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
-		Operators: []OperatorSummary{{Operator: "op-a", Generated: 1, Killed: 1}},
-		Kills:     []Kill{{Position: "f.go:1:1", Operator: "op-a", Killer: "p.TestOld"}}}
-	drifted, _, err := driftFindingCounts(context.Background(), drec, candidates, map[int]bool{0: true}, windowScores{outcomes: outcomes, flips: flips}, nil, nil, 0, time.Minute, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertFlip("drift", drifted.Survivors)
 }
 
 // TestCarrySurvivorPreservesFlipEvidence pins the carry-prior arms: a
@@ -5748,12 +5670,6 @@ func TestCarrySurvivorPreservesFlipEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertCarried("splice", spliced.Survivors)
-
-	drifted, _, err := driftFindingCounts(context.Background(), rec, candidates, nil, windowScores{}, nil, nil, 0, time.Minute, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertCarried("drift", drifted.Survivors)
 }
 
 // The derived default oracle reaches the consumer package: genp has no

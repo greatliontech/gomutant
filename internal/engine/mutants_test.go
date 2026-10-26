@@ -368,6 +368,25 @@ func TestCandidatesRejectImportProcessingFailure(t *testing.T) {
 	}
 }
 
+func TestBaselineNoOpCandidateSkipsImportProcessing(t *testing.T) {
+	tr := fixtureTree(t)
+	calls := 0
+	tr.importProcessor = func(_ context.Context, _ string, source []byte) ([]byte, error) {
+		calls++
+		return source, nil
+	}
+	generation, err := tr.CandidatesContext(context.Background(), "example.com/fixture/lib.ReturnZeroLiteral", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generation.CandidateCount != 3 || len(generation.Candidates) != 3 {
+		t.Fatalf("generation = %+v", generation)
+	}
+	if calls != 1 {
+		t.Fatalf("importProcessor calls = %d on ReturnZeroLiteral, want 1 (statement: delete only; baseline no-op return: zero skipped)", calls)
+	}
+}
+
 func TestCandidatesSelectBeforeEffectiveSourceDeduplication(t *testing.T) {
 	if testing.Short() {
 		t.Skip("measured heavy under the fast tier (in-process)")

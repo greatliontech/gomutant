@@ -215,7 +215,7 @@ func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symb
 		}
 	}
 	extents := candidateExtents(catalog.pkg, specs)
-	renderedSeen := map[string]bool{}
+	renderedSeen := map[string]bool{string(baseline): true}
 	effectiveSeen := map[string]bool{string(baseline): true}
 	candidates := make([]Candidate, 0, len(specs))
 	for i, spec := range specs {

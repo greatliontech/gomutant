@@ -1,15 +1,28 @@
 package engine
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/resident"
 )
 
 // memoryFloorBytes keeps the derived default above what a large test
 // binary's in-oracle link step legitimately needs: a ceiling that breaks
 // builds would convert every measurement into a discard.
 const memoryFloorBytes = int64(1) << 30
+
+// totalRAMBytes reads the host's total memory (capped by any active
+// cgroup v2 memory limit) through resident.HostMemory; 0 when unreadable —
+// an unknown total disables the derived default rather than guessing.
+func totalRAMBytes() int64 {
+	m, ok := resident.HostMemory()
+	if !ok || m.TotalBytes > math.MaxInt64 {
+		return 0
+	}
+	return int64(m.TotalBytes)
+}
 
 // DefaultOracleMemoryLimit derives the default ceiling: total RAM over
 // twice the job count, floored at 1 GiB; 0 (disabled) when the total is
