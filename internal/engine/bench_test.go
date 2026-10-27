@@ -9,6 +9,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
+//gofresh:pure
 func BenchmarkDeclaredSymbols(b *testing.B) {
 	const src = `package sample
 
