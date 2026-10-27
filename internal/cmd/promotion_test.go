@@ -52,7 +52,7 @@ func TestRunCommandReportsPromotedRecords(t *testing.T) {
 	if err := os.WriteFile(targetsPath, []byte(`{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute}
+	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4}
 
 	var dirty bytes.Buffer
 	opts.output = &dirty
@@ -92,7 +92,7 @@ func TestRunProgressBanksCommittedTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute, jsonl: true, progressEvery: time.Millisecond, output: &out}
+	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, jsonl: true, progressEvery: time.Millisecond, output: &out}
 	if err := runCommand(context.Background(), opts); err != nil {
 		t.Fatal(err)
 	}

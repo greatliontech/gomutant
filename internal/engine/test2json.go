@@ -337,6 +337,7 @@ func (c *test2jsonConverter) flushReport(depth int) {
 func (c *test2jsonConverter) Close() error {
 	c.input.flush()
 	c.output.flush()
+	c.flushReport(0)
 	if c.result != "" {
 		e := &testEvent{Action: c.result}
 		if c.mode&test2jsonTimestamp != 0 {

@@ -321,7 +321,8 @@ func TestCleanLinkedImportPathAndBatchWarm(t *testing.T) {
 func TestRTAReachesSymbol(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/rtamod\n\ngo 1.21\n",
+		"go.mod":      "module example.com/rtamod\n\ngo 1.21\n",
+		"core/stub.s": "",
 		"core/core.go": `package core
 
 type Runner interface {
@@ -341,6 +342,8 @@ func (GenericBox[T]) RunMethod() int { return Target() }
 func GenericHelper[T any](_ T) int { return Target() }
 
 func Target() int { return 42 }
+
+func BodylessAsm(x int) int
 
 func Unrelated() int { return 7 }
 `,

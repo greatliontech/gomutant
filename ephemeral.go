@@ -500,20 +500,19 @@ func derivedOracleBudget(baseline time.Duration) time.Duration {
 func derivedBaselineRefusal(err error, leash time.Duration) error {
 	var bt *engine.BaselineTimeoutError
 	if errors.As(err, &bt) {
-		return fmt.Errorf("baseline test ran past the %s measurement leash - the derived budget needs a measured baseline; pass an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) to bound this oracle instead", bt.Bound)
+		return fmt.Errorf("baseline test ran past the %s measurement leash - the derived budget needs a measured baseline", bt.Bound)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("the command deadline expired during the %s-leashed baseline measurement - raise the command timeout (timeout_sec / --timeout), or pass an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) to bound this oracle instead: %w", leash, err)
+		return fmt.Errorf("the command deadline expired during the %s-leashed baseline measurement - raise the command timeout (timeout_sec / --timeout): %w", leash, err)
 	}
 	return err
 }
 
 // derivedTimeoutEvidence is a timeout kill's evidence text in
-// derived-budget mode: the engine's names the oracle knob, which here
-// never governed — the bound's provenance is the measured baseline,
-// and the override path rides along.
+// derived-budget mode: the engine's names the oracle timeout, while
+// here the bound's provenance is the measured baseline.
 func derivedTimeoutEvidence(mutantBudget, measuredBaseline time.Duration) string {
-	return fmt.Sprintf("oracle timed out after %s - the bound is the budget derived from the measured %s baseline; an explicit oracle timeout (oracle_timeout_sec / --oracle-timeout) overrides the derivation", mutantBudget, measuredBaseline)
+	return fmt.Sprintf("oracle timed out after %s - the bound is the budget derived from the measured %s baseline", mutantBudget, measuredBaseline)
 }
 
 // timeoutEvidenceForMode picks a kill's evidence text: only a timeout
@@ -696,8 +695,7 @@ func (t *Tree) runEphemeral(ctx context.Context, replacements []fileReplacement,
 		// under this load. The measurement can UNDERSTATE the mutant
 		// run's cost — a warm-cache baseline pays no compile while
 		// the mutant always recompiles the mutated package inside its
-		// bound — which is why the floor is the retired fixed
-		// default, never lower.
+		// bound — which is why a 5s floor bounds short baselines.
 		mutantBudget = derivedOracleBudget(measuredBaseline)
 	}
 

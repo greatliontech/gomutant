@@ -610,7 +610,7 @@ func TestRunCommandBankedLineNamesTheMachineLocalShare(t *testing.T) {
 	out := &triggerCancelWriter{cancel: cancel, trigger: []byte("1/2 targets committed")}
 	err := runCommand(ctx, runOptions{
 		dir: dir, targetsFile: filepath.Join(dir, "targets.json"), findingsFile: defaultFindings,
-		budget: 1, jobs: 1, oracleTimeout: 2 * time.Minute, progressEvery: time.Millisecond, output: out,
+		budget: 1, jobs: 1, progressEvery: time.Millisecond, output: out,
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled run = %v, want context.Canceled\n%s", err, out.buf.String())

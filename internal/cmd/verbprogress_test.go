@@ -145,7 +145,7 @@ func TestEphemeralCommandReportsPhasesAndInterruptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	o := ephemeralOptions{dir: dir, file: "lib/lib.go", replacement: replacement, testPkg: "example.com/fixture/lib", runPat: "^TestAdd$", oracleTimeout: time.Minute, runs: 1, progressEvery: time.Millisecond, output: &out, oracleMemoryMiB: 768}
+	o := ephemeralOptions{dir: dir, file: "lib/lib.go", replacement: replacement, testPkg: "example.com/fixture/lib", runPat: "^TestAdd$", runs: 1, progressEvery: time.Millisecond, output: &out, oracleMemoryMiB: 768}
 	labels := observeStretches(t)
 	if err := ephemeralCommand(context.Background(), o); err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestEphemeralCommandReportsPhasesAndInterruptions(t *testing.T) {
 	}
 	wantLoadingLineAheadOfTheRows(t, out.String())
 	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
-	if !strings.Contains(out.String(), "prepare   baseline ^TestAdd$ example.com/fixture/lib 1m0s") || !strings.Contains(out.String(), "prepare   mutant-run 1/1") {
+	if !strings.Contains(out.String(), "prepare   baseline ^TestAdd$ example.com/fixture/lib 10m0s") || !strings.Contains(out.String(), "prepare   mutant-run 1/1") {
 		t.Fatalf("ephemeral phases = %q", out.String())
 	}
 	verdict := -1

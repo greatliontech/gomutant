@@ -26,9 +26,8 @@ func TestToolRunRowsStateTheWritesRouting(t *testing.T) {
 		return gomutant.Routing{symbol: {Layer: gomutant.LayerLocal, Reasons: []string{"the write's own reason"}}}, nil
 	}
 	_, out, err := s.toolRun(context.Background(), nil, runIn{
-		TargetsJSON:      `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
-		Budget:           1,
-		OracleTimeoutSec: 120,
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
+		Budget:      1,
 	})
 	if err != nil {
 		t.Fatal(err)

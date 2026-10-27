@@ -52,9 +52,8 @@ func TestToolRunReportsPromotedRecords(t *testing.T) {
 
 	ctx := context.Background()
 	in := runIn{
-		TargetsJSON:      `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
-		Budget:           1,
-		OracleTimeoutSec: 120,
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
+		Budget:      1,
 	}
 	_, dirty, err := s.toolRun(ctx, nil, in)
 	if err != nil {
@@ -121,7 +120,6 @@ func TestToolRunReportsPromotedRecords(t *testing.T) {
 	// agreeing with the document (REQ-attest-survivor,
 	// REQ-mcp-findings-doc).
 	reIn := in
-	reIn.OracleTimeoutSec = 180
 	_, reMeasured, err := s.toolRun(ctx, nil, reIn)
 	if err != nil {
 		t.Fatal(err)
@@ -280,7 +278,7 @@ func TestToolRunDriftExitCarriesThePersistedDrop(t *testing.T) {
 		seams.afterCommit = nil
 	}
 	t.Cleanup(func() { seams.afterCommit = nil })
-	_, _, err := New(dir).toolRun(context.Background(), nil, runIn{Jobs: 1, OracleTimeoutSec: 60})
+	_, _, err := New(dir).toolRun(context.Background(), nil, runIn{Jobs: 1})
 	if err == nil || !strings.Contains(err.Error(), "tree changed under measurement") {
 		t.Fatalf("run over a tree moved after its first commit = %v; want the drift refusal", err)
 	}

@@ -136,13 +136,11 @@ type runSeams struct {
 	// (REQ-exec-attribution's abort terms).
 	truncateErr error
 	// ephemeralBudgetFloor keeps a derived mutant budget from ever being
-	// less patient than the fixed default it replaced: the floor is the
-	// retired 60s, because a warm-cache baseline pays no compile while
-	// the mutant run always recompiles the mutated package inside its
-	// bound — the multiple alone would time out honest slow mutants of
-	// fast tests, and a timeout is a kill, the flattering direction. A
-	// seam only so tests can pin the measured derivation and the
-	// timeout-kill serve without minute-class hangs.
+	// too tight for a fast baseline (5s floor): the multiple alone would
+	// time out honest slow mutants of sub-second tests, and a timeout is
+	// a kill, the flattering direction. A seam only so tests can pin the
+	// measured derivation and the timeout-kill serve without multi-second
+	// hangs.
 	ephemeralBudgetFloor time.Duration
 }
 
@@ -160,7 +158,7 @@ func defaultSeams() runSeams {
 		advisoryProbe:        engine.TestProbeObservedEnv,
 		baselineProbe:        engine.TestBaselineObservedEnv,
 		killGround:           engine.TestBaselineObservedEnv,
-		ephemeralBudgetFloor: 60 * time.Second,
+		ephemeralBudgetFloor: 5 * time.Second,
 	}
 }
 

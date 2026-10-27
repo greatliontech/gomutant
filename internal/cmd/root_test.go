@@ -71,7 +71,7 @@ func TestRunCommandTimeoutCancelsBeforeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = runCommand(context.Background(), runOptions{
-		dir: filepath.Join(t.TempDir(), "missing"), findingsFile: docPath, timeout: time.Nanosecond, oracleTimeout: time.Hour,
+		dir: filepath.Join(t.TempDir(), "missing"), findingsFile: docPath, timeout: time.Nanosecond,
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("command timeout = %v, want context.DeadlineExceeded", err)
@@ -87,8 +87,8 @@ func TestRunTimeoutFlagsNameIndependentLimits(t *testing.T) {
 	if got := cmd.Flags().Lookup("timeout"); got == nil || got.DefValue != "0s" {
 		t.Fatalf("--timeout = %+v, want unlimited command default", got)
 	}
-	if got := cmd.Flags().Lookup("oracle-timeout"); got == nil || got.DefValue != "0s" {
-		t.Fatalf("--oracle-timeout = %+v, want the derive-from-baseline default (0s)", got)
+	if got := cmd.Flags().Lookup("oracle-timeout"); got != nil {
+		t.Fatalf("--oracle-timeout = %+v, want nil (zero-config derived budget)", got)
 	}
 }
 
@@ -349,7 +349,7 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 	}
 	var output bytes.Buffer
 	if err := runCommand(context.Background(), runOptions{
-		dir: fixture, targetsFile: targetsPath, findingsFile: findingsPath, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute, output: &output,
+		dir: fixture, targetsFile: targetsPath, findingsFile: findingsPath, budget: 1, jobs: 4, output: &output,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestRunCommandReportsPreparationBeforeDecision(t *testing.T) {
 		// load noise — the rendered rows name the disqualifier.
 		t.Fatalf("no findings in the repo document; run output:\n%s", output.String())
 	}
-	if err != nil || len(findings) != 1 || findings[0].OracleTimeout != "2m0s" || findings[0].CandidateCount < findings[0].Generated ||
+	if err != nil || len(findings) != 1 || !findings[0].OracleTimeoutDerived || findings[0].OracleTimeout == "" || findings[0].CandidateCount < findings[0].Generated ||
 		findings[0].Generated != 1 || findings[0].Mutants != 0 || findings[0].Discarded != 1 {
 		t.Fatalf("oracle timeout pin = %+v, %v", findings, err)
 	}
@@ -584,7 +584,7 @@ func TestRunCommandAbortAfterCommitReportsSheds(t *testing.T) {
 	// The assertion-free oracle leaves every mutant surviving.
 	targetsFile := filepath.Join(dir, "targets.json")
 	var first bytes.Buffer
-	if err := runCommand(context.Background(), runOptions{dir: dir, targetsFile: targetsFile, findingsFile: docPath, oracleTimeout: time.Minute, output: &first}); err != nil {
+	if err := runCommand(context.Background(), runOptions{dir: dir, targetsFile: targetsFile, findingsFile: docPath, output: &first}); err != nil {
 		t.Fatalf("first run: %v\n%s", err, first.String())
 	}
 	raw, err := os.ReadFile(docPath)
@@ -618,7 +618,7 @@ func TestRunCommandAbortAfterCommitReportsSheds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	writer := &shedCancellingWriter{cancel: cancel}
-	err = runCommand(ctx, runOptions{dir: dir, targetsFile: targetsFile, findingsFile: docPath, oracleTimeout: time.Minute, output: writer})
+	err = runCommand(ctx, runOptions{dir: dir, targetsFile: targetsFile, findingsFile: docPath, output: writer})
 	if !bytes.Contains(writer.buf.Bytes(), []byte("attestation shed: ")) {
 		t.Fatalf("no shed line streamed; output:\n%s", writer.buf.String())
 	}
@@ -821,7 +821,7 @@ func TestRunCommandStatesTheReconcileDrop(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, budget: 1, jobs: 2, oracleTimeout: 2 * time.Minute, output: &output}); err != nil {
+	if err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, budget: 1, jobs: 2, output: &output}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "measured  example.com/current.Value") || !strings.Contains(output.String(), "the whole-tree reconcile dropped 1 record(s) whose targets left the code\n") {
@@ -904,7 +904,7 @@ func TestRunCommandRenderBoundExitCarriesThePersistedDrop(t *testing.T) {
 	seams.postCommitRenderBound = time.Nanosecond
 	t.Cleanup(func() { seams.postCommitRenderBound = bound })
 	var output bytes.Buffer
-	err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, budget: 1, jobs: 2, oracleTimeout: 2 * time.Minute, output: &output})
+	err := runCommand(context.Background(), runOptions{dir: dir, findingsFile: defaultFindings, budget: 1, jobs: 2, output: &output})
 	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "additionally, the whole-tree reconcile dropped 1 record(s)") || !strings.Contains(err.Error(), "(persisted)") {
 		t.Fatalf("render-bound exit = %v; want the deadline with the persisted drop riding it\n%s", err, output.String())
 	}

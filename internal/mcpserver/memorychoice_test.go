@@ -26,7 +26,7 @@ func TestEphemeralMemoryChoiceIsDerivedOnce(t *testing.T) {
 		t.Helper()
 		_, out, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{
 			File: "lib/lib.go", Edits: []gomutant.Edit{{Old: "return x - 1", New: "return x - 2"}},
-			TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleTimeoutSec: 60, OracleMemoryMiB: mib,
+			TestPkg: "example.com/fixture/lib", Run: "^TestWeak$", OracleMemoryMiB: mib,
 		})
 		if err != nil {
 			t.Fatal(err)

@@ -89,7 +89,7 @@ func TestEphemeralCommandTimeoutIncludesInput(t *testing.T) {
 	defer func() { os.Stdin = original }()
 
 	err = ephemeralCommand(context.Background(), ephemeralOptions{
-		batch: "-", testPkg: "p", runPat: "T", timeout: 10 * time.Millisecond, oracleTimeout: time.Hour,
+		batch: "-", testPkg: "p", runPat: "T", timeout: 10 * time.Millisecond,
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("command timeout during stdin = %v, want context.DeadlineExceeded", err)
@@ -177,13 +177,12 @@ func TestRenderEphemeralVerdictReportsOracleBudget(t *testing.T) {
 	}
 }
 
-// 0 is the ephemeral face's oracle-timeout default: the budget derives
-// from the measured baseline, and an explicit value is the override
-// (REQ-exec-ephemeral's derived budget).
+// The ephemeral face derives the oracle budget from the measured baseline
+// with no user-facing --oracle-timeout flag (REQ-exec-ephemeral).
 func TestEphemeralOracleTimeoutDefaultsToDerived(t *testing.T) {
 	cmd := newEphemeralCommand()
-	if got := cmd.Flags().Lookup("oracle-timeout"); got == nil || got.DefValue != "0s" {
-		t.Fatalf("--oracle-timeout = %+v, want the derive-from-baseline default (0s)", got)
+	if got := cmd.Flags().Lookup("oracle-timeout"); got != nil {
+		t.Fatalf("--oracle-timeout = %+v, want nil (zero-config derived budget)", got)
 	}
 }
 

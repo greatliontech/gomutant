@@ -17,7 +17,7 @@ type ephemeralOptions struct {
 	dir, file, replacement, batch, testPkg, runPat string
 	attest, findingsFile                           string
 	reattest                                       bool
-	timeout, oracleTimeout, progressEvery          time.Duration
+	timeout, progressEvery                         time.Duration
 	oracleMemoryMiB                                int64
 	runs                                           int
 	tags                                           []string
@@ -40,7 +40,6 @@ func newEphemeralCommand() *cobra.Command {
 	f.StringVar(&o.runPat, "run", "", "")
 	f.DurationVar(&o.timeout, "timeout", 0, "")
 	progressIntervalFlag(f, &o.progressEvery)
-	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "")
 	f.IntVar(&o.runs, "runs", 1, "")
 	f.StringVar(&o.attest, "attest", "", "")
@@ -52,9 +51,6 @@ func newEphemeralCommand() *cobra.Command {
 func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	if o.timeout < 0 {
 		return fmt.Errorf("timeout must not be negative")
-	}
-	if o.oracleTimeout < 0 {
-		return fmt.Errorf("oracle timeout must not be negative")
 	}
 	if o.timeout > 0 {
 		var cancel context.CancelFunc
@@ -141,7 +137,7 @@ func ephemeralCommand(ctx context.Context, o ephemeralOptions) error {
 	if err != nil {
 		return interrupted(err)
 	}
-	req := gomutant.EphemeralRequest{Findings: gomutant.FindingsPathAt(o.dir, o.findingsFile), RefuseAttested: o.attest != "" && !o.reattest, TestPkg: o.testPkg, Run: o.runPat, OracleTimeout: o.oracleTimeout, Runs: o.runs, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Progress: rep.preparation}
+	req := gomutant.EphemeralRequest{Findings: gomutant.FindingsPathAt(o.dir, o.findingsFile), RefuseAttested: o.attest != "" && !o.reattest, TestPkg: o.testPkg, Run: o.runPat, Runs: o.runs, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Progress: rep.preparation}
 	if o.batch != "" {
 		req.BatchEdits = batchEdits
 	} else {

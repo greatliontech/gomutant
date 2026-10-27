@@ -41,7 +41,7 @@ func TestSeamsDefaultToTheEngine(t *testing.T) {
 	if d.windowCandidates != 0 || d.waitPreparedBeforePick || d.truncateAfterItems != 0 || d.truncateErr != nil {
 		t.Fatalf("a knob is set by default: %+v", d)
 	}
-	if d.ephemeralBudgetFloor != 60*time.Second {
-		t.Fatalf("ephemeral budget floor = %s, want the retired 60s", d.ephemeralBudgetFloor)
+	if d.ephemeralBudgetFloor != 5*time.Second {
+		t.Fatalf("ephemeral budget floor = %s, want the 5s floor", d.ephemeralBudgetFloor)
 	}
 }

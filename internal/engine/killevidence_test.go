@@ -66,12 +66,12 @@ func TestKillEvidenceKillerOutputTail(t *testing.T) {
 	}
 }
 
-// A timeout verdict's evidence names the governing option; a
+// A timeout verdict's evidence names the governing bound; a
 // package-scope kill carries the package-level output; survivors and
 // discards carry nothing.
 func TestKillEvidenceTimeoutAndPackageArms(t *testing.T) {
-	if got := killEvidence(nil, TimeoutKiller, 90*time.Second); !strings.Contains(got, "oracle_timeout_sec") || !strings.Contains(got, "1m30s") {
-		t.Fatalf("timeout evidence = %q, want the governing option and the bound", got)
+	if got := killEvidence(nil, TimeoutKiller, 90*time.Second); !strings.Contains(got, "the oracle timeout governs") || !strings.Contains(got, "1m30s") {
+		t.Fatalf("timeout evidence = %q, want the governing bound named", got)
 	}
 	stream := jsonStream(t, []map[string]string{
 		{"Action": "output", "Package": "example.com/p", "Test": "", "Output": "panic: registry wiring exploded\n"},

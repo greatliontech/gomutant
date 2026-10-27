@@ -26,7 +26,7 @@ func TestToolRunKeepsAnalysisPayloadsInlineWithoutAToken(t *testing.T) {
 	}
 	s := serverAt(t)
 	targets := `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/failing.TestAlwaysFails"],"oracleExplicit":true}]}`
-	_, out, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60})
+	_, out, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestToolRunKeepsAnalysisPayloadsInlineWithoutAToken(t *testing.T) {
 	aborted.updateDocument = func(context.Context, string, func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error) {
 		return nil, errors.New("the document write refused")
 	}
-	if _, _, err := aborted.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "analysis payloads seen before this abort: baseline-output example.com/fixture/failing:") {
+	if _, _, err := aborted.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1}); err == nil || !strings.Contains(err.Error(), "analysis payloads seen before this abort: baseline-output example.com/fixture/failing:") {
 		t.Fatalf("aborted tokenless run = %v; want the payloads riding the error", err)
 	}
 
@@ -73,7 +73,7 @@ func TestToolRunKeepsAnalysisPayloadsInlineWithoutAToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clientSession.Close()
-	params := &mcp.CallToolParams{Name: "run", Arguments: map[string]any{"targets_json": targets, "budget": 1, "oracle_timeout_sec": 60}}
+	params := &mcp.CallToolParams{Name: "run", Arguments: map[string]any{"targets_json": targets, "budget": 1}}
 	params.SetProgressToken("tok")
 	result, err := clientSession.CallTool(ctx, params)
 	if err != nil {
@@ -115,7 +115,7 @@ func TestToolRunNotifiesContradictions(t *testing.T) {
 	s := serverAt(t)
 	targets := `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`
 	ctx := context.Background()
-	_, first, err := s.toolRun(ctx, nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 120})
+	_, first, err := s.toolRun(ctx, nil, runIn{TargetsJSON: targets, Budget: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,9 +161,9 @@ func TestToolRunNotifiesContradictions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clientSession.Close()
-	// Both the moved oracle timeout and the oracle edit require full
-	// remeasurement; the contradiction still names its actual killer.
-	params := &mcp.CallToolParams{Name: "run", Arguments: map[string]any{"targets_json": targets, "budget": 1, "oracle_timeout_sec": 180}}
+	// The oracle edit requires full remeasurement; the contradiction
+	// still names its actual killer.
+	params := &mcp.CallToolParams{Name: "run", Arguments: map[string]any{"targets_json": targets, "budget": 1}}
 	params.SetProgressToken("tok")
 	result, err := clientSession.CallTool(ctx, params)
 	if err != nil {
@@ -236,7 +236,7 @@ func TestToolRunCancelledBeforeMeasurementCarriesTheAnalysisPayloads(t *testing.
 	}
 	t.Cleanup(func() { seams.stretchObserver = nil })
 	targets := `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/failing.TestAlwaysFails"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`
-	_, out, err := s.toolRun(ctx, nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60})
+	_, out, err := s.toolRun(ctx, nil, runIn{TargetsJSON: targets, Budget: 1})
 	if err == nil || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "analysis payloads seen before this abort: baseline-output example.com/fixture/failing:") {
 		t.Fatalf("cancelled before measurement = %v (banked %v); want the cancellation carrying the payloads", err, out.Summary.Banked != nil)
 	}
@@ -288,7 +288,7 @@ func TestToolRunDriftExitCarriesTheAnalysisPayloads(t *testing.T) {
 	}
 	t.Cleanup(func() { seams.afterCommit = nil })
 	targets := `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/failing.TestAlwaysFails"],"oracleExplicit":true},{"symbol":"example.com/fixture/lib.Guarded","oracle":["example.com/fixture/lib.TestGuarded"],"oracleExplicit":true}]}`
-	_, out, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, OracleTimeoutSec: 60, Jobs: 1})
+	_, out, err := s.toolRun(context.Background(), nil, runIn{TargetsJSON: targets, Budget: 1, Jobs: 1})
 	if err == nil || !strings.Contains(err.Error(), "tree changed under measurement") {
 		t.Fatalf("run over a tree moved after its first commit = %v (exit %q, findings %d); want the drift refusal", err, out.Exit, len(out.Findings))
 	}

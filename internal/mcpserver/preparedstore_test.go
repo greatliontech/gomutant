@@ -35,9 +35,8 @@ func TestToolRunCommitsThroughThePreparedStore(t *testing.T) {
 		torn <- os.ErrDeadlineExceeded
 	}()
 	in := runIn{
-		TargetsJSON:      `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
-		Budget:           1,
-		OracleTimeoutSec: 120,
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"oracleExplicit":true}]}`,
+		Budget:      1,
 	}
 	_, out, err := s.toolRun(context.Background(), nil, in)
 	if err != nil {

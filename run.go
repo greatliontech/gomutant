@@ -163,7 +163,7 @@ type Options struct {
 	RunID string
 	// OracleTimeout bounds each oracle process as a uniform explicit
 	// pin; 0 derives each oracle group's budget from that group's own
-	// measured baseline (a multiple with a 60s floor), the finding
+	// measured baseline (a multiple with a 5s floor), the finding
 	// marking the derived posture (REQ-exec-oracle-run's derived
 	// campaign budget).
 	OracleTimeout time.Duration

@@ -29,8 +29,8 @@ followed by the separately labelled findings-format capabilities.
 # Measure every addressable function in the tree against the tests of every in-tree package whose test binary links its package.
 gomutant run
 
-# Bound command work through result commit separately from each oracle process.
-gomutant run --timeout 2h --oracle-timeout 2m
+# Bound command work through result commit; per-oracle timeouts derive from measured baselines.
+gomutant run --timeout 2h
 
 # Measure only what changed since a ref, budgeted for the hot loop.
 gomutant run --changed HEAD --budget 5
@@ -125,7 +125,7 @@ dogfoods that path with:
 ```
 gomutant discover --targets testdata/self-host-targets.json
 gomutant run --targets testdata/self-host-targets.json --jobs 1 \
-    --timeout 30m --oracle-timeout 10m
+    --timeout 30m
 ```
 
 A run streams deterministic preparation for loading, target resolution,
@@ -139,9 +139,8 @@ generated, discarded, killed, survived, attested, and open totals. Repeating
 the same run serves findings whose pins still hold; `--force` deliberately
 remeasures them. Package- and symbol-filtered runs are scoped and never delete
 findings outside their selected surface. `--timeout` bounds command work through
-the atomic findings commit and defaults to unlimited; `--oracle-timeout` bounds
-each oracle process; its default of 0 derives the mutant budget from the
-passing baseline under the measurement leash. Each
+the atomic findings commit and defaults to unlimited; each oracle process's
+timeout is derived from the passing baseline under the measurement leash. Each
 finished target's finding commits incrementally under the findings document
 lock, so an interrupt or command timeout observed mid-run cancels the full
 oracle process tree while keeping every already-finished target; an unfinished

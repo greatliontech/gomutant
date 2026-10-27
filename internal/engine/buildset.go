@@ -624,9 +624,11 @@ func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.O
 						if isInitDecl(d) && bp != "" {
 							pkgInits[bp] = append(pkgInits[bp], fnObj)
 						}
-						collectNodeUses(pkg, d.Body, func(to types.Object) {
-							addEdge(fnObj, to)
-						})
+						if d.Body != nil {
+							collectNodeUses(pkg, d.Body, func(to types.Object) {
+								addEdge(fnObj, to)
+							})
+						}
 					case *ast.GenDecl:
 						for _, spec := range d.Specs {
 							vs, ok := spec.(*ast.ValueSpec)

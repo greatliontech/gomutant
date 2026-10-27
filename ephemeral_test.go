@@ -117,21 +117,21 @@ func TestEphemeral(t *testing.T) {
 		t.Fatalf("flaky kill evidence missing: %+v", flaky)
 	}
 
-	// A hanging mutant's timeout verdict names the option governing the
-	// bound.
+	// A hanging mutant's timeout verdict names the bound governing the
+	// run.
 	hung := strings.Replace(string(orig), "return a + b", "for {\n\t}\n\treturn a + b", 1)
 	res, err = tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(hung), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: 2 * time.Second, Runs: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Killed || res.Killer != "(timeout)" || !strings.Contains(res.KillerOutput, "oracle_timeout_sec") {
-		t.Fatalf("hanging mutant = %+v, want a timeout kill naming oracle_timeout_sec", res)
+	if !res.Killed || res.Killer != "(timeout)" || !strings.Contains(res.KillerOutput, "the oracle timeout governs") {
+		t.Fatalf("hanging mutant = %+v, want a timeout kill naming the governing bound", res)
 	}
 
 	// A baseline probe exceeding the oracle timeout refuses naming the
-	// governing option.
-	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Nanosecond, Runs: 1}); err == nil || !strings.Contains(err.Error(), "oracle_timeout_sec") {
-		t.Fatalf("probe timeout does not name its governing option: %v", err)
+	// governing bound.
+	if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: "^TestAdd$", OracleTimeout: time.Nanosecond, Runs: 1}); err == nil || !strings.Contains(err.Error(), "the oracle timeout governs") {
+		t.Fatalf("probe timeout does not name its governing bound: %v", err)
 	}
 
 	// runs is bounded: each run is a full oracle process.
@@ -181,7 +181,7 @@ func TestEphemeral(t *testing.T) {
 	// second alternative of a pattern whose first names nothing, both
 	// reach the probe — the harness's own split.
 	for _, run := range []string{"^TestAdd$/nothing", "^TestNoSuch$/x|^TestAdd$"} {
-		if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: run, OracleTimeout: time.Nanosecond, Runs: 1}); err == nil || !strings.Contains(err.Error(), "oracle_timeout_sec") {
+		if _, err := tr.RunEphemeral(ctx, EphemeralRequest{File: "lib/lib.go", Mutant: []byte(broken), TestPkg: "example.com/fixture/lib", Run: run, OracleTimeout: time.Nanosecond, Runs: 1}); err == nil || !strings.Contains(err.Error(), "the oracle timeout governs") {
 			t.Fatalf("%q selects TestAdd and must reach the probe: %v", run, err)
 		}
 	}
@@ -510,14 +510,13 @@ func TestEphemeralDerivesOracleBudgetFromBaseline(t *testing.T) {
 	}
 }
 
-// derivedOracleBudget is a multiple with a floor, and the floor is
-// never below the retired fixed default: the baseline measurement can
-// understate the mutant run's cost (no compile on a warm cache; the
-// mutant always recompiles), and a timeout is a kill — the flattering
-// direction.
+// derivedOracleBudget is a multiple with a 5s floor: the baseline
+// measurement can understate the mutant run's cost (no compile on a
+// warm cache; the mutant always recompiles), and a timeout is a kill —
+// the flattering direction.
 func TestDerivedOracleBudget(t *testing.T) {
-	if seams.ephemeralBudgetFloor < 60*time.Second {
-		t.Fatalf("floor = %v, below the retired 60s fixed default — a derived budget must never be less patient than the knob it replaced", seams.ephemeralBudgetFloor)
+	if seams.ephemeralBudgetFloor < 5*time.Second {
+		t.Fatalf("floor = %v, below the 5s floor", seams.ephemeralBudgetFloor)
 	}
 	if got := derivedOracleBudget(time.Second); got != seams.ephemeralBudgetFloor {
 		t.Fatalf("sub-floor baseline budget = %v, want the floor", got)

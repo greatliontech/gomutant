@@ -61,7 +61,7 @@ either face (the campaign's own entry; the ephemeral face's longest
 entry for the package, under any pattern), and a group's own baseline (measured, or served from the
 bank) lifts its advisory probes' leash, so an oracle the bank knows is
 slow is not refused at a leash sized for faster ones — as a multiple
-with the retired 60-second default as its floor, the same derivation
+with a 5-second floor (oracle processes run with `-timeout 0` / `-test.timeout=0` so Go's runtime deadlock detector trips immediately on asleep goroutines; the wall-clock floor only needs to cover CPU spin-loops and per-mutant package rebuilds), the same derivation
 the ephemeral face carries; the measurement is a passing baseline's own
 wall-clock (a failing or refused baseline skips its targets, derives
 nothing, and banks nothing), every verdict-bearing process of a group — full-group runs,
@@ -628,16 +628,14 @@ follows as a multiple with a floor — instead of a fixed knob that dies
 at baseline on a loaded host and idles through most of itself on a quiet
 one. The measurement can understate the mutant run's cost — a warm-cache
 baseline pays no compile while the mutant run always recompiles the
-mutated package inside its bound — so the floor is never below the fixed
-default the derivation replaced: that relation is contract; the
-particular multiple and leash values are incidental. An explicit timeout
-remains the caller's override; the result reports the effective budget,
+mutated package inside its bound — so the floor is 5 seconds (oracle processes run with `-timeout 0` / `-test.timeout=0` so Go's runtime deadlock detector trips immediately on asleep goroutines; the wall-clock floor only needs to cover CPU spin-loops and per-mutant package rebuilds): the
+particular multiple and leash values are incidental. The result reports the effective budget,
 the measured baseline, and the memory ceiling the probe's oracle
 processes ran under (0 spelled as unlimited, never elided — an uncapped
-run and an absent field must not share one encoding) either way; and a
+run and an absent field must not share one encoding); and a
 refusal or timeout kill under a derived bound names that bound's true
 provenance (the leash, the derived budget, or a command deadline that
-undercut them) rather than the oracle knob that never governed it. The
+undercut them). The
 honest-naming duty attaches to refusals and kills; the advisory coverage
 probe's bound expiry — and a replacement whose profile entry the probe
 could not soundly attribute — leaves exercise unknown for the files
@@ -678,8 +676,7 @@ carries its interactive evidence in the result — a bounded excerpt of
 the killing test's own output anchored at its end, where Go emits the
 failure block, with the dropped earlier remainder counted (a head would
 bury the failure reason under run banners); a timeout verdict's text
-naming the governing oracle-timeout option in both its spellings
-(`oracle_timeout_sec` / `--oracle-timeout`); or a package-scope crash's
+naming the bound that expired; or a package-scope crash's
 bounded text — so acting on a kill requires no parallel re-run of the
 oracle. A caller may demand `runs:N` (bounded; each run is a full oracle
 process): the mutant runs N times against the once-probed baseline, the
@@ -687,8 +684,8 @@ result lists every run's verdict in order with the kill count, and the
 killed verdict means every run killed — N consecutive kills split a
 deterministic kill from a property generator's draw luck, and a mixed
 outcome reads as neither killed nor plain survival. A baseline probe
-exceeding the oracle timeout refuses with an error naming the governing
-oracle-timeout option in both its spellings. Interference confirmation
+exceeding the oracle timeout refuses with an error naming the bound
+that expired. Interference confirmation
 is a campaign discipline: an ephemeral probe is a single process with no
 sibling mutants, and its advisory result carries no confirmation pass.
 

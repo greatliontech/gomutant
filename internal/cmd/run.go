@@ -38,7 +38,7 @@ type runOptions struct {
 	toolchain                                string
 	budget, jobs                             int
 	oracleMemoryMiB                          int64
-	timeout, oracleTimeout, analysisBudget   time.Duration
+	timeout, analysisBudget                  time.Duration
 	force, plan, staged, jsonl               bool
 	progressEvery                            time.Duration
 	bracketPaths, scratchNamespaces, vouches []string
@@ -54,7 +54,6 @@ func newRunCommand() *cobra.Command {
 	f.StringVar(&o.dir, "dir", ".", "")
 	f.IntVar(&o.budget, "budget", 0, "")
 	f.DurationVar(&o.timeout, "timeout", 0, "")
-	f.DurationVar(&o.oracleTimeout, "oracle-timeout", 0, "")
 	f.DurationVar(&o.analysisBudget, "analysis-budget", 0, "")
 	f.Int64Var(&o.oracleMemoryMiB, "oracle-memory-mib", 0, "")
 	f.IntVar(&o.jobs, "jobs", 0, "")
@@ -78,9 +77,6 @@ func newRunCommand() *cobra.Command {
 func runCommand(ctx context.Context, o runOptions) error {
 	if o.timeout < 0 {
 		return fmt.Errorf("timeout must not be negative")
-	}
-	if o.oracleTimeout < 0 {
-		return fmt.Errorf("oracle timeout must not be negative")
 	}
 	if o.analysisBudget < 0 {
 		return fmt.Errorf("analysis budget must not be negative")
@@ -135,7 +131,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// root exists — before the lock and the load; a plan renders no cut.
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: docPath, ModuleDir: o.dir, Plan: o.plan, Selection: selectionOf(o.tags, o.toolchain),
-		Budget: o.budget, OracleTimeout: o.oracleTimeout, AnalysisBudget: o.analysisBudget,
+		Budget: o.budget, AnalysisBudget: o.analysisBudget,
 		ScratchNamespaces: o.scratchNamespaces, Vouches: o.vouches, BracketPaths: o.bracketPaths,
 		TargetSources: sources, Targets: targetInputs(o.dir, o.targetsFile, o.changed),
 		Packages: o.packages, Symbols: o.symbols, CutChanged: !o.plan,
@@ -257,7 +253,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	findings, err := tree.Run(ctx, targets, gomutant.Options{
 		RunID:    runID,
 		SoftStop: softStop,
-		Budget:   o.budget, OracleTimeout: o.oracleTimeout, AnalysisBudget: o.analysisBudget, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
+		Budget:   o.budget, AnalysisBudget: o.analysisBudget, OracleMemoryBytes: gomutant.OracleMemoryBytesFromMiB(o.oracleMemoryMiB), Jobs: o.jobs, Force: o.force, BracketPaths: o.bracketPaths, ScratchNamespaces: scratchNamespaces, Exemptions: exemptions, Staged: o.staged, Prior: prior,
 		OwnWrites: gomutant.RunOwnWrites(docPath),
 		PlanOnly:  o.plan,
 		Executing: func(event gomutant.ExecutionEvent) {

@@ -7,14 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	gomutant "github.com/greatliontech/gomutant"
 )
 
 // A disposition is a judgment about the mutated source, so it carries
 // across moved measurement pins and sheds on a moved mutation domain:
-// measure, attest, re-measure under a different oracle timeout - the
+// measure, attest, re-measure under a tighter oracle memory ceiling - the
 // disposition rides, reported distinctly - then edit the target's body
 // below the survivor's site and re-measure - the disposition sheds,
 // loudly, in output and document alike (REQ-attest-survivor,
@@ -29,7 +28,7 @@ func TestRunCarriesAcrossPinsAndShedsOnDomainMove(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute}
+	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleMemoryMiB: 1024}
 
 	var first bytes.Buffer
 	opts.output = &first
@@ -69,13 +68,13 @@ func TestRunCarriesAcrossPinsAndShedsOnDomainMove(t *testing.T) {
 		t.Fatalf("current record warned: %q", echo.String())
 	}
 
-	// A different oracle timeout moves a measurement pin without
+	// A tighter oracle memory ceiling moves a measurement pin without
 	// touching source geometry: the serve refuses, the record
 	// re-measures in full, the survivor re-appears at its exact
 	// position, operator, and site - and the disposition rides, with
 	// the carry reported distinctly (the acceptance outliving the
 	// environment it was judged in is auditable at the moment it rides).
-	opts.oracleTimeout = 3 * time.Minute
+	opts.oracleMemoryMiB = 512
 
 	var second bytes.Buffer
 	opts.output = &second
@@ -181,7 +180,7 @@ func TestRunFullRemeasureContradictionNamesKiller(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute}
+	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleMemoryMiB: 1024}
 	opts.output = &bytes.Buffer{}
 	if err := runCommand(ctx, opts); err != nil {
 		t.Fatal(err)
@@ -210,9 +209,8 @@ func TestRunFullRemeasureContradictionNamesKiller(t *testing.T) {
 	if err := os.WriteFile(libTest, []byte(strengthened), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Both the moved oracle timeout and the oracle edit require full
-	// remeasurement; the contradiction still names its actual killer.
-	opts.oracleTimeout = 3 * time.Minute
+	// The oracle edit requires full remeasurement; the contradiction
+	// still names its actual killer.
 	var second bytes.Buffer
 	opts.output = &second
 	if err := runCommand(ctx, opts); err != nil {
@@ -244,7 +242,7 @@ func TestRunCommandContradictionIsTheSingleReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleTimeout: 2 * time.Minute}
+	opts := runOptions{dir: fixture, targetsFile: targetsPath, findingsFile: defaultFindings, budget: 1, jobs: 4, oracleMemoryMiB: 1024}
 
 	opts.output = &bytes.Buffer{}
 	if err := runCommand(ctx, opts); err != nil {

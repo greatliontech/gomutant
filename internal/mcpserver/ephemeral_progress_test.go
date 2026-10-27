@@ -51,7 +51,7 @@ func TestToolEphemeralNotifiesItsPhases(t *testing.T) {
 	defer clientSession.Close()
 	params := &mcp.CallToolParams{Name: "ephemeral", Arguments: map[string]any{
 		"file": "lib/lib.go", "edits": []map[string]any{{"old": "return x - 1", "new": "return x - 2"}},
-		"test_pkg": "example.com/fixture/lib", "run": "^TestWeak$", "oracle_timeout_sec": 60, "oracle_memory_mib": 512,
+		"test_pkg": "example.com/fixture/lib", "run": "^TestWeak$", "oracle_memory_mib": 512,
 	}}
 	params.SetProgressToken("tok")
 	labels := observeStretches(t)
@@ -211,7 +211,7 @@ func TestToolRunForwardsExecutionEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clientSession.Close()
-	params := &mcp.CallToolParams{Name: "run", Arguments: map[string]any{"targets_json": `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"]}]}`, "budget": 1, "oracle_timeout_sec": 120}}
+	params := &mcp.CallToolParams{Name: "run", Arguments: map[string]any{"targets_json": `{"targets":[{"symbol":"example.com/fixture/lib.Add","oracle":["example.com/fixture/lib.TestAdd"]}]}`, "budget": 1}}
 	params.SetProgressToken("tok")
 	result, err := clientSession.CallTool(ctx, params)
 	if err != nil {

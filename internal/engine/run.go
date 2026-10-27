@@ -174,7 +174,7 @@ const PropertyRegimeRapid = "rapid:nofailfile,seed=1"
 type BaselineTimeoutError struct{ Bound time.Duration }
 
 func (e *BaselineTimeoutError) Error() string {
-	return fmt.Sprintf("baseline test timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", e.Bound)
+	return fmt.Sprintf("baseline test timed out after %s - the oracle timeout governs this bound", e.Bound)
 }
 
 // TimeoutKiller is the killer attribution of a timed-out mutant run: the
@@ -226,7 +226,7 @@ func RunMutantEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, 
 // RunMutantEvidenceEnv is RunMutantEnv additionally deriving the kill's
 // interactive evidence from the mutant run's own -json stream: the
 // killing test's bounded output head, the timeout verdict naming the
-// governing oracle_timeout_sec, or the package-scope crash's bounded
+// governing oracle timeout, or the package-scope crash's bounded
 // text - so acting on a kill needs no parallel oracle re-run
 // (REQ-exec-ephemeral). The evidence is empty when the mutant survived
 // or was discarded.
@@ -250,12 +250,12 @@ const (
 
 // killEvidence derives a kill's bounded evidence text from the mutant
 // run's -json stream by verdict shape: the killing test's output head,
-// the timeout naming its governing option, or the package-scope
+// the timeout naming its governing bound, or the package-scope
 // crash's bounded tail.
 func killEvidence(stream []byte, killer string, timeout time.Duration) string {
 	switch {
 	case killer == TimeoutKiller:
-		return fmt.Sprintf("oracle timed out after %s - the oracle timeout governs this bound (oracle_timeout_sec / --oracle-timeout)", timeout)
+		return fmt.Sprintf("oracle timed out after %s - the oracle timeout governs this bound", timeout)
 	case strings.HasPrefix(killer, PackageKillerPrefix):
 		if excerpt := packageCrashTail(stream); excerpt != "" {
 			return excerpt
@@ -572,9 +572,9 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	testlog := filepath.Join(tmp, "mutant.testlog")
 	baseTestlog := filepath.Join(tmp, "baseline.testlog")
 	baseTail := append([]string{"-count=1", "-failfast", "-run", runRegex}, testPkgs...)
-	baseArgs := goTestArgs(timeout, append(baseTail, binFlags...)...)
+	baseArgs := goTestArgs(append(baseTail, binFlags...)...)
 	mutantTail := append([]string{"-overlay", overlay, "-count=1", "-failfast", "-run", runRegex}, testPkgs...)
-	args := goTestArgs(timeout, append(mutantTail, binFlags...)...)
+	args := goTestArgs(append(mutantTail, binFlags...)...)
 	if capture {
 		args = append(args, "-test.testlogfile="+testlog)
 		baseArgs = append(baseArgs, "-test.testlogfile="+baseTestlog)
@@ -1207,7 +1207,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
 	// fails on the clean baseline would otherwise write a reproducer into
 	// the tree, the very invariant the runner protects (REQ-mut-overlay).
-	args := goTestArgs(timeout, testArgs...)
+	args := goTestArgs(testArgs...)
 	// A capture is requested by naming the oracle's module and package
 	// directories; the frame itself anchors at dir, the tree root
 	// (captureOracleFrame).
@@ -1357,12 +1357,14 @@ func capDiagnostic(out string) string {
 	return out
 }
 
-func goTestArgs(timeout time.Duration, tail ...string) []string {
-	testTimeout := timeout
-	if timeout <= time.Duration(1<<63-1)-time.Second {
-		testTimeout += time.Second
-	}
-	args := []string{"test", "-json", "-timeout", testTimeout.String()}
+// goTestArgs builds the go test invocation with the harness's own
+// timeout disabled (-timeout 0): the caller's context-bounded
+// process-group kill is the sole wall-clock bound, so suites longer
+// than go test's 10-minute default are never preempted and
+// testing.M.startAlarm never places a timer on pp.timers.heap that
+// would suppress the Go runtime's checkdead deadlock detector.
+func goTestArgs(tail ...string) []string {
+	args := []string{"test", "-json", "-timeout", "0"}
 	return append(args, tail...)
 }
 

@@ -246,13 +246,13 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkgKills, timeoutKills := 0, 0
+	pkgKills := 0
 	for _, m := range ms {
-		// Two of Guarded's mutants drop the channel send, so the receiver
-		// deadlocks and the run can only end at the timeout. A short one
-		// suffices — the legitimate run is sub-second — and keeps this
-		// exhaustive loop from paying a long timeout for mutants that are
-		// incidental to the package-kill this test asserts.
+		// Guarded's guard mutant panics in the spawned goroutine, and its two
+		// dropped-send mutants deadlock the receiver; with -timeout 0 passed to
+		// go test, Go's runtime deadlock detector immediately aborts the
+		// dropped-send mutants as package-scope crashes too instead of waiting
+		// for a wall-clock timeout.
 		out, killer, _, state, incomplete, _, err := RunMutantObserved(context.Background(), "testdata/fixturemod", m,
 			[]string{"example.com/fixture/lib"}, "^TestGuarded$", 5*time.Second, nil, moduleDir, packageDir, nil, nil, OracleBounds{})
 		if err != nil {
@@ -270,23 +270,9 @@ func TestRunMutantGoroutinePanicIsAKill(t *testing.T) {
 				t.Fatalf("package-failure incompleteness = %q, want candidate-local reason", incomplete)
 			}
 		}
-		if out == MutantKilled && killer == TimeoutKiller {
-			timeoutKills++
-			if !state.Unverifiable {
-				t.Fatalf("timeout observation = %+v, want unverifiable", state)
-			}
-			if !strings.Contains(incomplete, "timed out") {
-				t.Fatalf("timeout incompleteness = %q, want candidate-local reason", incomplete)
-			}
-		}
 	}
-	if pkgKills == 0 {
-		t.Fatal("no mutant detonated in the goroutine; the guard mutant should")
-	}
-	// The dropped-send mutants deadlock: the hang is the noticed breakage,
-	// killed with the timeout attribution (REQ-exec-attribution).
-	if timeoutKills == 0 {
-		t.Fatal("no deadlocking mutant killed by timeout; the dropped send should")
+	if pkgKills < 3 {
+		t.Fatalf("pkgKills = %d, want at least 3 (goroutine panic and dropped-send deadlocks)", pkgKills)
 	}
 }
 
@@ -775,15 +761,10 @@ func TestLoadContextCancelsPackageLoading(t *testing.T) {
 }
 
 func TestGoTestArgs(t *testing.T) {
-	got := goTestArgs(11*time.Minute, "-run", "^TestF$", "example.com/p")
-	want := []string{"test", "-json", "-timeout", "11m1s", "-run", "^TestF$", "example.com/p"}
+	got := goTestArgs("-run", "^TestF$", "example.com/p")
+	want := []string{"test", "-json", "-timeout", "0", "-run", "^TestF$", "example.com/p"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("go test args = %v, want %v", got, want)
-	}
-	max := time.Duration(1<<63 - 1)
-	got = goTestArgs(max)
-	if got[3] != max.String() {
-		t.Fatalf("maximum timeout wrapped to %q", got[3])
 	}
 }
 
@@ -1003,5 +984,27 @@ func TestObservationWithoutAMintedScratchRootRefuses(t *testing.T) {
 	}
 	if _, _, err := processObservationContext(context.Background(), logPath, t.TempDir(), "", os.Environ(), "", false, runtimeinput.ProducerFrame{}, nil, OracleBounds{}); err != nil {
 		t.Fatalf("an uncaptured observation needs no root: %v", err)
+	}
+}
+
+func TestTest2JSONConverterCloseEmitsPackageFailAfterMidTestCrash(t *testing.T) {
+	var buf bytes.Buffer
+	conv := newTest2JSONConverter(&buf, "example.com/pkg", test2jsonTimestamp)
+	if _, err := conv.Write([]byte("=== RUN   TestMidCrash\nfatal error: all goroutines are asleep - deadlock!\n")); err != nil {
+		t.Fatal(err)
+	}
+	conv.Exited(errors.New("exit status 2"))
+	if err := conv.Close(); err != nil {
+		t.Fatal(err)
+	}
+	killer, err := firstFailingTest(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if killer != "" {
+		t.Fatalf("firstFailingTest = %q, want empty (package-scope crash, not test-level fail)", killer)
+	}
+	if pkg := failedPackage(buf.Bytes()); pkg != "example.com/pkg" {
+		t.Fatalf("failedPackage = %q, want example.com/pkg", pkg)
 	}
 }

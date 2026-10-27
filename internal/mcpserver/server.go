@@ -802,7 +802,6 @@ type runIn struct {
 	Changed           string   `json:"changed,omitempty"`
 	Budget            int      `json:"budget,omitempty"`
 	TimeoutSec        *int     `json:"timeout_sec,omitempty"`
-	OracleTimeoutSec  int      `json:"oracle_timeout_sec,omitempty"`
 	AnalysisBudgetSec int      `json:"analysis_budget_sec,omitempty"`
 	Jobs              int      `json:"jobs,omitempty"`
 	BracketPaths      []string `json:"bracket_paths,omitempty"`
@@ -1030,10 +1029,6 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	if err != nil {
 		return err
 	}
-	oracleTimeout, err := secondsDuration("oracle_timeout_sec", in.OracleTimeoutSec)
-	if err != nil {
-		return err
-	}
 	analysisBudget, err := secondsDuration("analysis_budget_sec", in.AnalysisBudgetSec)
 	if err != nil {
 		return err
@@ -1063,7 +1058,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	inputs := s.targetInputs(in.TargetsPath, in.TargetsJSON, in.Changed)
 	prepared, err := gomutant.PrepareCampaign(ctx, gomutant.CampaignInputs{
 		FindingsPath: gomutant.FindingsPathAt(s.dir, in.Findings), ModuleDir: s.dir, Selection: in.selection(),
-		Budget: in.Budget, OracleTimeout: oracleTimeout, AnalysisBudget: analysisBudget,
+		Budget: in.Budget, AnalysisBudget: analysisBudget,
 		ScratchNamespaces: in.ScratchNamespaces, BracketPaths: in.BracketPaths,
 		TargetSources: sources, Targets: inputs, Packages: in.Packages, Symbols: in.Symbols, CutChanged: true,
 	})
@@ -1165,7 +1160,6 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	options := gomutant.Options{
 		RunID:             runID,
 		Budget:            in.Budget,
-		OracleTimeout:     oracleTimeout,
 		AnalysisBudget:    analysisBudget,
 		Jobs:              in.Jobs,
 		Force:             in.Force,
@@ -2256,7 +2250,6 @@ type ephemeralIn struct {
 	TestPkg          string               `json:"test_pkg"`
 	Run              string               `json:"run"`
 	TimeoutSec       *int                 `json:"timeout_sec,omitempty"`
-	OracleTimeoutSec int                  `json:"oracle_timeout_sec,omitempty"`
 	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty"`
 	Runs             int                  `json:"runs,omitempty"`
 	Reattest         bool                 `json:"reattest,omitempty"`
@@ -2283,10 +2276,6 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	// the CLI passes it: a value derived here and derived again there
 	// read -1 as the default ceiling.
 	timeout, err := commandTimeout("timeout_sec", in.TimeoutSec)
-	if err != nil {
-		return nil, nil, err
-	}
-	oracleTimeout, err := secondsDuration("oracle_timeout_sec", in.OracleTimeoutSec)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2349,7 +2338,7 @@ func (s *Server) toolEphemeral(ctx context.Context, req *mcp.CallToolRequest, in
 	// The label until the probe names its first phase is the load's —
 	// the last stretch this call named.
 	phase := newStretchLabel(gomutant.StretchPreparing(loadingEvent))
-	probe := gomutant.EphemeralRequest{Findings: gomutant.FindingsPathAt(s.dir, in.Findings), RefuseAttested: in.Attest != "" && !in.Reattest, File: in.File, TestPkg: in.TestPkg, Run: in.Run, OracleTimeout: oracleTimeout, Runs: in.Runs, OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB), Progress: func(event gomutant.PreparationEvent) {
+	probe := gomutant.EphemeralRequest{Findings: gomutant.FindingsPathAt(s.dir, in.Findings), RefuseAttested: in.Attest != "" && !in.Reattest, File: in.File, TestPkg: in.TestPkg, Run: in.Run, Runs: in.Runs, OracleMemoryBytes: mcpOracleMemoryBytes(in.OracleMemoryMiB), Progress: func(event gomutant.PreparationEvent) {
 		phase.set(gomutant.StretchPreparing(event))
 		if notify != nil {
 			notify(preparationMessage(event))

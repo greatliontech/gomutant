@@ -5732,7 +5732,7 @@ func TestRunNamesFullyStoodDownDerivation(t *testing.T) {
 // The campaign derives each group's oracle budget from its measured
 // baseline when no explicit timeout is given: the record marks the
 // derivation and pins the loosest bound any verdict ran under (>= the
-// retired 60s floor), and a second derived run SERVES it — completed
+// 5s floor), and a second derived run SERVES it — completed
 // verdicts are budget-independent, so derived budgets varying with
 // load never churn records (REQ-exec-oracle-run's derived campaign
 // budget; REQ-result-stale's timeout-kill rule). An explicit timeout
@@ -5771,7 +5771,7 @@ func TestRunDerivesOracleBudgetsAndServesAcrossThem(t *testing.T) {
 		t.Fatalf("derived-mode record not marked derived: %+v", f)
 	}
 	bound, err := time.ParseDuration(f.OracleTimeout)
-	if err != nil || bound < 60*time.Second || bound >= campaignBaselineLeash {
+	if err != nil || bound < 5*time.Second || bound >= campaignBaselineLeash {
 		t.Fatalf("derived bound = %q (%v), want floor <= bound < the campaign leash — a bound equal to the leash means the derivation never ran", f.OracleTimeout, err)
 	}
 	var decisions []RunDecision
@@ -6378,5 +6378,60 @@ func TestRunPricesWindowsOffTheMeasuredBaseline(t *testing.T) {
 		if e.EstimateProjected == "" || e.EstimateUnknown != 0 {
 			t.Fatalf("estimate = %+v, want the window priced off its measured baseline with nothing unpriced", e)
 		}
+	}
+}
+
+// Disabling testing.M.startAlarm (-timeout 0 / -test.timeout=0) leaves
+// Go's runtime checkdead detector active so a mutant that deletes
+// defer mu.Unlock() crashes immediately as a package-scope failure
+// rather than waiting out the outer oracle timeout.
+func TestRunKillsDeadlockingMutantImmediately(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines and a deadlocking mutant")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/deadlockmod\n\ngo 1.26\n",
+		"a/a.go": "package a\n\nimport \"sync\"\n\nvar mu sync.Mutex\n\nfunc Step(x int) int {\n\tmu.Lock()\n\tdefer mu.Unlock()\n\treturn x + 1\n}\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestStep(t *testing.T) {\n\tif Step(1) != 2 || Step(2) != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	findings, err := tr.Run(context.Background(), []Target{{Symbol: "example.com/deadlockmod/a.Step"}}, Options{OracleTimeout: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed >= 25*time.Second {
+		t.Fatalf("deadlocking mutant run took %s, want immediate checkdead crash well below the 30s timeout", elapsed)
+	}
+	if len(findings) != 1 || findings[0].Survivors != nil {
+		t.Fatalf("findings = %+v, want all mutants killed", findings)
+	}
+	if recordHasTimeoutKill(findings[0]) {
+		t.Fatalf("deadlocking mutant was killed by (timeout) instead of Go's runtime deadlock detector: %+v", findings[0].Kills)
+	}
+	sawDeferPackageKill := false
+	for _, k := range findings[0].Kills {
+		if k.Position == "a.go:9:2" && k.Operator == "statement: delete" {
+			if k.Killer != "(package failure: example.com/deadlockmod/a)" {
+				t.Fatalf("defer delete killer = %q, want (package failure: example.com/deadlockmod/a) from schema test2json package-scope crash", k.Killer)
+			}
+			sawDeferPackageKill = true
+		}
+	}
+	if !sawDeferPackageKill {
+		t.Fatalf("missing a.go:9:2 statement: delete kill in %+v", findings[0].Kills)
 	}
 }

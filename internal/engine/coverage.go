@@ -182,7 +182,7 @@ func CoveredPositions(ctx context.Context, dir, testPkg, runRegex, coverPkg stri
 	defer os.RemoveAll(tmp)
 	profile := filepath.Join(tmp, "cover.out")
 	tail := append([]string{"-count=1", "-run", runRegex, "-coverprofile", profile, "-coverpkg", coverPkg, testPkg}, binFlags...)
-	args := goTestArgs(timeout, tail...)
+	args := goTestArgs(tail...)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	scratchEnv, _, _, removeScratch, err := oracleScratch(env)

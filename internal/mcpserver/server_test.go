@@ -298,10 +298,10 @@ func TestMCPRosterExposesExplain(t *testing.T) {
 
 func TestToolTimeoutInputsNameIndependentLimits(t *testing.T) {
 	s := serverAt(t)
-	if _, _, err := s.toolRun(context.Background(), nil, runIn{TimeoutSec: seconds(-1), OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
+	if _, _, err := s.toolRun(context.Background(), nil, runIn{TimeoutSec: seconds(-1)}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
 		t.Fatalf("negative run command timeout = %v", err)
 	}
-	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{TimeoutSec: seconds(-1), OracleTimeoutSec: 60}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
+	if _, _, err := s.toolEphemeral(context.Background(), nil, ephemeralIn{TimeoutSec: seconds(-1)}); err == nil || !strings.Contains(err.Error(), "timeout_sec") {
 		t.Fatalf("negative ephemeral command timeout = %v", err)
 	}
 }
@@ -334,7 +334,7 @@ func TestToolRunCommandTimeoutLeavesFindingsUntouched(t *testing.T) {
 	s := New(dir)
 	_, _, err = s.toolRun(context.Background(), nil, runIn{
 		TargetsJSON: `{"targets":[{"symbol":"example.com/slow.Value","oracle":["example.com/slow.TestValue"]}]}`,
-		Budget:      1, TimeoutSec: seconds(1), OracleTimeoutSec: 10,
+		Budget:      1, TimeoutSec: seconds(1),
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("tool command timeout = %v, want context.DeadlineExceeded", err)
@@ -578,9 +578,8 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	ctx := context.Background()
 
 	_, out, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON:      `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"labels":["REQ-weak"],"oracleExplicit":true}]}`,
-		Budget:           1,
-		OracleTimeoutSec: 120,
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"labels":["REQ-weak"],"oracleExplicit":true}]}`,
+		Budget:      1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -611,14 +610,14 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	for _, event := range out.Preparation {
 		stages = append(stages, string(event.Stage))
 	}
-	if got, want := strings.Join(stages, ","), "loading,resolving,freshness,views,proofs,mutants,baseline"; got != want {
+	if got, want := strings.Join(stages, ","), "loading,resolving,freshness,views,proofs,mutants,baseline,oracle-budget"; got != want {
 		t.Fatalf("run preparation = %s, want %s: %+v", got, want, out.Preparation)
 	}
 	if _, err := os.Stat(filepath.Join(s.dir, gomutant.DefaultFindingsPath)); err != nil {
 		t.Fatalf("findings document not written: %v", err)
 	}
 	persisted, err := s.loadFindings("")
-	if err != nil || len(persisted) != 1 || persisted[0].OracleTimeout != "2m0s" {
+	if err != nil || len(persisted) != 1 || !persisted[0].OracleTimeoutDerived || persisted[0].OracleTimeout == "" {
 		t.Fatalf("oracle timeout pin = %+v, %v", persisted, err)
 	}
 
@@ -710,9 +709,8 @@ func TestToolRunFindingsAttest(t *testing.T) {
 	}
 
 	_, out2, err := s.toolRun(ctx, nil, runIn{
-		TargetsJSON:      `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"labels":["REQ-current","run:current"],"oracleExplicit":true}]}`,
-		Budget:           1,
-		OracleTimeoutSec: 120,
+		TargetsJSON: `{"targets":[{"symbol":"example.com/fixture/lib.Weak","oracle":["example.com/fixture/lib.TestWeak"],"labels":["REQ-current","run:current"],"oracleExplicit":true}]}`,
+		Budget:      1,
 	})
 	if err != nil {
 		t.Fatal(err)
