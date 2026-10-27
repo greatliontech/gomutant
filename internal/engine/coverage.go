@@ -200,6 +200,10 @@ func CoveredPositions(ctx context.Context, dir, testPkg, runRegex, coverPkg stri
 	if err := runOracleProcess(cmd, bounds); err != nil {
 		return Coverage{}, fmt.Errorf("coverage probe for %s under %s: %v: %s", coverPkg, testPkg, err, coverageTail(out.String(), 300))
 	}
+	return parseCoverageProfile(profile, view)
+}
+
+func parseCoverageProfile(profile string, view DirectiveCoverageView) (Coverage, error) {
 	profiles, err := cover.ParseProfiles(profile)
 	if err != nil {
 		return Coverage{}, fmt.Errorf("parse coverage profile: %w", err)

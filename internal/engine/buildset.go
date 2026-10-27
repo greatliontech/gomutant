@@ -37,6 +37,9 @@ type buildSet struct {
 	pkgsBySymPath   map[string][]*packages.Package
 	funcsByObj      map[types.Object]funcDeclEntry
 	propertyImports map[string]map[string]bool
+	rtaOnce         sync.Once
+	rtaAdj          map[types.Object][]types.Object
+	rtaPkgInits     map[string][]types.Object
 }
 
 func (t *Tree) buildIndex() *buildSet {
@@ -488,4 +491,290 @@ func (t *Tree) DerivedOracleContext(ctx context.Context, pkgPath string) (oracle
 	}
 	t.derivedMu.Unlock()
 	return slices.Clone(oracle), slices.Clone(stoodDown), nil
+}
+
+func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.Object) {
+	b := t.buildIndex()
+	b.rtaOnce.Do(func() {
+		adj := make(map[types.Object][]types.Object)
+		pkgInits := make(map[string][]types.Object)
+		var concreteNamed []*types.Named
+		seenNamed := make(map[*types.Named]bool)
+		var collectNamed func(typ types.Type, depth int)
+		collectNamed = func(typ types.Type, depth int) {
+			if typ == nil || depth > 8 {
+				return
+			}
+			switch u := typ.(type) {
+			case *types.Named:
+				if seenNamed[u] {
+					return
+				}
+				seenNamed[u] = true
+				if !types.IsInterface(u.Underlying()) {
+					concreteNamed = append(concreteNamed, u)
+				}
+				collectNamed(u.Underlying(), depth+1)
+			case *types.Pointer:
+				collectNamed(u.Elem(), depth+1)
+			case *types.Slice:
+				collectNamed(u.Elem(), depth+1)
+			case *types.Array:
+				collectNamed(u.Elem(), depth+1)
+			case *types.Map:
+				collectNamed(u.Key(), depth+1)
+				collectNamed(u.Elem(), depth+1)
+			case *types.Chan:
+				collectNamed(u.Elem(), depth+1)
+			case *types.Struct:
+				for i := 0; i < u.NumFields(); i++ {
+					collectNamed(u.Field(i).Type(), depth+1)
+				}
+			case *types.Signature:
+				if p := u.Params(); p != nil {
+					for i := 0; i < p.Len(); i++ {
+						collectNamed(p.At(i).Type(), depth+1)
+					}
+				}
+				if r := u.Results(); r != nil {
+					for i := 0; i < r.Len(); i++ {
+						collectNamed(r.At(i).Type(), depth+1)
+					}
+				}
+			}
+		}
+		var ifaceMethods []*types.Func
+		seenIfaceMethod := make(map[*types.Func]bool)
+		canonicalObj := func(obj types.Object) types.Object {
+			switch u := obj.(type) {
+			case *types.Func:
+				return u.Origin()
+			case *types.Var:
+				return u.Origin()
+			default:
+				return obj
+			}
+		}
+		addEdge := func(from, to types.Object) {
+			from = canonicalObj(from)
+			to = canonicalObj(to)
+			if from == nil || to == nil || from == to {
+				return
+			}
+			switch u := to.(type) {
+			case *types.Func:
+				if sig, ok := u.Type().(*types.Signature); ok && sig != nil && sig.Recv() != nil && types.IsInterface(sig.Recv().Type()) {
+					if !seenIfaceMethod[u] {
+						seenIfaceMethod[u] = true
+						ifaceMethods = append(ifaceMethods, u)
+					}
+				}
+			case *types.Var:
+			default:
+				return
+			}
+			adj[from] = append(adj[from], to)
+		}
+		collectNodeUses := func(pkg *packages.Package, node ast.Node, into func(types.Object)) {
+			if node == nil || pkg.TypesInfo == nil {
+				return
+			}
+			ast.Inspect(node, func(n ast.Node) bool {
+				switch x := n.(type) {
+				case *ast.Ident:
+					if obj := pkg.TypesInfo.Uses[x]; obj != nil {
+						into(obj)
+					}
+				case *ast.SelectorExpr:
+					if sel := pkg.TypesInfo.Selections[x]; sel != nil {
+						if obj := sel.Obj(); obj != nil {
+							into(obj)
+						}
+					}
+				}
+				return true
+			})
+		}
+		for _, pkg := range t.pkgs {
+			if pkg.TypesInfo == nil {
+				continue
+			}
+			for _, tv := range pkg.TypesInfo.Types {
+				collectNamed(tv.Type, 0)
+			}
+			for _, obj := range pkg.TypesInfo.Defs {
+				if obj != nil {
+					collectNamed(obj.Type(), 0)
+				}
+			}
+			for _, obj := range pkg.TypesInfo.Uses {
+				if obj != nil {
+					collectNamed(obj.Type(), 0)
+				}
+			}
+			bp := basePackagePath(pkg)
+			for _, f := range pkg.Syntax {
+				for _, decl := range f.Decls {
+					switch d := decl.(type) {
+					case *ast.FuncDecl:
+						fnObj := pkg.TypesInfo.Defs[d.Name]
+						if fnObj == nil {
+							continue
+						}
+						if isInitDecl(d) && bp != "" {
+							pkgInits[bp] = append(pkgInits[bp], fnObj)
+						}
+						collectNodeUses(pkg, d.Body, func(to types.Object) {
+							addEdge(fnObj, to)
+						})
+					case *ast.GenDecl:
+						for _, spec := range d.Specs {
+							vs, ok := spec.(*ast.ValueSpec)
+							if !ok {
+								continue
+							}
+							var refs []types.Object
+							for _, val := range vs.Values {
+								collectNodeUses(pkg, val, func(to types.Object) {
+									refs = append(refs, to)
+								})
+							}
+							for _, name := range vs.Names {
+								varObj := pkg.TypesInfo.Defs[name]
+								if varObj == nil {
+									continue
+								}
+								if bp != "" {
+									pkgInits[bp] = append(pkgInits[bp], varObj)
+								}
+								for _, ref := range refs {
+									addEdge(varObj, ref)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		for _, m := range ifaceMethods {
+			mSig, ok := m.Type().(*types.Signature)
+			if !ok || mSig == nil {
+				continue
+			}
+			for _, named := range concreteNamed {
+				obj, _, _ := types.LookupFieldOrMethod(named, true, m.Pkg(), m.Name())
+				cm, ok := obj.(*types.Func)
+				if !ok || cm == nil {
+					continue
+				}
+				cmSig, ok := cm.Type().(*types.Signature)
+				if !ok || cmSig == nil {
+					continue
+				}
+				if cmSig.Variadic() == mSig.Variadic() &&
+					cmSig.Params().Len() == mSig.Params().Len() &&
+					cmSig.Results().Len() == mSig.Results().Len() {
+					adj[m] = append(adj[m], cm.Origin())
+				}
+			}
+		}
+		b.rtaAdj = adj
+		b.rtaPkgInits = pkgInits
+	})
+	return b.rtaAdj, b.rtaPkgInits
+}
+
+func (t *Tree) resolveSymbolObjectsUnlocked(symbol string) (objs []types.Object, pkgPath string, isInit bool) {
+	b := t.buildIndex()
+	var rest string
+	for i := strings.LastIndexByte(symbol, '.'); i > 0; i = strings.LastIndexByte(symbol[:i], '.') {
+		if b.basePackages[symbol[:i]] {
+			pkgPath, rest = symbol[:i], symbol[i+1:]
+			break
+		}
+	}
+	if pkgPath == "" {
+		return nil, "", false
+	}
+	if _, _, ok := parseInitSymbol(rest); ok {
+		return nil, pkgPath, true
+	}
+	parts := strings.Split(rest, ".")
+	if len(parts) == 0 || len(parts) > 2 {
+		return nil, pkgPath, false
+	}
+	seen := make(map[types.Object]bool)
+	for _, pkg := range b.pkgsBySymPath[pkgPath] {
+		if len(pkg.Errors) > 0 || pkg.Types == nil {
+			continue
+		}
+		if obj := lookup(pkg.Types, parts); obj != nil && !seen[obj] {
+			seen[obj] = true
+			objs = append(objs, obj)
+		}
+	}
+	return objs, pkgPath, false
+}
+
+// ReachesSymbol reports whether fromSymbol statically reaches targetSymbol
+// in the loaded build's Rapid Type Analysis (RTA) call and reference graph.
+// When either symbol cannot be resolved in the loaded type graph or
+// targetSymbol is a package init declaration, ReachesSymbol returns true so
+// static ordering never misclassifies an unresolvable or init target as
+// unreachable (REQ-exec-oracle-run).
+func (t *Tree) ReachesSymbol(fromSymbol, targetSymbol string) bool {
+	if fromSymbol == "" || targetSymbol == "" {
+		return true
+	}
+	if fromSymbol == targetSymbol {
+		return true
+	}
+	t.loadMu.Lock()
+	adj, pkgInits := t.rtaIndex()
+	fromObjs, fromPkg, _ := t.resolveSymbolObjectsUnlocked(fromSymbol)
+	targetObjs, targetPkg, targetIsInit := t.resolveSymbolObjectsUnlocked(targetSymbol)
+	t.loadMu.Unlock()
+	if targetIsInit {
+		return true
+	}
+	if len(fromObjs) == 0 || len(targetObjs) == 0 {
+		return true
+	}
+	goal := make(map[types.Object]bool, len(targetObjs))
+	for _, obj := range targetObjs {
+		goal[obj] = true
+	}
+	visited := make(map[types.Object]bool, 32)
+	queue := make([]types.Object, 0, 32)
+	enqueue := func(obj types.Object) {
+		if obj != nil && !visited[obj] {
+			visited[obj] = true
+			queue = append(queue, obj)
+		}
+	}
+	for _, obj := range fromObjs {
+		enqueue(obj)
+	}
+	for _, obj := range pkgInits[fromPkg] {
+		enqueue(obj)
+	}
+	if targetPkg != "" && targetPkg != fromPkg {
+		for _, obj := range pkgInits[targetPkg] {
+			enqueue(obj)
+		}
+	}
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+		if goal[curr] {
+			return true
+		}
+		for _, next := range adj[curr] {
+			if goal[next] {
+				return true
+			}
+			enqueue(next)
+		}
+	}
+	return false
 }

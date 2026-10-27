@@ -134,6 +134,9 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 			// shape, which would fall back to the full oracle.
 			if len(g.pkgs) == 1 && g.pkgs[0] == pkg {
 				scoped := *g
+				if !singleTestGroup(*g, fn) {
+					scoped.passed = nil
+				}
 				scoped.runRegex = "^" + regexp.QuoteMeta(fn) + "$"
 				confirmBudget = stepBudget(*g, opts)
 				return &scoped
@@ -169,6 +172,14 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 	return out, gk, md, state, incomplete, err
 }
 
+func singleTestGroup(g group, fn string) bool {
+	if len(g.passed) != 1 || fn == "" {
+		return false
+	}
+	quoted := regexp.QuoteMeta(fn)
+	return g.runRegex == "^("+quoted+")$" || g.runRegex == "^"+quoted+"$"
+}
+
 // scopedBaselineKey identifies one killer-scoped baseline probe: the
 // memo's identity is the probe's whole shape.
 type scopedBaselineKey struct {
@@ -179,13 +190,21 @@ type scopedBaselineKey struct {
 // unmutated run — the killer-scoped stage's differential
 // ground — memoized in the caller's Run-local map (this Run's probe
 // gate serializes every confirmation, so the memo needs no lock, and
-// Run-locality is what keeps the key complete across bounds). Any
-// non-pass — a standalone failure, a timeout, a probe error —
-// answers no passes and the confirmation falls back to the full oracle;
-// the probe is best-effort ground, never a campaign abort.
+// Run-locality is what keeps the key complete across bounds). When the
+// group's own baseline already ran the killer standalone (a single-test
+// group), its passing set is reused directly without a redundant
+// standalone baseline probe (REQ-exec-attribution). Any non-pass — a
+// standalone failure, a timeout, a probe error — answers no passes and
+// the confirmation falls back to the full oracle; the probe is
+// best-effort ground, never a campaign abort.
 func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scopedBaselineKey][]string, opts runOptions, runEnv []string) []string {
 	key := scopedBaselineKey{pkg: g.pkgs[0], run: g.runRegex, flags: strings.Join(g.flags, "\x00"), moduleDir: g.moduleDir, packageDir: g.packageDir}
 	if passed, ok := memo[key]; ok {
+		return passed
+	}
+	if len(g.passed) > 0 {
+		passed := slices.Clone(g.passed)
+		memo[key] = passed
 		return passed
 	}
 	baseline, err := seams.killGround(ctx, t.dir, g.pkgs[0], g.runRegex, opts.OracleTimeout, g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
@@ -527,6 +546,12 @@ func (t *Tree) oracleCoverage(ctx context.Context, w work, opts runOptions, runE
 		}
 		key := coverageKey(g, coverPkg)
 		got, ok := cache[key]
+		if !ok && opts.foldedCoverage != nil {
+			if folded, fok := opts.foldedCoverage(g, coverPkg); fok {
+				got, ok = folded, true
+				cache[key] = got
+			}
+		}
 		if !ok {
 			probed, err := seams.coveredPositions(ctx, t.dir, g.pkgs[0], g.runRegex, coverPkg, opts.advisoryLeash(g), g.flags, runEnv, t.eng.DirectiveCoverage(), opts.bounds)
 			if err != nil {

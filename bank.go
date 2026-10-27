@@ -65,11 +65,12 @@ type bankedBaseline struct {
 	// Evidence rows pin everything content-shaped — source closures,
 	// guards (toolchain, build config), observation posture, recorded
 	// runtime inputs — through the finding-serve pair discipline.
-	Evidence    []SubjectEvidence `json:"evidence"`
-	Manifest    string            `json:"manifest"`
-	Digest      string            `json:"digest"`
-	RawMillis   int64             `json:"rawMillis"`
-	PassedTests []string          `json:"passedTests"`
+	Evidence           []SubjectEvidence `json:"evidence"`
+	Manifest           string            `json:"manifest"`
+	Digest             string            `json:"digest"`
+	RawMillis          int64             `json:"rawMillis"`
+	PassedTests        []string          `json:"passedTests"`
+	TestDurationMillis map[string]int64  `json:"testDurationMillis,omitempty"`
 	// MeasuredAtUnix records when — diagnostic only; age never
 	// discards a content-valid entry (see the package note).
 	MeasuredAtUnix int64 `json:"measuredAtUnix"`
@@ -325,7 +326,7 @@ func (b *baselineBank) putBaseline(key string, e bankedBaseline) {
 // baseline's own observation, validates the producer bracket, and
 // persists immediately. Any non-cancellation attachment or validation
 // failure skips the deposit without aborting the campaign.
-func depositGroupBaseline(ctx context.Context, bank *baselineBank, key string, w work, g group, observed runtimeinput.Observation, runEnv []string, raw time.Duration, passed []string) (bool, error) {
+func depositGroupBaseline(ctx context.Context, bank *baselineBank, key string, w work, g group, observed runtimeinput.Observation, runEnv []string, raw time.Duration, passed []string, testDurations map[string]time.Duration) (bool, error) {
 	if bank == nil || observed.Unverifiable || observed.Manifest == "" || w.producer == nil {
 		return false, nil
 	}
@@ -412,14 +413,46 @@ func depositGroupBaseline(ctx context.Context, bank *baselineBank, key string, w
 		}
 	}
 	bank.putBaseline(key, bankedBaseline{
-		Evidence:       rows,
-		Manifest:       observed.Manifest,
-		Digest:         observed.Digest,
-		PassedTests:    slices.Clone(passed),
-		RawMillis:      raw.Milliseconds(),
-		MeasuredAtUnix: time.Now().Unix(),
+		Evidence:           rows,
+		Manifest:           observed.Manifest,
+		Digest:             observed.Digest,
+		PassedTests:        slices.Clone(passed),
+		TestDurationMillis: durationsToMillis(testDurations),
+		RawMillis:          raw.Milliseconds(),
+		MeasuredAtUnix:     time.Now().Unix(),
 	})
 	return true, nil
+}
+
+func durationsToMillis(durs map[string]time.Duration) map[string]int64 {
+	if len(durs) == 0 {
+		return nil
+	}
+	out := make(map[string]int64, len(durs))
+	for k, d := range durs {
+		if ms := d.Milliseconds(); ms > 0 {
+			out[k] = ms
+		} else if d > 0 {
+			out[k] = 1
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func millisToDurations(ms map[string]int64) map[string]time.Duration {
+	if len(ms) == 0 {
+		return nil
+	}
+	out := make(map[string]time.Duration, len(ms))
+	for k, v := range ms {
+		if v > 0 {
+			out[k] = time.Duration(v) * time.Millisecond
+		}
+	}
+	return out
 }
 
 // pendingBankDeposit is a really-probed group baseline awaiting its
@@ -433,6 +466,7 @@ type pendingBankDeposit struct {
 	manifest, digest string
 	raw              time.Duration
 	passed           []string
+	testDurations    map[string]time.Duration
 }
 
 // bankOracleRowsFor selects a finding's oracle evidence rows for one

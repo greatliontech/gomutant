@@ -69,12 +69,12 @@ func TestRunConfirmsKillsSerially(t *testing.T) {
 	}
 	data, _ := os.ReadFile(counter)
 	// The baseline validity repeat runs the oracle twice before any
-	// mutant; the killer-scoped baseline probes the killing test
-	// (validity-doubled, once per distinct killer — here the scoped
-	// regex equals the whole single-test oracle); kills execute
+	// mutant; because the group's own baseline already ran the single
+	// test standalone, the killer-scoped stage elides the redundant
+	// scoped baseline probe (REQ-exec-attribution); kills execute
 	// twice (concurrent + serial confirmation), survivors once.
 	const baselineRuns = 2
-	const scopedBaselineRuns = 2
+	const scopedBaselineRuns = 0
 	want := baselineRuns + scopedBaselineRuns + f.Killed*2 + (f.Mutants - f.Killed)
 	if got := strings.Count(string(data), "\n"); got != want {
 		t.Fatalf("oracle executions = %d, want %d (kills confirmed serially, survivors once)", got, want)
@@ -314,7 +314,10 @@ func TestKillGroundIsTheConfirmationsSeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := Target{Symbol: "example.com/fixture/counting.Value", Oracle: []string{"example.com/fixture/counting.TestCountingStrict"}}
+	target := Target{Symbol: "example.com/fixture/counting.Value", Oracle: []string{
+		"example.com/fixture/counting.TestCounting",
+		"example.com/fixture/counting.TestCountingStrict",
+	}}
 	prior := seams.killGround
 	t.Cleanup(func() { seams.killGround = prior })
 	var grounds atomic.Int64
@@ -330,5 +333,164 @@ func TestKillGroundIsTheConfirmationsSeam(t *testing.T) {
 	}
 	if fs[0].Killed == 0 || grounds.Load() != 1 {
 		t.Fatalf("kill-ground probes seen by the seam = %d over %d kills; want the one memoized ground per distinct killer", grounds.Load(), fs[0].Killed)
+	}
+
+	// Single-test group: the group's own baseline already ran the killer
+	// standalone, so scopedBaselinePasses reuses g.passed without
+	// spawning a redundant killGround probe (REQ-exec-attribution).
+	grounds.Store(0)
+	singleTarget := Target{Symbol: "example.com/fixture/counting.Value", Oracle: []string{"example.com/fixture/counting.TestCountingStrict"}}
+	fsSingle, err := tr.Run(context.Background(), []Target{singleTarget}, Options{Jobs: 2, Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fsSingle[0].Killed == 0 || grounds.Load() != 0 {
+		t.Fatalf("single-test group kill-ground probes = %d over %d kills; want 0 (reused from single-test group baseline)", grounds.Load(), fsSingle[0].Killed)
+	}
+}
+
+func TestRunFoldsCoverageIntoBaselineProbe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test per mutant")
+	}
+	tr, err := Load(fixtureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var baselineProbes atomic.Int64
+	priorBaseline := seams.baselineProbe
+	t.Cleanup(func() { seams.baselineProbe = priorBaseline })
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
+		baselineProbes.Add(1)
+		b, err := priorBaseline(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
+		if err == nil && b.Coverage == nil {
+			t.Errorf("baselineProbe for %s returned nil folded Coverage", pkg)
+		}
+		if err == nil && b.Observation.Unverifiable {
+			t.Errorf("baselineProbe for %s marked Observation.Unverifiable with folded -coverprofile", pkg)
+		}
+		return b, err
+	}
+	target := Target{Symbol: "example.com/fixture/counting.Value", Oracle: []string{"example.com/fixture/counting.TestCounting"}}
+	fs, err := tr.Run(context.Background(), []Target{target}, Options{Jobs: 1, Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baselineProbes.Load() != 1 {
+		t.Fatalf("baselineProbes = %d, want 1", baselineProbes.Load())
+	}
+	if len(fs[0].Survivors) == 0 {
+		t.Fatalf("expected survivors under weak oracle, got %+v", fs[0])
+	}
+	for _, s := range fs[0].Survivors {
+		if s.Execution == "" {
+			t.Fatalf("survivor %+v missing coverage-classified bucket", s)
+		}
+	}
+}
+
+func TestOrderOracleGroupsByRTAReachabilityAndAscendingDuration(t *testing.T) {
+	w := work{
+		oracleSet: map[string]bool{
+			"example.com/slowreach.TestReachSlow":   true,
+			"example.com/fastreach.TestReachFast":   true,
+			"example.com/nonreach.TestUnrelated":    true,
+			"example.com/targetpkg.TestTargetSuite": true,
+		},
+		groups: []group{
+			{pkgs: []string{"example.com/nonreach"}, passed: []string{"example.com/nonreach.TestUnrelated"}},
+			{pkgs: []string{"example.com/slowreach"}, passed: []string{"example.com/slowreach.TestReachSlow"}},
+			{pkgs: []string{"example.com/targetpkg"}, passed: []string{"example.com/targetpkg.TestTargetSuite"}},
+			{pkgs: []string{"example.com/fastreach"}, passed: []string{"example.com/fastreach.TestReachFast"}},
+		},
+		baselines: make([]runtimeinput.Observation, 4),
+	}
+	reaches := func(fromSymbol, targetSymbol string) bool {
+		return fromSymbol != "example.com/nonreach.TestUnrelated"
+	}
+	durs := map[string]time.Duration{
+		"example.com/nonreach.TestUnrelated":    5 * time.Millisecond,
+		"example.com/fastreach.TestReachFast":   10 * time.Millisecond,
+		"example.com/targetpkg.TestTargetSuite": 25 * time.Millisecond,
+		"example.com/slowreach.TestReachSlow":   80 * time.Millisecond,
+	}
+	orderOracleGroups(
+		&w,
+		"example.com/targetpkg.Target",
+		"example.com/targetpkg",
+		reaches,
+		func(g group) (time.Duration, map[string]time.Duration) {
+			return durs[g.passed[0]], durs
+		},
+	)
+	got := []string{
+		w.groups[0].pkgs[0],
+		w.groups[1].pkgs[0],
+		w.groups[2].pkgs[0],
+		w.groups[3].pkgs[0],
+	}
+	want := []string{
+		"example.com/fastreach",
+		"example.com/targetpkg",
+		"example.com/slowreach",
+		"example.com/nonreach",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("ordered groups = %v, want %v (RTA-reaching suites in ascending duration order ahead of non-reaching suites)", got, want)
+	}
+
+	// Mixed testDur > 0 and testDur == 0 (falling back to raw): every
+	// input permutation must converge on the same strict weak order.
+	baseGroups := []group{
+		{pkgs: []string{"example.com/a"}, passed: []string{"example.com/a.TestA"}},
+		{pkgs: []string{"example.com/b"}, passed: []string{"example.com/b.TestB"}},
+		{pkgs: []string{"example.com/c"}, passed: []string{"example.com/c.TestC"}},
+	}
+	rawByPkg := map[string]time.Duration{
+		"example.com/a": 100 * time.Millisecond,
+		"example.com/b": 50 * time.Millisecond,
+		"example.com/c": 15 * time.Millisecond,
+	}
+	mixedTestDurs := map[string]time.Duration{
+		"example.com/a.TestA": 10 * time.Millisecond,
+		"example.com/b.TestB": 20 * time.Millisecond,
+		// TestC has 0 testDur (e.g. "Elapsed": 0), so its effective duration falls back to raw = 15ms.
+	}
+	perms := [][]int{
+		{0, 1, 2},
+		{0, 2, 1},
+		{1, 0, 2},
+		{1, 2, 0},
+		{2, 0, 1},
+		{2, 1, 0},
+	}
+	for _, perm := range perms {
+		pw := work{
+			oracleSet: map[string]bool{
+				"example.com/a.TestA": true,
+				"example.com/b.TestB": true,
+				"example.com/c.TestC": true,
+			},
+			groups: []group{
+				baseGroups[perm[0]],
+				baseGroups[perm[1]],
+				baseGroups[perm[2]],
+			},
+			baselines: make([]runtimeinput.Observation, 3),
+		}
+		orderOracleGroups(
+			&pw,
+			"example.com/a.Target",
+			"example.com/a",
+			func(string, string) bool { return true },
+			func(g group) (time.Duration, map[string]time.Duration) {
+				return rawByPkg[g.pkgs[0]], mixedTestDurs
+			},
+		)
+		gotPerm := []string{pw.groups[0].pkgs[0], pw.groups[1].pkgs[0], pw.groups[2].pkgs[0]}
+		wantPerm := []string{"example.com/a", "example.com/c", "example.com/b"}
+		if strings.Join(gotPerm, ",") != strings.Join(wantPerm, ",") {
+			t.Fatalf("perm %v ordered groups = %v, want %v", perm, gotPerm, wantPerm)
+		}
 	}
 }

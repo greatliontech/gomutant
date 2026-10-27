@@ -886,9 +886,10 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	// ingestion failure), the ingest exclusions (extended below with the
 	// tool-bookkeeping surfaces the frame excludes), and every
 	// classification root but one, resolved from the environment it is
-	// handed. The environment carries the minted TMPDIR as delivered;
-	// declaring its filesystem root ephemeral does not erase a read of the
-	// environment variable's value.
+	// handed — and the environment is the run's, never the per-process
+	// scratch TMPDIR, so every process's observation binds against the
+	// same ambient TMPDIR that merge, bank, and revalidation consult and
+	// shares the run's memoized classification roots.
 	// Resource settings remain verbatim: a logged GOMEMLIMIT read pins the
 	// delivered value even when the memory-budget comparison is directional.
 	// Every other divergence would silently vacate
@@ -900,7 +901,7 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	// the root as an uncovered
 	// runtime input and seals verifiability for every temp-touching
 	// oracle (REQ-exec-oracle-scratch-declared).
-	ingestEnv := oracleIngestEnv(gotool.SetEnv(env, "TMPDIR", scratchRoot), frame, bounds)
+	ingestEnv := oracleIngestEnv(env, frame, bounds)
 	completion, err := frame.Completion(path, ingestEnv, incompleteReason)
 	if err != nil {
 		return runtimeinput.Observation{}, "", err
@@ -1050,12 +1051,56 @@ func TestProbeEnv(ctx context.Context, dir, testPkg, run string, timeout time.Du
 // tests with a structured pass event, never tests inferred from a run pattern.
 // A successful process with some passed tests may still contain skipped tests.
 type Baseline struct {
-	Ran         int
-	Passed      bool
-	Tests       []string
-	Failed      []string
-	Diagnostic  string
-	Observation runtimeinput.Observation
+	Ran           int
+	Passed        bool
+	Tests         []string
+	Failed        []string
+	Diagnostic    string
+	Observation   runtimeinput.Observation
+	Coverage      *Coverage
+	TestDurations map[string]time.Duration
+}
+
+type baselineCoverageKey struct{}
+
+type baselineCoverageSpec struct {
+	coverPkgs []string
+	view      DirectiveCoverageView
+}
+
+// WithBaselineCoverage requests that a baseline probe fold -coverprofile and
+// -coverpkg into its initial go test invocation, writing the profile into the
+// oracle scratch directory and parsing it before the scratch sweep so the
+// runtime-input observation remains clean (REQ-exec-survivor-evidence).
+func WithBaselineCoverage(ctx context.Context, coverPkgs []string, view DirectiveCoverageView) context.Context {
+	if len(coverPkgs) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, baselineCoverageKey{}, baselineCoverageSpec{
+		coverPkgs: slices.Clone(coverPkgs),
+		view:      view,
+	})
+}
+
+func withoutBaselineCoverage(ctx context.Context) context.Context {
+	if _, ok := baselineCoverageFromContext(ctx); !ok {
+		return ctx
+	}
+	return context.WithValue(ctx, baselineCoverageKey{}, baselineCoverageSpec{})
+}
+
+func baselineCoverageFromContext(ctx context.Context) (baselineCoverageSpec, bool) {
+	if ctx == nil {
+		return baselineCoverageSpec{}, false
+	}
+	spec, ok := ctx.Value(baselineCoverageKey{}).(baselineCoverageSpec)
+	return spec, ok && len(spec.coverPkgs) > 0
+}
+
+// TestBaselineObservedCoverageEnv is TestBaselineObservedEnv with coverage
+// folded into the initial baseline probe (REQ-exec-survivor-evidence).
+func TestBaselineObservedCoverageEnv(ctx context.Context, dir, testPkg, run string, coverPkgs []string, view DirectiveCoverageView, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
+	return TestBaselineObservedEnv(WithBaselineCoverage(ctx, coverPkgs, view), dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 }
 
 // TestBaselineEnv preserves the named baseline dispositions for attribution.
@@ -1105,7 +1150,7 @@ func TestBaselineObservedEnv(ctx context.Context, dir, testPkg, run string, time
 	if !once.Observation.Unverifiable && once.Observation.State == empty.State {
 		return once, nil
 	}
-	again, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
+	again, err := testProbeOnceObservedEnv(withoutBaselineCoverage(ctx), dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 	if err != nil {
 		return again, err
 	}
@@ -1117,6 +1162,12 @@ func TestBaselineObservedEnv(ctx context.Context, dir, testPkg, run string, time
 	}
 	if !slices.Equal(again.Tests, once.Tests) {
 		return Baseline{}, fmt.Errorf("baseline passing test identities changed between discovery and measurement")
+	}
+	if again.Coverage == nil {
+		again.Coverage = once.Coverage
+	}
+	if len(again.TestDurations) == 0 {
+		again.TestDurations = once.TestDurations
 	}
 	// The repeat guards baseline VALIDITY only; the evidence is the scored
 	// second run's own bracket-vouched observation - the historical
@@ -1135,10 +1186,19 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		return Baseline{}, err
 	}
 	defer removeScratch()
+	covSpec, wantCover := baselineCoverageFromContext(ctx)
+	var coverPath string
+	testArgs := []string{"-count=1", "-run", run}
+	if wantCover {
+		coverPath = filepath.Join(scratchRoot, "baseline.cover")
+		testArgs = append(testArgs, "-coverprofile", coverPath, "-coverpkg", strings.Join(covSpec.coverPkgs, ","))
+	}
+	testArgs = append(testArgs, testPkg)
+	testArgs = append(testArgs, binFlags...)
 	// binFlags carries -rapid.nofailfile for rapid packages: a property that
 	// fails on the clean baseline would otherwise write a reproducer into
 	// the tree, the very invariant the runner protects (REQ-mut-overlay).
-	args := goTestArgs(timeout, append([]string{"-count=1", "-run", run, testPkg}, binFlags...)...)
+	args := goTestArgs(timeout, testArgs...)
 	// A capture is requested by naming the oracle's module and package
 	// directories; the frame itself anchors at dir, the tree root
 	// (captureOracleFrame).
@@ -1169,6 +1229,20 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := runOracleProcess(cmd, bounds)
+	if wantCover && runErr != nil && !oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), ctx2) && !oracleRunCancelled(runErr, ctx2) {
+		// Coverage instrumentation can fail on packages that build and pass
+		// uninstrumented; retry without -coverprofile so an uninstrumentable
+		// package degrades coverage to unrecorded rather than failing a
+		// passing baseline (REQ-exec-survivor-evidence).
+		sweepScratch()
+		return testProbeOnceObservedEnv(withoutBaselineCoverage(ctx), dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
+	}
+	var parsedCoverage *Coverage
+	if wantCover && runErr == nil {
+		if cov, covErr := parseCoverageProfile(coverPath, covSpec.view); covErr == nil {
+			parsedCoverage = &cov
+		}
+	}
 	// Sweep before finalization - the record captures the swept truth
 	// (see the mutant site).
 	sweepScratch()
@@ -1209,7 +1283,14 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	if err != nil {
 		return Baseline{}, err
 	}
-	result := Baseline{Ran: stream.ran, Passed: runErr == nil, Tests: stream.passed, Observation: state}
+	result := Baseline{
+		Ran:           stream.ran,
+		Passed:        runErr == nil,
+		Tests:         stream.passed,
+		Observation:   state,
+		Coverage:      parsedCoverage,
+		TestDurations: stream.durations,
+	}
 	if runErr != nil {
 		result.Failed = append(append([]string(nil), stream.failed...), stream.truncated...)
 		result.Diagnostic = failedTestsDiagnostic(stream)
@@ -1430,14 +1511,21 @@ type testStream struct {
 	failed    []string
 	truncated []string
 	outputs   map[string]*strings.Builder
+	durations map[string]time.Duration
 	pkg       strings.Builder
 }
 
 // parseTestStream reads the stream once; a malformed stream is an error
 // (a probe whose output cannot be read has no verdict).
 func parseTestStream(stream []byte) (*testStream, error) {
-	type event struct{ Action, Test, Output, Package string }
-	ts := &testStream{outputs: map[string]*strings.Builder{}}
+	type event struct {
+		Action, Test, Output, Package string
+		Elapsed                       float64
+	}
+	ts := &testStream{
+		outputs:   map[string]*strings.Builder{},
+		durations: map[string]time.Duration{},
+	}
 	var order []string
 	started, ended, failed, ran := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	dec := json.NewDecoder(bytes.NewReader(stream))
@@ -1479,7 +1567,11 @@ func parseTestStream(stream []byte) (*testStream, error) {
 			}
 			ended[e.Test] = true
 			if e.Action == "pass" && e.Package != "" {
-				ts.passed = append(ts.passed, e.Package+"."+e.Test)
+				sym := e.Package + "." + e.Test
+				ts.passed = append(ts.passed, sym)
+				if e.Elapsed > 0 {
+					ts.durations[sym] = time.Duration(e.Elapsed * float64(time.Second))
+				}
 			}
 			if e.Action == "fail" && !failed[e.Test] {
 				failed[e.Test] = true

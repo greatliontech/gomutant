@@ -54,6 +54,10 @@ type runOptions struct {
 	// oracle probes hold it shared so they never share a window with a serial
 	// confirmation's scored run (REQ-exec-attribution).
 	probeGate *sync.RWMutex
+	// foldedCoverage answers a group's baseline coverage when the
+	// initial baseline probe folded -coverprofile over coverPkg
+	// (REQ-exec-survivor-evidence).
+	foldedCoverage func(g group, coverPkg string) (engine.Coverage, bool)
 	// bounds are the run's oracle resource bounds, derived once at
 	// Run's entry and applied to every oracle spawn.
 	bounds engine.OracleBounds
@@ -1423,16 +1427,30 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	}
 	var oraclePackages []string
 	seenOraclePackage := map[string]bool{}
+	coverPkgsByOraclePkg := map[string][]string{}
 	for _, resolved := range resolvedTargets {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		var targetPkg string
+		if resolved.shaped == nil {
+			mv := modeFor(resolved.attested)
+			if tv := mv.views.bySymbol[targets[resolved.index].Symbol]; tv != nil {
+				targetPkg = tv.subject.Package
+			}
 		}
 		for _, run := range pkgRuns(resolved.oracle) {
 			if !seenOraclePackage[run.pkg] {
 				seenOraclePackage[run.pkg] = true
 				oraclePackages = append(oraclePackages, run.pkg)
 			}
+			if targetPkg != "" && !slices.Contains(coverPkgsByOraclePkg[run.pkg], targetPkg) {
+				coverPkgsByOraclePkg[run.pkg] = append(coverPkgsByOraclePkg[run.pkg], targetPkg)
+			}
 		}
+	}
+	for pkg := range coverPkgsByOraclePkg {
+		slices.Sort(coverPkgsByOraclePkg[pkg])
 	}
 	// Bracket-path preflight is once per run at the tree root — the base
 	// every spawn's frame resolves against — fired at the first target's
@@ -1511,9 +1529,12 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// budget derived from it (derive mode only). One entry per probe
 	// makes "a group with a budget has a raw duration" structural.
 	type groupBaseline struct {
-		raw    time.Duration
-		budget time.Duration
-		passed []string
+		raw           time.Duration
+		budget        time.Duration
+		passed        []string
+		testDurations map[string]time.Duration
+		coverage      *engine.Coverage
+		coverPkgs     []string
 	}
 	groupBaselines := map[baselineKey]groupBaseline{}
 	// pendingBankDeposits holds really-probed baselines until their
@@ -1562,6 +1583,15 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		b, ok := groupBaselines[keyFor(g)]
 		return b.raw, ok
 	}
+	opts.foldedCoverage = func(g group, coverPkg string) (engine.Coverage, bool) {
+		groupBudgetMu.Lock()
+		defer groupBudgetMu.Unlock()
+		b, ok := groupBaselines[keyFor(g)]
+		if !ok || b.coverage == nil || !slices.Contains(b.coverPkgs, coverPkg) {
+			return engine.Coverage{}, false
+		}
+		return *b.coverage, true
+	}
 	// probeGroupBaselines fills w.baselines for the target's oracle
 	// groups. A non-cancellation baseline condition - a probe failure,
 	// an empty match, a failing test - is the target's own condition:
@@ -1604,15 +1634,16 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 						if aerr == nil && adopted.Digest == banked.Digest {
 							reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0], Banked: true})
 							raw := time.Duration(banked.RawMillis) * time.Millisecond
+							testDurs := millisToDurations(banked.TestDurationMillis)
 							if deriveOracleBudgets {
 								budget := derivedOracleBudget(raw)
 								groupBudgetMu.Lock()
-								groupBaselines[key] = groupBaseline{raw: raw, budget: budget, passed: banked.PassedTests}
+								groupBaselines[key] = groupBaseline{raw: raw, budget: budget, passed: banked.PassedTests, testDurations: testDurs}
 								groupBudgetMu.Unlock()
 								reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: budget.String()})
 							} else {
 								groupBudgetMu.Lock()
-								groupBaselines[key] = groupBaseline{raw: raw, passed: banked.PassedTests}
+								groupBaselines[key] = groupBaseline{raw: raw, passed: banked.PassedTests, testDurations: testDurs}
 								groupBudgetMu.Unlock()
 							}
 							state, ok = adopted, true
@@ -1633,9 +1664,18 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				if deriveOracleBudgets {
 					baselineBound = leashFor(opts.OracleTimeout, time.Duration(banked.RawMillis)*time.Millisecond)
 				}
+				coverPkgs := coverPkgsByOraclePkg[group.pkgs[0]]
+				if !w.shaped && w.targetView != nil && w.targetView.subject.Package != "" && !slices.Contains(coverPkgs, w.targetView.subject.Package) {
+					coverPkgs = append(slices.Clone(coverPkgs), w.targetView.subject.Package)
+					slices.Sort(coverPkgs)
+				}
+				probeCtx := ctx
+				if !w.shaped && seams.hasDefaultCoveredPositions() && len(coverPkgs) > 0 {
+					probeCtx = engine.WithBaselineCoverage(ctx, coverPkgs, t.eng.DirectiveCoverage())
+				}
 				baselineStart := time.Now()
 				probeGate.RLock()
-				baseline, err := seams.baselineProbe(ctx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
+				baseline, err := seams.baselineProbe(probeCtx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 				probeGate.RUnlock()
 				ran, passed, failedTests, diagnostic, observed := baseline.Ran, baseline.Passed, baseline.Failed, baseline.Diagnostic, baseline.Observation
 				baselineElapsed := time.Since(baselineStart)
@@ -1680,7 +1720,13 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// leash-multiple budget for its group's siblings, and
 				// prices nothing). The raw wall-clock records in every
 				// budget mode; the derived budget only in derive mode.
-				entry := groupBaseline{raw: baselineElapsed, passed: baseline.Tests}
+				entry := groupBaseline{
+					raw:           baselineElapsed,
+					passed:        baseline.Tests,
+					testDurations: baseline.TestDurations,
+					coverage:      baseline.Coverage,
+					coverPkgs:     coverPkgs,
+				}
 				if deriveOracleBudgets {
 					entry.budget = derivedOracleBudget(baselineElapsed)
 				}
@@ -1699,13 +1745,19 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// guard only keeps dead weight out of the bank. The
 				// manifest guard is load-bearing: adoption needs one.
 				if !observed.Unverifiable && observed.Manifest != "" {
-					deposited, derr := depositGroupBaseline(ctx, opts.baselineBank, key.persistedKey(bankScope), *w, group, observed, runEnv, baselineElapsed, baseline.Tests)
+					deposited, derr := depositGroupBaseline(ctx, opts.baselineBank, key.persistedKey(bankScope), *w, group, observed, runEnv, baselineElapsed, baseline.Tests, baseline.TestDurations)
 					if derr != nil {
 						return "", derr
 					}
 					if !deposited {
 						groupBudgetMu.Lock()
-						pendingBankDeposits[key] = pendingBankDeposit{manifest: observed.Manifest, digest: observed.Digest, raw: baselineElapsed, passed: baseline.Tests}
+						pendingBankDeposits[key] = pendingBankDeposit{
+							manifest:      observed.Manifest,
+							digest:        observed.Digest,
+							raw:           baselineElapsed,
+							passed:        baseline.Tests,
+							testDurations: baseline.TestDurations,
+						}
 						groupBudgetMu.Unlock()
 					}
 				}
@@ -1722,6 +1774,25 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			groupBudgetMu.Lock()
 			w.groups[gi].passed = groupBaselines[key].passed
 			groupBudgetMu.Unlock()
+		}
+		if !w.shaped && len(w.groups) > 1 && w.targetView != nil {
+			orderOracleGroups(
+				w,
+				tg.Symbol,
+				w.targetView.subject.Package,
+				t.eng.ReachesSymbol,
+				func(g group) (time.Duration, map[string]time.Duration) {
+					if seams.baselinePrice != nil {
+						if d, ok := seams.baselinePrice(g.pkgs); ok {
+							return d, nil
+						}
+					}
+					groupBudgetMu.Lock()
+					defer groupBudgetMu.Unlock()
+					b := groupBaselines[keyFor(g)]
+					return b.raw, b.testDurations
+				},
+			)
 		}
 		return "", nil
 	}
@@ -2493,8 +2564,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			}
 			opts.baselineBank.putBaseline(key.persistedKey(bankScope), bankedBaseline{
 				Evidence: rows, Manifest: pd.manifest, Digest: pd.digest,
-				PassedTests: pd.passed,
-				RawMillis:   pd.raw.Milliseconds(), MeasuredAtUnix: time.Now().Unix(),
+				PassedTests:        pd.passed,
+				TestDurationMillis: durationsToMillis(pd.testDurations),
+				RawMillis:          pd.raw.Milliseconds(), MeasuredAtUnix: time.Now().Unix(),
 			})
 			groupBudgetMu.Lock()
 			delete(pendingBankDeposits, key)

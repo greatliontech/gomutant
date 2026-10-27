@@ -25,7 +25,10 @@ declaration's coverage block. Unknown negative authority therefore runs
 the whole group; profiles and historical batch banks cannot restore
 omissions. No scheduling-only batch probes or corrective sampling audit
 are performed. A survivor requires every required group to pass; a kill
-can end execution early under REQ-exec-attribution. Its named-killer
+can end execution early under REQ-exec-attribution, and required groups
+execute in RTA static-reachability priority and ascending measured
+baseline duration order so directly reaching, faster suites decide kills
+first without narrowing the survivor oracle. Its named-killer
 confirmation and REQ-result-stale's independently licensed composition of
 prior passes retain their own rules, neither deriving authority from
 negative coverage. Full-pattern coverage remains advisory under
@@ -108,7 +111,8 @@ run's shape (the symmetry rule's "differ in the overlay alone",
 here on the run-regex axis): an order-dependent killer that fails
 standalone regardless of the mutant must refuse the scope, never
 convert a sibling-induced false kill into a confirmed one. The
-scoped baseline memoizes per distinct killer for the campaign, and
+scoped baseline memoizes per distinct killer for the campaign (elided
+when the group's own baseline already ran that test standalone), and
 any non-pass — failure, timeout, error — refuses the scope.
 Anything weaker than an attributed test kill over a passing scoped
 baseline — the killer passing, a timeout on either side, a
@@ -353,7 +357,9 @@ Historical buckets on a carried portion remain history, never fresh
 negative authority. The overlay-bypass judgment precedes the coverage probe:
 a bypassed target's coverage would bucket confidence the evidence
 cannot support. Coverage is measured under the full pattern once per oracle
-group on the unmutated tree
+group on the unmutated tree (folded into the initial baseline probe
+inside the swept oracle scratch directory when probing live, or probed
+on demand when the baseline served from the bank)
 and cached across the run's targets sharing the group and cover package —
 advisory classification, never a measurement pin; an unprobeable oracle
 leaves the bucket empty rather than failing a sound measurement. Every
@@ -1219,11 +1225,6 @@ ephemeral. Every other classification root (the toolchain, the module
 and build caches) the facade resolves from the process environment
 gomutant hands it, so an oracle's reads beneath them record no identity
 and seal nothing.
-The filesystem-root declaration does not hide an environment-variable read:
-a logged `TMPDIR` read records the value actually delivered to that process.
-Different per-process values can therefore prevent a coherent reusable union;
-the owned root's path-classification exemption is not an assertion that its name
-has a stable environment value.
 
 **REQ-exec-scratch-namespace** (behavior): gomutant MUST accept caller
 scratch-namespace declarations - a tree-relative directory (resolved against

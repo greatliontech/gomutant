@@ -793,3 +793,132 @@ func reportPreparation(callback func(PreparationEvent), event PreparationEvent) 
 // explicitly empty statement, is the caller's oracle; neither is a
 // derivation (REQ-result-stale pins the mode on both sides of a serve).
 func (tg Target) explicitOracle() bool { return tg.OracleExplicit || len(tg.Oracle) != 0 }
+
+// orderOracleGroups orders a target's required oracle groups by RTA static
+// reachability priority (groups with at least one test reaching the target
+// symbol precede groups with no reaching tests) and ascending measured
+// baseline duration, without narrowing the required oracle set
+// (REQ-exec-oracle-run).
+func orderOracleGroups(
+	w *work,
+	targetSymbol, targetPkg string,
+	reaches func(fromSymbol, targetSymbol string) bool,
+	groupStats func(g group) (raw time.Duration, testDurations map[string]time.Duration),
+) {
+	if w == nil || w.shaped || len(w.groups) <= 1 {
+		return
+	}
+	type rankedGroup struct {
+		group    group
+		baseline runtimeinput.Observation
+		hasBase  bool
+		pkg      string
+		reaches  bool
+		effDur   time.Duration
+		raw      time.Duration
+		index    int
+	}
+	ranked := make([]rankedGroup, len(w.groups))
+	for i, g := range w.groups {
+		pkg := ""
+		if len(g.pkgs) > 0 {
+			pkg = g.pkgs[0]
+		}
+		var raw time.Duration
+		var testDurations map[string]time.Duration
+		if groupStats != nil {
+			raw, testDurations = groupStats(g)
+		}
+		rtaReaches := false
+		var sumTestDur time.Duration
+		tests := g.passed
+		if len(tests) == 0 {
+			for sym := range w.oracleSet {
+				if p, _ := splitTestSymbol(sym); p == pkg {
+					tests = append(tests, sym)
+				}
+			}
+		}
+		for _, testSym := range tests {
+			if p, _ := splitTestSymbol(testSym); p != pkg {
+				continue
+			}
+			if w.oracleSet != nil && !w.oracleSet[testSym] {
+				continue
+			}
+			if reaches == nil || targetSymbol == "" || reaches(testSym, targetSymbol) {
+				rtaReaches = true
+			}
+			if d := testDurations[testSym]; d > 0 {
+				sumTestDur += d
+			}
+		}
+		if len(tests) == 0 {
+			rtaReaches = pkg == targetPkg || reaches == nil || targetSymbol == ""
+		}
+		effDur := sumTestDur
+		if effDur <= 0 {
+			effDur = raw
+		}
+		rg := rankedGroup{
+			group:   g,
+			pkg:     pkg,
+			reaches: rtaReaches,
+			effDur:  effDur,
+			raw:     raw,
+			index:   i,
+		}
+		if i < len(w.baselines) {
+			rg.baseline = w.baselines[i]
+			rg.hasBase = true
+		}
+		ranked[i] = rg
+	}
+	slices.SortStableFunc(ranked, func(a, b rankedGroup) int {
+		if a.reaches != b.reaches {
+			if a.reaches {
+				return -1
+			}
+			return 1
+		}
+		if a.effDur != b.effDur {
+			if a.effDur < b.effDur {
+				return -1
+			}
+			return 1
+		}
+		if a.raw != b.raw {
+			if a.raw < b.raw {
+				return -1
+			}
+			return 1
+		}
+		aOwn := a.pkg == targetPkg
+		bOwn := b.pkg == targetPkg
+		if aOwn != bOwn {
+			if aOwn {
+				return -1
+			}
+			return 1
+		}
+		if c := strings.Compare(a.pkg, b.pkg); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.group.runRegex, b.group.runRegex); c != 0 {
+			return c
+		}
+		if a.index < b.index {
+			return -1
+		}
+		if a.index > b.index {
+			return 1
+		}
+		return 0
+	})
+	for i, rg := range ranked {
+		w.groups[i] = rg.group
+		if rg.hasBase && i < len(w.baselines) {
+			w.baselines[i] = rg.baseline
+		}
+	}
+}

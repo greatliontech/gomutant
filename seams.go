@@ -3,6 +3,7 @@ package gomutant
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"time"
 
@@ -165,3 +166,10 @@ func defaultSeams() runSeams {
 
 // errTruncateSeam is the stopping error truncateAfterItems loses.
 var errTruncateSeam = errors.New("truncation seam")
+
+func (s runSeams) hasDefaultCoveredPositions() bool {
+	if s.coveredPositions == nil {
+		return false
+	}
+	return reflect.ValueOf(s.coveredPositions).Pointer() == reflect.ValueOf(engine.CoveredPositions).Pointer()
+}

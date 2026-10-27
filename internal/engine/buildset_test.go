@@ -317,3 +317,130 @@ func TestCleanLinkedImportPathAndBatchWarm(t *testing.T) {
 		}
 	}
 }
+
+func TestRTAReachesSymbol(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/rtamod\n\ngo 1.21\n",
+		"core/core.go": `package core
+
+type Runner interface {
+	Exec() int
+}
+
+type Impl struct{}
+
+func (Impl) Exec() int { return Target() }
+
+type GenericBox[T any] struct {
+	val T
+}
+
+func (GenericBox[T]) RunMethod() int { return Target() }
+
+func GenericHelper[T any](_ T) int { return Target() }
+
+func Target() int { return 42 }
+
+func Unrelated() int { return 7 }
+`,
+		"core/core_test.go": `package core
+
+import "testing"
+
+func TestDirectSlow(t *testing.T) {
+	if Target() != 42 {
+		t.Fatal()
+	}
+}
+
+func TestGenericFunc(t *testing.T) {
+	if GenericHelper(123) != 42 {
+		t.Fatal()
+	}
+}
+
+func TestGenericMethod(t *testing.T) {
+	var b GenericBox[string]
+	if b.RunMethod() != 42 {
+		t.Fatal()
+	}
+}
+
+func TestUnrelatedFast(t *testing.T) {
+	if Unrelated() != 7 {
+		t.Fatal()
+	}
+}
+`,
+		"consumer/consumer.go": `package consumer
+
+import "example.com/rtamod/core"
+
+func ViaInterface(r core.Runner) int {
+	return r.Exec()
+}
+`,
+		"consumer/consumer_test.go": `package consumer
+
+import (
+	"testing"
+	"example.com/rtamod/core"
+)
+
+func TestInterfaceFast(t *testing.T) {
+	if ViaInterface(core.Impl{}) != 42 {
+		t.Fatal()
+	}
+}
+
+func TestConsumerGenericBoxViaInterface(t *testing.T) {
+	var b core.GenericBox[int]
+	if b.RunMethod() != 42 {
+		t.Fatal()
+	}
+}
+
+func TestConsumerUnrelated(t *testing.T) {
+	if core.Unrelated() != 7 {
+		t.Fatal()
+	}
+}
+`,
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "example.com/rtamod/core.Target"
+	if !tr.ReachesSymbol("example.com/rtamod/core.TestDirectSlow", target) {
+		t.Fatalf("expected TestDirectSlow to reach %s", target)
+	}
+	if !tr.ReachesSymbol("example.com/rtamod/core.TestGenericFunc", target) {
+		t.Fatalf("expected TestGenericFunc to reach %s via instantiated generic function", target)
+	}
+	if !tr.ReachesSymbol("example.com/rtamod/core.TestGenericMethod", target) {
+		t.Fatalf("expected TestGenericMethod to reach %s via instantiated generic method", target)
+	}
+	if !tr.ReachesSymbol("example.com/rtamod/consumer.TestConsumerGenericBoxViaInterface", target) {
+		t.Fatalf("expected TestConsumerGenericBoxViaInterface to reach %s via cross-package generic method", target)
+	}
+	if !tr.ReachesSymbol("example.com/rtamod/consumer.TestInterfaceFast", target) {
+		t.Fatalf("expected TestInterfaceFast to reach %s via RTA interface dispatch", target)
+	}
+	if tr.ReachesSymbol("example.com/rtamod/core.TestUnrelatedFast", target) {
+		t.Fatalf("expected TestUnrelatedFast not to reach %s", target)
+	}
+	if tr.ReachesSymbol("example.com/rtamod/consumer.TestConsumerUnrelated", target) {
+		t.Fatalf("expected TestConsumerUnrelated not to reach %s", target)
+	}
+}
