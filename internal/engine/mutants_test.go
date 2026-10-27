@@ -15,8 +15,8 @@ func TestMutants(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads the fixture tree")
 	}
-	if OperatorSet != "go/12" {
-		t.Fatalf("operator set = %q, want go/12", OperatorSet)
+	if OperatorSet != "go/13" {
+		t.Fatalf("operator set = %q, want go/13", OperatorSet)
 	}
 	tr := fixtureTree(t)
 	ms, err := tr.Mutants("example.com/fixture/lib.Add", 0)

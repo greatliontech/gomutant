@@ -243,7 +243,7 @@ func TestContradictKilledDispositions(t *testing.T) {
 // breaks the candidate identity a disposition is a judgment about
 // (REQ-attest-survivor).
 func TestMutationDomainHeld(t *testing.T) {
-	base := Finding{BodyHash: "body", OperatorSet: "go/12", OracleTimeout: "1m0s"}
+	base := Finding{BodyHash: "body", OperatorSet: "go/13", OracleTimeout: "1m0s"}
 	if !mutationDomainHeld(base, base) {
 		t.Fatal("identical domain not held")
 	}
@@ -258,7 +258,7 @@ func TestMutationDomainHeld(t *testing.T) {
 		t.Fatal("a moved body held the domain")
 	}
 	operatorsMoved := base
-	operatorsMoved.OperatorSet = "go/13"
+	operatorsMoved.OperatorSet = "go/14"
 	if mutationDomainHeld(base, operatorsMoved) {
 		t.Fatal("a moved operator set held the domain")
 	}

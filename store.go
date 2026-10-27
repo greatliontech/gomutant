@@ -1287,9 +1287,11 @@ func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Find
 			if !committable[key] {
 				continue
 			}
-			if prior, held := view[key]; held && reflect.DeepEqual(persistedForm(prior), forms[key]) {
-				byRepo[key] = persistedForm(prior)
-				continue
+			if prior, held := view[key]; held {
+				if priorForm := persistedForm(prior); reflect.DeepEqual(priorForm, forms[key]) {
+					byRepo[key] = priorForm
+					continue
+				}
 			}
 			if s.hooks.recordParse != nil {
 				s.hooks.recordParse(f.Symbol)

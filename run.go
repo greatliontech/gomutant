@@ -2878,10 +2878,12 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 				// committable, the prior record stands, and the
 				// interrupt error names the truncation
 				// (REQ-exec-cancellation's graceful-interrupt clause).
+				window[wi].candidates = nil
 				targetDone(window[wi].target)
 				continue
 			}
 			w := window[wi]
+			window[wi].candidates = nil
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -3318,7 +3320,9 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		}
 		pick := nextReadyWindow(pool)
 		window := pool[pick].window
-		pool = append(pool[:pick], pool[pick+1:]...)
+		copy(pool[pick:], pool[pick+1:])
+		pool[len(pool)-1] = readyWindow{}
+		pool = pool[:len(pool)-1]
 		// The previously executed window aggregates only now, with the
 		// next window in hand proving it was not the last: its commits
 		// still land before this window dispatches

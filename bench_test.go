@@ -8,7 +8,6 @@ import (
 	"github.com/greatliontech/gofresh/guard"
 )
 
-//gofresh:pure
 func BenchmarkFindingsRoundTrip(b *testing.B) {
 	target := SubjectEvidence{
 		Symbol: "example.com/p.F",

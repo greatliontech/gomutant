@@ -672,9 +672,9 @@ func TestRunAccountsForOperatorFamilies(t *testing.T) {
 			}
 		}
 		oldBasis := findings[0]
-		oldBasis.OperatorSet = "go/11"
+		oldBasis.OperatorSet = "go/12"
 		if fresh, err := tr.Fresh(context.Background(), oldBasis, statementTargets[0], 0); err != nil || fresh {
-			t.Fatalf("go/11 finding under go/12 = fresh %v, err %v", fresh, err)
+			t.Fatalf("go/12 finding under go/13 = fresh %v, err %v", fresh, err)
 		}
 	})
 }

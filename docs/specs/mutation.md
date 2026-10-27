@@ -12,7 +12,7 @@ of behavior a finding is measured against.
 is run and either killed or reported as a survivor.
 
 **REQ-mut-operators** (behavior): gomutant MUST identify the exact active
-operator basis in every finding. The current active `go/12` basis comprises
+operator basis in every finding. The current active `go/13` basis comprises
 the equality, relational-boundary, relational-negation, and logical families
 exactly as cataloged below; the boolean-operand, condition, range-suppression,
 and loop-control families exactly as cataloged below; the arithmetic, bitwise,
@@ -24,14 +24,14 @@ the return-substitution, block-emptying, statement-deletion, and assignment-stor
 families exactly as cataloged below, each emitted where
 the replacement can be formed without a new import or named type expression. A
 site with no such counterpart, including a result type with no context-free
-zero expression, yields no `go/12` candidate. A selected candidate
+zero expression, yields no `go/13` candidate. A selected candidate
 that fails to compile, does not differ from the baseline, or renders identically
 to an earlier selected candidate is discarded; a timed-out oracle run is a kill under
 REQ-exec-attribution. The basis is the catalog REQ-mut-comprehensive-basis
 states; a change to it receives a new operator-set identifier, stated in
 this clause with the family list in the same change.
 
-The active `go/12` basis uses the exact catalog labels below.
+The active `go/13` basis uses the exact catalog labels below.
 
 **REQ-mut-comprehensive-basis** (invariant): The comprehensive automatic
 basis MUST be exactly the finite first-order catalog below. Every mapping applies once
@@ -172,9 +172,10 @@ before rendering or deduplication. A budget selects candidates, including ones
 later discarded. Failure to render or format the one-site rewrite, normalize
 its imports, or construct its overlay is a generator/infrastructure error and
 aborts the measurement. A selected candidate is **discarded** when its
-canonical body equals the baseline, its normalized complete overlay equals an
-earlier selected candidate, or the compiler rejects the mutated overlay before
-an oracle test runs. Compiler rejection is attributable to the candidate only
+canonical body equals the baseline (including a return substitution that
+replaces a constant expression with an equal constant value), its normalized
+complete overlay equals an earlier selected candidate, or the compiler rejects
+the mutated overlay before an oracle test runs. Compiler rejection is attributable to the candidate only
 after the same package-scoped baseline passed and source/build inputs remained
 coherent; baseline, environment, unrelated-package, malformed-output, and
 movement failures abort under REQ-exec-attribution. Every selected candidate is

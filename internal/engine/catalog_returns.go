@@ -2,6 +2,7 @@ package engine
 
 import (
 	"go/ast"
+	"go/constant"
 	"go/types"
 )
 
@@ -28,10 +29,34 @@ func emitReturnSubstitution(c *catalog, node ast.Node, ancestors []ast.Node) []c
 				operator: variant.operator,
 				start:    result.Pos(), end: result.End(), family: variant.family, variant: 1, index: i,
 				edits: []sourceEdit{c.edit(result.Pos(), result.End(), []byte(variant.replacement))},
+				noOp:  isReturnConstantNoOp(c.pkg.TypesInfo, result, variant),
 			})
 		}
 	}
 	return specs
+}
+
+func isReturnConstantNoOp(info *types.Info, result ast.Expr, variant returnVariant) bool {
+	if info == nil {
+		return false
+	}
+	tv, ok := info.Types[result]
+	if !ok || tv.Value == nil {
+		return false
+	}
+	switch tv.Value.Kind() {
+	case constant.Bool:
+		if constant.BoolVal(tv.Value) {
+			return variant.replacement == "true"
+		}
+		return variant.replacement == "false"
+	case constant.String:
+		return variant.replacement == `""` && constant.StringVal(tv.Value) == ""
+	case constant.Int, constant.Float, constant.Complex:
+		return variant.replacement == "0" && constant.Sign(tv.Value) == 0
+	default:
+		return false
+	}
 }
 
 func enclosingReturnSignature(c *catalog, ancestors []ast.Node) *types.Signature {

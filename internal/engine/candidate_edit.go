@@ -37,6 +37,7 @@ type candidateSpec struct {
 	family, variant, index    int
 	edits                     []sourceEdit
 	preservesImportReferences bool
+	noOp                      bool
 }
 
 func (c candidateSpec) less(other candidateSpec) bool {
@@ -271,7 +272,7 @@ func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symb
 		if err != nil {
 			return nil, fmt.Errorf("format candidate %s %s: %w", candidate.Position, candidate.Operator, err)
 		}
-		if renderedSeen[string(mutated)] {
+		if spec.noOp || renderedSeen[string(mutated)] {
 			candidates = append(candidates, candidate)
 			continue
 		}

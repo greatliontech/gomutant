@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -163,4 +165,100 @@ func TestReturnSubstitutionPrunesOrphanedImport(t *testing.T) {
 		}
 	}
 	t.Fatal("return: nil candidate missing")
+}
+
+func TestReturnConstantSubstitutionIsDiscardedNoOp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads a temporary module tree")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/constnoop\n\ngo 1.26.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const src = `package constnoop
+
+type Kind uint8
+
+const (
+	KindUnknown   Kind       = 0
+	KindKnown     Kind       = 1
+	NegConst      int        = -1
+	FloatZero     float64    = 0.0
+	FloatPos      float64    = 1.5
+	ComplexZero   complex128 = 0i
+	ComplexPos    complex128 = 1i
+	FalseConst               = false
+	TrueConst                = true
+	EmptyConst               = ""
+	NonEmptyConst            = "x"
+)
+
+func ReturnNamedZeroConst() Kind { return KindUnknown }
+func ReturnNamedPosConst() Kind { return KindKnown }
+func ReturnNamedNegConst() int { return NegConst }
+func ReturnNamedFloatZeroConst() float64 { return FloatZero }
+func ReturnNamedFloatPosConst() float64 { return FloatPos }
+func ReturnNamedComplexZeroConst() complex128 { return ComplexZero }
+func ReturnNamedComplexPosConst() complex128 { return ComplexPos }
+func ReturnNamedFalseConst() bool { return FalseConst }
+func ReturnNamedTrueConst() bool { return TrueConst }
+func ReturnNamedEmptyConst() string { return EmptyConst }
+func ReturnNamedNonEmptyConst() string { return NonEmptyConst }
+func ReturnAnyZeroConst() any { return KindUnknown }
+func ReturnAnyEmptyConst() any { return EmptyConst }
+func ReturnAnyFalseConst() any { return FalseConst }
+func ReturnAnyTrueConst() any { return TrueConst }
+`
+	if err := os.WriteFile(filepath.Join(dir, "constnoop.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := LoadContext(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		symbol      string
+		discardedOp string
+		keptOp      string
+	}{
+		{symbol: "example.com/constnoop.ReturnNamedZeroConst", discardedOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnNamedPosConst", keptOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnNamedNegConst", keptOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnNamedFloatZeroConst", discardedOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnNamedFloatPosConst", keptOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnNamedComplexZeroConst", discardedOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnNamedComplexPosConst", keptOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnNamedFalseConst", discardedOp: "return: false", keptOp: "return: true"},
+		{symbol: "example.com/constnoop.ReturnNamedTrueConst", discardedOp: "return: true", keptOp: "return: false"},
+		{symbol: "example.com/constnoop.ReturnNamedEmptyConst", discardedOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnNamedNonEmptyConst", keptOp: "return: zero"},
+		{symbol: "example.com/constnoop.ReturnAnyZeroConst", keptOp: "return: nil"},
+		{symbol: "example.com/constnoop.ReturnAnyEmptyConst", keptOp: "return: nil"},
+		{symbol: "example.com/constnoop.ReturnAnyFalseConst", keptOp: "return: nil"},
+		{symbol: "example.com/constnoop.ReturnAnyTrueConst", keptOp: "return: nil"},
+	} {
+		gen, err := tr.CandidatesContext(context.Background(), tc.symbol, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sawDiscarded := tc.discardedOp == ""
+		sawKept := tc.keptOp == ""
+		for _, cand := range gen.Candidates {
+			if tc.discardedOp != "" && cand.Operator == tc.discardedOp {
+				sawDiscarded = true
+				if len(cand.Replacements) != 0 {
+					t.Errorf("%s %s replacements = %d, want 0 (discarded constant no-op)", tc.symbol, tc.discardedOp, len(cand.Replacements))
+				}
+			}
+			if tc.keptOp != "" && cand.Operator == tc.keptOp {
+				sawKept = true
+				if len(cand.Replacements) != 1 {
+					t.Errorf("%s %s replacements = %d, want 1", tc.symbol, tc.keptOp, len(cand.Replacements))
+				}
+			}
+		}
+		if !sawDiscarded || !sawKept {
+			t.Errorf("%s sawDiscarded=%v sawKept=%v in %+v", tc.symbol, sawDiscarded, sawKept, gen.Candidates)
+		}
+	}
 }

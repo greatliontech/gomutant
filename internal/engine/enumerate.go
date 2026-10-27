@@ -141,6 +141,7 @@ func (t *Tree) ValidateOracle(symbols []string) error {
 func (t *Tree) ValidateOracleContext(ctx context.Context, symbols []string) error {
 	seen := map[string]bool{}
 	candidatesByPkg := map[string]map[string]bool{}
+	declarationsByPkg := map[string]map[string]map[string]bool{}
 	for _, symbol := range symbols {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -167,30 +168,36 @@ func (t *Tree) ValidateOracleContext(ctx context.Context, symbols []string) erro
 				pkgCandidates[candidate] = true
 			}
 			candidatesByPkg[pkgPath] = pkgCandidates
+			declsByName := map[string]map[string]bool{}
+			for _, pkg := range t.pkgsByBase(pkgPath) {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				for _, file := range pkg.Syntax {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					for _, decl := range file.Decls {
+						fn, ok := decl.(*ast.FuncDecl)
+						if !ok || fn.Recv != nil || !runnableTest(pkg, fn) {
+							continue
+						}
+						pos := pkg.Fset.PositionFor(fn.Pos(), false)
+						sites := declsByName[fn.Name.Name]
+						if sites == nil {
+							sites = map[string]bool{}
+							declsByName[fn.Name.Name] = sites
+						}
+						sites[fmt.Sprintf("%s:%d", pos.Filename, pos.Offset)] = true
+					}
+				}
+			}
+			declarationsByPkg[pkgPath] = declsByName
 		}
 		if !pkgCandidates[symbol] {
 			return fmt.Errorf("oracle %s is not a runnable test", symbol)
 		}
-		declarations := map[string]bool{}
-		for _, pkg := range t.pkgsByBase(pkgPath) {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			for _, file := range pkg.Syntax {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				for _, decl := range file.Decls {
-					fn, ok := decl.(*ast.FuncDecl)
-					if !ok || fn.Recv != nil || fn.Name.Name != name || !runnableTest(pkg, fn) {
-						continue
-					}
-					pos := pkg.Fset.PositionFor(fn.Pos(), false)
-					declarations[fmt.Sprintf("%s:%d", pos.Filename, pos.Offset)] = true
-				}
-			}
-		}
-		if len(declarations) != 1 {
+		if len(declarationsByPkg[pkgPath][name]) != 1 {
 			return fmt.Errorf("oracle %s is ambiguous across test package variants", symbol)
 		}
 	}

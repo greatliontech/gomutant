@@ -1317,6 +1317,34 @@ func TestTreeStateKeyRefusesOutOfTreeLoaderInputs(t *testing.T) {
 	if restored != before {
 		t.Fatal("identical content produced a different tree fingerprint")
 	}
+	if err := os.MkdirAll(filepath.Join(plain, ".gomutant", "local"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plain, ".gomutant", "local", "shadow.go"), []byte("package shadow\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withStoreDir, err := treeStateKeyContext(ctx, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withStoreDir != before {
+		t.Fatal(".gomutant directory moved the tree fingerprint")
+	}
+	if err := os.WriteFile(filepath.Join(plain, "literal_c.go"), []byte("package m\n\nconst literalC = \"C\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := treeStateKeyContext(ctx, plain); err != nil {
+		t.Fatalf("non-import \"C\" string literal refused tree fingerprint: %v", err)
+	}
+	if fileImportsC("literal_c.go", []byte("package m\n\nconst literalC = \"C\"\n")) {
+		t.Fatal("fileImportsC returned true for non-import \"C\" literal")
+	}
+	if !fileImportsC("broken_c.go", []byte("not valid go \"C\"")) {
+		t.Fatal("fileImportsC returned false for unparseable file containing \"C\"")
+	}
+	if fileImportsC("plain.go", []byte("package m\n")) {
+		t.Fatal("fileImportsC returned true for file without \"C\"")
+	}
 }
 
 func TestCommandTimeoutDefaultsWhenOmitted(t *testing.T) {

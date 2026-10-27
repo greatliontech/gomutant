@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -138,7 +139,7 @@ func treeStateKeyContext(ctx context.Context, dir string) (string, error) {
 			return cancelErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" {
+			if entry.Name() == ".git" || entry.Name() == ".gomutant" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -221,6 +222,9 @@ func rejectUnfingerprintableInput(dir, path, name string, data []byte) error {
 // from its import list rather than probed as a raw byte pattern, so an
 // ordinary string literal containing C never disables tree caching.
 func fileImportsC(path string, data []byte) bool {
+	if !bytes.Contains(data, []byte(`"C"`)) {
+		return false
+	}
 	file, err := parser.ParseFile(token.NewFileSet(), path, data, parser.ImportsOnly)
 	if err != nil {
 		// Unparseable files fail the load anyway; refusing the cache is the
