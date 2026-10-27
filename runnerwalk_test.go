@@ -19,8 +19,8 @@ import (
 // declared anywhere but the runner's own home and the Windows oracle
 // arm (which
 // prepares the oracle under the plain policy with the tree's hook and
-// installs the job object over it), or a gofresh engine constructed in
-// a file that never names WithGoRunner. A source walk over the real
+// installs the job object over it), or a gofresh session constructed in
+// a file that never sets Runner. A source walk over the real
 // tree is a hand-edit oracle; goCommandSpawnsOutsideTheRunner's logic
 // is pinned over synthetic sources below.
 func TestEveryGoCommandRidesTheRunner(t *testing.T) {
@@ -112,6 +112,10 @@ func goCommandSpawnsOutsideTheRunner(path string, src []byte) []string {
 						}
 					}
 				}
+			case "gofresh":
+				if sel.Sel.Name == "NewSession" && !sessionCallHasRunner(file, n) {
+					report(n.Pos(), "gofresh.NewSession without Runner")
+				}
 			}
 		case *ast.CompositeLit:
 			if isGotoolRunner(n.Type) && !runnerHomes[path] {
@@ -124,21 +128,91 @@ func goCommandSpawnsOutsideTheRunner(path string, src []byte) []string {
 		}
 		return true
 	})
-	if !strings.Contains(string(src), "WithGoRunner") {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
+	return out
+}
+
+func sessionPolicyLitHasRunner(lit *ast.CompositeLit) bool {
+	sel, ok := lit.Type.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "SessionPolicy" {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok || pkg.Name != "gofresh" {
+		return false
+	}
+	for _, elt := range lit.Elts {
+		if kv, ok := elt.(*ast.KeyValueExpr); ok {
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Runner" {
 				return true
 			}
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "gofresh" && sel.Sel.Name == "New" {
-					report(call.Pos(), "gofresh.New without WithGoRunner")
+		}
+	}
+	return false
+}
+
+func sessionCallHasRunner(file *ast.File, call *ast.CallExpr) bool {
+	if len(call.Args) < 3 {
+		return false
+	}
+	switch arg := call.Args[2].(type) {
+	case *ast.CompositeLit:
+		return sessionPolicyLitHasRunner(arg)
+	case *ast.Ident:
+		var scope ast.Node = file
+		ast.Inspect(file, func(n ast.Node) bool {
+			if n == nil || call.Pos() < n.Pos() || call.End() > n.End() {
+				return false
+			}
+			switch n.(type) {
+			case *ast.FuncDecl, *ast.FuncLit:
+				scope = n
+			}
+			return true
+		})
+		hasRunner := false
+		ast.Inspect(scope, func(n ast.Node) bool {
+			if n == nil || n.Pos() >= call.Pos() {
+				return false
+			}
+			switch stmt := n.(type) {
+			case *ast.AssignStmt:
+				for i, lhs := range stmt.Lhs {
+					switch l := lhs.(type) {
+					case *ast.Ident:
+						if l.Name == arg.Name && i < len(stmt.Rhs) {
+							if lit, ok := stmt.Rhs[i].(*ast.CompositeLit); ok {
+								hasRunner = sessionPolicyLitHasRunner(lit)
+							} else {
+								hasRunner = false
+							}
+						}
+					case *ast.SelectorExpr:
+						if x, ok := l.X.(*ast.Ident); ok && x.Name == arg.Name && l.Sel.Name == "Runner" {
+							hasRunner = true
+						}
+					}
+				}
+			case *ast.ValueSpec:
+				for i, name := range stmt.Names {
+					if name.Name == arg.Name {
+						if i < len(stmt.Values) {
+							if lit, ok := stmt.Values[i].(*ast.CompositeLit); ok {
+								hasRunner = sessionPolicyLitHasRunner(lit)
+							} else {
+								hasRunner = false
+							}
+						} else {
+							hasRunner = false
+						}
+					}
 				}
 			}
 			return true
 		})
+		return hasRunner
+	default:
+		return false
 	}
-	return out
 }
 
 func isGotoolRunner(expr ast.Expr) bool {
@@ -168,7 +242,7 @@ func f(ctx context.Context, dir string, env []string) {
 	_ = gotool.Runner{}
 	var plain gotool.Runner
 	_, _ = goRunner.Run(ctx, dir, env, "list")
-	_, _ = gofresh.New(gofresh.WithDir(dir))
+	_, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{})
 }
 `)
 	got := goCommandSpawnsOutsideTheRunner(filepath.Join("internal", "x", "x.go"), src)
@@ -176,7 +250,7 @@ func f(ctx context.Context, dir string, env []string) {
 		`exec.Command(…, "go", …)`, `exec.CommandContext(…, "go", …)`,
 		`exec.Command(…, "git", …)`, `exec.CommandContext(…, "git", …)`,
 		"gotool.Runner{…}", "var … gotool.Runner",
-		"gofresh.New without WithGoRunner",
+		"gofresh.NewSession without Runner",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("walk = %v, want %d sites", got, len(want))
@@ -189,7 +263,11 @@ func f(ctx context.Context, dir string, env []string) {
 	if got := goCommandSpawnsOutsideTheRunner(filepath.Join("internal", "engine", "runner.go"), []byte("package engine\nimport \"github.com/greatliontech/gofresh/gotool\"\nvar r = gotool.Runner{}\n")); len(got) != 0 {
 		t.Fatalf("the runner's home reported: %v", got)
 	}
-	if got := goCommandSpawnsOutsideTheRunner("x.go", []byte("package p\nimport \"github.com/greatliontech/gofresh\"\nfunc f(dir string) { _, _ = gofresh.New(gofresh.WithDir(dir), gofresh.WithGoRunner(r)) }\n")); len(got) != 0 {
-		t.Fatalf("an engine under WithGoRunner reported: %v", got)
+	if got := goCommandSpawnsOutsideTheRunner("x.go", []byte("package p\nimport \"github.com/greatliontech/gofresh\"\nfunc f(dir string) { _, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{Runner: r}) }\n")); len(got) != 0 {
+		t.Fatalf("a session under Runner reported: %v", got)
+	}
+	mixed := []byte("package p\nimport \"github.com/greatliontech/gofresh\"\nfunc f(dir string) {\n\t_, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{Runner: r})\n\t_, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{})\n}\n")
+	if got := goCommandSpawnsOutsideTheRunner("x.go", mixed); len(got) != 1 || !strings.HasSuffix(got[0], "x.go:5:9: gofresh.NewSession without Runner") {
+		t.Fatalf("mixed NewSession calls reported %v, want [x.go:5:9: gofresh.NewSession without Runner]", got)
 	}
 }

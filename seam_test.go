@@ -46,7 +46,11 @@ func TestSubjectViewsBatchByModule(t *testing.T) {
 	}
 	shared := views.bySymbol[symbols[0]].view
 	moduleDir := views.bySymbol[symbols[0]].moduleDir
-	engine, err := gofresh.New(gofresh.WithDir(moduleDir), gofresh.WithEnv(tr.eng.GoEnv()...))
+	session, err := gofresh.NewSession(context.Background(), gofresh.BuildDescription{
+		Directory:   moduleDir,
+		Environment: tr.eng.GoEnv(),
+		Inputs:      []string{},
+	}, gofresh.SessionPolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +59,7 @@ func TestSubjectViewsBatchByModule(t *testing.T) {
 		if batched.view != shared || batched.module != views.modules[0] {
 			t.Fatalf("%s does not share the module view", symbol)
 		}
-		singleton, err := engine.NewViewFor(context.Background(), []gofresh.Subject{batched.subject}, moduleDir, gofresh.CodeResult)
+		singleton, err := session.SnapshotFor(context.Background(), []gofresh.Subject{batched.subject}, moduleDir, gofresh.CodeResult)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -71,14 +71,14 @@ type subjectView struct {
 	// member base and the walk honors it.
 	evidenceDir string
 	env         []string
-	view        *gofresh.View
+	view        *gofresh.Snapshot
 	fp          gofresh.Fingerprint
 	sourceFiles []string
 	module      *moduleSubjectView
 }
 
 type moduleSubjectView struct {
-	view     *gofresh.View
+	view     *gofresh.Snapshot
 	validate func(context.Context) error
 	producer bool
 }
@@ -120,7 +120,7 @@ type subjectEngines struct {
 	vouches []string
 	event   func(AnalysisEvent)
 	// packageProcess carries the package-process attestation
-	// (gofresh WithPackageProcessExecution) for the engines this set
+	// (gofresh.PackageExecution) for the sessions this set
 	// builds, fixed at construction: gomutant runs every oracle as
 	// `go test` of the oracle packages, and the processes that
 	// ATTRIBUTE a subject's verdicts are exactly its own target's
@@ -140,57 +140,60 @@ type subjectEngines struct {
 	analysisBudget  time.Duration
 	purityAssertion bool
 	pureSubjects    map[string]bool
-	byDir           map[string]*gofresh.Engine
+	byDir           map[string]*gofresh.Session
 }
 
 func (t *Tree) newSubjectEngines(event func(AnalysisEvent), packageProcess bool, bounds engine.OracleBounds, analysisBudget time.Duration) *subjectEngines {
 	env := t.eng.GoEnv()
-	return &subjectEngines{evidenceEnv: engine.OracleEvidenceEnv(env, bounds), bounds: bounds, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, analysisBudget: analysisBudget, purityAssertion: t.purityAssertion, pureSubjects: maps.Clone(t.pureSubjects), byDir: map[string]*gofresh.Engine{}}
+	return &subjectEngines{evidenceEnv: engine.OracleEvidenceEnv(env, bounds), bounds: bounds, vouches: t.effectiveVouches(), event: event, packageProcess: packageProcess, treeDir: t.dir, analysisBudget: analysisBudget, purityAssertion: t.purityAssertion, pureSubjects: maps.Clone(t.pureSubjects), byDir: map[string]*gofresh.Session{}}
 }
 
-func (e *subjectEngines) engineFor(dir string) (*gofresh.Engine, error) {
-	if engine, ok := e.byDir[dir]; ok {
-		return engine, nil
+func (e *subjectEngines) engineFor(dir string) (*gofresh.Session, error) {
+	if session, ok := e.byDir[dir]; ok {
+		return session, nil
 	}
-	// The engine reads no vouch file of its own: the tree root's file
+	// The session reads no vouch file of its own: the tree root's file
 	// is the one home, read at the load and installed below as part of
 	// the effective set — a workspace member's own file is never a
 	// second home (REQ-exec-preparation).
-	// The engine's own go commands ride the tree's runner — one
+	// The session's own go commands ride the tree's runner — one
 	// process boundary for every go child gomutant owns.
-	opts := []gofresh.Option{gofresh.WithoutRepositoryVouches(), gofresh.WithDir(dir), gofresh.WithEnv(e.evidenceEnv...), gofresh.WithEvidenceRoot(e.treeDir), gofresh.WithGoRunner(engine.GoRunner())}
+	policy := gofresh.SessionPolicy{
+		EvidenceRoot:   e.treeDir,
+		Vouches:        e.vouches,
+		AnalysisBudget: e.analysisBudget,
+		Runner:         engine.GoRunner(),
+	}
 	if e.packageProcess {
-		opts = append(opts, gofresh.WithPackageProcessExecution())
+		policy.Execution = gofresh.PackageExecution
 	}
 	if e.purityAssertion {
-		opts = append(opts, gofresh.WithAssumePure(func(gofresh.Subject) bool { return true }))
+		policy.AssumePure = func(gofresh.Subject) bool { return true }
 	} else if len(e.pureSubjects) > 0 {
 		pure := e.pureSubjects
-		opts = append(opts, gofresh.WithAssumePure(func(s gofresh.Subject) bool {
+		policy.AssumePure = func(s gofresh.Subject) bool {
 			return pure[s.Package+"."+s.Symbol] || pure[s.Symbol]
-		}))
-	}
-	if len(e.vouches) > 0 {
-		opts = append(opts, gofresh.WithDynamicStateVouches(e.vouches...))
-	}
-	if e.analysisBudget > 0 {
-		opts = append(opts, gofresh.WithAnalysisBudget(e.analysisBudget))
+		}
 	}
 	if event := e.event; event != nil {
 		// One channel end to end, mirroring gofresh's Progress: the
 		// keep-alive/diagnostic split (throttle the former, never the
 		// latter) is the consumer's, keyed on detail emptiness — a
 		// routing layer here would reintroduce a droppable leg.
-		opts = append(opts, gofresh.WithProgress(func(p gofresh.Progress) {
+		policy.Progress = func(p gofresh.Progress) {
 			event(analysisEventOf(p))
-		}))
+		}
 	}
-	engine, err := gofresh.New(opts...)
+	session, err := gofresh.NewSession(context.Background(), gofresh.BuildDescription{
+		Directory:   dir,
+		Environment: e.evidenceEnv,
+		Inputs:      []string{},
+	}, policy)
 	if err != nil {
 		return nil, err
 	}
-	e.byDir[dir] = engine
-	return engine, nil
+	e.byDir[dir] = session
+	return session, nil
 }
 
 // symbolPackage cuts a subject symbol's package path: the first dot
@@ -337,7 +340,7 @@ func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups [
 	}
 	set := &subjectViewSet{bySymbol: make(map[string]*subjectView, len(requested)), bounds: engines.bounds, packageProcess: engines.packageProcess}
 	env := engines.evidenceEnv
-	capture := func(ctx context.Context, view *gofresh.View, module *moduleSubjectView, resolved []resolvedSubject) error {
+	capture := func(ctx context.Context, view *gofresh.Snapshot, module *moduleSubjectView, resolved []resolvedSubject) error {
 		for _, r := range resolved {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -373,7 +376,7 @@ func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups [
 			}
 			continue
 		}
-		view, err := groupEngine.NewViewFor(ctx, group.subjects, group.dir, gofresh.CodeResult)
+		view, err := groupEngine.SnapshotFor(ctx, group.subjects, group.dir, gofresh.CodeResult)
 		if err == nil {
 			module := &moduleSubjectView{view: view, validate: view.Validate}
 			set.modules = append(set.modules, module)
@@ -405,7 +408,7 @@ func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups [
 			for _, r := range subset {
 				subjects = append(subjects, r.subject)
 			}
-			subView, subErr := groupEngine.NewViewFor(ctx, subjects, group.dir, gofresh.CodeResult)
+			subView, subErr := groupEngine.SnapshotFor(ctx, subjects, group.dir, gofresh.CodeResult)
 			if subErr != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
@@ -891,8 +894,8 @@ func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(
 		recorded map[gofresh.Subject]gofresh.Fingerprint
 		members  []int
 	}
-	batches := map[*gofresh.View]*viewBatch{}
-	order := make([]*gofresh.View, 0, len(pairs))
+	batches := map[*gofresh.Snapshot]*viewBatch{}
+	order := make([]*gofresh.Snapshot, 0, len(pairs))
 	for i, pair := range pairs {
 		fingerprint := pair.evidence.fingerprint()
 		single := !observedFingerprint(fingerprint)

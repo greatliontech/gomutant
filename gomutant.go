@@ -292,14 +292,14 @@ type Tree struct {
 	// findings inspection, and explain judge under the same acceptances
 	// (REQ-exec-preparation).
 	vouches []string
-	// purityAssertion installs gofresh.WithAssumePure on every analysis
-	// engine this tree constructs when true.
+	// purityAssertion installs SessionPolicy.AssumePure on every analysis
+	// session this tree constructs when true.
 	purityAssertion bool
 	pureSubjects    map[string]bool
 }
 
 // SetPurityAssertion installs or clears the caller's purity assertion
-// (gofresh.WithAssumePure) on every analysis engine this tree
+// (gofresh.SessionPolicy.AssumePure) on every analysis session this tree
 // constructs. Not synchronized: install before the tree is shared
 // across goroutines or calls.
 func (t *Tree) SetPurityAssertion(pure bool) {
@@ -307,8 +307,8 @@ func (t *Tree) SetPurityAssertion(pure bool) {
 }
 
 // SetPureSubjects installs the caller's subject-scoped purity
-// assertions (gofresh.WithAssumePure) for the named symbols on every
-// analysis engine this tree constructs.
+// assertions (gofresh.SessionPolicy.AssumePure) for the named symbols on every
+// analysis session this tree constructs.
 func (t *Tree) SetPureSubjects(symbols ...string) {
 	if len(symbols) == 0 {
 		t.pureSubjects = nil

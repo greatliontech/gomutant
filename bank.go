@@ -321,7 +321,7 @@ func (b *baselineBank) putBaseline(key string, e bankedBaseline) {
 // measurement at probe time — before any mutant executes — so a
 // campaign killed during its first window still preserves the baseline
 // measurement on disk (REQ-result-baseline-bank). It constructs a
-// gofresh.View.Sibling over the group's oracle subjects, attaches the
+// gofresh.Snapshot.Sibling over the group's oracle subjects, attaches the
 // baseline's own observation, validates the producer bracket, and
 // persists immediately. Any non-cancellation attachment or validation
 // failure skips the deposit without aborting the campaign.

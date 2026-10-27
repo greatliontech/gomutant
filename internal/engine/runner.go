@@ -11,7 +11,7 @@ import (
 // its baseline probe, the coverage probe — the tree's own listings and
 // environment snapshots, the toolchain ladder's sampler, the roots
 // probe of every observation ingest, and, installed on the analysis
-// engines (gofresh.WithGoRunner), every go command they spawn
+// sessions (gofresh.SessionPolicy.Runner), every go command they spawn
 // themselves. Its containment is the policy's process boundary — the
 // child in its own process group, a cancellation sweeping the group,
 // an already-gone group the process-done case, the reap bounded by

@@ -110,7 +110,11 @@ func TestCount(t *testing.T) {
 	}
 	// Real closure hashes and guards, so inspection passes the staleness
 	// ladder and reaches the dynamic-state judgment.
-	plainEngine, err := gofresh.New(gofresh.WithDir(dir))
+	plainSession, err := gofresh.NewSession(ctx, gofresh.BuildDescription{
+		Directory:   dir,
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, gofresh.SessionPolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +122,7 @@ func TestCount(t *testing.T) {
 		{Package: "example.com/vouchmut", Symbol: "Count"},
 		{Package: "example.com/vouchmut", Symbol: "TestCount"},
 	}
-	view, err := plainEngine.NewView(ctx, subjects, dir)
+	view, err := plainSession.SnapshotFor(ctx, subjects, dir, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,11 +189,15 @@ func TestCount(t *testing.T) {
 	// The recorded discharge is never a serve input: evidence captured
 	// under the vouched engine (the field non-empty) still refuses under
 	// a plain tree - only the current engine's set governs.
-	vouchedEngine, err := gofresh.New(gofresh.WithDir(dir), gofresh.WithDynamicStateVouches(culprit))
+	vouchedSession, err := gofresh.NewSession(ctx, gofresh.BuildDescription{
+		Directory:   dir,
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, gofresh.SessionPolicy{Vouches: []string{culprit}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	vouchedView, err := vouchedEngine.NewView(ctx, subjects, dir)
+	vouchedView, err := vouchedSession.SnapshotFor(ctx, subjects, dir, gofresh.CodeResult)
 	if err != nil {
 		t.Fatal(err)
 	}
