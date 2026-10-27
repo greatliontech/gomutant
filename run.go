@@ -946,6 +946,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// through the recorded environment evidence exactly where an oracle
 	// observably reads it.
 	opts.bounds = engine.DeriveOracleBounds(opts.OracleMemoryBytes, jobs)
+	defer opts.bounds.Close()
 	// The campaign's one evidence environment, mode-independent (env plus
 	// the run's width; the per-mode engine sets are built after
 	// resolution, when each target's attestation is known).
@@ -2605,6 +2606,15 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		discard []bool
 	}
 	executeWindow := func(window []work) (*executedWindow, error) {
+		schemaGroups := make([][]engine.Candidate, 0, len(window))
+		for wi := range window {
+			if !window[wi].shaped && len(window[wi].candidates) > 0 {
+				schemaGroups = append(schemaGroups, window[wi].candidates)
+			}
+		}
+		if len(schemaGroups) > 1 {
+			engine.MergeCandidateSchemas(schemaGroups...)
+		}
 		outcomes := make([][]engine.MutantOutcome, len(window))
 		flips := make([]map[int]string, len(window))
 		observations := make([][]runtimeinput.Observation, len(window))

@@ -43,6 +43,14 @@ func oracleCommand(ctx context.Context, dir string, env []string, args ...string
 	return jobCommandOver(ctx, cmd), nil
 }
 
+func prepareSchemaBinaryCommand(ctx context.Context, dir string, env []string, binPath string, args ...string) (*jobCommand, error) {
+	cmd, err := (gotool.Runner{}).Program(ctx, dir, env, binPath, args...)
+	if err != nil {
+		return nil, err
+	}
+	return jobCommandOver(ctx, cmd), nil
+}
+
 // jobCommandOver wraps a prepared, unstarted command in the job-object
 // shape: the process starts suspended in its own group, is assigned to
 // the job, then resumed (Run).

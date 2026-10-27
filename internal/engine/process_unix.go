@@ -19,6 +19,10 @@ func oracleCommand(ctx context.Context, dir string, env []string, args ...string
 	return goRunner.Command(ctx, dir, env, args...)
 }
 
+func prepareSchemaBinaryCommand(ctx context.Context, dir string, env []string, binPath string, args ...string) (*exec.Cmd, error) {
+	return schemaBinaryRunner.Program(ctx, dir, env, binPath, args...)
+}
+
 // oracleProcessKilled is the platform-owned fact "the oracle process
 // did not exit on its own": on unix a bound expiry SIGKILLs the
 // process group, recorded as ExitCode -1 (killed by signal, never

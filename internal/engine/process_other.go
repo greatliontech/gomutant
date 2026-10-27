@@ -17,6 +17,10 @@ func oracleCommand(ctx context.Context, dir string, env []string, args ...string
 	return goRunner.Command(ctx, dir, env, args...)
 }
 
+func prepareSchemaBinaryCommand(ctx context.Context, dir string, env []string, binPath string, args ...string) (*exec.Cmd, error) {
+	return schemaBinaryRunner.Program(ctx, dir, env, binPath, args...)
+}
+
 // runOracleProcess on hosts without process-group ownership just runs
 // the command; execution is refused earlier during tree loading, so
 // this exists for compilation completeness only.

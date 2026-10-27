@@ -63,8 +63,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mut-overlay"
-  content_hash: "31d280c4a3d5d958df16e74cca0c8d07e75bd87cb0943f2949f3f90856098864"
-  source_hash: "a2a5239d0ca754034bfbdb638cfb30a142846b912beb2aaa469968d0f93c334e"
+  content_hash: "efabb40806c217a2b3cfdff005a0d90fdb3938d39f4b8f389a4ac933bd7c2c12"
+  source_hash: "ab0a251c796018de655607de04f2d70e6ade0243cc586953264e13b540c7e896"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestRunMutantOutcomes"
   role: BINDING_ROLE_TESTS
@@ -73,12 +73,72 @@ bindings {
 
 bindings {
   requirement_id: "REQ-mut-overlay"
-  content_hash: "31d280c4a3d5d958df16e74cca0c8d07e75bd87cb0943f2949f3f90856098864"
-  source_hash: "a2a5239d0ca754034bfbdb638cfb30a142846b912beb2aaa469968d0f93c334e"
+  content_hash: "efabb40806c217a2b3cfdff005a0d90fdb3938d39f4b8f389a4ac933bd7c2c12"
+  source_hash: "ab0a251c796018de655607de04f2d70e6ade0243cc586953264e13b540c7e896"
   backend: "go"
   symbol: "github.com/greatliontech/gomutant/internal/engine.TestSplitRapidPkgs"
   role: BINDING_ROLE_TESTS
   shape_hash: "48d22cdcd69d296f281de840a45982a7cb70de9bf744098860f1f492ecaefb52"
+}
+
+bindings {
+  requirement_id: "REQ-mut-overlay"
+  content_hash: "efabb40806c217a2b3cfdff005a0d90fdb3938d39f4b8f389a4ac933bd7c2c12"
+  source_hash: "ab0a251c796018de655607de04f2d70e6ade0243cc586953264e13b540c7e896"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestMutantSchemaGenerationAndMerge"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b0c73c8902284cf2479c42f47a0b1cbbc3816506ebcafbc46fd57299a47758f4"
+}
+
+bindings {
+  requirement_id: "REQ-mut-overlay"
+  content_hash: "efabb40806c217a2b3cfdff005a0d90fdb3938d39f4b8f389a4ac933bd7c2c12"
+  source_hash: "ab0a251c796018de655607de04f2d70e6ade0243cc586953264e13b540c7e896"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant.TestCampaignWindowMergesPackageSchemasAndCommitsVerifiableFindings"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "56355f812cb89df558244ec2fe4bb74da228d7bd3ec4415d7bfabc9658545177"
+}
+
+bindings {
+  requirement_id: "REQ-mut-overlay"
+  content_hash: "efabb40806c217a2b3cfdff005a0d90fdb3938d39f4b8f389a4ac933bd7c2c12"
+  source_hash: "ab0a251c796018de655607de04f2d70e6ade0243cc586953264e13b540c7e896"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestSchemaRejectsSignatureVarShortRedeclaration"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fa79dc4edf530d528a2b1acb58cc6f59c1c91040b5c63c5a63ffa929342387dc"
+}
+
+bindings {
+  requirement_id: "REQ-mut-overlay"
+  content_hash: "efabb40806c217a2b3cfdff005a0d90fdb3938d39f4b8f389a4ac933bd7c2c12"
+  source_hash: "ab0a251c796018de655607de04f2d70e6ade0243cc586953264e13b540c7e896"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestSchemaFiltersCandidateStrandingDotImport"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9ab25b2dd2118c13203b20b91e6549996b2f5e4e86bb17b8da1ca3d6863d0368"
+}
+
+bindings {
+  requirement_id: "REQ-mut-overlay"
+  content_hash: "efabb40806c217a2b3cfdff005a0d90fdb3938d39f4b8f389a4ac933bd7c2c12"
+  source_hash: "ab0a251c796018de655607de04f2d70e6ade0243cc586953264e13b540c7e896"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestSchemaCrossFileVarInitAndEarlyInitUnsetenv"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "70d02923384280c7059dfc1470dc09ee7d4f32ba855f4f72c9d217770db69e18"
+}
+
+bindings {
+  requirement_id: "REQ-mut-overlay"
+  content_hash: "efabb40806c217a2b3cfdff005a0d90fdb3938d39f4b8f389a4ac933bd7c2c12"
+  source_hash: "ab0a251c796018de655607de04f2d70e6ade0243cc586953264e13b540c7e896"
+  backend: "go"
+  symbol: "github.com/greatliontech/gomutant/internal/engine.TestSchemaBinaryTimeoutAndPanicOnExit0"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "70ac5f8853b55e8f219ec3dcd306f0183cd3627d56064d255e88e2da30690d24"
 }
 
 bindings {

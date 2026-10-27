@@ -239,7 +239,15 @@ REQ-result-stale pin remains required.
 overlay that leaves the working tree untouched, compiling and running it in
 isolation — concurrent mutants share nothing but a content-addressed build
 cache, so a run neither corrupts the working copy nor lets one mutant's
-compilation perturb another's. The purity extends to run time: a mutant run
+compilation perturb another's. Body candidates whose edits remain within
+function bodies without adding imports or line directives may coalesce their
+type-validated mutations into a per-symbol or per-package mutant schema overlay
+compiled once per test package (`go test -c -overlay`) and executed per mutant
+in its own isolated process by selecting the active mutant during package
+initialization and scrubbing the selector environment variable before test
+execution begins; candidates rejected by type validation fall back to
+single-mutant overlay compilation so compiler diagnostics and build-failure
+discards remain exact. The purity extends to run time: a mutant run
 must not write into the tree through the tests it executes either — a
 property-test library that persists a failure reproducer on a mutant-induced
 failure is run with that persistence disabled, both to keep the tree clean

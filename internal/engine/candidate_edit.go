@@ -298,5 +298,6 @@ func (t *Tree) materializeCandidates(ctx context.Context, catalog *catalog, symb
 		candidate.Replacements = []Replacement{{File: catalog.path, Source: mutated}}
 		candidates = append(candidates, candidate)
 	}
+	attachSymbolSchema(ctx, catalog, symbol, specs, candidates)
 	return candidates, nil
 }

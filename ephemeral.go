@@ -225,13 +225,15 @@ func (t *Tree) RunEphemeral(ctx context.Context, req EphemeralRequest) (*Ephemer
 	if forms != 1 {
 		return nil, errors.New("gomutant: an ephemeral request carries exactly one of Mutant, Edits, or BatchEdits")
 	}
+	bounds := DeriveOracleBounds(req.OracleMemoryBytes, 1)
+	defer bounds.Close()
 	switch {
 	case len(req.BatchEdits) != 0:
-		return t.ephemeralBatch(ctx, req.BatchEdits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1), prep)
+		return t.ephemeralBatch(ctx, req.BatchEdits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, bounds, prep)
 	case len(req.Edits) != 0:
-		return t.ephemeralEdits(ctx, req.File, req.Edits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1), prep)
+		return t.ephemeralEdits(ctx, req.File, req.Edits, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, bounds, prep)
 	default:
-		return t.ephemeral(ctx, req.File, req.Mutant, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, DeriveOracleBounds(req.OracleMemoryBytes, 1), prep)
+		return t.ephemeral(ctx, req.File, req.Mutant, req.TestPkg, req.Run, req.OracleTimeout, req.Runs, req.Progress, bounds, prep)
 	}
 }
 

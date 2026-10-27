@@ -27,6 +27,14 @@ type Mutant struct {
 	Position     string
 	Extent       string
 	Replacements []Replacement
+	// SchemaReplacements, SchemaMutantID, and SchemaKey carry an optional
+	// per-symbol or per-package mutant schema overlay and selector
+	// (GOMUTANT_ACTIVE_MUTANT) so a compiled test binary can be reused across
+	// candidates while Replacements preserves each candidate's single-mutant
+	// source verbatim.
+	SchemaReplacements []Replacement
+	SchemaMutantID     string
+	SchemaKey          string
 }
 
 // Candidate is one selected operator application before no-op and duplicate
@@ -46,8 +54,12 @@ type Candidate struct {
 	// toolchain-dependent block boundaries (go1.27 moved body spans
 	// off the brace token), so the bucket probes the range. Advisory
 	// geometry, never a measurement pin.
-	Extent       string
-	Replacements []Replacement
+	Extent             string
+	Replacements       []Replacement
+	SchemaReplacements []Replacement
+	SchemaMutantID     string
+	SchemaKey          string
+	schemaPiece        *funcSchemaPiece
 }
 
 // Mutant returns the runnable mutation represented by c. Pre-execution
@@ -56,7 +68,16 @@ func (c Candidate) Mutant() (Mutant, bool) {
 	if len(c.Replacements) == 0 {
 		return Mutant{}, false
 	}
-	return Mutant{Symbol: c.Symbol, Operator: c.Operator, Position: c.Position, Extent: c.Extent, Replacements: c.Replacements}, true
+	return Mutant{
+		Symbol:             c.Symbol,
+		Operator:           c.Operator,
+		Position:           c.Position,
+		Extent:             c.Extent,
+		Replacements:       c.Replacements,
+		SchemaReplacements: c.SchemaReplacements,
+		SchemaMutantID:     c.SchemaMutantID,
+		SchemaKey:          c.SchemaKey,
+	}, true
 }
 
 // Generation is the complete candidate count and the budget-selected prefix.

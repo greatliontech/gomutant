@@ -498,6 +498,16 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		// engine API (REQ-exec-observation).
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", fmt.Errorf("observed mutant runs cover one test package per process: %d packages requested with observation enabled; run per package and merge the observations", len(testPkgs))
 	}
+	if canUseSchemaBinary(m, testPkgs, baselineDir, bounds) {
+		binPath, pkgDir, cerr := bounds.Schemas.getOrCompile(ctx, dir, packageDir, testPkgs[0], m.SchemaKey, m.SchemaReplacements, env, bounds)
+		if cerr != nil {
+			if ctx.Err() != nil {
+				return MutantDiscarded, "", runtimeinput.Observation{}, "", "", ctx.Err()
+			}
+		} else {
+			return runSchemaBinary(ctx, dir, binPath, pkgDir, m, testPkgs[0], runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink, memoryDecided, bounds)
+		}
+	}
 	tmp, err := os.MkdirTemp("", "gomutant-*")
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
@@ -886,10 +896,9 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	// ingestion failure), the ingest exclusions (extended below with the
 	// tool-bookkeeping surfaces the frame excludes), and every
 	// classification root but one, resolved from the environment it is
-	// handed — and the environment is the run's, never the per-process
-	// scratch TMPDIR, so every process's observation binds against the
-	// same ambient TMPDIR that merge, bank, and revalidation consult and
-	// shares the run's memoized classification roots.
+	// handed. The environment carries the minted TMPDIR as delivered;
+	// declaring its filesystem root ephemeral does not erase a read of the
+	// environment variable's value.
 	// Resource settings remain verbatim: a logged GOMEMLIMIT read pins the
 	// delivered value even when the memory-budget comparison is directional.
 	// Every other divergence would silently vacate
@@ -901,7 +910,7 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	// the root as an uncovered
 	// runtime input and seals verifiability for every temp-touching
 	// oracle (REQ-exec-oracle-scratch-declared).
-	ingestEnv := oracleIngestEnv(env, frame, bounds)
+	ingestEnv := oracleIngestEnv(gotool.SetEnv(env, "TMPDIR", scratchRoot), frame, bounds)
 	completion, err := frame.Completion(path, ingestEnv, incompleteReason)
 	if err != nil {
 		return runtimeinput.Observation{}, "", err

@@ -26,6 +26,14 @@ type OracleBounds struct {
 	MemoryBytes int64
 	Width       int
 	Roots       *runtimeinput.Roots
+	Schemas     *SchemaCache
+}
+
+// Close releases any compiled mutant-schema test binaries cached for the run.
+func (b OracleBounds) Close() {
+	if b.Schemas != nil {
+		b.Schemas.Close()
+	}
 }
 
 // DeriveOracleBounds derives a run's bounds from its memory choice and
@@ -36,7 +44,7 @@ type OracleBounds struct {
 // ceiling still applies as GOMEMLIMIT; the derived default needs a
 // readable RAM total, which only the Linux path currently provides.
 func DeriveOracleBounds(memoryBytes int64, jobs int) OracleBounds {
-	b := OracleBounds{Width: oracleParallelismWidth(jobs), Roots: new(runtimeinput.Roots)}
+	b := OracleBounds{Width: oracleParallelismWidth(jobs), Roots: new(runtimeinput.Roots), Schemas: NewSchemaCache()}
 	switch {
 	case memoryBytes < 0:
 		b.MemoryBytes = 0

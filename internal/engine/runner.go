@@ -33,6 +33,13 @@ var goRunner = gotool.Runner{
 	Prepare:     observeGoCommand,
 }
 
+// schemaBinaryRunner prepares compiled schema test binaries under the same
+// process-group containment policy as goRunner without triggering the go-command
+// observer hook.
+var schemaBinaryRunner = gotool.Runner{
+	Containment: &gotool.Containment{},
+}
+
 // observeGoCommand is the runner's hook on every prepared go command,
 // the Windows oracle arm's included: it hands the command to the test
 // observer when one is installed (seams.go) and is otherwise inert. An
