@@ -34,7 +34,7 @@ func TestOracleGrowthRemeasuresInterferingTests(t *testing.T) {
 				for _, change := range []string{"added", "edited"} {
 					initialTarget := target
 					if change == "edited" {
-						write("aa_test.go", "package interference\nimport \"testing\"\nfunc TestA(t *testing.T) {}\n")
+						write("aa_test.go", "package interference\nimport \"testing\"\nfunc TestA(t *testing.T) { _ = Value(0) }\n")
 					}
 					if explicit {
 						initialTarget.Oracle = []string{"example.com/interference.TestZ"}
@@ -59,7 +59,7 @@ func TestOracleGrowthRemeasuresInterferingTests(t *testing.T) {
 					}
 					priors[change] = cloneFinding(prior)
 				}
-				write("aa_test.go", fmt.Sprintf("package interference\nimport \"testing\"\nfunc TestA(t *testing.T) { disabled = %t }\n", !initiallyDisabled))
+				write("aa_test.go", fmt.Sprintf("package interference\nimport \"testing\"\nfunc TestA(t *testing.T) { _ = Value(0); disabled = %t }\n", !initiallyDisabled))
 				tree, err := Load(dir)
 				if err != nil {
 					t.Fatal(err)

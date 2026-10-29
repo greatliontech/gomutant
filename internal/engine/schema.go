@@ -73,8 +73,8 @@ func headerInsertOffset(tokens *token.File, file *ast.File, src []byte) int {
 func schemaHeaderBytes(varName string) []byte {
 	valName := varName + "_val"
 	return []byte(fmt.Sprintf(
-		"\nimport _gomutant_os \"os\"\nvar %s string\nfunc %s() string {\n\tif %s == \"\" {\n\t\tif v := _gomutant_os.Getenv(\"GOMUTANT_ACTIVE_MUTANT\"); v != \"\" {\n\t\t\t%s = v\n\t\t} else {\n\t\t\t%s = \"\\x00\"\n\t\t}\n\t}\n\treturn %s\n}\nvar _ = %s()\nfunc init() { _ = _gomutant_os.Unsetenv(\"GOMUTANT_ACTIVE_MUTANT\") }\n",
-		valName, varName, valName, valName, valName, valName, varName,
+		"\nimport _gomutant_os \"os\"\nvar %s string\nfunc %s() string {\n\tif %s == \"\" {\n\t\tif v := _gomutant_os.Getenv(\"GOMUTANT_ACTIVE_MUTANT\"); v != \"\" {\n\t\t\t%s = v\n\t\t} else {\n\t\t\t%s = \"\\x00\"\n\t\t\tif len(_gomutant_os.Args) > 0 {\n\t\t\t\ta := _gomutant_os.Args[0]\n\t\t\t\tconst tag = \"_gomutant_active_\"\n\t\t\t\tfor i := len(a) - len(tag); i >= 0; i-- {\n\t\t\t\t\tif a[i:i+len(tag)] == tag {\n\t\t\t\t\t\ts := a[i+len(tag):]\n\t\t\t\t\t\tfor j := 0; j < len(s); j++ {\n\t\t\t\t\t\t\tif s[j] == '/' || s[j] == '\\\\' {\n\t\t\t\t\t\t\t\ts = s[:j]\n\t\t\t\t\t\t\t\tbreak\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif len(s) > 4 && s[len(s)-4:] == \".exe\" {\n\t\t\t\t\t\t\ts = s[:len(s)-4]\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif s != \"\" {\n\t\t\t\t\t\t\t%s = s\n\t\t\t\t\t\t}\n\t\t\t\t\t\tbreak\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\treturn %s\n}\nvar _ = %s()\nfunc init() { _ = _gomutant_os.Unsetenv(\"GOMUTANT_ACTIVE_MUTANT\") }\n",
+		valName, varName, valName, valName, valName, valName, valName, varName,
 	))
 }
 
@@ -536,6 +536,7 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 		return
 	}
 	alwaysProcessImports, pkgNameOffsets := declImportReferences(catalog)
+	symHash := sha256.Sum256([]byte(symbol))
 	var arms []schemaCaseArm
 	for i := range candidates {
 		if ctx.Err() != nil {
@@ -564,7 +565,7 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 		}
 		arms = append(arms, schemaCaseArm{
 			candidateIdx: i,
-			mutantID:     fmt.Sprintf("%s#%d", symbol, i+1),
+			mutantID:     fmt.Sprintf("%x_%d", symHash[:6], i+1),
 			innerBody:    armInner,
 		})
 	}

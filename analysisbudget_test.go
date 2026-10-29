@@ -218,20 +218,21 @@ func TestAnalysisBudgetCutLandsAnUnavailableProof(t *testing.T) {
 	// A static proof alone supplies no transformed-executable outcome support:
 	// both runs refuse I/O-based reuse. The analysis-budget cut additionally
 	// retains its own proof refusal and stored-observation diagnostic.
-	channels := func(p RecordPosture) (target, stored bool) {
+	channels := func(p RecordPosture) (freshness, target, stored bool) {
 		for _, r := range p.Reasons {
+			freshness = freshness || (r.Channel == PostureFreshness && strings.Contains(r.Reason, "reaches os.ReadFile (file I/O)"))
 			target = target || (r.Channel == PostureFreshness && strings.HasPrefix(r.Reason, targetReasonPrefix))
 			stored = stored || (r.Channel == PostureStoredObservation && strings.Contains(r.Reason, "analysis budget 1ns exhausted"))
 		}
-		return target, stored
+		return freshness, target, stored
 	}
 	if len(postures) != 2 {
 		t.Fatalf("postures = %+v", postures)
 	}
-	if target, stored := channels(postures[0]); !target || stored {
-		t.Fatalf("proven record's posture = %+v; want unsupported target outcomes without an invented budget refusal", postures[0])
+	if freshness, _, stored := channels(postures[0]); !freshness || stored {
+		t.Fatalf("proven record's posture = %+v; want unsupported I/O outcomes without an invented budget refusal", postures[0])
 	}
-	if target, stored := channels(postures[1]); !target || !stored {
+	if freshness, target, stored := channels(postures[1]); !freshness || !target || !stored {
 		t.Fatalf("budget-cut record's posture = %+v; want the target's reuse refused and the stored observation naming the budget", postures[1])
 	}
 	second := func(prior []Finding) RunDecision {

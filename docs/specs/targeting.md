@@ -62,9 +62,18 @@ variants, and
 nothing an ordinary `go test` invocation would not execute (a helper whose
 name merely starts with Test, or the TestMain harness, can kill nothing, so
 admitting it would derive an oracle that executes nothing and every mutant
-would survive an empty run) — so a bare list of symbols, or whole-package
+would survive an empty run) — narrowed per target by Rapid Type Analysis
+(RTA) static symbol reachability to the runnable tests whose call graph
+(including package initializers, interface-dispatch edges, and open-world
+external interface or reflective dispatch) reaches the target symbol,
+falling back to the target package's runnable tests (or the full linked
+consumer test set when the target package declares none) when no test
+statically reaches the symbol, so an unreached symbol is still measured as a
+survivor while unrelated tests in the package or linked consumer packages do
+not execute against or taint the evidence of targets they cannot reach — so
+a bare list of symbols, or whole-package
 discovery, is a usable run without a caller enumerating tests. The
-cross-package reach is linkage-derived and deterministic, never
+cross-package reach is linkage- and static-reachability-derived and deterministic, never
 coverage-derived: a symbol's teeth can live one package up (a consumer
 suite demonstrably kills mutants the symbol's own package cannot see), and
 a derivation stopping at the package boundary mints survivors an existing

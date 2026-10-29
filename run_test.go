@@ -5620,7 +5620,7 @@ func TestRunDerivesCrossPackageOracle(t *testing.T) {
 	// The measure decision names the derived oracle's breadth: the
 	// operator sees the expanded width before paying for it
 	// (REQ-target-default's naming posture).
-	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.Contains(decisions[0].Reason, "oracle: ") || !strings.Contains(decisions[0].Reason, "packages") {
+	if len(decisions) != 1 || decisions[0].Action != "measure" || !strings.Contains(decisions[0].Reason, "oracle: ") || !strings.Contains(decisions[0].Reason, "package") {
 		t.Fatalf("measure decision = %+v, want the oracle breadth named", decisions)
 	}
 	if f.Skipped != "" {
@@ -5657,7 +5657,7 @@ func TestRunNamesRefusingConsumerPackage(t *testing.T) {
 		"a/a.go":      "package a\n\nfunc A() int { return 1 }\n",
 		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) { if A() != 1 { t.Fatal() } }\n",
 		"r/r.go":      "package r\n\nimport \"example.com/redmod/a\"\n\nfunc R() int { return a.A() }\n",
-		"r/r_test.go": "package r\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { t.Fatal(\"always red\") }\n",
+		"r/r_test.go": "package r\n\nimport \"testing\"\n\nfunc TestRed(t *testing.T) { _ = R(); t.Fatal(\"always red\") }\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
@@ -6435,3 +6435,94 @@ func TestRunKillsDeadlockingMutantImmediately(t *testing.T) {
 		t.Fatalf("missing a.go:9:2 statement: delete kill in %+v", findings[0].Kills)
 	}
 }
+
+func TestRunDerivedOracleScopesAwaySiblingIOTestForCacheReuse(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test baselines and mutants")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/mixedmod\n\ngo 1.26\n",
+		"a/a.go": `package a
+
+import "os"
+
+func PureAdd(x int) int {
+	return x + 1
+}
+
+type UnrelatedErr struct {
+	Path string
+}
+
+func (e UnrelatedErr) Error() string {
+	_ = os.WriteFile(e.Path, []byte("err"), 0o600)
+	return "err:" + e.Path
+}
+`,
+		"a/a_test.go": `package a
+
+import (
+	"path/filepath"
+	"testing"
+)
+
+func TestPureAdd(t *testing.T) {
+	if got := PureAdd(1); got != 2 {
+		t.Fatalf("got %v, want 2", got)
+	}
+}
+
+func TestUnrelatedErrIO(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "marker")
+	err := UnrelatedErr{Path: p}
+	if err.Error() == "" {
+		t.Fatal("empty error")
+	}
+}
+`,
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	targets := []Target{
+		{Symbol: "example.com/mixedmod/a.PureAdd"},
+		{Symbol: "example.com/mixedmod/a.UnrelatedErr.Error"},
+	}
+	var firstDecisions []RunDecision
+	first, err := tr.Run(ctx, targets, Options{Decision: func(d RunDecision) { firstDecisions = append(firstDecisions, d) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || first[0].Skipped != "" || first[0].Killed == 0 {
+		t.Fatalf("first run findings = %+v, want PureAdd measured and killed", first)
+	}
+	for _, d := range firstDecisions {
+		if !strings.Contains(d.Reason, "oracle: 1 test across 1 package") {
+			t.Fatalf("decision %+v: want RTA-scoped 1-test oracle, got %q", d, d.Reason)
+		}
+	}
+	var secondDecisions []RunDecision
+	second, err := tr.Run(ctx, []Target{{Symbol: "example.com/mixedmod/a.PureAdd"}}, Options{
+		Prior:    first,
+		Decision: func(d RunDecision) { secondDecisions = append(secondDecisions, d) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(secondDecisions) != 1 || secondDecisions[0].Action != "cached" || !second[0].Cached {
+		t.Fatalf("second run decisions = %+v (finding Cached=%v), want PureAdd served from cache without sibling I/O test taint", secondDecisions, second[0].Cached)
+	}
+}
+

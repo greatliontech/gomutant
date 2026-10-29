@@ -29,6 +29,9 @@ func TestUnstable(t *testing.T) {
 	if Value() != 1 {
 		t.Fatal("value")
 	}
+	if Weakly(3) != 3 {
+		t.Fatal("weakly")
+	}
 }
 
 func TestWeakly(t *testing.T) {

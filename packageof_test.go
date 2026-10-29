@@ -21,7 +21,7 @@ func dottedTree(t *testing.T) *Tree {
 		"x/x.go":                "package x\n\ntype T struct{}\n\nfunc (T) M() int {\n\treturn 1\n}\n\ntype test struct{}\n\nfunc (test) N() int {\n\treturn 2\n}\n",
 		"x/x_test.go":           "package x\n\nimport \"testing\"\n\nfunc TestM(t *testing.T) { if (T{}).M() != 1 { t.Fatal() } }\n",
 		"x.go/f.go":             "package xgo\n\nfunc F(v int) int {\n\tif v > 0 {\n\t\treturn v\n\t}\n\treturn -v\n}\n",
-		"x.go/f_test.go":        "package xgo\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { if F(1) != 1 { t.Fatal() } }\n\n// TestM links nothing of x: an explicit oracle for x.T.M that is cross-package\n// by package alone, so x stays outside x.go's test binary and derived oracle.\nfunc TestM(t *testing.T) {}\n",
+		"x.go/f_test.go":        "package xgo\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { if F(1) != 1 { t.Fatal() } }\n\n// TestM links nothing of x: an explicit oracle for x.T.M that is cross-package\n// by package alone, so x stays outside x.go's test binary and derived oracle.\nfunc TestM(t *testing.T) { _ = F(0) }\n",
 		"cmd/tool.test/main.go": "package main\n\nfunc run() int { return 3 }\n\nfunc main() { _ = run() }\n",
 	}
 	for name, content := range files {

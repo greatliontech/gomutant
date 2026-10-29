@@ -446,4 +446,283 @@ func TestConsumerUnrelated(t *testing.T) {
 	if tr.ReachesSymbol("example.com/rtamod/consumer.TestConsumerUnrelated", target) {
 		t.Fatalf("expected TestConsumerUnrelated not to reach %s", target)
 	}
+
+	fullOracle := []string{
+		"example.com/rtamod/consumer.TestConsumerGenericBoxViaInterface",
+		"example.com/rtamod/consumer.TestConsumerUnrelated",
+		"example.com/rtamod/consumer.TestInterfaceFast",
+		"example.com/rtamod/core.TestDirectSlow",
+		"example.com/rtamod/core.TestGenericFunc",
+		"example.com/rtamod/core.TestGenericMethod",
+		"example.com/rtamod/core.TestUnrelatedFast",
+	}
+	scoped := tr.ScopeDerivedOracle("example.com/rtamod/core", target, fullOracle)
+	wantScoped := []string{
+		"example.com/rtamod/consumer.TestConsumerGenericBoxViaInterface",
+		"example.com/rtamod/consumer.TestInterfaceFast",
+		"example.com/rtamod/core.TestDirectSlow",
+		"example.com/rtamod/core.TestGenericFunc",
+		"example.com/rtamod/core.TestGenericMethod",
+	}
+	if !slices.Equal(scoped, wantScoped) {
+		t.Fatalf("ScopeDerivedOracle(%s) = %v, want %v", target, scoped, wantScoped)
+	}
+
+	// Unreached symbol falls back to same-package tests when present, or full
+	// oracle when the target package has no tests in the oracle.
+	unreached := "example.com/rtamod/core.BodylessAsm"
+	fallbackSamePkg := tr.ScopeDerivedOracle("example.com/rtamod/core", unreached, fullOracle)
+	wantSamePkg := []string{
+		"example.com/rtamod/core.TestDirectSlow",
+		"example.com/rtamod/core.TestGenericFunc",
+		"example.com/rtamod/core.TestGenericMethod",
+		"example.com/rtamod/core.TestUnrelatedFast",
+	}
+	if !slices.Equal(fallbackSamePkg, wantSamePkg) {
+		t.Fatalf("ScopeDerivedOracle(unreached same-pkg fallback) = %v, want %v", fallbackSamePkg, wantSamePkg)
+	}
+	consumerOnly := []string{
+		"example.com/rtamod/consumer.TestConsumerUnrelated",
+	}
+	fallbackConsumer := tr.ScopeDerivedOracle("example.com/rtamod/core", unreached, consumerOnly)
+	if !slices.Equal(fallbackConsumer, consumerOnly) {
+		t.Fatalf("ScopeDerivedOracle(unreached consumer-only fallback) = %v, want %v", fallbackConsumer, consumerOnly)
+	}
+}
+
+func TestRTAReachesSymbolOpenWorldAndInit(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/openmod\n\ngo 1.21\n",
+		"core/core.go": `package core
+
+import (
+	"io"
+	"net/http"
+)
+
+var InitRan bool
+
+func init() {
+	InitHelper()
+}
+
+func InitHelper() {
+	InitRan = true
+}
+
+type CustomReader struct{}
+
+func (CustomReader) Read(p []byte) (int, error) {
+	ReaderTarget()
+	return 0, io.EOF
+}
+
+func ReaderTarget() {}
+
+type ReflectBox struct{}
+
+func (ReflectBox) Secret() {
+	ReflectTarget()
+}
+
+func ReflectTarget() {}
+
+type CustomStringer struct{}
+
+var UnusedStringerTable = []CustomStringer{{}}
+
+func (CustomStringer) String() string {
+	StringerTarget()
+	return "ok"
+}
+
+func StringerTarget() {}
+
+type GenericHolder[T any] struct {
+	V T
+}
+
+type StringerAlias = GenericHolder[CustomStringer]
+
+type OuterStruct struct {
+	Field CustomStringer
+}
+
+type CustomErr struct{}
+
+func (CustomErr) Error() string { return "err" }
+
+func (CustomErr) Is(target error) bool {
+	ErrorIsTarget()
+	return false
+}
+
+func ErrorIsTarget() {}
+
+type unexportedIface interface {
+	hiddenStep()
+}
+
+func RunUnexportedIface(v unexportedIface) {
+	v.hiddenStep()
+}
+
+func UnexportedIfaceTarget() {}
+
+type CustomRoundTripper struct{}
+
+func (CustomRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	RoundTripTarget()
+	return nil, nil
+}
+
+func RoundTripTarget() {}
+`,
+		"core/core_test.go": `package core
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"reflect"
+	"testing"
+)
+
+func TestExternalInterfaceDispatch(t *testing.T) {
+	_, _ = io.ReadAll(CustomReader{})
+}
+
+func TestExternalStructFieldInterfaceDispatch(t *testing.T) {
+	c := &http.Client{Transport: CustomRoundTripper{}}
+	_ = c
+}
+
+func TestReflectDispatch(t *testing.T) {
+	v := reflect.ValueOf(ReflectBox{})
+	m := v.MethodByName("Secret")
+	m.Call(nil)
+}
+
+func TestFmtStringerViaAny(t *testing.T) {
+	_ = fmt.Sprintf("%v", CustomStringer{})
+}
+
+func TestFmtStringerViaAliasGeneric(t *testing.T) {
+	var h StringerAlias
+	_ = fmt.Sprintf("%v", h)
+}
+
+func TestFmtStringerViaStructField(t *testing.T) {
+	var o OuterStruct
+	_ = fmt.Sprintf("%v", o)
+}
+
+func TestErrorsIsProtocol(t *testing.T) {
+	_ = errors.Is(CustomErr{}, io.EOF)
+}
+
+type testVariantImpl struct{}
+
+func (testVariantImpl) hiddenStep() {
+	UnexportedIfaceTarget()
+}
+
+func TestUnexportedIfaceAcrossTestVariant(t *testing.T) {
+	RunUnexportedIface(testVariantImpl{})
+}
+
+func TestPlain(t *testing.T) {
+	_ = fmt.Sprintf("%v", 123)
+	_ = errors.Is(io.EOF, io.EOF)
+}
+`,
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestExternalInterfaceDispatch", "example.com/openmod/core.ReaderTarget") {
+		t.Fatal("expected TestExternalInterfaceDispatch to reach ReaderTarget via io.ReadAll(io.Reader) external interface parameter")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestExternalStructFieldInterfaceDispatch", "example.com/openmod/core.RoundTripTarget") {
+		t.Fatal("expected TestExternalStructFieldInterfaceDispatch to reach RoundTripTarget via http.Client.Transport field")
+	}
+	if tr.ReachesSymbol("example.com/openmod/core.TestPlain", "example.com/openmod/core.RoundTripTarget") {
+		t.Fatal("expected TestPlain not to reach RoundTripTarget")
+	}
+	if tr.ReachesSymbol("example.com/openmod/core.TestPlain", "example.com/openmod/core.ReaderTarget") {
+		t.Fatal("expected TestPlain not to reach ReaderTarget")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestReflectDispatch", "example.com/openmod/core.ReflectTarget") {
+		t.Fatal("expected TestReflectDispatch to fail open and reach ReflectTarget when using reflect.Value.MethodByName/Call")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestFmtStringerViaAny", "example.com/openmod/core.StringerTarget") {
+		t.Fatal("expected TestFmtStringerViaAny to reach StringerTarget via fmt.Sprintf any -> fmt.Stringer")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestFmtStringerViaAliasGeneric", "example.com/openmod/core.StringerTarget") {
+		t.Fatal("expected TestFmtStringerViaAliasGeneric to reach StringerTarget via generic type argument")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestFmtStringerViaStructField", "example.com/openmod/core.StringerTarget") {
+		t.Fatal("expected TestFmtStringerViaStructField to reach StringerTarget via non-embedded struct field")
+	}
+	if tr.ReachesSymbol("example.com/openmod/core.TestPlain", "example.com/openmod/core.StringerTarget") {
+		t.Fatal("expected TestPlain not to reach StringerTarget")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestErrorsIsProtocol", "example.com/openmod/core.ErrorIsTarget") {
+		t.Fatal("expected TestErrorsIsProtocol to reach ErrorIsTarget via errors.Is protocol method")
+	}
+	if tr.ReachesSymbol("example.com/openmod/core.TestPlain", "example.com/openmod/core.ErrorIsTarget") {
+		t.Fatal("expected TestPlain not to reach ErrorIsTarget when CustomErr is not instantiated")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestUnexportedIfaceAcrossTestVariant", "example.com/openmod/core.UnexportedIfaceTarget") {
+		t.Fatal("expected TestUnexportedIfaceAcrossTestVariant to reach UnexportedIfaceTarget across base/test-variant package instances")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestPlain", "example.com/openmod/core.InitHelper") {
+		t.Fatal("expected TestPlain to reach InitHelper via package init()")
+	}
+	if !tr.ReachesSymbol("example.com/openmod/core.TestPlain", "example.com/openmod/core.init#core.go#0") {
+		t.Fatal("expected TestPlain to reach positional init#core.go#0 target")
+	}
+
+	// Multi-module workspace (go.work): verify cross-module RTA edges bridge
+	// distinct packages.Load object instances.
+	wsDir := t.TempDir()
+	wsFiles := map[string]string{
+		"go.work":           "go 1.21\n\nuse (\n\t.\n\t./sub\n)\n",
+		"go.mod":            "module example.com/ws\n\ngo 1.21\n\nrequire example.com/ws/sub v0.0.0\n",
+		"root.go":           "package ws\n\nimport \"example.com/ws/sub\"\n\nfunc CallSub() int { return sub.Wrapper() }\n",
+		"root_test.go":      "package ws\n\nimport \"testing\"\n\nfunc TestCrossModule(t *testing.T) { _ = CallSub() }\n",
+		"sub/go.mod":        "module example.com/ws/sub\n\ngo 1.21\n",
+		"sub/sub.go":        "package sub\n\nfunc Wrapper() int { return InnerTarget() }\nfunc InnerTarget() int { return 7 }\nfunc Uncalled() int { return 9 }\n",
+	}
+	for name, content := range wsFiles {
+		path := filepath.Join(wsDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wsTr, err := Load(wsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wsTr.ReachesSymbol("example.com/ws.TestCrossModule", "example.com/ws/sub.InnerTarget") {
+		t.Fatal("expected workspace root TestCrossModule to reach cross-module sub.InnerTarget via sub.Wrapper")
+	}
+	if wsTr.ReachesSymbol("example.com/ws.TestCrossModule", "example.com/ws/sub.Uncalled") {
+		t.Fatal("expected workspace root TestCrossModule not to reach sub.Uncalled")
+	}
 }

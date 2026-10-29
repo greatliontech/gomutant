@@ -879,7 +879,10 @@ func (t *Tree) resolveOracleContext(ctx context.Context, tg Target) ([]string, e
 	// face reports the oracle alone — the run names any stood-down
 	// packages on its decisions.
 	oracle, _, err := t.eng.DerivedOracleContext(ctx, pkg)
-	return oracle, err
+	if err != nil {
+		return nil, err
+	}
+	return t.eng.ScopeDerivedOracle(pkg, tg.Symbol, oracle), nil
 }
 
 // pkgRun is one package's oracle execution: the package and the -run

@@ -246,7 +246,17 @@ func runSchemaBinary(
 
 	execEnv := oracleEnv(gotool.SetEnv(scratchEnv, "PWD", effectivePkgDir), bounds)
 	mutantExecEnv := gotool.SetEnv(execEnv, "GOMUTANT_ACTIVE_MUTANT", m.SchemaMutantID)
-	cmd, err := prepareSchemaBinaryCommand(runCtx, effectivePkgDir, mutantExecEnv, binPath, binArgs...)
+	mutantBinPath := binPath
+	if m.SchemaMutantID != "" {
+		mutantDir := filepath.Join(tmp, "_gomutant_active_"+m.SchemaMutantID)
+		if err := os.MkdirAll(mutantDir, 0o700); err == nil {
+			linked := filepath.Join(mutantDir, filepath.Base(binPath))
+			if err := os.Link(binPath, linked); err == nil {
+				mutantBinPath = linked
+			}
+		}
+	}
+	cmd, err := prepareSchemaBinaryCommand(runCtx, effectivePkgDir, mutantExecEnv, mutantBinPath, binArgs...)
 	if err != nil {
 		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
 	}

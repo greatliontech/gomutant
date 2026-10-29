@@ -3,10 +3,14 @@ package lib_test
 import (
 	"os"
 	"testing"
+
+	"example.com/fixture/lib"
 )
 
 // TestExt lives in the external test package.
-func TestExt(t *testing.T) {}
+func TestExt(t *testing.T) {
+	_ = lib.Add(1, 2)
+}
 
 // TestMain is a transparent harness wrapper: never part of a derived
 // oracle — it is the harness, not a test. It stays effect-free so the

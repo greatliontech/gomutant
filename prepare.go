@@ -357,6 +357,7 @@ type runPreparation struct {
 	// error). One implementation lives in the engine; the seam exists
 	// for preparation unit tests.
 	deriveOracle func(context.Context, string) ([]string, []string, error)
+	scopeOracle  func(string, string, []string) []string
 	validate     func(context.Context, []string) error
 	contextFor   func(context.Context, string) (string, string, error)
 	runtimesOf   func(context.Context, []string) (map[string][]string, error)
@@ -373,6 +374,7 @@ func newRunPreparation(t *Tree) *runPreparation {
 	return &runPreparation{
 		packageOf:      t.eng.PackageOfContext,
 		deriveOracle:   t.eng.DerivedOracleContext,
+		scopeOracle:    t.eng.ScopeDerivedOracle,
 		validate:       t.eng.ValidateOracleContext,
 		contextFor:     t.eng.PackageContextContext,
 		runtimesOf:     t.eng.PropertyRuntimesContext,
@@ -400,17 +402,22 @@ func (p *runPreparation) oracle(ctx context.Context, target Target) (oracle, sto
 		return nil, nil, false, nil
 	}
 	if memo, ok := p.derivedOracles[pkg]; ok {
-		return slices.Clone(memo.oracle), slices.Clone(memo.stoodDown), true, ctx.Err()
+		oracle = slices.Clone(memo.oracle)
+		stoodDown = slices.Clone(memo.stoodDown)
+	} else {
+		oracle, stoodDown, err = p.deriveOracle(ctx, pkg)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, nil, false, err
+		}
+		p.derivedOracles[pkg] = derivedOracleMemo{oracle: slices.Clone(oracle), stoodDown: slices.Clone(stoodDown)}
 	}
-	oracle, stoodDown, err = p.deriveOracle(ctx, pkg)
-	if err != nil {
-		return nil, nil, false, err
+	if p.scopeOracle != nil {
+		oracle = p.scopeOracle(pkg, target.Symbol, oracle)
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, nil, false, err
-	}
-	p.derivedOracles[pkg] = derivedOracleMemo{oracle: slices.Clone(oracle), stoodDown: slices.Clone(stoodDown)}
-	return oracle, stoodDown, true, nil
+	return oracle, stoodDown, true, ctx.Err()
 }
 
 func (p *runPreparation) validateOracle(ctx context.Context, oracle []string) error {

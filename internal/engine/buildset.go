@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"os/exec"
 	"path/filepath"
@@ -37,9 +38,23 @@ type buildSet struct {
 	pkgsBySymPath   map[string][]*packages.Package
 	funcsByObj      map[types.Object]funcDeclEntry
 	propertyImports map[string]map[string]bool
-	rtaOnce         sync.Once
-	rtaAdj          map[types.Object][]types.Object
-	rtaPkgInits     map[string][]types.Object
+	rtaOnce            sync.Once
+	rtaAdj             map[types.Object][]types.Object
+	rtaPkgInits        map[string][]types.Object
+	rtaReflective      map[types.Object]bool
+	rtaCanonByKey      map[string]types.Object
+	rtaNodeTypes       map[types.Object][]string
+	rtaIfaceImpls      map[*types.Func]map[string][]*types.Func
+	rtaAnyByType       map[string][]*types.Func
+	rtaAnyProtocolObj  types.Object
+	rtaSeenIfaceMethod map[*types.Func]bool
+	rtaClosuresMu      sync.Mutex
+	rtaClosures        map[[2]string]rtaClosureResult
+}
+
+type rtaClosureResult struct {
+	visited      map[types.Object]bool
+	isReflective bool
 }
 
 func (t *Tree) buildIndex() *buildSet {
@@ -493,11 +508,100 @@ func (t *Tree) DerivedOracleContext(ctx context.Context, pkgPath string) (oracle
 	return slices.Clone(oracle), slices.Clone(stoodDown), nil
 }
 
+var anyProtocolMethodNames = []string{
+	"Error",
+	"Unwrap",
+	"Is",
+	"As",
+	"String",
+	"GoString",
+	"Format",
+	"Scan",
+	"MarshalJSON",
+	"UnmarshalJSON",
+	"MarshalText",
+	"UnmarshalText",
+	"AppendText",
+	"MarshalBinary",
+	"UnmarshalBinary",
+	"AppendBinary",
+	"MarshalXML",
+	"UnmarshalXML",
+	"MarshalXMLAttr",
+	"UnmarshalXMLAttr",
+	"GobEncode",
+	"GobDecode",
+	"Value",
+	"LogValue",
+}
+
+func rtaObjectKey(obj types.Object) string {
+	if obj == nil {
+		return ""
+	}
+	switch u := obj.(type) {
+	case *types.Func:
+		u = u.Origin()
+		if u.Pkg() == nil {
+			return ""
+		}
+		sig, ok := u.Type().(*types.Signature)
+		if !ok || sig == nil {
+			return ""
+		}
+		if sig.Recv() != nil {
+			rt := types.Unalias(sig.Recv().Type())
+			if ptr, ok := rt.(*types.Pointer); ok {
+				rt = types.Unalias(ptr.Elem())
+			}
+			if named, ok := rt.(*types.Named); ok {
+				if tn := named.Origin().Obj(); tn != nil && tn.Pkg() != nil {
+					return tn.Pkg().Path() + "." + tn.Name() + "." + u.Name()
+				}
+			}
+			return ""
+		}
+		if u.Name() == "init" && sig.Params().Len() == 0 && sig.Results().Len() == 0 {
+			return ""
+		}
+		return u.Pkg().Path() + "." + u.Name()
+	case *types.Var:
+		u = u.Origin()
+		if u.Pkg() == nil || u.IsField() {
+			return ""
+		}
+		if scope := u.Pkg().Scope(); scope != nil && (u.Parent() == scope || scope.Lookup(u.Name()) == u) {
+			return u.Pkg().Path() + "." + u.Name()
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
+func rtaTypeKey(named *types.Named) string {
+	if named == nil {
+		return ""
+	}
+	orig := named.Origin()
+	if types.IsInterface(orig.Underlying()) {
+		return ""
+	}
+	tn := orig.Obj()
+	if tn == nil || tn.Pkg() == nil {
+		return ""
+	}
+	return tn.Pkg().Path() + "." + tn.Name()
+}
+
 func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.Object) {
 	b := t.buildIndex()
 	b.rtaOnce.Do(func() {
 		adj := make(map[types.Object][]types.Object)
 		pkgInits := make(map[string][]types.Object)
+		reflective := make(map[types.Object]bool)
+		canonByKey := make(map[string]types.Object)
+		nodeTypes := make(map[types.Object][]string)
 		var concreteNamed []*types.Named
 		seenNamed := make(map[*types.Named]bool)
 		var collectNamed func(typ types.Type, depth int)
@@ -506,15 +610,23 @@ func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.O
 				return
 			}
 			switch u := typ.(type) {
+			case *types.Alias:
+				collectNamed(types.Unalias(u), depth+1)
 			case *types.Named:
-				if seenNamed[u] {
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						collectNamed(targs.At(i), depth+1)
+					}
+				}
+				orig := u.Origin()
+				if seenNamed[orig] {
 					return
 				}
-				seenNamed[u] = true
-				if !types.IsInterface(u.Underlying()) {
-					concreteNamed = append(concreteNamed, u)
+				seenNamed[orig] = true
+				if !types.IsInterface(orig.Underlying()) {
+					concreteNamed = append(concreteNamed, orig)
 				}
-				collectNamed(u.Underlying(), depth+1)
+				collectNamed(orig.Underlying(), depth+1)
 			case *types.Pointer:
 				collectNamed(u.Elem(), depth+1)
 			case *types.Slice:
@@ -531,6 +643,9 @@ func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.O
 					collectNamed(u.Field(i).Type(), depth+1)
 				}
 			case *types.Signature:
+				if u.Recv() != nil {
+					collectNamed(u.Recv().Type(), depth+1)
+				}
 				if p := u.Params(); p != nil {
 					for i := 0; i < p.Len(); i++ {
 						collectNamed(p.At(i).Type(), depth+1)
@@ -543,17 +658,219 @@ func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.O
 				}
 			}
 		}
+		addNodeTypes := func(owner types.Object, rootTyp types.Type, seenKey map[string]bool) {
+			if owner == nil || rootTyp == nil {
+				return
+			}
+			seenType := make(map[types.Type]bool)
+			var walk func(typ types.Type, depth int)
+			walk = func(typ types.Type, depth int) {
+				if typ == nil || depth > 6 {
+					return
+				}
+				u := types.Unalias(typ)
+				if seenType[u] {
+					return
+				}
+				seenType[u] = true
+				switch t := u.(type) {
+				case *types.Named:
+					if targs := t.TypeArgs(); targs != nil {
+						for i := 0; i < targs.Len(); i++ {
+							walk(targs.At(i), depth+1)
+						}
+					}
+					orig := t.Origin()
+					if tk := rtaTypeKey(orig); tk != "" && !seenKey[tk] {
+						seenKey[tk] = true
+						nodeTypes[owner] = append(nodeTypes[owner], tk)
+					}
+					if !types.IsInterface(orig.Underlying()) {
+						walk(orig.Underlying(), depth+1)
+					}
+				case *types.Pointer:
+					walk(t.Elem(), depth+1)
+				case *types.Slice:
+					walk(t.Elem(), depth+1)
+				case *types.Array:
+					walk(t.Elem(), depth+1)
+				case *types.Map:
+					walk(t.Key(), depth+1)
+					walk(t.Elem(), depth+1)
+				case *types.Chan:
+					walk(t.Elem(), depth+1)
+				case *types.Struct:
+					for i := 0; i < t.NumFields(); i++ {
+						walk(t.Field(i).Type(), depth+1)
+					}
+				case *types.Signature:
+					if t.Recv() != nil {
+						walk(t.Recv().Type(), depth+1)
+					}
+					if p := t.Params(); p != nil {
+						for i := 0; i < p.Len(); i++ {
+							walk(p.At(i).Type(), depth+1)
+						}
+					}
+					if r := t.Results(); r != nil {
+						for i := 0; i < r.Len(); i++ {
+							walk(r.At(i).Type(), depth+1)
+						}
+					}
+				}
+			}
+			walk(rootTyp, 0)
+		}
 		var ifaceMethods []*types.Func
 		seenIfaceMethod := make(map[*types.Func]bool)
 		canonicalObj := func(obj types.Object) types.Object {
+			if obj == nil {
+				return nil
+			}
 			switch u := obj.(type) {
 			case *types.Func:
-				return u.Origin()
+				obj = u.Origin()
 			case *types.Var:
-				return u.Origin()
-			default:
-				return obj
+				obj = u.Origin()
 			}
+			if key := rtaObjectKey(obj); key != "" {
+				if c, ok := canonByKey[key]; ok {
+					return c
+				}
+				canonByKey[key] = obj
+			}
+			return obj
+		}
+		registerIfaceMethod := func(m *types.Func) *types.Func {
+			m = canonicalObj(m).(*types.Func)
+			if !seenIfaceMethod[m] {
+				seenIfaceMethod[m] = true
+				ifaceMethods = append(ifaceMethods, m)
+			}
+			return m
+		}
+		anyProtocolObj := types.NewVar(token.NoPos, nil, "$anyProtocol", nil)
+		anyProtocolUsed := false
+		pkgAnyNodes := make(map[string]types.Object)
+		collectPkgScopeInterfaces := func(pkg *types.Package) types.Object {
+			if pkg == nil {
+				return nil
+			}
+			if node, ok := pkgAnyNodes[pkg.Path()]; ok {
+				return node
+			}
+			node := types.NewVar(token.NoPos, nil, "$pkgAny:"+pkg.Path(), nil)
+			pkgAnyNodes[pkg.Path()] = node
+			scanScope := func(s *types.Scope) {
+				if s == nil {
+					return
+				}
+				for _, name := range s.Names() {
+					obj := s.Lookup(name)
+					tn, ok := obj.(*types.TypeName)
+					if !ok || tn == nil {
+						continue
+					}
+					iface, ok := tn.Type().Underlying().(*types.Interface)
+					if !ok || iface == nil {
+						continue
+					}
+					for i := 0; i < iface.NumMethods(); i++ {
+						m := registerIfaceMethod(iface.Method(i))
+						adj[node] = append(adj[node], m)
+					}
+				}
+			}
+			scanScope(pkg.Scope())
+			for _, imp := range pkg.Imports() {
+				scanScope(imp.Scope())
+			}
+			return node
+		}
+		seenExtFunc := make(map[*types.Func]bool)
+		collectExtInterfaces := func(from types.Object, srcPkg *types.Package, rootTyp types.Type) {
+			seenType := make(map[types.Type]bool)
+			var walk func(typ types.Type, depth int)
+			walk = func(typ types.Type, depth int) {
+				if typ == nil || depth > 6 {
+					return
+				}
+				u := types.Unalias(typ)
+				if seenType[u] {
+					return
+				}
+				seenType[u] = true
+				switch t := u.(type) {
+				case *types.Named:
+					if targs := t.TypeArgs(); targs != nil {
+						for i := 0; i < targs.Len(); i++ {
+							walk(targs.At(i), depth+1)
+						}
+					}
+					if tn := t.Obj(); tn != nil && tn.Pkg() == nil && tn.Name() == "error" {
+						anyProtocolUsed = true
+						adj[from] = append(adj[from], anyProtocolObj)
+					}
+					if iface, ok := t.Underlying().(*types.Interface); ok {
+						for i := 0; i < iface.NumMethods(); i++ {
+							m := registerIfaceMethod(iface.Method(i))
+							adj[from] = append(adj[from], m)
+						}
+						return
+					}
+					walk(t.Underlying(), depth+1)
+				case *types.Interface:
+					if t.NumMethods() == 0 {
+						anyProtocolUsed = true
+						adj[from] = append(adj[from], anyProtocolObj)
+						if node := collectPkgScopeInterfaces(srcPkg); node != nil {
+							adj[from] = append(adj[from], node)
+						}
+						return
+					}
+					for i := 0; i < t.NumMethods(); i++ {
+						m := registerIfaceMethod(t.Method(i))
+						adj[from] = append(adj[from], m)
+					}
+				case *types.Pointer:
+					walk(t.Elem(), depth+1)
+				case *types.Slice:
+					walk(t.Elem(), depth+1)
+				case *types.Array:
+					walk(t.Elem(), depth+1)
+				case *types.Map:
+					walk(t.Key(), depth+1)
+					walk(t.Elem(), depth+1)
+				case *types.Chan:
+					walk(t.Elem(), depth+1)
+				case *types.Struct:
+					for i := 0; i < t.NumFields(); i++ {
+						walk(t.Field(i).Type(), depth+1)
+					}
+				case *types.Signature:
+					if depth == 0 && t.Recv() != nil {
+						walk(t.Recv().Type(), depth+1)
+					}
+					if p := t.Params(); p != nil {
+						for i := 0; i < p.Len(); i++ {
+							walk(p.At(i).Type(), depth+1)
+						}
+					}
+					if r := t.Results(); r != nil {
+						for i := 0; i < r.Len(); i++ {
+							walk(r.At(i).Type(), depth+1)
+						}
+					}
+				}
+			}
+			walk(rootTyp, 0)
+		}
+		isInTreePkg := func(pkg *types.Package) bool {
+			if pkg == nil {
+				return false
+			}
+			bp, _ := strings.CutSuffix(pkg.Path(), "_test")
+			return b.basePackages[bp]
 		}
 		addEdge := func(from, to types.Object) {
 			from = canonicalObj(from)
@@ -563,37 +880,72 @@ func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.O
 			}
 			switch u := to.(type) {
 			case *types.Func:
-				if sig, ok := u.Type().(*types.Signature); ok && sig != nil && sig.Recv() != nil && types.IsInterface(sig.Recv().Type()) {
-					if !seenIfaceMethod[u] {
-						seenIfaceMethod[u] = true
-						ifaceMethods = append(ifaceMethods, u)
+				if sig, ok := u.Type().(*types.Signature); ok && sig != nil {
+					if sig.Recv() != nil && types.IsInterface(sig.Recv().Type()) {
+						registerIfaceMethod(u)
+					} else if !isInTreePkg(u.Pkg()) {
+						if !seenExtFunc[u] {
+							seenExtFunc[u] = true
+							if u.Pkg() != nil && u.Pkg().Path() == "reflect" && (u.Name() == "Call" || u.Name() == "CallSlice" || u.Name() == "MethodByName") {
+								reflective[u] = true
+							}
+							collectExtInterfaces(u, u.Pkg(), sig)
+						}
 					}
 				}
 			case *types.Var:
+				if !isInTreePkg(u.Pkg()) {
+					collectExtInterfaces(from, u.Pkg(), u.Type())
+					return
+				}
 			default:
 				return
 			}
 			adj[from] = append(adj[from], to)
 		}
-		collectNodeUses := func(pkg *packages.Package, node ast.Node, into func(types.Object)) {
+		collectNodeUses := func(pkg *packages.Package, node ast.Node, into func(types.Object), intoType func(types.Type)) {
 			if node == nil || pkg.TypesInfo == nil {
 				return
 			}
 			ast.Inspect(node, func(n ast.Node) bool {
+				if expr, ok := n.(ast.Expr); ok {
+					if tv, ok := pkg.TypesInfo.Types[expr]; ok && tv.Type != nil {
+						intoType(tv.Type)
+					}
+				}
 				switch x := n.(type) {
 				case *ast.Ident:
+					if obj := pkg.TypesInfo.Defs[x]; obj != nil {
+						intoType(obj.Type())
+					}
 					if obj := pkg.TypesInfo.Uses[x]; obj != nil {
 						into(obj)
+						intoType(obj.Type())
 					}
 				case *ast.SelectorExpr:
-					if sel := pkg.TypesInfo.Selections[x]; sel != nil {
-						if obj := sel.Obj(); obj != nil {
-							into(obj)
+					if pkg.TypesInfo.Uses[x.Sel] == nil {
+						if sel := pkg.TypesInfo.Selections[x]; sel != nil {
+							if obj := sel.Obj(); obj != nil {
+								into(obj)
+								intoType(obj.Type())
+							}
 						}
 					}
 				}
 				return true
 			})
+		}
+		seenNodeKeys := make(map[types.Object]map[string]bool)
+		recordTypeForOwner := func(owner types.Object, typ types.Type) {
+			if owner == nil || typ == nil {
+				return
+			}
+			sk := seenNodeKeys[owner]
+			if sk == nil {
+				sk = make(map[string]bool)
+				seenNodeKeys[owner] = sk
+			}
+			addNodeTypes(owner, typ, sk)
 		}
 		for _, pkg := range t.pkgs {
 			if pkg.TypesInfo == nil {
@@ -617,16 +969,19 @@ func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.O
 				for _, decl := range f.Decls {
 					switch d := decl.(type) {
 					case *ast.FuncDecl:
-						fnObj := pkg.TypesInfo.Defs[d.Name]
+						fnObj := canonicalObj(pkg.TypesInfo.Defs[d.Name])
 						if fnObj == nil {
 							continue
 						}
+						recordTypeForOwner(fnObj, fnObj.Type())
 						if isInitDecl(d) && bp != "" {
 							pkgInits[bp] = append(pkgInits[bp], fnObj)
 						}
 						if d.Body != nil {
 							collectNodeUses(pkg, d.Body, func(to types.Object) {
 								addEdge(fnObj, to)
+							}, func(typ types.Type) {
+								recordTypeForOwner(fnObj, typ)
 							})
 						}
 					case *ast.GenDecl:
@@ -636,21 +991,28 @@ func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.O
 								continue
 							}
 							var refs []types.Object
+							var refTypes []types.Type
 							for _, val := range vs.Values {
 								collectNodeUses(pkg, val, func(to types.Object) {
 									refs = append(refs, to)
+								}, func(typ types.Type) {
+									refTypes = append(refTypes, typ)
 								})
 							}
 							for _, name := range vs.Names {
-								varObj := pkg.TypesInfo.Defs[name]
+								varObj := canonicalObj(pkg.TypesInfo.Defs[name])
 								if varObj == nil {
 									continue
 								}
-								if bp != "" {
-									pkgInits[bp] = append(pkgInits[bp], varObj)
-								}
+								recordTypeForOwner(varObj, varObj.Type())
 								for _, ref := range refs {
 									addEdge(varObj, ref)
+								}
+								for _, rt := range refTypes {
+									recordTypeForOwner(varObj, rt)
+								}
+								if bp != "" && len(adj[varObj]) > 0 {
+									pkgInits[bp] = append(pkgInits[bp], varObj)
 								}
 							}
 						}
@@ -658,30 +1020,85 @@ func (t *Tree) rtaIndex() (map[types.Object][]types.Object, map[string][]types.O
 				}
 			}
 		}
+		methodsByTypeAndName := make(map[string]map[string][]*types.Func)
+		seenConcreteMethod := make(map[string]map[*types.Func]bool)
+		addConcreteMethod := func(tk string, cm *types.Func) {
+			if tk == "" || cm == nil {
+				return
+			}
+			cm = canonicalObj(cm).(*types.Func)
+			if seenConcreteMethod[tk] == nil {
+				seenConcreteMethod[tk] = make(map[*types.Func]bool)
+				methodsByTypeAndName[tk] = make(map[string][]*types.Func)
+			}
+			if seenConcreteMethod[tk][cm] {
+				return
+			}
+			seenConcreteMethod[tk][cm] = true
+			methodsByTypeAndName[tk][cm.Name()] = append(methodsByTypeAndName[tk][cm.Name()], cm)
+		}
+		for _, named := range concreteNamed {
+			tk := rtaTypeKey(named)
+			if tk == "" {
+				continue
+			}
+			for i := 0; i < named.NumMethods(); i++ {
+				addConcreteMethod(tk, named.Method(i))
+			}
+			mset := types.NewMethodSet(types.NewPointer(named))
+			for i := 0; i < mset.Len(); i++ {
+				if cm, ok := mset.At(i).Obj().(*types.Func); ok {
+					addConcreteMethod(tk, cm)
+				}
+			}
+		}
+		anyByType := make(map[string][]*types.Func)
+		if anyProtocolUsed {
+			for tk, byName := range methodsByTypeAndName {
+				for _, name := range anyProtocolMethodNames {
+					if cms := byName[name]; len(cms) > 0 {
+						anyByType[tk] = append(anyByType[tk], cms...)
+					}
+				}
+			}
+		}
+		ifaceImpls := make(map[*types.Func]map[string][]*types.Func, len(ifaceMethods))
 		for _, m := range ifaceMethods {
 			mSig, ok := m.Type().(*types.Signature)
 			if !ok || mSig == nil {
 				continue
 			}
-			for _, named := range concreteNamed {
-				obj, _, _ := types.LookupFieldOrMethod(named, true, m.Pkg(), m.Name())
-				cm, ok := obj.(*types.Func)
-				if !ok || cm == nil {
-					continue
-				}
-				cmSig, ok := cm.Type().(*types.Signature)
-				if !ok || cmSig == nil {
-					continue
-				}
-				if cmSig.Variadic() == mSig.Variadic() &&
-					cmSig.Params().Len() == mSig.Params().Len() &&
-					cmSig.Results().Len() == mSig.Results().Len() {
-					adj[m] = append(adj[m], cm.Origin())
+			for tk, byName := range methodsByTypeAndName {
+				for _, cm := range byName[m.Name()] {
+					if !m.Exported() {
+						if m.Pkg() == nil || cm.Pkg() == nil || m.Pkg().Path() != cm.Pkg().Path() {
+							continue
+						}
+					}
+					cmSig, ok := cm.Type().(*types.Signature)
+					if !ok || cmSig == nil {
+						continue
+					}
+					if cmSig.Variadic() == mSig.Variadic() &&
+						cmSig.Params().Len() == mSig.Params().Len() &&
+						cmSig.Results().Len() == mSig.Results().Len() {
+						if ifaceImpls[m] == nil {
+							ifaceImpls[m] = make(map[string][]*types.Func)
+						}
+						ifaceImpls[m][tk] = append(ifaceImpls[m][tk], cm)
+					}
 				}
 			}
 		}
 		b.rtaAdj = adj
 		b.rtaPkgInits = pkgInits
+		b.rtaReflective = reflective
+		b.rtaCanonByKey = canonByKey
+		b.rtaNodeTypes = nodeTypes
+		b.rtaIfaceImpls = ifaceImpls
+		b.rtaAnyByType = anyByType
+		b.rtaAnyProtocolObj = anyProtocolObj
+		b.rtaSeenIfaceMethod = seenIfaceMethod
 	})
 	return b.rtaAdj, b.rtaPkgInits
 }
@@ -733,6 +1150,13 @@ func (t *Tree) ReachesSymbol(fromSymbol, targetSymbol string) bool {
 	}
 	t.loadMu.Lock()
 	adj, pkgInits := t.rtaIndex()
+	reflective := t.build.rtaReflective
+	canonByKey := t.build.rtaCanonByKey
+	nodeTypes := t.build.rtaNodeTypes
+	ifaceImpls := t.build.rtaIfaceImpls
+	anyByType := t.build.rtaAnyByType
+	anyProtocolObj := t.build.rtaAnyProtocolObj
+	seenIfaceMethod := t.build.rtaSeenIfaceMethod
 	fromObjs, fromPkg, _ := t.resolveSymbolObjectsUnlocked(fromSymbol)
 	targetObjs, targetPkg, targetIsInit := t.resolveSymbolObjectsUnlocked(targetSymbol)
 	t.loadMu.Unlock()
@@ -742,41 +1166,155 @@ func (t *Tree) ReachesSymbol(fromSymbol, targetSymbol string) bool {
 	if len(fromObjs) == 0 || len(targetObjs) == 0 {
 		return true
 	}
-	goal := make(map[types.Object]bool, len(targetObjs))
-	for _, obj := range targetObjs {
-		goal[obj] = true
-	}
-	visited := make(map[types.Object]bool, 32)
-	queue := make([]types.Object, 0, 32)
-	enqueue := func(obj types.Object) {
-		if obj != nil && !visited[obj] {
-			visited[obj] = true
-			queue = append(queue, obj)
-		}
-	}
-	for _, obj := range fromObjs {
-		enqueue(obj)
-	}
-	for _, obj := range pkgInits[fromPkg] {
-		enqueue(obj)
-	}
-	if targetPkg != "" && targetPkg != fromPkg {
-		for _, obj := range pkgInits[targetPkg] {
-			enqueue(obj)
-		}
-	}
-	for len(queue) > 0 {
-		curr := queue[0]
-		queue = queue[1:]
-		if goal[curr] {
-			return true
-		}
-		for _, next := range adj[curr] {
-			if goal[next] {
-				return true
+	canon := func(obj types.Object) types.Object {
+		if key := rtaObjectKey(obj); key != "" {
+			if c, ok := canonByKey[key]; ok {
+				return c
 			}
-			enqueue(next)
+		}
+		return obj
+	}
+	closureKey := [2]string{fromSymbol, targetPkg}
+	t.build.rtaClosuresMu.Lock()
+	closure, cached := t.build.rtaClosures[closureKey]
+	t.build.rtaClosuresMu.Unlock()
+	if !cached {
+		visited := make(map[types.Object]bool, 32)
+		seenInitPkg := make(map[string]bool, 8)
+		activeTypes := make(map[string]bool, 16)
+		activeIfaces := make(map[*types.Func]bool, 8)
+		anyActive := false
+		isReflective := false
+		queue := make([]types.Object, 0, 32)
+		enqueue := func(obj types.Object) {
+			if obj != nil && !visited[obj] {
+				visited[obj] = true
+				queue = append(queue, obj)
+			}
+		}
+		activateType := func(tk string) {
+			if tk == "" || activeTypes[tk] {
+				return
+			}
+			activeTypes[tk] = true
+			for m := range activeIfaces {
+				for _, cm := range ifaceImpls[m][tk] {
+					enqueue(cm)
+				}
+			}
+			if anyActive {
+				for _, cm := range anyByType[tk] {
+					enqueue(cm)
+				}
+			}
+		}
+		activateIface := func(m *types.Func) {
+			if m == nil || activeIfaces[m] {
+				return
+			}
+			activeIfaces[m] = true
+			for tk := range activeTypes {
+				for _, cm := range ifaceImpls[m][tk] {
+					enqueue(cm)
+				}
+			}
+		}
+		activateAny := func() {
+			if anyActive {
+				return
+			}
+			anyActive = true
+			for tk := range activeTypes {
+				for _, cm := range anyByType[tk] {
+					enqueue(cm)
+				}
+			}
+		}
+		enqueuePkgInits := func(pkg string) {
+			if pkg == "" || seenInitPkg[pkg] {
+				return
+			}
+			seenInitPkg[pkg] = true
+			for _, obj := range pkgInits[pkg] {
+				enqueue(obj)
+			}
+		}
+		for _, obj := range fromObjs {
+			enqueue(canon(obj))
+		}
+		enqueuePkgInits(fromPkg)
+		enqueuePkgInits(targetPkg)
+		for len(queue) > 0 {
+			curr := queue[0]
+			queue = queue[1:]
+			if reflective[curr] {
+				isReflective = true
+			}
+			if curr == anyProtocolObj {
+				activateAny()
+			} else if fn, ok := curr.(*types.Func); ok && seenIfaceMethod[fn] {
+				activateIface(fn)
+			}
+			for _, tk := range nodeTypes[curr] {
+				activateType(tk)
+			}
+			if pkg := curr.Pkg(); pkg != nil {
+				bp, _ := strings.CutSuffix(pkg.Path(), "_test")
+				enqueuePkgInits(bp)
+			}
+			for _, next := range adj[curr] {
+				if reflective[next] {
+					isReflective = true
+				}
+				enqueue(next)
+			}
+		}
+		closure = rtaClosureResult{visited: visited, isReflective: isReflective}
+		t.build.rtaClosuresMu.Lock()
+		if t.build.rtaClosures == nil {
+			t.build.rtaClosures = make(map[[2]string]rtaClosureResult)
+		}
+		t.build.rtaClosures[closureKey] = closure
+		t.build.rtaClosuresMu.Unlock()
+	}
+	if closure.isReflective {
+		return true
+	}
+	for _, obj := range targetObjs {
+		if closure.visited[canon(obj)] {
+			return true
 		}
 	}
 	return false
+}
+
+// ScopeDerivedOracle narrows a package-derived oracle to the tests that
+// statically reach targetSymbol in the loaded RTA call and reference graph
+// (REQ-target-default). When no test in oracle statically reaches
+// targetSymbol, it falls back to the target package's own tests in oracle
+// (or the full oracle when the target package declares none), so an
+// unreached or dynamically dispatched target in a test-bearing package is
+// still measured against a suite rather than skipped as oracle-less.
+func (t *Tree) ScopeDerivedOracle(pkgPath, targetSymbol string, oracle []string) []string {
+	if len(oracle) == 0 || targetSymbol == "" {
+		return slices.Clone(oracle)
+	}
+	var reached []string
+	var samePkg []string
+	prefix := pkgPath + "."
+	for _, testSym := range oracle {
+		if strings.HasPrefix(testSym, prefix) && !strings.Contains(testSym[len(prefix):], "/") {
+			samePkg = append(samePkg, testSym)
+		}
+		if t.ReachesSymbol(testSym, targetSymbol) {
+			reached = append(reached, testSym)
+		}
+	}
+	if len(reached) > 0 {
+		return reached
+	}
+	if len(samePkg) > 0 {
+		return samePkg
+	}
+	return slices.Clone(oracle)
 }
