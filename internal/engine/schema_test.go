@@ -55,8 +55,8 @@ func TestMath(t *testing.T) {
 	if got := os.Getenv("GOMUTANT_ACTIVE_MUTANT"); got != "" {
 		t.Fatalf("GOMUTANT_ACTIVE_MUTANT leaked into test environment: %q", got)
 	}
-	if base := filepath.Base(os.Args[0]); base != "pkg.test" && base != "pkg.test.exe" {
-		t.Fatalf("filepath.Base(os.Args[0]) = %q, want pkg.test", base)
+	if base := filepath.Base(os.Args[0]); base != "schemapkg.test" && base != "schemapkg.test.exe" {
+		t.Fatalf("filepath.Base(os.Args[0]) = %q, want schemapkg.test", base)
 	}
 	if strings.Contains(filepath.Base(os.Args[0]), "_gomutant_active_") {
 		t.Fatalf("os.Args[0] basename leaked schema tag: %q", os.Args[0])

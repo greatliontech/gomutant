@@ -90,4 +90,4 @@ jobs:
       # The records tier reads this tree's bindings with the release that
       # writes them — the fleet's current stipulator; a reader behind the
       # writer could refuse a record form it predates.
-      stipulator-version: v0.73.4
+      stipulator-version: v0.76.0

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -145,7 +146,14 @@ func compileSchemaEntry(ctx context.Context, baseDir, dir, packageDir, testPkg s
 		}
 	}
 
-	binName := "pkg.test"
+	pkgBase := path.Base(strings.TrimSuffix(testPkg, "/"))
+	if pkgBase == "" || pkgBase == "." || pkgBase == "/" {
+		pkgBase = filepath.Base(pkgDir)
+	}
+	if pkgBase == "" || pkgBase == "." || pkgBase == string(filepath.Separator) {
+		pkgBase = "pkg"
+	}
+	binName := pkgBase + ".test"
 	if runtime.GOOS == "windows" {
 		binName += ".exe"
 	}
