@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 )
 
 // The batched judge builds the records' subject views once and judges
@@ -22,11 +21,11 @@ func TestInspectFindingsJudgesInOnePass(t *testing.T) {
 	ctx := context.Background()
 	records := []Finding{
 		{Symbol: "example.com/fixture/lib.Add", OperatorSet: "go/13", OracleTimeout: "1m0s", BodyHash: "stale", OracleExplicit: true, OracleExecutionPolicy: FullOracleExecutionPolicy,
-			TargetEvidence: SubjectEvidence{Symbol: "example.com/fixture/lib.Add", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: guard.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}},
-			OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/lib.TestAdd", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: guard.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}}}},
+			TargetEvidence: SubjectEvidence{Symbol: "example.com/fixture/lib.Add", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}},
+			OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/lib.TestAdd", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}}}},
 		{Symbol: "example.com/fixture/lib.Weak", OperatorSet: "go/13", OracleTimeout: "1m0s", BodyHash: "stale", OracleExplicit: true, OracleExecutionPolicy: FullOracleExecutionPolicy,
-			TargetEvidence: SubjectEvidence{Symbol: "example.com/fixture/lib.Weak", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: guard.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}},
-			OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/lib.TestWeak", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: guard.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}}}},
+			TargetEvidence: SubjectEvidence{Symbol: "example.com/fixture/lib.Weak", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}},
+			OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/lib.TestWeak", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}}}},
 		{Symbol: "example.com/fixture/lib.Gone", OperatorSet: "go/13", OracleTimeout: "1m0s", BodyHash: "x", OracleExplicit: true, OracleExecutionPolicy: FullOracleExecutionPolicy},
 	}
 	// A record whose oracle lives outside its package is judged under
@@ -39,10 +38,10 @@ func TestInspectFindingsJudgesInOnePass(t *testing.T) {
 	}
 	records = append(records,
 		Finding{Symbol: "example.com/fixture/lib.PickInput", OperatorSet: "go/13", OracleTimeout: "1m0s", BodyHash: "stale", OracleExplicit: true, OracleExecutionPolicy: FullOracleExecutionPolicy,
-			TargetEvidence: SubjectEvidence{Symbol: "example.com/fixture/lib.PickInput", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: guard.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}},
-			OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/counting.TestCounting", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: guard.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}}}},
+			TargetEvidence: SubjectEvidence{Symbol: "example.com/fixture/lib.PickInput", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}},
+			OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/counting.TestCounting", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}}}},
 		Finding{Symbol: "recipe:lib-add", Shape: &TargetShape{Manual: &ManualSpec{File: "lib/lib.go", Edits: []ManualEdit{{Find: "return a + b", Replace: "return a - b"}}}}, OperatorSet: shapedOperatorSet, OracleTimeout: "1m0s", BodyHash: digest, OracleExecutionPolicy: FullOracleExecutionPolicy,
-			OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/lib.TestAdd", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: guard.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}}}},
+			OracleEvidence: []SubjectEvidence{{Symbol: "example.com/fixture/lib.TestAdd", Fingerprint: gofresh.Fingerprint{MaximalClosure: "x", TestVariantClosure: "x", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "x", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "x"}, ResultKind: gofresh.CodeResult}}}},
 	)
 	// A derived-oracle record whose recorded oracle no longer matches
 	// the derived one is decided by the delta: without a compartment

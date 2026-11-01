@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -34,7 +33,7 @@ func TestPillarM4RenderBoundExpiryPreservesSummaryAndOutcomeOnResponse(t *testin
 				ObservationAssertion: "caller assertion",
 				RuntimeInputs:        "manifest",
 				RuntimeDigest:        "digest",
-				Guards:               guard.Guards{Toolchain: "go", BuildConfig: "build"},
+				Guards:               gofresh.Guards{Toolchain: "go", BuildConfig: "build"},
 				ObservationProof:     gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"},
 				ResultKind:           gofresh.CodeResult,
 			},

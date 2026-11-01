@@ -16,7 +16,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -136,7 +135,7 @@ func TestCount(t *testing.T) {
 	}
 	evidence := func(symbol string) SubjectEvidence {
 		fp := captured[symbol]
-		return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: fp.MaximalClosure, ToolchainContent: fp.ToolchainContent, AdmissionPolicy: fp.AdmissionPolicy, TestVariantClosure: fp.TestVariantClosure, ObservationAssertion: "caller assertion", DynamicStateVouches: fp.DynamicStateVouches, DynamicStateStrategy: fp.DynamicStateStrategy, ClosureStrategy: fp.ClosureStrategy, RuntimeInputs: emptyManifest, RuntimeDigest: current.Digest, Guards: guard.Guards{Toolchain: fp.Guards.Toolchain, BuildConfig: fp.Guards.BuildConfig}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/vouchmut", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
+		return SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: fp.MaximalClosure, ToolchainContent: fp.ToolchainContent, AdmissionPolicy: fp.AdmissionPolicy, TestVariantClosure: fp.TestVariantClosure, ObservationAssertion: "caller assertion", DynamicStateVouches: fp.DynamicStateVouches, DynamicStateStrategy: fp.DynamicStateStrategy, ClosureStrategy: fp.ClosureStrategy, RuntimeInputs: emptyManifest, RuntimeDigest: current.Digest, Guards: gofresh.Guards{Toolchain: fp.Guards.Toolchain, BuildConfig: fp.Guards.BuildConfig}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "example.com/vouchmut", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	finding := Finding{Symbol: "example.com/vouchmut.Count", BodyHash: "h", OperatorSet: engine.OperatorSet,
 		OracleTimeout: "1m0s", Commit: "abc", OracleExecutionPolicy: FullOracleExecutionPolicy,

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -25,8 +24,8 @@ func TestFindingsCommandDefaultsToSummaryRows(t *testing.T) {
 	}
 	seed := gomutant.Finding{Symbol: "example.com/empty.Gone", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		CandidateCount: 1, Generated: 1, Mutants: 1,
-		TargetEvidence: gomutant.SubjectEvidence{Symbol: "example.com/empty.Gone", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: "example.com/empty.Gone"}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}},
-		OracleEvidence: []gomutant.SubjectEvidence{{Symbol: "example.com/empty.TestGone", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: "example.com/empty.TestGone"}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}},
+		TargetEvidence: gomutant.SubjectEvidence{Symbol: "example.com/empty.Gone", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: "example.com/empty.Gone"}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}},
+		OracleEvidence: []gomutant.SubjectEvidence{{Symbol: "example.com/empty.TestGone", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: "example.com/empty.TestGone"}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}},
 		Operators:      []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors:      []gomutant.Survivor{{Position: "old.go:1:1", Operator: "zero return"}}}
 	if err := gomutant.UpdateDocument(context.Background(), gomutant.FindingsPathAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gomutant"
 )
 
@@ -29,8 +28,8 @@ func seedFinding(t *testing.T, dir, symbol, test, pkg string) {
 	seed := gomutant.Finding{Symbol: symbol, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		OracleExecutionPolicy: gomutant.FullOracleExecutionPolicy,
 		CandidateCount:        1, Generated: 1, Mutants: 1,
-		TargetEvidence: gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: pkg, Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}},
-		OracleEvidence: []gomutant.SubjectEvidence{{Symbol: test, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: pkg, Symbol: test}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}},
+		TargetEvidence: gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: pkg, Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}},
+		OracleEvidence: []gomutant.SubjectEvidence{{Symbol: test, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: pkg, Symbol: test}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}},
 		Operators:      []gomutant.OperatorSummary{{Operator: "zero return", Generated: 1, Survived: 1}},
 		Survivors:      []gomutant.Survivor{{Position: "lib/lib.go:1:1", Operator: "zero return"}}}
 	if err := gomutant.UpdateDocument(context.Background(), gomutant.FindingsPathAt(dir, defaultFindings), func([]gomutant.Finding) ([]gomutant.Finding, error) {

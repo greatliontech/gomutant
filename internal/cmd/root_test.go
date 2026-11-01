@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -105,7 +104,7 @@ func TestUpdateDocumentMergesAndAnchors(t *testing.T) {
 	dir := t.TempDir()
 	path := gomutant.FindingsPathAt(dir, defaultFindings)
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
+		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	fresh := []gomutant.Finding{{Symbol: "p.A", BodyHash: "h", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("p.A"), OracleEvidence: []gomutant.SubjectEvidence{evidence("p.TestA")}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
@@ -132,7 +131,7 @@ func TestRunCommandWholeTreePrunesWhenNoTargetsRemain(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
+		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
@@ -210,7 +209,7 @@ func TestInspectFindingsIncludesFullyAttestedDetachedRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
+		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	finding := gomutant.Finding{Symbol: "example.com/empty.Deleted", Labels: []string{"REQ-Z", "REQ-A"}, BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Deleted"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestDeleted")}, CandidateCount: 1, Generated: 1, Mutants: 1,
@@ -642,7 +641,7 @@ func TestInspectFindingsCarriesCandidateEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	evidence := gomutant.SubjectEvidence{Symbol: "example.com/empty.Gone", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ResultKind: gofresh.CodeResult}}
+	evidence := gomutant.SubjectEvidence{Symbol: "example.com/empty.Gone", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ResultKind: gofresh.CodeResult}}
 	finding := gomutant.Finding{Symbol: "example.com/empty.Gone", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence, OracleEvidence: []gomutant.SubjectEvidence{evidence}, CandidateCount: 1, Generated: 1, Mutants: 1, Killed: 1,
 		CandidateEvidence: []gomutant.CandidateEvidence{{Position: "gone.go:1:1", Operator: "return: zero", Reason: "panicked before observation finalization", Disposition: "killed"}}}
@@ -671,7 +670,7 @@ func TestRunCommandPlanNeverPrunesEmptyWholeTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
+		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	seed := gomutant.Finding{Symbol: "example.com/empty.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/empty.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/empty.TestOld")}}
@@ -812,7 +811,7 @@ func TestRunCommandStatesTheReconcileDrop(t *testing.T) {
 		}
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
+		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	stale := gomutant.Finding{Symbol: "example.com/current.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/current.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/current.TestOld")}}
@@ -841,7 +840,7 @@ func TestRunCommandStatesAPromotionOnTheZeroTargetReconcile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "empty.go"), []byte("package empty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	oracle := gomutant.SubjectEvidence{Symbol: "example.com/empty.TestBoundary", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: "example.com/empty.TestBoundary"}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: true, RuntimeReason: "sealed reason"}
+	oracle := gomutant.SubjectEvidence{Symbol: "example.com/empty.TestBoundary", Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "eyJ2Ijo0fQ", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: "example.com/empty.TestBoundary"}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}, RuntimeUnverifiable: true, RuntimeReason: "sealed reason"}
 	shaped := gomutant.Finding{Symbol: "example.com/empty.Boundary", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Commit: "abc",
 		Shape:          &gomutant.TargetShape{Structural: &gomutant.StructuralSpec{Class: "import-boundary", Packages: []string{"p"}, Forbidden: "q"}},
 		OracleEvidence: []gomutant.SubjectEvidence{oracle}}
@@ -892,7 +891,7 @@ func TestRunCommandRenderBoundExitCarriesThePersistedDrop(t *testing.T) {
 		}
 	}
 	evidence := func(symbol string) gomutant.SubjectEvidence {
-		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: guard.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
+		return gomutant.SubjectEvidence{Symbol: symbol, Fingerprint: gofresh.Fingerprint{MaximalClosure: "closure", TestVariantClosure: "tv", ObservationAssertion: "caller assertion", RuntimeInputs: "manifest", RuntimeDigest: "digest", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "build"}, ObservationProof: gofresh.ObservationProof{Strategy: "proof/v1", Subject: gofresh.Subject{Package: "p", Symbol: symbol}, Observable: true, Evidence: "proof"}, ResultKind: gofresh.CodeResult}}
 	}
 	stale := gomutant.Finding{Symbol: "example.com/current.Old", BodyHash: "body", OperatorSet: "go/2", OracleTimeout: "1m0s", Dirty: true,
 		TargetEvidence: evidence("example.com/current.Old"), OracleEvidence: []gomutant.SubjectEvidence{evidence("example.com/current.TestOld")}}

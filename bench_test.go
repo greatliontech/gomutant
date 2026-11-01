@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 )
 
 //gofresh:pure
@@ -15,7 +14,7 @@ func BenchmarkFindingsRoundTrip(b *testing.B) {
 		Fingerprint: gofresh.Fingerprint{
 			MaximalClosure:      "0123456789abcdef0123456789abcdef",
 			TestVariantClosure:  "fedcba9876543210fedcba9876543210",
-			Guards:              guard.Guards{Toolchain: "go1.27.0 linux/amd64", BuildConfig: "abcdef0123456789abcdef0123456789"},
+			Guards:              gofresh.Guards{Toolchain: "go1.27.0 linux/amd64", BuildConfig: "abcdef0123456789abcdef0123456789"},
 			PurityAssertion:     "source directive",
 			DynamicStateVouches: "example.com/dep.Var",
 			ClosureStrategy:     gofresh.ClosureStrategy,

@@ -10,12 +10,11 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/closure/testvariant"
 )
 
 func bindingLedger() gofresh.TestVariantLedger {
 	return gofresh.TestVariantLedger{
-		BindingStrategy: testvariant.BindingStrategy,
+		BindingStrategy: gofresh.TestVariantBindingStrategy,
 		BaseFiles: []gofresh.TestVariantFileHeader{{File: "p.go", Bindings: &gofresh.TestVariantFileBindings{
 			Package: "p", References: []string{"true"}, Imports: []gofresh.TestVariantImport{{Name: "s", Path: "strings"}},
 		}}},
@@ -77,7 +76,7 @@ func TestPartialSpliceNeverBackfillsBindingEvidence(t *testing.T) {
 	complete := compartmentLedgerFromView(current)
 	current.Declarations = append(current.Declarations, gofresh.TestVariantDeclaration{File: "p_test.go", Package: "p", Kind: "func", Name: "TestNew", Hash: "new"})
 	got := splicedCompartmentLedger(complete, current)
-	if len(got.Declarations) != 2 || got.BindingStrategy != testvariant.BindingStrategy {
+	if len(got.Declarations) != 2 || got.BindingStrategy != gofresh.TestVariantBindingStrategy {
 		t.Fatal("preserved complete bindings failed to follow an admissible splice")
 	}
 }

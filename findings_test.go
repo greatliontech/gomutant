@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -20,7 +19,7 @@ func TestSubjectEvidencePreservesObservationProof(t *testing.T) {
 			reason = "unobservable effect"
 		}
 		fingerprint := gofresh.Fingerprint{
-			MaximalClosure: "closure", Guards: guard.Guards{Toolchain: "toolchain", BuildConfig: "build"},
+			MaximalClosure: "closure", Guards: gofresh.Guards{Toolchain: "toolchain", BuildConfig: "build"},
 			ObservationAssertion: "caller assertion",
 			ObservationProof: gofresh.ObservationProof{
 				Strategy: gofresh.ObservationRTA, Subject: gofresh.Subject{Package: "p", Symbol: "F"},
@@ -180,7 +179,7 @@ func TestParseFindingsVersionAheadNamesProbableCause(t *testing.T) {
 // (REQ-result-record, REQ-result-export).
 func TestSubjectEvidenceWireFormIsTheRecordBesideFourFields(t *testing.T) {
 	row := SubjectEvidence{Symbol: "p.F", Fingerprint: gofresh.Fingerprint{
-		MaximalClosure: "m", TestVariantClosure: "v", Guards: guard.Guards{Toolchain: "go", BuildConfig: "b"},
+		MaximalClosure: "m", TestVariantClosure: "v", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "b"},
 		ObservationAssertion: "caller assertion",
 		ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "p", Symbol: "F"}, Observable: false, Reason: "r", Evidence: "e"},
 		PurityAssertion:      "source directive", DynamicStateVouches: "vouches", SingleSubjectDischarges: "single", PackageProcessDischarges: "discharges",
@@ -276,7 +275,7 @@ func TestLegacyEvidenceRowsUpgradeOnRead(t *testing.T) {
 	}
 	target := parsed.Findings[0].TargetEvidence
 	wantTarget := SubjectEvidence{Symbol: "example.com/m.F", Fingerprint: gofresh.Fingerprint{
-		MaximalClosure: "m", TestVariantClosure: "v", Guards: guard.Guards{Toolchain: "go", BuildConfig: "b"},
+		MaximalClosure: "m", TestVariantClosure: "v", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "b"},
 		ObservationAssertion: "caller assertion",
 		ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "example.com/m", Symbol: "F"}, Observable: true, Evidence: "e"},
 		PurityAssertion:      "source directive", DynamicStateVouches: "a.b", PackageProcessDischarges: "a.p", DynamicStateStrategy: "strategy", ClosureStrategy: "closure",
@@ -286,7 +285,7 @@ func TestLegacyEvidenceRowsUpgradeOnRead(t *testing.T) {
 		t.Fatalf("upgraded target row:\n got %+v\nwant %+v", target, wantTarget)
 	}
 	wantOracle := SubjectEvidence{Symbol: "example.com/m.TestF", Fingerprint: gofresh.Fingerprint{
-		MaximalClosure: "m", TestVariantClosure: "v", Guards: guard.Guards{Toolchain: "go", BuildConfig: "b"},
+		MaximalClosure: "m", TestVariantClosure: "v", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "b"},
 		ObservationAssertion: "caller assertion",
 		ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "example.com/m", Symbol: "TestF"}, Observable: false, Reason: "reaches os.Getenv", Evidence: "e"},
 		DynamicStateStrategy: "strategy", RuntimeInputs: "eyJ2IjoxfQ", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
@@ -484,7 +483,7 @@ func TestExportCarriesTheCoverageBounds(t *testing.T) {
 // downgrader forgot, fails here rather than silently (REQ-result-export).
 func TestLegacyRowsAndTheUpgradeAreInverse(t *testing.T) {
 	row := SubjectEvidence{Symbol: "p.F", Fingerprint: gofresh.Fingerprint{
-		MaximalClosure: "m", TestVariantClosure: "v", Guards: guard.Guards{Toolchain: "go", BuildConfig: "b"},
+		MaximalClosure: "m", TestVariantClosure: "v", Guards: gofresh.Guards{Toolchain: "go", BuildConfig: "b"},
 		ObservationAssertion: "caller assertion",
 		ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "p", Symbol: "F"}, Observable: false, Reason: "r", Evidence: "e"},
 		PurityAssertion:      "source directive", DynamicStateVouches: "vouches", PackageProcessDischarges: "discharges",

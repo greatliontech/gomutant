@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -56,7 +55,7 @@ func TestPillarM4ExplainCommandTriageAndSymbolArms(t *testing.T) {
 				ObservationAssertion: "caller assertion",
 				RuntimeInputs:        "eyJ2IjoxfQ",
 				RuntimeDigest:        "d",
-				Guards:               guard.Guards{Toolchain: "go", BuildConfig: "b"},
+				Guards:               gofresh.Guards{Toolchain: "go", BuildConfig: "b"},
 				ObservationProof:     gofresh.ObservationProof{Strategy: "s", Subject: gofresh.Subject{Package: "example.com/expmod", Symbol: "Value"}, Observable: true, Evidence: "e"},
 				ResultKind:           gofresh.CodeResult,
 			},

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/guard"
 	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 )
@@ -131,7 +130,7 @@ func FuzzKillAttributionAllOrNothing(f *testing.F) {
 				Fingerprint: gofresh.Fingerprint{
 					MaximalClosure:       "c",
 					TestVariantClosure:   "tv",
-					Guards:               guard.Guards{Toolchain: "go", BuildConfig: "b"},
+					Guards:               gofresh.Guards{Toolchain: "go", BuildConfig: "b"},
 					ObservationAssertion: "caller assertion",
 					ObservationProof: gofresh.ObservationProof{
 						Strategy:   gofresh.ObservationRTA,
@@ -340,4 +339,3 @@ func FuzzFindingCandidateConservation(f *testing.F) {
 		assertConserved("extend", extended)
 	})
 }
-
