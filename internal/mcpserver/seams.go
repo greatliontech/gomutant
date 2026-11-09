@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/resident"
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/resident"
 )
 
 // serverSeams are the package's test injection points — the observers

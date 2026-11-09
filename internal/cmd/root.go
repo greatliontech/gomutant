@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/greatliontech/gomutant/internal/resident"
 	"github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/resident"
 	"github.com/spf13/cobra"
 )
 

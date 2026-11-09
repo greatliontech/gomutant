@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // The per-tree width is host width over the job count, floored at one

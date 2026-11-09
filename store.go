@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // Store is the two-layer findings persistence (REQ-result-layers): the

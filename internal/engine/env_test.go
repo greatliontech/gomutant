@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // TestComposedKeysReplaceTheAmbientEntryOnce is the property behind

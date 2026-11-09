@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/contextio"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // SchemaCache coalesces and caches compiled mutant-schema test binaries

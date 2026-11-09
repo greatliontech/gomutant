@@ -29,15 +29,15 @@ type funcDeclEntry struct {
 // ephemeral validation avoid repeated full-tree scans
 // (REQ-exec-ephemeral's validation arm).
 type buildSet struct {
-	once            sync.Once
-	packages        map[string]bool
-	basePackages    map[string]bool
-	files           map[string]bool
-	filePkg         map[string]string
-	pkgsByBase      map[string][]*packages.Package
-	pkgsBySymPath   map[string][]*packages.Package
-	funcsByObj      map[types.Object]funcDeclEntry
-	propertyImports map[string]map[string]bool
+	once               sync.Once
+	packages           map[string]bool
+	basePackages       map[string]bool
+	files              map[string]bool
+	filePkg            map[string]string
+	pkgsByBase         map[string][]*packages.Package
+	pkgsBySymPath      map[string][]*packages.Package
+	funcsByObj         map[types.Object]funcDeclEntry
+	propertyImports    map[string]map[string]bool
 	rtaOnce            sync.Once
 	rtaAdj             map[types.Object][]types.Object
 	rtaPkgInits        map[string][]types.Object

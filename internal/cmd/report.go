@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/resident"
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/resident"
 
 	"github.com/spf13/pflag"
 )

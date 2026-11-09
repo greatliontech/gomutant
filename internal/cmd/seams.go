@@ -3,8 +3,8 @@ package cmd
 import (
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/resident"
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/resident"
 )
 
 // commandSeams are the package's test injection points — the observer

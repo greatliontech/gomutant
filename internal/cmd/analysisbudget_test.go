@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/resident"
 	"github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/resident"
 )
 
 // The analysis budget defaults unbounded on the CLI face, like the

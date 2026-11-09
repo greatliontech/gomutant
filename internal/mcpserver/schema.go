@@ -4,8 +4,8 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/greatliontech/gomutant/internal/guidance"
 	"github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/guidance"
 )
 
 // knobbedTool is a tool whose input schema's every property

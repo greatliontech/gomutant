@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gomutant/internal/guidance"
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/guidance"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

@@ -10,8 +10,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/greatliontech/gomutant/internal/guidance"
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/guidance"
 )
 
 // guidanceSession is an in-memory client session over a fresh server.

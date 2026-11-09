@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // Shaped-target support: structural classes and manual recipes generate

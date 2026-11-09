@@ -699,12 +699,12 @@ func TestPlain(t *testing.T) {
 	// distinct packages.Load object instances.
 	wsDir := t.TempDir()
 	wsFiles := map[string]string{
-		"go.work":           "go 1.21\n\nuse (\n\t.\n\t./sub\n)\n",
-		"go.mod":            "module example.com/ws\n\ngo 1.21\n\nrequire example.com/ws/sub v0.0.0\n",
-		"root.go":           "package ws\n\nimport \"example.com/ws/sub\"\n\nfunc CallSub() int { return sub.Wrapper() }\n",
-		"root_test.go":      "package ws\n\nimport \"testing\"\n\nfunc TestCrossModule(t *testing.T) { _ = CallSub() }\n",
-		"sub/go.mod":        "module example.com/ws/sub\n\ngo 1.21\n",
-		"sub/sub.go":        "package sub\n\nfunc Wrapper() int { return InnerTarget() }\nfunc InnerTarget() int { return 7 }\nfunc Uncalled() int { return 9 }\n",
+		"go.work":      "go 1.21\n\nuse (\n\t.\n\t./sub\n)\n",
+		"go.mod":       "module example.com/ws\n\ngo 1.21\n\nrequire example.com/ws/sub v0.0.0\n",
+		"root.go":      "package ws\n\nimport \"example.com/ws/sub\"\n\nfunc CallSub() int { return sub.Wrapper() }\n",
+		"root_test.go": "package ws\n\nimport \"testing\"\n\nfunc TestCrossModule(t *testing.T) { _ = CallSub() }\n",
+		"sub/go.mod":   "module example.com/ws/sub\n\ngo 1.21\n",
+		"sub/sub.go":   "package sub\n\nfunc Wrapper() int { return InnerTarget() }\nfunc InnerTarget() int { return 7 }\nfunc Uncalled() int { return 9 }\n",
 	}
 	for name, content := range wsFiles {
 		path := filepath.Join(wsDir, name)

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gomutant/internal/gotool"
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // Both version surfaces state the binary identity and the findings

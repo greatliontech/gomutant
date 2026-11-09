@@ -9,7 +9,6 @@ import (
 	"io"
 	iofs "io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -18,9 +17,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/contextio"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // MutantOutcome classifies one overlay run.
@@ -1228,7 +1227,8 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		oracleFrame = captureOracleFrame(ctx, dir, packageDir, bracketPaths)
 	}
 	var stdout, stderr bytes.Buffer
-	var cmd *exec.Cmd
+	var procState *os.ProcessState
+	var procKilled, ranSchemaBin bool
 	var runErr error
 	if !wantCover {
 		if binPath, schemaPkgDir, ok := bounds.Schemas.findCompiled(dir, testPkg); ok {
@@ -1249,7 +1249,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 			}
 			baseExecEnv := oracleEnv(gotool.SetEnv(scratchEnv, "PWD", effectivePkgDir), bounds)
 			baseExecEnv = gotool.SetEnv(baseExecEnv, "GOMUTANT_ACTIVE_MUTANT", "")
-			cmd, err = prepareSchemaBinaryCommand(ctx2, effectivePkgDir, baseExecEnv, binPath, binArgs...)
+			cmd, err := prepareSchemaBinaryCommand(ctx2, effectivePkgDir, baseExecEnv, binPath, binArgs...)
 			if err != nil {
 				return Baseline{}, err
 			}
@@ -1259,10 +1259,13 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 			runErr = runOracleProcess(cmd, bounds)
 			conv.Exited(runErr)
 			_ = conv.Close()
+			procState = cmd.ProcessState
+			procKilled = oracleProcessKilled(cmd)
+			ranSchemaBin = true
 		}
 	}
-	if cmd == nil {
-		cmd, err = oracleCommand(ctx2, dir, oracleEnv(scratchEnv, bounds), args...)
+	if !ranSchemaBin {
+		cmd, err := oracleCommand(ctx2, dir, oracleEnv(scratchEnv, bounds), args...)
 		if err != nil {
 			return Baseline{}, err
 		}
@@ -1273,8 +1276,10 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		runErr = runOracleProcess(cmd, bounds)
+		procState = cmd.ProcessState
+		procKilled = oracleProcessKilled(cmd)
 	}
-	if wantCover && runErr != nil && !oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), ctx2) && !oracleRunCancelled(runErr, ctx2) {
+	if wantCover && runErr != nil && !oracleBudgetFired(runErr, procState, procKilled, ctx2) && !oracleRunCancelled(runErr, ctx2) {
 		// Coverage instrumentation can fail on packages that build and pass
 		// uninstrumented; retry without -coverprofile so an uninstrumentable
 		// package degrades coverage to unrecorded rather than failing a
@@ -1291,7 +1296,7 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 	// Sweep before finalization - the record captures the swept truth
 	// (see the mutant site).
 	sweepScratch()
-	if oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), ctx2) {
+	if oracleBudgetFired(runErr, procState, procKilled, ctx2) {
 		state, _, observationErr := processObservationContext(ctx, testlog, dir, "baseline test process timed out", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
 			return Baseline{}, observationErr

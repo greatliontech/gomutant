@@ -80,10 +80,10 @@ func NewRunLedger(store *Store, prior []Finding, runID string, wholeTree bool) *
 		wholeTree:   wholeTree,
 		PruneSymbol: pruneSymbol,
 		snapshot:    make(map[string][]Attestation, len(prior)),
-		overlaid:  make(map[string]bool, len(prior)),
-		postMerge: map[string]Finding{},
-		reported:  map[string]bool{},
-		routed:    Routing{},
+		overlaid:    make(map[string]bool, len(prior)),
+		postMerge:   map[string]Finding{},
+		reported:    map[string]bool{},
+		routed:      Routing{},
 	}
 	for _, f := range prior {
 		key := f.recordKeyString()

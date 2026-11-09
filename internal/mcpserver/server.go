@@ -18,9 +18,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/toolversion"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/gitref"
+	"github.com/greatliontech/gomutant/internal/toolversion"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -2244,18 +2244,18 @@ func (s *Server) toolRetarget(ctx context.Context, req *mcp.CallToolRequest, in 
 
 type ephemeralIn struct {
 	selectionIn
-	File             string               `json:"file,omitempty"`
-	Replacement      string               `json:"replacement,omitempty"`
-	Edits            []gomutant.Edit      `json:"edits,omitempty"`
-	BatchEdits       []gomutant.BatchEdit `json:"batch_edits,omitempty"`
-	TestPkg          string               `json:"test_pkg"`
-	Run              string               `json:"run"`
-	TimeoutSec       *int                 `json:"timeout_sec,omitempty"`
-	OracleMemoryMiB  *int64               `json:"oracle_memory_mib,omitempty"`
-	Runs             int                  `json:"runs,omitempty"`
-	Reattest         bool                 `json:"reattest,omitempty"`
-	Attest           string               `json:"attest,omitempty"`
-	Findings         string               `json:"findings,omitempty"`
+	File            string               `json:"file,omitempty"`
+	Replacement     string               `json:"replacement,omitempty"`
+	Edits           []gomutant.Edit      `json:"edits,omitempty"`
+	BatchEdits      []gomutant.BatchEdit `json:"batch_edits,omitempty"`
+	TestPkg         string               `json:"test_pkg"`
+	Run             string               `json:"run"`
+	TimeoutSec      *int                 `json:"timeout_sec,omitempty"`
+	OracleMemoryMiB *int64               `json:"oracle_memory_mib,omitempty"`
+	Runs            int                  `json:"runs,omitempty"`
+	Reattest        bool                 `json:"reattest,omitempty"`
+	Attest          string               `json:"attest,omitempty"`
+	Findings        string               `json:"findings,omitempty"`
 }
 
 // ephemeralOut is the probe result plus the attestation confirmation

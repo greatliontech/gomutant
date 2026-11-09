@@ -6390,8 +6390,8 @@ func TestRunKillsDeadlockingMutantImmediately(t *testing.T) {
 	}
 	dir := t.TempDir()
 	files := map[string]string{
-		"go.mod": "module example.com/deadlockmod\n\ngo 1.26\n",
-		"a/a.go": "package a\n\nimport \"sync\"\n\nvar mu sync.Mutex\n\nfunc Step(x int) int {\n\tmu.Lock()\n\tdefer mu.Unlock()\n\treturn x + 1\n}\n",
+		"go.mod":      "module example.com/deadlockmod\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nimport \"sync\"\n\nvar mu sync.Mutex\n\nfunc Step(x int) int {\n\tmu.Lock()\n\tdefer mu.Unlock()\n\treturn x + 1\n}\n",
 		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestStep(t *testing.T) {\n\tif Step(1) != 2 || Step(2) != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
 	}
 	for name, content := range files {
@@ -6524,4 +6524,3 @@ func TestUnrelatedErrIO(t *testing.T) {
 		t.Fatalf("second run decisions = %+v (finding Cached=%v), want PureAdd served from cache without sibling I/O test taint", secondDecisions, second[0].Cached)
 	}
 }
-

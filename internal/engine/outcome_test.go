@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gofresh"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 func TestOracleObservationBindsTheDeliveredMemoryEnvironment(t *testing.T) {

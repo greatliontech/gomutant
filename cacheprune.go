@@ -348,4 +348,3 @@ func writeBoundedBankFile(path string, data []byte) error {
 	}
 	return nil
 }
-

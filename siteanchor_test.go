@@ -288,4 +288,3 @@ func TestCarryAnchoredAttestationsPartition(t *testing.T) {
 		t.Fatalf("grandfathered adopt = kept %+v siteSheds %+v", kept, siteSheds)
 	}
 }
-

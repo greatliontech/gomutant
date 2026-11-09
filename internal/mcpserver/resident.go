@@ -4,8 +4,8 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/greatliontech/gomutant/internal/resident"
 	gomutant "github.com/greatliontech/gomutant"
+	"github.com/greatliontech/gomutant/internal/resident"
 )
 
 // The server's resident set is its working set, never its largest
