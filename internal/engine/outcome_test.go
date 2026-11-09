@@ -31,7 +31,6 @@ func TestOracleObservationBindsTheDeliveredMemoryEnvironment(t *testing.T) {
 import ("os"; "testing")
 func TestMemory(t *testing.T) {
  if got := os.Getenv("GOMEMLIMIT"); got != %q { t.Fatalf("memory environment = %%q", got) }
- if os.Getenv("TMPDIR") == "" { t.Fatal("missing delivered scratch directory") }
 }
 `, fmt.Sprint(soft)),
 	} {
@@ -56,9 +55,16 @@ func TestMemory(t *testing.T) {
 	if len(deliveredEnv) == 0 {
 		t.Fatal("the real oracle spawn was not observed")
 	}
+	if tmp, _ := gotool.LookupEnv(deliveredEnv, "TMPDIR"); tmp == "" {
+		t.Fatal("missing delivered scratch directory")
+	}
 	delivered, err := gofresh.CurrentRuntimeInputs(context.Background(), observation.Manifest, dir, deliveredEnv)
 	if err != nil || delivered.Digest != observation.Digest {
 		t.Fatalf("observation bound the parent environment instead of the delivered value: recorded=%+v delivered=%+v err=%v", observation.State, delivered, err)
+	}
+	parentInputs, err := gofresh.CurrentRuntimeInputs(context.Background(), observation.Manifest, dir, env)
+	if err != nil || parentInputs.Digest == observation.Digest {
+		t.Fatalf("observation unexpectedly matched parent GOMEMLIMIT environment: recorded=%+v parent=%+v err=%v", observation.State, parentInputs, err)
 	}
 	assertIdentityOnly(t, observation)
 }
