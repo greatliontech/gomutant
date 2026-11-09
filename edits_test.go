@@ -113,7 +113,11 @@ func TestMergeWholeFindingsPrunesAbsentSymbols(t *testing.T) {
 	pkgScoped := mergeOnly(MergeDiscoveredFindingsForSelection(prior, fresh, []Target{{Symbol: "p.Present"}}, nil, "", func(symbol string) bool {
 		return strings.HasPrefix(symbol, "p.")
 	}))
-	if len(pkgScoped) != 2 || pkgScoped[0].Symbol != "p.Present" || pkgScoped[1].Symbol != "other.Kept" {
+	pkgBySym := map[string]string{}
+	for _, f := range pkgScoped {
+		pkgBySym[f.Symbol] = f.BodyHash
+	}
+	if len(pkgScoped) != 2 || pkgBySym["p.Present"] != "new" || pkgBySym["other.Kept"] != "other" {
 		t.Fatalf("package-scoped discovery merge = %+v, want p.Deleted pruned and other.Kept retained", pkgScoped)
 	}
 	dottedFindings := []Finding{
