@@ -20,6 +20,7 @@ import (
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/gotool"
+	"github.com/greatliontech/gomutant/internal/trace"
 )
 
 // MutantOutcome classifies one overlay run.
@@ -481,7 +482,19 @@ func memoryDecidedKill(stream []byte) bool {
 // kill's output carries the memory-exhaustion signature — an
 // out-parameter so the six-way return tuple does not widen for a fact
 // only the observed campaign path consumes.
-func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool, bounds OracleBounds) (MutantOutcome, string, gofresh.Observation, string, string, error) {
+func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool, bounds OracleBounds) (retOutcome MutantOutcome, retKiller string, retState gofresh.Observation, retIncomplete, retDiagnostic string, retErr error) {
+	t0 := time.Now()
+	usedSchema := false
+	defer func() {
+		trace.Emit(ctx, trace.DomainOracle, "run_mutant", strings.Join(testPkgs, ","),
+			trace.String("schema_id", m.SchemaMutantID),
+			trace.Bool("schema_bin", usedSchema),
+			trace.Int("outcome", int(retOutcome)),
+			trace.String("killer", retKiller),
+			trace.Int64("duration_ms", time.Since(t0).Milliseconds()),
+			trace.Err(retErr),
+		)
+	}()
 	if err := ctx.Err(); err != nil {
 		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
@@ -505,6 +518,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 				return MutantDiscarded, "", gofresh.Observation{}, "", "", ctx.Err()
 			}
 		} else {
+			usedSchema = true
 			return runSchemaBinary(ctx, dir, binPath, pkgDir, m, testPkgs[0], runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink, memoryDecided, bounds)
 		}
 	}
@@ -1185,6 +1199,7 @@ func TestBaselineObservedEnv(ctx context.Context, dir, testPkg, run string, time
 }
 
 func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
+	t0 := time.Now()
 	// The oracle bound carries its own cause exactly as the mutant
 	// run's: a parent expiry must read as cancellation, never as the
 	// oracle bound firing (REQ-exec-attribution).
@@ -1345,6 +1360,13 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		result.Failed = append(append([]string(nil), stream.failed...), stream.truncated...)
 		result.Diagnostic = failedTestsDiagnostic(stream)
 	}
+	trace.Emit(ctx, trace.DomainOracle, "baseline_probe", testPkg,
+		trace.String("run", run),
+		trace.Bool("schema_bin", ranSchemaBin),
+		trace.Bool("passed", result.Passed),
+		trace.Int("ran", result.Ran),
+		trace.Int64("duration_ms", time.Since(t0).Milliseconds()),
+	)
 	return result, nil
 }
 

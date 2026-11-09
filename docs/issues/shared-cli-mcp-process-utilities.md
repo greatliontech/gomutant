@@ -16,3 +16,4 @@ Evaluate extracting the duplicated non-freshness CLI/MCP/process utilities share
 3. `internal/toolversion` (VCS build-info version string formatting)
 4. `internal/shortgates` and `internal/shapecorpus` (test-suite gate discipline and Go language-shape canary fixtures)
 5. `internal/gotool` (process-group containment, `go env -json` snapshot caching, and command preparation)
+6. `internal/trace` (zero-disabled-cost structured diagnostic tracing interleaved with `gofresh` via `GOFRESH_TRACE` / `GOFRESH_TRACE_FILE`)

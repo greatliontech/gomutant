@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	gofresh "github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/trace"
 )
 
 // FindingState classifies whether a persisted finding still addresses the
@@ -334,6 +336,7 @@ func (t *Tree) buildSubjectViews(ctx context.Context, symbols []string, packageC
 // hook's argument (the requested set, unresolvable symbols included),
 // never read for the build itself.
 func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups []moduleGroup, engines *subjectEngines, faults map[string]error) (*subjectViewSet, error) {
+	t0 := time.Now()
 	if seams.subjectViewBuild != nil {
 		seams.subjectViewBuild(requested)
 	}
@@ -424,6 +427,14 @@ func (t *Tree) buildGroupViews(ctx context.Context, requested []string, groups [
 			}
 		}
 	}
+	trace.Emit(ctx, trace.DomainPrepare, "build_group_views", t.dir,
+		trace.Int("requested", len(requested)),
+		trace.Int("groups", len(groups)),
+		trace.Int("resolved", len(set.bySymbol)),
+		trace.Int("faults", len(faults)),
+		trace.Bool("package_process", engines.packageProcess),
+		trace.Int64("duration_ms", time.Since(t0).Milliseconds()),
+	)
 	return set, nil
 }
 
@@ -1047,6 +1058,8 @@ func (t *Tree) InspectFindings(ctx context.Context, findings []Finding, progress
 // every record's outcome; a judged view stops at the first record
 // error, as its per-record loop did.
 func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress func(stage string), bestEffort bool) ([]FindingInspection, []error, error) {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
+	t0 := time.Now()
 	t.ensureExplicitTestdataFindings(ctx, findings)
 	report := func(stage string) {
 		if progress != nil {
@@ -1116,6 +1129,10 @@ func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress
 		}
 		out[i] = withCandidateEvidence(inspection, f)
 	}
+	trace.Emit(ctx, trace.DomainReconcile, "inspect_findings", t.dir,
+		trace.Int("findings", len(findings)),
+		trace.Int64("duration_ms", time.Since(t0).Milliseconds()),
+	)
 	return out, errs, ctx.Err()
 }
 

@@ -4,9 +4,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/resident"
+	"github.com/greatliontech/gomutant/internal/trace"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +21,7 @@ func Execute(args []string) error {
 
 // ExecuteContext runs the gomutant command tree with args and cancellation.
 func ExecuteContext(ctx context.Context, args []string) error {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
 	ctx, stop := withSoftInterrupt(ctx)
 	defer stop()
 	cmd := newRootCommand()

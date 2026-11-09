@@ -19,6 +19,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/greatliontech/gomutant/internal/trace"
 )
 
 const maxCandidatesPerSchema = 256
@@ -693,6 +696,7 @@ func candidateMayStrandImport(catalog *catalog, edits []sourceEdit, alwaysProces
 }
 
 func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, specs []candidateSpec, candidates []Candidate) {
+	t0 := time.Now()
 	if catalog == nil || catalog.fd == nil || catalog.fd.Body == nil || catalog.fd.Name == nil ||
 		catalog.file == nil || catalog.tokens == nil || catalog.pkg == nil || catalog.pkg.Types == nil {
 		return
@@ -886,6 +890,11 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 			candidates[idx].schemaPiece = piece
 		}
 	}
+	trace.Emit(ctx, trace.DomainSchema, "attach_symbol_schema", symbol,
+		trace.Int("candidates", len(candidates)),
+		trace.Int("arms", len(arms)),
+		trace.Int64("duration_ms", time.Since(t0).Milliseconds()),
+	)
 }
 
 // MergeCandidateSchemas merges per-symbol mutant schemas across all candidate
@@ -894,6 +903,7 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 // `go test -c -overlay` compiles bounded package binaries across mutated
 // functions in that package.
 func MergeCandidateSchemas(groups ...[]Candidate) {
+	t0 := time.Now()
 	byPkg := map[string][]*funcSchemaPiece{}
 	seenPiece := map[*funcSchemaPiece]bool{}
 	for _, group := range groups {
@@ -987,4 +997,9 @@ func MergeCandidateSchemas(groups ...[]Candidate) {
 			}
 		}
 	}
+	trace.Emit(context.Background(), trace.DomainSchema, "merge_schemas", "",
+		trace.Int("groups", len(groups)),
+		trace.Int("packages", len(byPkg)),
+		trace.Int64("duration_ms", time.Since(t0).Milliseconds()),
+	)
 }

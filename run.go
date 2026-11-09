@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	iofs "io/fs"
+	"os"
 	"runtime"
 	"slices"
 	"sort"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/trace"
 	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
@@ -837,6 +839,13 @@ func SummarizeRun(findings []Finding, sel Selection, packageOf func(string) stri
 // cannot attribute an outcome aborts without findings
 // (REQ-core-attributed-kills).
 func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Finding, error) {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
+	t0 := time.Now()
+	trace.Emit(ctx, trace.DomainPrepare, "run_start", t.dir,
+		trace.Int("targets", len(targets)),
+		trace.Int("prior", len(caller.Prior)),
+		trace.Bool("plan_only", caller.PlanOnly),
+	)
 	t.ensureExplicitTestdataTargets(ctx, targets)
 	// The run counts itself: the tallies are installed on the caller's
 	// callbacks and delivered on every exit once measurement began, and
@@ -850,6 +859,13 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 	if caller.Tallies != nil && (started || err == nil || errors.As(err, &drift)) {
 		caller.Tallies(tally)
 	}
+	trace.Emit(ctx, trace.DomainReconcile, "run_done", t.dir,
+		trace.Int("findings", len(findings)),
+		trace.Int("cached", tally.Served),
+		trace.Int("selected", tally.Selected),
+		trace.Int64("duration_ms", time.Since(t0).Milliseconds()),
+		trace.Err(err),
+	)
 	return findings, err
 }
 
@@ -1069,6 +1085,10 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	skipTarget := func(i int, reason string, emit bool) {
 		findings[i].Skipped = reason
 		decisions[i] = RunDecision{Symbol: targets[i].Symbol, Action: "skipped", Reason: reason}
+		trace.Emit(ctx, trace.DomainReconcile, "target_decision", targets[i].Symbol,
+			trace.String("action", "skipped"),
+			trace.String("reason", reason),
+		)
 		if emit && opts.Decision != nil {
 			opts.Decision(decisions[i])
 		}
@@ -1093,6 +1113,10 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// the shared measure-decision path instead, carrying its count.)
 	cacheTarget := func(i int, reason string) {
 		decisions[i] = RunDecision{Symbol: targets[i].Symbol, Action: "cached", Reason: reason}
+		trace.Emit(ctx, trace.DomainReconcile, "target_decision", targets[i].Symbol,
+			trace.String("action", "cached"),
+			trace.String("reason", reason),
+		)
 		if opts.Decision != nil {
 			opts.Decision(decisions[i])
 		}

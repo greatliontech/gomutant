@@ -13,6 +13,7 @@ import (
 
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/trace"
 )
 
 // CampaignInputs is what a findings-producing run knows at its flag
@@ -136,6 +137,7 @@ func ValidateTargetSources(given []string) error {
 // lock's file outlives its holder by design, so no refusal may follow
 // it. A run that fails any of them pays nothing (REQ-exec-preparation).
 func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparation, error) {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
 	if err := validateRunBounds(in.Budget, in.OracleTimeout, in.AnalysisBudget); err != nil {
 		return nil, err
 	}
@@ -215,6 +217,10 @@ func PrepareCampaign(ctx context.Context, in CampaignInputs) (*CampaignPreparati
 			return nil, err
 		}
 	}
+	trace.Emit(ctx, trace.DomainPrepare, "prepare_campaign", in.ModuleDir,
+		trace.Int("prior", len(prior)),
+		trace.Bool("plan", in.Plan),
+	)
 	return &CampaignPreparation{ScratchNamespaces: scratch, Vouches: vouches, Exemptions: store.Exemptions(), Store: store, Prior: prior, Request: request, ReleaseCampaign: release}, nil
 }
 
