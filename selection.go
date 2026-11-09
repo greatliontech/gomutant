@@ -130,14 +130,16 @@ type SelectionRequest struct {
 
 // TargetSelection is a resolved selection: the targets after the
 // filters, the changed-scope residue, the survivor cut when asked for,
-// and whether the selection is the whole tree — no source
-// and no filter — the form whose final write reconciles the document
+// whether the selection is the whole tree — no source and no filter —
+// and PruneSymbol, the predicate naming which symbols belong to the
+// run's complete discovery scope for deleted-symbol reconciliation
 // (REQ-result-hygiene).
 type TargetSelection struct {
-	Targets   []Target
-	Residue   []Residue
-	Cut       *DeltaCut
-	WholeTree bool
+	Targets     []Target
+	Residue     []Residue
+	Cut         *DeltaCut
+	WholeTree   bool
+	PruneSymbol func(string) bool
 }
 
 // SelectTargets is the one target-source dispatch every face's run and
@@ -169,12 +171,36 @@ func (t *Tree) SelectTargets(ctx context.Context, req SelectionRequest) (TargetS
 			return sel, err
 		}
 		sel.WholeTree = true
+		sel.PruneSymbol = func(string) bool { return true }
 	}
 	if sel.Targets, err = t.FilterTargets(ctx, sel.Targets, req.Packages, req.Symbols); err != nil {
 		return sel, err
 	}
 	if len(req.Packages) != 0 || len(req.Symbols) != 0 {
 		sel.WholeTree = false
+		if !req.TargetsGiven && req.Changed == nil && len(req.Symbols) == 0 {
+			packages, _, err := compileTargetFilters(ctx, req.Packages, nil)
+			if err != nil {
+				return sel, err
+			}
+			sel.PruneSymbol = func(symbol string) bool {
+				pkg, ok := strings.CutSuffix(symbol, "._")
+				if !ok {
+					pkg = t.PackageOf(symbol)
+				}
+				if pkg == "" {
+					return false
+				}
+				for _, pattern := range packages {
+					if pattern.Match(pkg) {
+						return true
+					}
+				}
+				return false
+			}
+		} else {
+			sel.PruneSymbol = nil
+		}
 	}
 	return sel, nil
 }

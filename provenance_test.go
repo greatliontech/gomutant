@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
 
@@ -212,7 +211,7 @@ func TestStampServedProvenanceCoversEvidenceRuntimeInputs(t *testing.T) {
 	if commit, err := repository.currentCommitContext(context.Background()); err != nil || commit == "" {
 		t.Fatalf("stamp-time commit = %q, %v", commit, err)
 	}
-	observed, err := runtimeinput.FromTestLog([]byte("open data/input.txt\n"), root, moduleDir, os.Environ(), runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	observed, err := gofresh.FromTestLog([]byte("open data/input.txt\n"), root, moduleDir, os.Environ(), gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +325,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	aliasInput := filepath.Join(alias, "m", "data", "input.txt")
-	observed, err := runtimeinput.FromTestLog([]byte("open "+aliasInput+"\n"), root, moduleDir, os.Environ(), runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	observed, err := gofresh.FromTestLog([]byte("open "+aliasInput+"\n"), root, moduleDir, os.Environ(), gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +356,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	runGit("commit", "-q", "-m", "tracked link")
 	repository = mustRepositoryState(t, root)
 	aliasLinkInput := filepath.Join(alias, "m", "link", "input.txt")
-	linkObserved, err := runtimeinput.FromTestLog([]byte("open "+aliasLinkInput+"\n"), root, moduleDir, os.Environ(), runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	linkObserved, err := gofresh.FromTestLog([]byte("open "+aliasLinkInput+"\n"), root, moduleDir, os.Environ(), gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +401,7 @@ func TestStampJudgesAliasFormIdentitiesByPhysicalPath(t *testing.T) {
 	if err := os.Remove(input); err != nil {
 		t.Fatal(err)
 	}
-	deletedObserved, err := runtimeinput.FromTestLog([]byte("open "+aliasInput+"\n"), root, moduleDir, os.Environ(), runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	deletedObserved, err := gofresh.FromTestLog([]byte("open "+aliasInput+"\n"), root, moduleDir, os.Environ(), gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +606,7 @@ func TestStampAsksGitAboutTheLinkAnOutsideIdentityTraverses(t *testing.T) {
 	if !repository.available {
 		t.Fatalf("repository state = %+v", repository)
 	}
-	observed, err := runtimeinput.FromTestLog([]byte("open "+filepath.Join(link, "input.txt")+"\n"), root, moduleDir, os.Environ(), runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	observed, err := gofresh.FromTestLog([]byte("open "+filepath.Join(link, "input.txt")+"\n"), root, moduleDir, os.Environ(), gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}

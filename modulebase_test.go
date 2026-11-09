@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 )
 
 func relManifest(paths ...string) string {
@@ -144,7 +144,7 @@ func TestFreshMeasureStampsDirtyForUntrackedInputBelowRepositoryRoot(t *testing.
 	if findings[0].TargetEvidence.ModuleBase != "" || findings[0].OracleEvidence[0].ModuleBase != "" {
 		t.Fatalf("tree-anchored evidence carries a module base: %q/%q", findings[0].TargetEvidence.ModuleBase, findings[0].OracleEvidence[0].ModuleBase)
 	}
-	paths, err := runtimeinput.Paths(findings[0].OracleEvidence[0].RuntimeInputs, root)
+	paths, err := gofresh.RuntimeInputPaths(findings[0].OracleEvidence[0].RuntimeInputs, root)
 	if err != nil {
 		t.Fatal(err)
 	}

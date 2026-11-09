@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -48,20 +48,20 @@ type runSeams struct {
 	// a test can observe the executed patterns — the exemption's one
 	// direct observable is which patterns ran (the exempt remainder's
 	// never appears outside the audit's full runs).
-	runMutantObserved func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error)
+	runMutantObserved func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error)
 	// baselineProbe is the baseline a group pays once: its preparation
 	// baseline, served from the bank when the tree is unchanged, under
 	// the leash the bank lifts and the producer-probe gate held shared
 	// — one seam, so a test counting or bounding the banked baselines
 	// counts every one and neither a kill's (killGround) nor an
 	// advisory's (advisoryProbe).
-	baselineProbe func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error)
+	baselineProbe func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error)
 	// advisoryProbe is the solo-test probe of oracle guidance's
 	// instability attribution — one per oracle test under the group's
 	// advisory leash, ungated and never banked, best-effort: a stub sees
 	// every probe an attribution pays and a counter of banked baselines
 	// never counts one.
-	advisoryProbe func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error)
+	advisoryProbe func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, gofresh.Observation, error)
 	// killGround is the baseline a kill is judged against — the
 	// phase-pattern vouch on a scheduled kill, and the killer-scoped
 	// differential ground a serial confirmation is scored against — a
@@ -70,7 +70,7 @@ type runSeams struct {
 	// stubbing the group baselines leaves no kill judged for real
 	// behind its back, and one counting banked baselines never counts
 	// a kill's.
-	killGround func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error)
+	killGround func(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error)
 	// probeGateInstalled observes the run's producer-probe gate at its
 	// installation: a test holds the gate's handle and pins, from
 	// inside a confirmation, that the confirmation runs under the gate

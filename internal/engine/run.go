@@ -9,6 +9,7 @@ import (
 	"io"
 	iofs "io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -17,8 +18,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/gotool"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/contextio"
 )
 
@@ -404,13 +405,13 @@ func outputTailLine(stream []byte, keep func(pkg, test, line string) bool) strin
 // The third return reports a memory-decided kill: the oracle memory
 // ceiling decided this verdict, so the record must pin the exact
 // ceiling rather than serve directionally (REQ-exec-oracle-memory).
-func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, bounds OracleBounds) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+func RunMutantObserved(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, bounds OracleBounds) (MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, GoEnv(dir), bounds)
 }
 
 // RunMutantObservedEnv is RunMutantObserved under an already-frozen complete
 // environment.
-func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds OracleBounds) (MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 	return runMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 }
 
@@ -419,7 +420,7 @@ func RunMutantObservedEnv(ctx context.Context, dir string, m Mutant, testPkgs []
 // discovery-then-score double execution and its evidence-drift
 // comparison are retired - bracket verdicts are the truth
 // (REQ-exec-observation).
-func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+func runMutant(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds OracleBounds) (MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 	var memoryDecided bool
 	outcome, killer, state, incomplete, diagnostic, err := runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, nil, &memoryDecided, bounds)
 	return outcome, killer, memoryDecided, state, incomplete, diagnostic, err
@@ -437,7 +438,7 @@ func RunMutantBaselineDirEnv(ctx context.Context, dir, baselineDir string, m Mut
 	return outcome, killer, memoryDecided, diagnostic, err
 }
 
-func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool, bounds OracleBounds) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+func runMutantOnce(ctx context.Context, dir string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool, bounds OracleBounds) (MutantOutcome, string, gofresh.Observation, string, string, error) {
 	return runMutantBase(ctx, dir, "", nil, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink, memoryDecided, bounds)
 }
 
@@ -481,9 +482,9 @@ func memoryDecidedKill(stream []byte) bool {
 // kill's output carries the memory-exhaustion signature — an
 // out-parameter so the six-way return tuple does not widen for a fact
 // only the observed campaign path consumes.
-func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool, bounds OracleBounds) (MutantOutcome, string, runtimeinput.Observation, string, string, error) {
+func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []string, m Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, sink *bytes.Buffer, memoryDecided *bool, bounds OracleBounds) (MutantOutcome, string, gofresh.Observation, string, string, error) {
 	if err := ctx.Err(); err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	// A capture is requested by naming the oracle's module and package
 	// directories; the frame itself anchors at dir, the tree root
@@ -496,13 +497,13 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		// observation silently covering one package - refused instead.
 		// Campaign groups are single-package; this guards the exported
 		// engine API (REQ-exec-observation).
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", fmt.Errorf("observed mutant runs cover one test package per process: %d packages requested with observation enabled; run per package and merge the observations", len(testPkgs))
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", fmt.Errorf("observed mutant runs cover one test package per process: %d packages requested with observation enabled; run per package and merge the observations", len(testPkgs))
 	}
 	if canUseSchemaBinary(m, testPkgs, baselineDir, bounds) {
 		binPath, pkgDir, cerr := bounds.Schemas.getOrCompile(ctx, dir, packageDir, testPkgs[0], m.SchemaKey, m.SchemaReplacements, env, bounds)
 		if cerr != nil {
 			if ctx.Err() != nil {
-				return MutantDiscarded, "", runtimeinput.Observation{}, "", "", ctx.Err()
+				return MutantDiscarded, "", gofresh.Observation{}, "", "", ctx.Err()
 			}
 		} else {
 			return runSchemaBinary(ctx, dir, binPath, pkgDir, m, testPkgs[0], runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, sink, memoryDecided, bounds)
@@ -510,34 +511,34 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	}
 	tmp, err := os.MkdirTemp("", "gomutant-*")
 	if err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	defer os.RemoveAll(tmp)
 	scratchEnv, scratchRoot, sweepScratch, removeScratch, err := oracleScratch(env)
 	if err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	defer removeScratch()
 	if len(m.Replacements) == 0 {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", fmt.Errorf("mutant has no file replacements")
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", fmt.Errorf("mutant has no file replacements")
 	}
 	replace := make(map[string]string, len(m.Replacements))
 	for i, replacement := range m.Replacements {
 		if err := ctx.Err(); err != nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 		}
 		if replacement.File == "" || replacement.Source == nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", fmt.Errorf("mutant replacement %d is incomplete", i+1)
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", fmt.Errorf("mutant replacement %d is incomplete", i+1)
 		}
 		if _, duplicate := replace[replacement.File]; duplicate {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", fmt.Errorf("mutant replaces %s more than once", replacement.File)
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", fmt.Errorf("mutant replaces %s more than once", replacement.File)
 		}
 		mutFile := filepath.Join(tmp, fmt.Sprintf("replacement-%d%s", i, filepath.Ext(replacement.File)))
 		if err := contextio.WriteFile(ctx, mutFile, replacement.Source, 0o644); err != nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 		}
 		if err := ctx.Err(); err != nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 		}
 		replace[replacement.File] = mutFile
 	}
@@ -546,16 +547,16 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		Replace map[string]string
 	}{Replace: replace})
 	if err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	if err := ctx.Err(); err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	if err := contextio.WriteFile(ctx, overlay, oj, 0o644); err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	if err := ctx.Err(); err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 
 	parent := ctx
@@ -579,13 +580,13 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		args = append(args, "-test.testlogfile="+testlog)
 		baseArgs = append(baseArgs, "-test.testlogfile="+baseTestlog)
 	}
-	var oracleFrame runtimeinput.ProducerFrame
+	var oracleFrame gofresh.ProducerFrame
 	if capture {
 		oracleFrame = captureOracleFrame(ctx, dir, packageDir, bracketPaths)
 	}
 	cmd, err := oracleCommand(runCtx, dir, oracleEnv(scratchEnv, bounds), args...)
 	if err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	// The sink, when given, receives the mutant run's raw -json stream -
 	// the evidence surface RunMutantEvidenceEnv derives kill output from.
@@ -596,12 +597,15 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	var stderr bytes.Buffer
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
+	leavePkgDir := enterPkgDir(bounds.Schemas, packageDir, dir, namespaces)
+	defer leavePkgDir()
 	runErr := runOracleProcess(cmd, bounds)
 	// The sweep precedes observation finalization: the evidence union
 	// merges this observation with the probes' under revalidation, and
 	// a content digest of a swept file would read moved - the input's
 	// paths dropped and the union stamped unverifiable.
 	sweepScratch()
+	leavePkgDir()
 
 	if oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), runCtx) {
 		state, incomplete, err := processObservationContext(ctx, testlog, dir, "mutant test process timed out", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
@@ -610,7 +614,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	if oracleRunCancelled(runErr, runCtx) {
 		state, incomplete, observationErr := processObservationContext(ctx, testlog, dir, "mutant test process was cancelled", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", observationErr
 		}
 		return MutantDiscarded, "", state, incomplete, "", ctx.Err()
 	}
@@ -618,7 +622,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	if parseErr != nil {
 		state, incomplete, observationErr := processObservationContext(ctx, testlog, dir, "go test output was malformed before observation finalization", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 		if observationErr != nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", observationErr
 		}
 		return MutantDiscarded, "", state, incomplete, "", fmt.Errorf("parse go test output: %w", parseErr)
 	}
@@ -641,7 +645,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 		// build-configuration pins (REQ-result-stale). The diagnostic
 		// carries the compiler's text for interactive surfaces.
 		markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", buildDiagnostic, nil
+		return MutantDiscarded, "", gofresh.Observation{}, "", buildDiagnostic, nil
 	case killer != "":
 		reason := ""
 		if testProcessPanicked(stdout.Bytes()) || !testFailureCompleted(stdout.Bytes(), killer) {
@@ -678,16 +682,16 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	}
 	baseScratchEnv, baseScratchRoot, sweepBaseScratch, removeBaseScratch, err := oracleScratch(effectiveBaselineEnv)
 	if err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	defer removeBaseScratch()
-	var baselineFrame runtimeinput.ProducerFrame
+	var baselineFrame gofresh.ProducerFrame
 	if capture {
 		baselineFrame = captureOracleFrame(ctx, dir, packageDir, bracketPaths)
 	}
 	base, err := oracleCommand(baseCtx, baseDir, oracleEnv(baseScratchEnv, bounds), baseArgs...)
 	if err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	baseErr := runOracleProcess(base, bounds)
 	// Sweep before finalization - the record captures the swept truth
@@ -696,16 +700,16 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	sweepBaseScratch()
 	mutantState, mutantIncomplete, err := processObservationContext(ctx, testlog, dir, "mutant test process exited before observation finalization", env, scratchRoot, capture, oracleFrame, namespaces, bounds)
 	if err != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 	}
 	if baseCtx.Err() != nil {
 		baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process did not complete", effectiveBaselineEnv, baseScratchRoot, capture, baselineFrame, namespaces, bounds)
 		if observationErr != nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", observationErr
 		}
 		state, mergeErr := mergeProcessObservationsContext(ctx, dir, env, capture, bounds, mutantState, baselineState)
 		if mergeErr != nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", mergeErr
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", mergeErr
 		}
 		// A cancelled parent is campaign cancellation and stays fatal
 		// (REQ-exec-cancellation). The probe hitting the ORACLE timeout
@@ -725,7 +729,7 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	if baseErr == nil {
 		baselineState, _, err := processObservationContext(ctx, baseTestlog, dir, "", effectiveBaselineEnv, baseScratchRoot, capture, baselineFrame, namespaces, bounds)
 		if err != nil {
-			return MutantDiscarded, "", runtimeinput.Observation{}, "", "", err
+			return MutantDiscarded, "", gofresh.Observation{}, "", "", err
 		}
 		state, err := mergeProcessObservationsContext(ctx, dir, env, capture, bounds, mutantState, baselineState)
 		killer := PackageKillerPrefix + "unattributed crash)"
@@ -741,11 +745,11 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 	// orchestration state (REQ-exec-attribution).
 	baselineState, _, observationErr := processObservationContext(ctx, baseTestlog, dir, "baseline test process failed before observation finalization", effectiveBaselineEnv, baseScratchRoot, capture, baselineFrame, namespaces, bounds)
 	if observationErr != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", observationErr
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", observationErr
 	}
 	state, mergeErr := mergeProcessObservationsContext(ctx, dir, env, capture, bounds, mutantState, baselineState)
 	if mergeErr != nil {
-		return MutantDiscarded, "", runtimeinput.Observation{}, "", "", mergeErr
+		return MutantDiscarded, "", gofresh.Observation{}, "", "", mergeErr
 	}
 	diagnostic := fmt.Sprintf("unclassifiable mutant-run failure: the baseline probe failed alongside the mutant (environmental noise, not a kill): %v: %s", runErr, tail(stderr.String()+stdout.String(), 400))
 	markMemoryDecided(memoryDecided, stdout.Bytes(), stderr.Bytes())
@@ -772,14 +776,14 @@ func runMutantBase(ctx context.Context, dir, baselineDir string, baselineEnv []s
 // portable in the committed document, and a relative bracket path is
 // one declared surface for every module's oracles (REQ-exec-observation,
 // REQ-result-layers). A single-module tree's root is its module.
-func captureOracleFrame(ctx context.Context, treeRoot, packageDir string, bracketPaths []string) runtimeinput.ProducerFrame {
+func captureOracleFrame(ctx context.Context, treeRoot, packageDir string, bracketPaths []string) gofresh.ProducerFrame {
 	// A relative tree root (a library caller's spelling) is the process
 	// working directory's: the facade's containment check compares
 	// resolved absolute paths.
 	if abs, err := filepath.Abs(treeRoot); err == nil {
 		treeRoot = abs
 	}
-	return runtimeinput.CaptureProducerFrame(ctx, treeRoot, packageDir, runtimeinput.FrameOptions{
+	return gofresh.CaptureProducerFrame(ctx, treeRoot, packageDir, gofresh.FrameOptions{
 		BracketPaths:  bracketPaths,
 		ExcludedPaths: oracleBookkeepingPaths,
 	})
@@ -803,7 +807,7 @@ func captureOracleFrame(ctx context.Context, treeRoot, packageDir string, bracke
 // the go command (gotool.EnvForCommand) — and the facade normalizes
 // the mirror before reading it, so the entry's position carries
 // nothing.
-func oracleIngestEnv(env []string, frame runtimeinput.ProducerFrame, bounds OracleBounds) []string {
+func oracleIngestEnv(env []string, frame gofresh.ProducerFrame, bounds OracleBounds) []string {
 	if frame.PkgDir == "" {
 		return OracleEvidenceEnv(env, bounds)
 	}
@@ -854,8 +858,8 @@ func CompilerCrashed(diagnostic string) bool {
 // A producer runs it once before the first spawn so nothing a spawn
 // would seal on passes preparation (REQ-exec-observation).
 func PreflightBracket(ctx context.Context, treeRoot string, bracketPaths []string) error {
-	bracket, err := runtimeinput.CaptureBracket(ctx, treeRoot, bracketPaths,
-		runtimeinput.WithBracketExcludedPaths(append([]string{".git"}, oracleBookkeepingPaths...)...))
+	bracket, err := gofresh.CaptureBracket(ctx, treeRoot, bracketPaths,
+		gofresh.WithBracketExcludedPaths(append([]string{".git"}, oracleBookkeepingPaths...)...))
 	if err != nil {
 		return err
 	}
@@ -872,16 +876,16 @@ func PreflightBracket(ctx context.Context, treeRoot string, bracketPaths []strin
 // observation that later fails absolute finalization keeps an empty reason
 // because that is input movement, which stays finding-wide
 // (REQ-exec-observation).
-func processObservationContext(ctx context.Context, path, treeRoot, incompleteReason string, env []string, scratchRoot string, capture bool, frame runtimeinput.ProducerFrame, namespaces []runtimeinput.ScratchNamespace, bounds OracleBounds) (runtimeinput.Observation, string, error) {
+func processObservationContext(ctx context.Context, path, treeRoot, incompleteReason string, env []string, scratchRoot string, capture bool, frame gofresh.ProducerFrame, namespaces []gofresh.ScratchNamespace, bounds OracleBounds) (gofresh.Observation, string, error) {
 	if abs, err := filepath.Abs(treeRoot); err == nil {
 		treeRoot = abs
 	}
 	moduleDir := treeRoot
 	if err := ctx.Err(); err != nil {
-		return runtimeinput.Observation{}, "", err
+		return gofresh.Observation{}, "", err
 	}
 	if !capture {
-		return runtimeinput.Observation{}, "", nil
+		return gofresh.Observation{}, "", nil
 	}
 	// A captured observation without the minted scratch root would let
 	// the facade fall back to the environment's temp root — a foreign
@@ -889,16 +893,17 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	// REQ-exec-oracle-scratch-declared forbids; the ingest refuses
 	// instead, so the fail-safe is this producer's own.
 	if scratchRoot == "" {
-		return runtimeinput.Observation{}, "", fmt.Errorf("oracle observation without a minted scratch root")
+		return gofresh.Observation{}, "", fmt.Errorf("oracle observation without a minted scratch root")
 	}
 	// The facade owns the fold discipline (caller verdict, missing or
 	// unreadable or headerless capture, refused frame, PWD mismatch,
 	// ingestion failure), the ingest exclusions (extended below with the
 	// tool-bookkeeping surfaces the frame excludes), and every
 	// classification root but one, resolved from the environment it is
-	// handed. The environment carries the minted TMPDIR as delivered;
-	// declaring its filesystem root ephemeral does not erase a read of the
-	// environment variable's value.
+	// handed. The ingest environment omits the per-process scratch TMPDIR
+	// override so env-read guards bind against the run's ambient environment,
+	// while ScratchRoot declares the minted directory as an ephemeral
+	// filesystem root.
 	// Resource settings remain verbatim: a logged GOMEMLIMIT read pins the
 	// delivered value even when the memory-budget comparison is directional.
 	// Every other divergence would silently vacate
@@ -910,62 +915,58 @@ func processObservationContext(ctx context.Context, path, treeRoot, incompleteRe
 	// the root as an uncovered
 	// runtime input and seals verifiability for every temp-touching
 	// oracle (REQ-exec-oracle-scratch-declared).
-	ingestEnv := oracleIngestEnv(gotool.SetEnv(env, "TMPDIR", scratchRoot), frame, bounds)
-	completion, err := frame.Completion(path, ingestEnv, incompleteReason)
-	if err != nil {
-		return runtimeinput.Observation{}, "", err
-	}
+	ingestEnv := oracleIngestEnv(env, frame, bounds)
 	// The analyzed source is the unmutated tree. It supplies no outcome
 	// capability for a transformed executable, and a baseline cannot lend one
 	// to a mutant. Finalize input guards without claiming operation outcomes.
-	observation, reason, err := frame.ObserveInputs(ctx, path, runtimeinput.ProducerIngest{
+	observation, reason, err := frame.ObserveInputs(ctx, path, gofresh.ProducerIngest{
 		Identity:          path,
 		Env:               ingestEnv,
-		Runner:            goRunner,
+		PrepareCommand:    goRunner.PrepareCommand,
 		Roots:             bounds.Roots,
-		Completion:        completion,
+		IncompleteReason:  incompleteReason,
 		ScratchRoot:       scratchRoot,
 		ExcludedPaths:     oracleBookkeepingPaths,
 		ScratchNamespaces: namespaces,
 	})
 	if err != nil {
-		return runtimeinput.Observation{}, "", err
+		return gofresh.Observation{}, "", err
 	}
 	if err := ctx.Err(); err != nil {
-		return runtimeinput.Observation{}, "", err
+		return gofresh.Observation{}, "", err
 	}
-	observation, err = absoluteRuntimeEvidenceContext(ctx, observation, moduleDir, ingestEnv)
+	observation, err = absoluteRuntimeEvidenceContext(ctx, observation, moduleDir, OracleEvidenceEnv(env, bounds))
 	return observation, reason, err
 }
 
-func absoluteRuntimeEvidenceContext(ctx context.Context, observation runtimeinput.Observation, moduleDir string, env []string) (runtimeinput.Observation, error) {
+func absoluteRuntimeEvidenceContext(ctx context.Context, observation gofresh.Observation, moduleDir string, env []string) (gofresh.Observation, error) {
 	if err := ctx.Err(); err != nil {
-		return runtimeinput.Observation{}, err
+		return gofresh.Observation{}, err
 	}
-	if _, err := runtimeinput.CompletedState(observation); err != nil {
-		return runtimeinput.Observation{}, err
+	if _, err := gofresh.CompletedObservationState(observation); err != nil {
+		return gofresh.Observation{}, err
 	}
-	absolute, err := runtimeinput.Absolute(observation, moduleDir, env)
+	absolute, err := gofresh.AbsoluteObservation(observation, moduleDir, env)
 	if cancelErr := ctx.Err(); cancelErr != nil {
-		return runtimeinput.Observation{}, cancelErr
+		return gofresh.Observation{}, cancelErr
 	}
 	if err == nil {
 		return absolute, nil
 	}
 	if !observation.OK || observation.Manifest == "" || observation.Digest == "" {
-		return runtimeinput.Observation{}, err
+		return gofresh.Observation{}, err
 	}
-	incomplete, incompleteErr := runtimeinput.Incomplete(moduleDir, observationProcess("absolute"), "runtime input observation could not be finalized for reuse: "+err.Error(), env)
+	incomplete, incompleteErr := gofresh.IncompleteRuntimeObservation(moduleDir, observationProcess("absolute"), "runtime input observation could not be finalized for reuse: "+err.Error(), env)
 	if incompleteErr != nil {
-		return runtimeinput.Observation{}, incompleteErr
+		return gofresh.Observation{}, incompleteErr
 	}
 	return absoluteNonReusableRuntimeEvidence(ctx, incomplete, moduleDir, env)
 }
 
-func absoluteNonReusableRuntimeEvidence(ctx context.Context, incomplete runtimeinput.Observation, moduleDir string, env []string) (runtimeinput.Observation, error) {
-	absolute, err := runtimeinput.Absolute(incomplete, moduleDir, env)
+func absoluteNonReusableRuntimeEvidence(ctx context.Context, incomplete gofresh.Observation, moduleDir string, env []string) (gofresh.Observation, error) {
+	absolute, err := gofresh.AbsoluteObservation(incomplete, moduleDir, env)
 	if cancelErr := ctx.Err(); cancelErr != nil {
-		return runtimeinput.Observation{}, cancelErr
+		return gofresh.Observation{}, cancelErr
 	}
 	if err == nil {
 		return absolute, nil
@@ -973,20 +974,20 @@ func absoluteNonReusableRuntimeEvidence(ctx context.Context, incomplete runtimei
 	// Once movement is proven, reuse is forbidden. If a preserved path moves
 	// again during conversion, retain the reason without requiring that path
 	// to stabilize merely to publish the fresh mutation outcome.
-	incomplete, incompleteErr := runtimeinput.Incomplete(moduleDir, observationProcess("absolute"), "runtime input observation could not be finalized for reuse: "+err.Error(), env)
+	incomplete, incompleteErr := gofresh.IncompleteRuntimeObservation(moduleDir, observationProcess("absolute"), "runtime input observation could not be finalized for reuse: "+err.Error(), env)
 	if incompleteErr != nil {
-		return runtimeinput.Observation{}, incompleteErr
+		return gofresh.Observation{}, incompleteErr
 	}
-	absolute, err = runtimeinput.Absolute(incomplete, moduleDir, env)
+	absolute, err = gofresh.AbsoluteObservation(incomplete, moduleDir, env)
 	if cancelErr := ctx.Err(); cancelErr != nil {
-		return runtimeinput.Observation{}, cancelErr
+		return gofresh.Observation{}, cancelErr
 	}
 	return absolute, err
 }
 
-func mergeProcessObservationsContext(ctx context.Context, root string, env []string, capture bool, bounds OracleBounds, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
+func mergeProcessObservationsContext(ctx context.Context, root string, env []string, capture bool, bounds OracleBounds, states ...gofresh.Observation) (gofresh.Observation, error) {
 	if !capture {
-		return runtimeinput.Observation{}, nil
+		return gofresh.Observation{}, nil
 	}
 	// Merge re-evaluates each child's recorded digests against the
 	// merge-time environment; the children ingested under the evidence
@@ -997,31 +998,31 @@ func mergeProcessObservationsContext(ctx context.Context, root string, env []str
 	return mergeRuntimeEvidenceContext(ctx, root, OracleEvidenceEnv(env, bounds), states...)
 }
 
-func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
+func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string, states ...gofresh.Observation) (gofresh.Observation, error) {
 	if err := ctx.Err(); err != nil {
-		return runtimeinput.Observation{}, err
+		return gofresh.Observation{}, err
 	}
-	state, err := runtimeinput.Merge(root, env, states...)
+	state, err := gofresh.MergeObservations(root, env, states...)
 	if cancelErr := ctx.Err(); cancelErr != nil {
-		return runtimeinput.Observation{}, cancelErr
+		return gofresh.Observation{}, cancelErr
 	}
 	if err == nil {
 		return state, nil
 	}
-	result, incompleteErr := runtimeinput.Incomplete(root, observationProcess("merge"), "runtime input observations could not be merged for reuse: "+err.Error(), env)
+	result, incompleteErr := gofresh.IncompleteRuntimeObservation(root, observationProcess("merge"), "runtime input observations could not be merged for reuse: "+err.Error(), env)
 	if incompleteErr != nil {
-		return runtimeinput.Observation{}, incompleteErr
+		return gofresh.Observation{}, incompleteErr
 	}
 	for _, input := range states {
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.Observation{}, err
+			return gofresh.Observation{}, err
 		}
 		if input.Manifest == "" {
 			continue
 		}
-		merged, mergeErr := runtimeinput.Merge(root, env, result, input)
+		merged, mergeErr := gofresh.MergeObservations(root, env, result, input)
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.Observation{}, err
+			return gofresh.Observation{}, err
 		}
 		if mergeErr == nil {
 			result = merged
@@ -1030,10 +1031,10 @@ func mergeRuntimeEvidenceContext(ctx context.Context, root string, env []string,
 	return result, nil
 }
 
-func addRuntimeEvidenceReasonContext(ctx context.Context, root string, env []string, state runtimeinput.Observation, reason string) (runtimeinput.Observation, error) {
-	incomplete, err := runtimeinput.Incomplete(root, observationProcess("disagreement"), reason, env)
+func addRuntimeEvidenceReasonContext(ctx context.Context, root string, env []string, state gofresh.Observation, reason string) (gofresh.Observation, error) {
+	incomplete, err := gofresh.IncompleteRuntimeObservation(root, observationProcess("disagreement"), reason, env)
 	if err != nil {
-		return runtimeinput.Observation{}, err
+		return gofresh.Observation{}, err
 	}
 	return mergeRuntimeEvidenceContext(ctx, root, env, state, incomplete)
 }
@@ -1065,7 +1066,7 @@ type Baseline struct {
 	Tests         []string
 	Failed        []string
 	Diagnostic    string
-	Observation   runtimeinput.Observation
+	Observation   gofresh.Observation
 	Coverage      *Coverage
 	TestDurations map[string]time.Duration
 }
@@ -1108,7 +1109,7 @@ func baselineCoverageFromContext(ctx context.Context) (baselineCoverageSpec, boo
 
 // TestBaselineObservedCoverageEnv is TestBaselineObservedEnv with coverage
 // folded into the initial baseline probe (REQ-exec-survivor-evidence).
-func TestBaselineObservedCoverageEnv(ctx context.Context, dir, testPkg, run string, coverPkgs []string, view DirectiveCoverageView, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
+func TestBaselineObservedCoverageEnv(ctx context.Context, dir, testPkg, run string, coverPkgs []string, view DirectiveCoverageView, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
 	return TestBaselineObservedEnv(WithBaselineCoverage(ctx, coverPkgs, view), dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 }
 
@@ -1121,7 +1122,7 @@ func TestBaselineEnv(ctx context.Context, dir, testPkg, run string, timeout time
 // runtime-input observation rooted at moduleDir and packageDir; a
 // failing run — reported, or drifting between the discovery and
 // measurement runs — carries the failing tests' output as diagnostic.
-func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (ran int, passed bool, failed []string, diagnostic string, state runtimeinput.Observation, err error) {
+func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds OracleBounds) (ran int, passed bool, failed []string, diagnostic string, state gofresh.Observation, err error) {
 	b, err := TestBaselineObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 	return b.Ran, b.Passed, b.Failed, b.Diagnostic, b.Observation, err
 }
@@ -1129,7 +1130,7 @@ func TestProbeObservedEnv(ctx context.Context, dir, testPkg, run string, timeout
 // TestBaselineObservedEnv preserves named passes beside the scored probe's
 // observation. A repeated probe must preserve the same passing test identities,
 // not merely their count. The second execution supplies the scored account.
-func TestBaselineObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
+func TestBaselineObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
 	once, err := testProbeOnceObservedEnv(ctx, dir, testPkg, run, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 	if err != nil || !once.Passed || once.Ran == 0 {
 		return once, err
@@ -1142,14 +1143,14 @@ func TestBaselineObservedEnv(ctx context.Context, dir, testPkg, run string, time
 	if !once.Observation.OK {
 		return once, nil
 	}
-	empty, err := runtimeinput.Merge(dir, env)
+	empty, err := gofresh.MergeObservations(dir, env)
 	if err != nil {
 		return Baseline{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return Baseline{}, err
 	}
-	empty, err = runtimeinput.Absolute(empty, dir, env)
+	empty, err = gofresh.AbsoluteObservation(empty, dir, env)
 	if err != nil {
 		return Baseline{}, err
 	}
@@ -1184,7 +1185,7 @@ func TestBaselineObservedEnv(ctx context.Context, dir, testPkg, run string, time
 	return again, nil
 }
 
-func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
+func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds OracleBounds) (Baseline, error) {
 	// The oracle bound carries its own cause exactly as the mutant
 	// run's: a parent expiry must read as cancellation, never as the
 	// oracle bound firing (REQ-exec-attribution).
@@ -1222,22 +1223,57 @@ func testProbeOnceObservedEnv(ctx context.Context, dir, testPkg, run string, tim
 		testlog = filepath.Join(tmp, "baseline.testlog")
 		args = append(args, "-test.testlogfile="+testlog)
 	}
-	var oracleFrame runtimeinput.ProducerFrame
+	var oracleFrame gofresh.ProducerFrame
 	if capture {
 		oracleFrame = captureOracleFrame(ctx, dir, packageDir, bracketPaths)
 	}
-	cmd, err := oracleCommand(ctx2, dir, oracleEnv(scratchEnv, bounds), args...)
-	if err != nil {
-		return Baseline{}, err
-	}
-	// The two streams stay apart, as the mutant path keeps them: the
-	// harness's events ride stdout and the go tool's own lines ride
-	// stderr, and a predicate over the event stream must never meet a
-	// stderr line ahead of the first event.
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	runErr := runOracleProcess(cmd, bounds)
+	var cmd *exec.Cmd
+	var runErr error
+	if !wantCover {
+		if binPath, schemaPkgDir, ok := bounds.Schemas.findCompiled(dir, testPkg); ok {
+			effectivePkgDir := schemaPkgDir
+			if packageDir != "" {
+				effectivePkgDir = packageDir
+			}
+			binArgs := []string{
+				"-test.paniconexit0",
+				"-test.v=test2json",
+				"-test.timeout=0",
+				"-test.count=1",
+				"-test.run=" + run,
+			}
+			binArgs = append(binArgs, binFlags...)
+			if capture {
+				binArgs = append(binArgs, "-test.testlogfile="+testlog)
+			}
+			baseExecEnv := oracleEnv(gotool.SetEnv(scratchEnv, "PWD", effectivePkgDir), bounds)
+			baseExecEnv = gotool.SetEnv(baseExecEnv, "GOMUTANT_ACTIVE_MUTANT", "")
+			cmd, err = prepareSchemaBinaryCommand(ctx2, effectivePkgDir, baseExecEnv, binPath, binArgs...)
+			if err != nil {
+				return Baseline{}, err
+			}
+			conv := newTest2JSONConverter(&stdout, testPkg, test2jsonTimestamp)
+			cmd.Stdout = conv
+			cmd.Stderr = conv
+			runErr = runOracleProcess(cmd, bounds)
+			conv.Exited(runErr)
+			_ = conv.Close()
+		}
+	}
+	if cmd == nil {
+		cmd, err = oracleCommand(ctx2, dir, oracleEnv(scratchEnv, bounds), args...)
+		if err != nil {
+			return Baseline{}, err
+		}
+		// The two streams stay apart, as the mutant path keeps them: the
+		// harness's events ride stdout and the go tool's own lines ride
+		// stderr, and a predicate over the event stream must never meet a
+		// stderr line ahead of the first event.
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		runErr = runOracleProcess(cmd, bounds)
+	}
 	if wantCover && runErr != nil && !oracleBudgetFired(runErr, cmd.ProcessState, oracleProcessKilled(cmd), ctx2) && !oracleRunCancelled(runErr, ctx2) {
 		// Coverage instrumentation can fail on packages that build and pass
 		// uninstrumented; retry without -coverprofile so an uninstrumentable

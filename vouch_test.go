@@ -16,7 +16,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -103,7 +102,7 @@ func TestCount(t *testing.T) {
 	ctx := context.Background()
 
 	emptyManifest := base64.RawURLEncoding.EncodeToString([]byte(`{"v":4}`))
-	current, err := runtimeinput.Current(ctx, emptyManifest, dir, os.Environ())
+	current, err := gofresh.CurrentRuntimeInputs(ctx, emptyManifest, dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +258,7 @@ func TestAttestationPinsIgnoreRecordedVouches(t *testing.T) {
 //gofresh:pure
 func TestSubjectEvidenceCarriesDynamicStateVouches(t *testing.T) {
 	fp := gofresh.Fingerprint{MaximalClosure: "h", DynamicStateVouches: "a.example/dep.Var"}
-	e := evidenceFromFingerprint("p.S", fp, runtimeEvidence{state: runtimeinput.State{}})
+	e := evidenceFromFingerprint("p.S", fp, runtimeEvidence{state: gofresh.RuntimeState{}})
 	if e.DynamicStateVouches != "a.example/dep.Var" {
 		t.Fatalf("evidence discharge = %q", e.DynamicStateVouches)
 	}
@@ -435,13 +434,13 @@ func TestCampaignAndProbeKeepTheirOwnBounds(t *testing.T) {
 		mu.Unlock()
 		return priorMutant(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, env, bounds)
 	}
-	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, testPkgs []string, runRegex string, timeout time.Duration, binFlags []string, moduleDir, packageDir string, bracketPaths []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 		mu.Lock()
 		campaignSpawns = append(campaignSpawns, bounds)
 		mu.Unlock()
 		return priorCampaign(ctx, dir, m, testPkgs, runRegex, timeout, binFlags, moduleDir, packageDir, bracketPaths, namespaces, env, bounds)
 	}
-	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		mu.Lock()
 		campaignSpawns = append(campaignSpawns, bounds)
 		mu.Unlock()

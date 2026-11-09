@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -140,7 +140,7 @@ func TestCampaignLeashLiftsFromTheBank(t *testing.T) {
 		seams.coveredPositions = restoreCov
 	})
 	var bounds, probeBounds []time.Duration
-	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (engine.Baseline, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, oracleBounds engine.OracleBounds) (engine.Baseline, error) {
 		bounds = append(bounds, timeout)
 		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, oracleBounds)
 	}

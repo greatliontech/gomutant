@@ -4,7 +4,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/greatliontech/gofresh/guidance"
+	"github.com/greatliontech/gomutant/internal/guidance"
 	"github.com/greatliontech/gomutant"
 )
 

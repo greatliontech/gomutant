@@ -10,8 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // Every load refuses a frontend older than the toolchain serving it,
@@ -144,7 +143,7 @@ func TestToolchainLadderSamplesOnce(t *testing.T) {
 	}
 	spawns := 0
 	prior := newToolchainSampler
-	newToolchainSampler = func() gofresh.ToolchainSampler {
+	newToolchainSampler = func() ToolchainSampler {
 		return &gotool.Sampler{Runner: gotool.Runner{Prepare: func(*exec.Cmd) { spawns++ }}}
 	}
 	defer func() { newToolchainSampler = prior }()

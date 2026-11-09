@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/greatliontech/gofresh/resident"
+	"github.com/greatliontech/gomutant/internal/resident"
 	"github.com/greatliontech/gomutant"
 	"github.com/spf13/cobra"
 )
@@ -37,7 +37,7 @@ func newRootCommand() *cobra.Command {
 			return fmt.Errorf("a command is required")
 		},
 		// Working commands run under the fleet's one ceiling
-		// (gofresh/resident: the host's available memory halved,
+		// (internal/resident: the host's available memory halved,
 		// floored at 1 GiB; an explicit operator GOMEMLIMIT replacing
 		// it), installed before the verb runs — REQ-mcp-resident-set.
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) {

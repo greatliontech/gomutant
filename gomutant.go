@@ -8,12 +8,14 @@
 package gomutant
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -22,9 +24,8 @@ import (
 
 	"github.com/greatliontech/glob"
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // Target is one symbol to mutate, paired with its kill oracle and its labels
@@ -355,6 +356,39 @@ func (t *Tree) DynamicStateVouches() []string {
 	return t.effectiveVouches()
 }
 
+const repositoryVouchFile = "vouches"
+
+func readVouchFile(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("vouch file %s: %w", path, err)
+	}
+	defer f.Close()
+	var identities []string
+	sc := bufio.NewScanner(f)
+	line := 0
+	for sc.Scan() {
+		line++
+		text := strings.TrimSpace(sc.Text())
+		if text == "" || strings.HasPrefix(text, "#") {
+			continue
+		}
+		identity, err := gofresh.ParseVouchEntry(text)
+		if err != nil {
+			return nil, fmt.Errorf("vouch file %s:%d: %w", path, line, err)
+		}
+		identities = append(identities, identity)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("vouch file %s: %w", path, err)
+	}
+	slices.Sort(identities)
+	return slices.Compact(identities), nil
+}
+
 // StandingVouches is the repository's reviewed standing vouch set: the
 // tree root's `vouches` file in gofresh's grammar — one
 // IMPORT-PATH:VARIABLE per line, `#` comments and blank lines ignored,
@@ -364,7 +398,7 @@ func (t *Tree) DynamicStateVouches() []string {
 // loads with no preparation stage meets it at the load's head, before
 // any package loads; the load reads the set (REQ-exec-preparation).
 func StandingVouches(root string) ([]string, error) {
-	vouches, err := gofresh.ReadVouchFile(filepath.Join(root, gofresh.RepositoryVouchFile))
+	vouches, err := readVouchFile(filepath.Join(root, repositoryVouchFile))
 	if err != nil {
 		return nil, fmt.Errorf("gomutant: %w", err)
 	}
@@ -381,7 +415,7 @@ func StandingVouches(root string) ([]string, error) {
 // cache — an over-invalidation, never a stale serve.
 func TreeLoadInput(name string) bool {
 	switch name {
-	case "go.mod", "go.sum", "go.work", "go.work.sum", "modules.txt", gofresh.RepositoryVouchFile:
+	case "go.mod", "go.sum", "go.work", "go.work.sum", "modules.txt", repositoryVouchFile:
 		return true
 	}
 	return strings.HasSuffix(name, ".go")
@@ -393,17 +427,17 @@ func TreeLoadInput(name string) bool {
 // parsed declaration passes gofresh's namespace grammar here, so a
 // malformed one refuses at the boundary - before a measurement whose
 // every observation would otherwise degrade at ingest.
-func ParseScratchNamespaces(entries []string) ([]runtimeinput.ScratchNamespace, error) {
-	var namespaces []runtimeinput.ScratchNamespace
+func ParseScratchNamespaces(entries []string) ([]gofresh.ScratchNamespace, error) {
+	var namespaces []gofresh.ScratchNamespace
 	for _, entry := range entries {
 		dir, pattern, ok := strings.Cut(entry, ":")
 		if !ok || dir == "" || pattern == "" {
 			return nil, fmt.Errorf("gomutant: scratch namespace %q is not DIR:PATTERN", entry)
 		}
-		if err := runtimeinput.ValidateScratchNamespace(dir, pattern); err != nil {
+		if err := gofresh.ValidateScratchNamespace(dir, pattern); err != nil {
 			return nil, fmt.Errorf("gomutant: scratch namespace %q refused: %w", entry, err)
 		}
-		namespaces = append(namespaces, runtimeinput.ScratchNamespace{Dir: dir, Pattern: pattern})
+		namespaces = append(namespaces, gofresh.ScratchNamespace{Dir: dir, Pattern: pattern})
 	}
 	return namespaces, nil
 }

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -36,7 +35,7 @@ type work struct {
 	// observation), so one read here keeps phase three free of
 	// per-finding view reads.
 	currentLedger gofresh.TestVariantLedger
-	baselines     []runtimeinput.Observation
+	baselines     []gofresh.Observation
 	// serve is the prior record being served with candidate-local
 	// re-execution (REQ-result-stale): only the candidate indexes in
 	// flagged execute, and phase three splices their fresh outcomes and
@@ -71,7 +70,7 @@ func oracleScope(w work) []string {
 // analyzes source at runtime, so the forbidden state must exist on
 // disk — the overlay reaches only the oracle binary's own
 // compilation), body mutants run through the build overlay.
-func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, gofresh.Observation, string, error) {
 	if opts.executedScope != nil {
 		// Emitted off the same w whose groups execute below: the
 		// observation and the execution cannot diverge.
@@ -80,7 +79,7 @@ func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, o
 	if w.shaped {
 		// Shaped candidates execute their explicit oracle inventory.
 		outcome, killer, memoryDecided, err := t.executeShapedCandidate(ctx, w, m, opts, runEnv)
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
+		return outcome, killer, memoryDecided, gofresh.Observation{}, "", err
 	}
 	return t.executeMutant(ctx, w, m, opts, runEnv)
 }
@@ -103,7 +102,7 @@ func (t *Tree) executeWorkMutant(ctx context.Context, w work, m engine.Mutant, o
 // discard, an unscopable killer — falls back to the serial run of the
 // candidate's whole oracle scope, whose verdict scores: a survivor
 // verdict always rests on every complete current oracle group.
-func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, killer string, scopedBaselines map[scopedBaselineKey][]string, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, killer string, scopedBaselines map[scopedBaselineKey][]string, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, gofresh.Observation, string, error) {
 	if opts.confirmScoped != nil {
 		// Emitted off the same w both confirmation paths derive from:
 		// the serial fallback executes w.groups verbatim, and the
@@ -151,17 +150,17 @@ func (t *Tree) confirmMutant(ctx context.Context, w work, m engine.Mutant, kille
 	if slices.Contains(scopedPasses, killer) {
 		out, gk, confirmMemoryDecided, state, incomplete, diagnostic, err := seams.runMutantObserved(ctx, t.dir, m, scopedGroup.pkgs, scopedGroup.runRegex, confirmBudget, scopedGroup.flags, scopedGroup.moduleDir, scopedGroup.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		if err != nil {
-			return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: killer-scoped confirmation: %w", m.Symbol, m.Position, m.Operator, err)
+			return out, gk, confirmMemoryDecided, gofresh.Observation{}, "", fmt.Errorf("%s: mutant %s %s: killer-scoped confirmation: %w", m.Symbol, m.Position, m.Operator, err)
 		}
 		if diagnostic == "" && out == engine.MutantKilled && gk != TimeoutKiller && !strings.HasPrefix(gk, PackageKillerPrefix) {
 			if !w.oracleSet[gk] {
 				aerr := attributedKill(gk, w.oracleSet, scopedPasses)
-				return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, aerr)
+				return out, gk, confirmMemoryDecided, gofresh.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, aerr)
 			}
 			if slices.Contains(scopedPasses, gk) {
 				merged, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, state)
 				if err != nil {
-					return out, gk, confirmMemoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+					return out, gk, confirmMemoryDecided, gofresh.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
 				}
 				return out, gk, confirmMemoryDecided, merged, incomplete, nil
 			}
@@ -218,26 +217,26 @@ func (t *Tree) scopedBaselinePasses(ctx context.Context, g group, memo map[scope
 
 // executeMutant runs complete unsplit oracle groups and merges their
 // observations. Coverage is advisory and is not an input to dispatch.
-func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts runOptions, runEnv []string) (engine.MutantOutcome, string, bool, gofresh.Observation, string, error) {
 	outcome := engine.MutantSurvived
 	killer := ""
 	memoryDecided := false
 	incompleteReason := ""
-	var processStates []runtimeinput.Observation
+	var processStates []gofresh.Observation
 	for _, g := range w.groups {
 		if err := ctx.Err(); err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
+			return outcome, killer, memoryDecided, gofresh.Observation{}, "", err
 		}
 		if outcome != engine.MutantSurvived {
 			break
 		}
 		out, who, decided, state, incomplete, diagnostic, err := seams.runMutantObserved(ctx, t.dir, m, g.pkgs, g.runRegex, stepBudget(g, opts), g.flags, g.moduleDir, g.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
 		if err != nil {
-			return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
+			return outcome, killer, memoryDecided, gofresh.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
 		}
 		if diagnostic == "" && out == engine.MutantKilled && who != TimeoutKiller {
 			if err := attributedKill(who, w.oracleSet, g.passed); err != nil {
-				return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
+				return outcome, killer, memoryDecided, gofresh.Observation{}, "", fmt.Errorf("%s: mutant %s %s: %w", m.Symbol, m.Position, m.Operator, err)
 			}
 		}
 		outcome, killer = out, who
@@ -252,11 +251,11 @@ func (t *Tree) executeMutant(ctx context.Context, w work, m engine.Mutant, opts 
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", err
+		return outcome, killer, memoryDecided, gofresh.Observation{}, "", err
 	}
 	state, err := mergeFindingObservationsContext(ctx, t.dir, runEnv, processStates...)
 	if err != nil {
-		return outcome, killer, memoryDecided, runtimeinput.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
+		return outcome, killer, memoryDecided, gofresh.Observation{}, "", fmt.Errorf("%s: merge runtime observations: %w", m.Symbol, err)
 	}
 	return outcome, killer, memoryDecided, state, incompleteReason, nil
 }
@@ -505,7 +504,7 @@ func overlayBypassedRead(f *Finding, w work) bool {
 	if len(mutated) == 0 {
 		return false
 	}
-	paths, err := runtimeinput.Paths(f.TargetEvidence.RuntimeInputs, evidenceBase(w.targetView.evidenceDir, f.TargetEvidence))
+	paths, err := gofresh.RuntimeInputPaths(f.TargetEvidence.RuntimeInputs, evidenceBase(w.targetView.evidenceDir, f.TargetEvidence))
 	if err != nil {
 		return false
 	}

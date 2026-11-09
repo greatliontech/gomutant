@@ -12,7 +12,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -162,7 +161,7 @@ func (e *subjectEngines) engineFor(dir string) (*gofresh.Session, error) {
 		EvidenceRoot:   e.treeDir,
 		Vouches:        e.vouches,
 		AnalysisBudget: e.analysisBudget,
-		Runner:         engine.GoRunner(),
+		PrepareCommand: engine.GoRunner().PrepareCommand,
 	}
 	if e.packageProcess {
 		policy.Execution = gofresh.PackageExecution
@@ -845,7 +844,7 @@ func acceptValidVerdict(verdict gofresh.Verdict) bool {
 // evidencePrecheck runs the pre-verdict evidence checks — identity, runtime
 // state, purity — shared by the per-subject and batched walks. A record
 // failing here never consults a gofresh verdict at all.
-func (s *subjectView) evidencePrecheck(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
+func (s *subjectView) evidencePrecheck(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (gofresh.RuntimeState, error)) (bool, error) {
 	if evidence.Symbol != s.symbol || evidence.RuntimeInputs == "" || evidence.RuntimeDigest == "" {
 		return false, nil
 	}
@@ -883,7 +882,7 @@ type evidencePair struct {
 // without observation facts keeps the per-subject check, as does a subject
 // appearing twice in one view — the batch map cannot carry two recordings
 // for one subject.
-func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
+func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(context.Context, string, string, []string) (gofresh.RuntimeState, error)) (bool, error) {
 	for _, pair := range pairs {
 		ok, err := pair.subject.evidencePrecheck(ctx, pair.evidence, current)
 		if err != nil || !ok {
@@ -943,7 +942,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 	if evidence.RuntimeUnverifiable {
 		return FindingInspection{State: FindingUnverifiable, Reason: evidence.RuntimeReason, Channel: PostureRuntimeInputs}, nil
 	}
-	state, err := runtimeinput.Current(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
+	state, err := gofresh.CurrentRuntimeInputs(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
 	if err != nil || !state.OK {
 		if ctx.Err() != nil {
 			return FindingInspection{}, ctx.Err()
@@ -981,7 +980,7 @@ func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEviden
 // just that one did (REQ-result-inspection). Attribution is
 // best-effort: an unwalkable manifest keeps the generic reason.
 func movedInputSuffix(ctx context.Context, encoded, moduleDir string, env []string) string {
-	moved, err := runtimeinput.MovedInputs(ctx, encoded, moduleDir, env)
+	moved, err := gofresh.MovedRuntimeInputs(ctx, encoded, moduleDir, env)
 	if err != nil || len(moved) == 0 {
 		return ""
 	}
@@ -1700,7 +1699,7 @@ func (t *Tree) modifiedOracleNames(ctx context.Context, f Finding, currentOracle
 // matching pass reads each manifest exactly once and a manifest that moved
 // mid-evaluation refuses.
 type runtimeMemo struct {
-	current func(context.Context, string, string, []string) (runtimeinput.State, error)
+	current func(context.Context, string, string, []string) (gofresh.RuntimeState, error)
 	results map[runtimeMemoKey]*runtimeMemoResult
 	order   []runtimeMemoKey
 }
@@ -1710,21 +1709,21 @@ type runtimeMemoKey struct {
 }
 
 type runtimeMemoResult struct {
-	state runtimeinput.State
+	state gofresh.RuntimeState
 	err   error
 	env   []string
 	uses  int
 }
 
-func newRuntimeMemo(current func(context.Context, string, string, []string) (runtimeinput.State, error)) *runtimeMemo {
+func newRuntimeMemo(current func(context.Context, string, string, []string) (gofresh.RuntimeState, error)) *runtimeMemo {
 	return &runtimeMemo{current: current, results: map[runtimeMemoKey]*runtimeMemoResult{}}
 }
 
 // newCurrentRuntimeMemo is the memo over gofresh's live re-evaluation,
 // the one every production caller installs.
-func newCurrentRuntimeMemo() *runtimeMemo { return newRuntimeMemo(runtimeinput.Current) }
+func newCurrentRuntimeMemo() *runtimeMemo { return newRuntimeMemo(gofresh.CurrentRuntimeInputs) }
 
-func (m *runtimeMemo) once(ctx context.Context, manifest, moduleDir string, env []string) (runtimeinput.State, error) {
+func (m *runtimeMemo) once(ctx context.Context, manifest, moduleDir string, env []string) (gofresh.RuntimeState, error) {
 	key := runtimeMemoKey{manifest: manifest, moduleDir: moduleDir, environment: sequenceKey(env)}
 	if result, ok := m.results[key]; ok {
 		result.uses++
@@ -1759,10 +1758,10 @@ func (m *runtimeMemo) verify(ctx context.Context) (bool, error) {
 }
 
 func evidenceSetMatchesContext(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string) (bool, error) {
-	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, timeoutDerived, memoryPin, regime, runtimeinput.Current)
+	return evidenceSetMatchesContextWithCurrent(ctx, prior, target, oracle, oracleExplicit, operatorSet, timeout, timeoutDerived, memoryPin, regime, gofresh.CurrentRuntimeInputs)
 }
 
-func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string, current func(context.Context, string, string, []string) (runtimeinput.State, error)) (bool, error) {
+func evidenceSetMatchesContextWithCurrent(ctx context.Context, prior Finding, target *subjectView, oracle []*subjectView, oracleExplicit bool, operatorSet, timeout string, timeoutDerived bool, memoryPin int64, regime string, current func(context.Context, string, string, []string) (gofresh.RuntimeState, error)) (bool, error) {
 	if prior.EvidenceFault != "" || OracleExecutionPolicyIssue(prior) != "" || prior.OperatorSet != operatorSet || prior.OracleExplicit != oracleExplicit || !timeoutPinMatches(prior, timeout, timeoutDerived) ||
 		memoryPinStale(prior, memoryPin) || prior.PropertyRegime != regime || len(prior.OracleEvidence) != len(oracle) {
 		return false, nil
@@ -1844,22 +1843,22 @@ var errEvidenceFinalization = errors.New("runtime evidence could not be finalize
 // the union's state was computed under, so revalidation inside the
 // conversion sees the same environment.
 type portableUnion struct {
-	absolute runtimeinput.Observation
+	absolute gofresh.Observation
 	env      []string
-	byModule map[string]runtimeinput.Observation
+	byModule map[string]gofresh.Observation
 }
 
-func newPortableUnion(observation runtimeinput.Observation, evidenceEnv []string) *portableUnion {
-	return &portableUnion{absolute: observation, env: evidenceEnv, byModule: map[string]runtimeinput.Observation{}}
+func newPortableUnion(observation gofresh.Observation, evidenceEnv []string) *portableUnion {
+	return &portableUnion{absolute: observation, env: evidenceEnv, byModule: map[string]gofresh.Observation{}}
 }
 
-func (u *portableUnion) at(moduleDir string) (runtimeinput.Observation, error) {
+func (u *portableUnion) at(moduleDir string) (gofresh.Observation, error) {
 	if obs, ok := u.byModule[moduleDir]; ok {
 		return obs, nil
 	}
-	obs, err := runtimeinput.Relative(u.absolute, moduleDir, u.env)
+	obs, err := gofresh.RelativeObservation(u.absolute, moduleDir, u.env)
 	if err != nil {
-		return runtimeinput.Observation{}, err
+		return gofresh.Observation{}, err
 	}
 	u.byModule[moduleDir] = obs
 	return obs, nil

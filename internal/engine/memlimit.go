@@ -4,8 +4,8 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/resident"
+	"github.com/greatliontech/gomutant/internal/gotool"
+	"github.com/greatliontech/gomutant/internal/resident"
 )
 
 // memoryFloorBytes keeps the derived default above what a large test

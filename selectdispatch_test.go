@@ -34,12 +34,16 @@ func TestSelectTargetsIsTheOneDispatch(t *testing.T) {
 	tree := selectionTree(t)
 	ctx := context.Background()
 	whole, err := tree.SelectTargets(ctx, SelectionRequest{})
-	if err != nil || !whole.WholeTree || len(whole.Targets) != 2 || whole.Cut != nil {
+	if err != nil || !whole.WholeTree || whole.PruneSymbol == nil || !whole.PruneSymbol("example.com/sel.Gone") || len(whole.Targets) != 2 || whole.Cut != nil {
 		t.Fatalf("whole tree = %+v, %v", whole, err)
 	}
+	pkgFiltered, err := tree.SelectTargets(ctx, SelectionRequest{Packages: []string{"example.com/sel"}})
+	if err != nil || pkgFiltered.WholeTree || pkgFiltered.PruneSymbol == nil || !pkgFiltered.PruneSymbol("example.com/sel.Gone") || !pkgFiltered.PruneSymbol("example.com/sel._") || pkgFiltered.PruneSymbol("example.com/sel.sub._") || pkgFiltered.PruneSymbol("example.com/other.Kept") || len(pkgFiltered.Targets) != 2 {
+		t.Fatalf("package-filtered discovery = %+v, %v; want package-scoped PruneSymbol", pkgFiltered, err)
+	}
 	filtered, err := tree.SelectTargets(ctx, SelectionRequest{Symbols: []string{"example.com/sel.Value"}})
-	if err != nil || filtered.WholeTree || len(filtered.Targets) != 1 {
-		t.Fatalf("filtered = %+v, %v; a filter narrows the whole tree", filtered, err)
+	if err != nil || filtered.WholeTree || filtered.PruneSymbol != nil || len(filtered.Targets) != 1 {
+		t.Fatalf("filtered = %+v, %v; a symbol filter narrows the whole tree without pruning", filtered, err)
 	}
 	empty, err := tree.SelectTargets(ctx, SelectionRequest{TargetsGiven: true})
 	if err != nil || empty.WholeTree || len(empty.Targets) != 0 {

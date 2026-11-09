@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/resident"
+	"github.com/greatliontech/gomutant/internal/resident"
 )
 
 // The derived default is RAM/(2 x jobs) floored at 1 GiB; an unreadable

@@ -11,7 +11,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 	"golang.org/x/sys/windows"
 )
 

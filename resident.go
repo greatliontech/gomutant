@@ -1,9 +1,9 @@
 package gomutant
 
-import "github.com/greatliontech/gofresh/resident"
+import "github.com/greatliontech/gomutant/internal/resident"
 
 // ResidentReading is the process's resident reading in the fleet's
-// words (gofresh/resident), the moment "now" — the tail of both faces'
+// words (internal/resident), the moment "now" — the tail of both faces'
 // progress lines (REQ-exec-run-status) — taken through sample, the
 // face's seam over resident.Sample; "" where the host answers no
 // reading.

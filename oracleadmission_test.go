@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -117,7 +117,7 @@ func FuzzSide(f *testing.F) { f.Add(0); f.Fuzz(func(t *testing.T, n int) {}) }
 	prior := seams.runMutantObserved
 	t.Cleanup(func() { seams.runMutantObserved = prior })
 	var patterns []string
-	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, pkgs []string, pattern string, bound time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, pkgs []string, pattern string, bound time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 		patterns = append(patterns, pattern)
 		return prior(ctx, dir, m, pkgs, pattern, bound, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 	}
@@ -133,16 +133,16 @@ func TestScopedConfirmationCannotBorrowAnotherTestsPass(t *testing.T) {
 	w.groups[0].passed = []string{pkg + ".TestA", pkg + ".TestB"}
 	priorGround, priorRun := seams.killGround, seams.runMutantObserved
 	t.Cleanup(func() { seams.killGround, seams.runMutantObserved = priorGround, priorRun })
-	seams.killGround = func(context.Context, string, string, string, time.Duration, []string, string, string, []string, []runtimeinput.ScratchNamespace, []string, engine.OracleBounds) (engine.Baseline, error) {
+	seams.killGround = func(context.Context, string, string, string, time.Duration, []string, string, string, []string, []gofresh.ScratchNamespace, []string, engine.OracleBounds) (engine.Baseline, error) {
 		return engine.Baseline{Ran: 1, Passed: true, Tests: []string{pkg + ".TestA"}}, nil
 	}
 	var patterns []string
-	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, pattern string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, _ engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, pattern string, _ time.Duration, _ []string, _, _ string, _ []string, _ []gofresh.ScratchNamespace, _ []string, _ engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 		patterns = append(patterns, pattern)
 		if pattern == "^TestA$" {
-			return engine.MutantKilled, pkg + ".TestB", false, runtimeinput.Observation{}, "", "", nil
+			return engine.MutantKilled, pkg + ".TestB", false, gofresh.Observation{}, "", "", nil
 		}
-		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
+		return engine.MutantSurvived, "", false, gofresh.Observation{}, "", "", nil
 	}
 	out, _, _, _, _, err := (&Tree{}).confirmMutant(context.Background(), w, engine.Mutant{}, pkg+".TestA", map[scopedBaselineKey][]string{}, runOptions{Options: Options{OracleTimeout: time.Minute}}, nil)
 	if err != nil || out != engine.MutantSurvived || !slices.Equal(patterns, []string{"^TestA$", w.groups[0].runRegex}) {

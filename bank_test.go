@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -155,7 +155,7 @@ func TestRunServesBankedBaselinesAcrossRuns(t *testing.T) {
 		seams.coveredPositions = restoreCov
 	})
 	var baselineProbes, coverageProbes atomic.Int64
-	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		baselineProbes.Add(1)
 		return restoreProbe(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 	}
@@ -408,7 +408,7 @@ func TestRunIgnoresHistoricalCoverageBanks(t *testing.T) {
 	})
 	var patternsMu sync.Mutex
 	var patterns []string
-	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, pkgs []string, pattern string, bound time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, pkgs []string, pattern string, bound time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 		patternsMu.Lock()
 		patterns = append(patterns, pattern)
 		patternsMu.Unlock()

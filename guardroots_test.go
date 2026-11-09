@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 )
 
 // An oracle's reads under the toolchain and under the tool's own
@@ -74,7 +74,7 @@ func TestOracleToolchainAndBookkeepingReadsAdmitRecordless(t *testing.T) {
 		if ev.RuntimeInputs == "" {
 			continue
 		}
-		paths, err := runtimeinput.Paths(ev.RuntimeInputs, dir)
+		paths, err := gofresh.RuntimeInputPaths(ev.RuntimeInputs, dir)
 		if err != nil {
 			t.Fatal(err)
 		}

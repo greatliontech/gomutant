@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
 
@@ -113,7 +113,7 @@ func TestMissingProcessLogIsIncomplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, incomplete, err := processObservationContext(context.Background(), filepath.Join(t.TempDir(), "missing.testlog"), moduleDir,
-		"", GoEnv(moduleDir), t.TempDir(), true, runtimeinput.ProducerFrame{}, nil, OracleBounds{})
+		"", GoEnv(moduleDir), t.TempDir(), true, gofresh.ProducerFrame{}, nil, OracleBounds{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,14 +136,14 @@ func TestIncompleteProcessDoesNotAssertPartialLogComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, incomplete, err := processObservationContext(context.Background(), logPath, moduleDir,
-		"test process timed out", GoEnv(moduleDir), t.TempDir(), true, runtimeinput.ProducerFrame{}, nil, OracleBounds{})
+		"test process timed out", GoEnv(moduleDir), t.TempDir(), true, gofresh.ProducerFrame{}, nil, OracleBounds{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if incomplete != "test process timed out" {
 		t.Fatalf("incomplete reason = %q, want the caller's process incompleteness", incomplete)
 	}
-	paths, err := runtimeinput.Paths(state.Manifest, moduleDir)
+	paths, err := gofresh.RuntimeInputPaths(state.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +571,7 @@ func TestProbeBaselineRetainsInputsWhenIdentitiesChange(t *testing.T) {
 	if err != nil || ran != 1 || !passed || !state.OK || state.Unverifiable {
 		t.Fatalf("changing identities = ran %d, passed %v, state %+v, error %v", ran, passed, state, err)
 	}
-	paths, err := runtimeinput.Paths(state.Manifest, moduleDir)
+	paths, err := gofresh.RuntimeInputPaths(state.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,11 +609,11 @@ func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	stableState, err := runtimeinput.FromTestLog([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	stableState, err := gofresh.FromTestLog([]byte("open "+stable+"\n"), root, root, env, gofresh.WithCompletedProcess("stable"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	movingState, err := runtimeinput.FromTestLog([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	movingState, err := gofresh.FromTestLog([]byte("open "+moving+"\n"), root, root, env, gofresh.WithCompletedProcess("moving"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +624,7 @@ func TestMergeRuntimeEvidenceMakesMovementNonReusable(t *testing.T) {
 	if err != nil || !merged.OK || !merged.Unverifiable || !strings.Contains(merged.Reason, "could not be merged for reuse") {
 		t.Fatalf("moved observation = %+v, %v", merged, err)
 	}
-	paths, err := runtimeinput.Paths(merged.Manifest, root)
+	paths, err := gofresh.RuntimeInputPaths(merged.Manifest, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +640,7 @@ func TestAbsoluteRuntimeEvidenceDropsMovedUnsealedInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := runtimeinput.FromTestLog([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("absolute"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	state, err := gofresh.FromTestLog([]byte("open "+path+"\n"), root, root, env, gofresh.WithCompletedProcess("absolute"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,16 +651,16 @@ func TestAbsoluteRuntimeEvidenceDropsMovedUnsealedInputs(t *testing.T) {
 	if err != nil || !absolute.OK || !absolute.Unverifiable || !strings.Contains(absolute.Reason, "could not be finalized for reuse") {
 		t.Fatalf("moved absolute observation = %+v, %v", absolute, err)
 	}
-	paths, err := runtimeinput.Paths(absolute.Manifest, root)
+	paths, err := gofresh.RuntimeInputPaths(absolute.Manifest, root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(paths) != 0 {
 		t.Fatalf("runtime paths = %v, want moved input omitted from incomplete evidence", paths)
 	}
-	for name, malformed := range map[string]runtimeinput.Observation{
+	for name, malformed := range map[string]gofresh.Observation{
 		"empty":     {},
-		"malformed": {State: runtimeinput.State{OK: true, Manifest: "malformed", Digest: "digest"}},
+		"malformed": {State: gofresh.RuntimeState{OK: true, Manifest: "malformed", Digest: "digest"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if state, err := absoluteRuntimeEvidenceContext(context.Background(), malformed, root, env); err == nil || state.OK {
@@ -677,7 +677,7 @@ func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	state, err := runtimeinput.FromTestLog([]byte("open "+path+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	state, err := gofresh.FromTestLog([]byte("open "+path+"\n"), root, root, env, gofresh.WithCompletedProcess("moving"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +689,7 @@ func TestNonReusableRuntimeEvidenceDropsInputsThatMoveAgain(t *testing.T) {
 	if err != nil || !absolute.OK || !absolute.Unverifiable || !strings.Contains(absolute.Reason, "could not be finalized for reuse") {
 		t.Fatalf("repeatedly moved observation = %+v, %v", absolute, err)
 	}
-	paths, err := runtimeinput.Paths(absolute.Manifest, root)
+	paths, err := gofresh.RuntimeInputPaths(absolute.Manifest, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -978,11 +978,11 @@ func TestObservationWithoutAMintedScratchRootRefuses(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte("# test log\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := processObservationContext(context.Background(), logPath, t.TempDir(), "", os.Environ(), "", true, runtimeinput.ProducerFrame{}, nil, OracleBounds{})
+	_, _, err := processObservationContext(context.Background(), logPath, t.TempDir(), "", os.Environ(), "", true, gofresh.ProducerFrame{}, nil, OracleBounds{})
 	if err == nil || !strings.Contains(err.Error(), "minted scratch root") {
 		t.Fatalf("capture without a scratch root: %v; want the refusal", err)
 	}
-	if _, _, err := processObservationContext(context.Background(), logPath, t.TempDir(), "", os.Environ(), "", false, runtimeinput.ProducerFrame{}, nil, OracleBounds{}); err != nil {
+	if _, _, err := processObservationContext(context.Background(), logPath, t.TempDir(), "", os.Environ(), "", false, gofresh.ProducerFrame{}, nil, OracleBounds{}); err != nil {
 		t.Fatalf("an uncaptured observation needs no root: %v", err)
 	}
 }

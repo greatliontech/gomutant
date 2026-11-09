@@ -14,7 +14,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -145,7 +144,7 @@ func evidenceFromFingerprint(symbol string, fp gofresh.Fingerprint, re runtimeEv
 // from the one observation so a row can never carry one observation's
 // reason beside another's attribution (REQ-result-record).
 type runtimeEvidence struct {
-	state       runtimeinput.State
+	state       gofresh.RuntimeState
 	attribution string
 }
 
@@ -154,8 +153,8 @@ type runtimeEvidence struct {
 // names — the observation's own for a classification refusal, else
 // the one a resolved-target refusal carries in the reason itself as
 // state, split by gofresh's one implementation of that split.
-func completedEvidence(observation runtimeinput.Observation) (runtimeEvidence, error) {
-	state, err := runtimeinput.CompletedState(observation)
+func completedEvidence(observation gofresh.Observation) (runtimeEvidence, error) {
+	state, err := gofresh.CompletedObservationState(observation)
 	if err != nil {
 		return runtimeEvidence{}, err
 	}
@@ -169,7 +168,7 @@ func completedEvidence(observation runtimeinput.Observation) (runtimeEvidence, e
 // reason that already carries the attribution as state (a
 // resolved-target refusal's) renders once (REQ-result-exemptions).
 func AttributedReason(reason, attribution string) string {
-	if attribution == "" || runtimeinput.RefusalAttribution(reason) == attribution {
+	if attribution == "" || refusalAttribution(reason) == attribution {
 		return reason
 	}
 	return reason + "; attributed to " + attribution
@@ -178,13 +177,13 @@ func AttributedReason(reason, attribution string) string {
 // evidenceAttribution is the attribution a row records for its reason:
 // the observation's own, which gofresh sets for a classification
 // refusal, else the one a resolved-target refusal carries in the
-// reason itself as state, split by gofresh's one implementation —
-// empty where the reason names no attributed refusal.
+// reason itself as state, split by the one refusal-attribution
+// implementation — empty where the reason names no attributed refusal.
 func evidenceAttribution(observed, reason string) string {
 	if observed != "" {
 		return observed
 	}
-	return runtimeinput.RefusalAttribution(reason)
+	return refusalAttribution(reason)
 }
 
 // fingerprint is the recorded gofresh evidence as the engine reads it.
@@ -2991,11 +2990,21 @@ func MergeWholeFindings(prior, fresh []Finding, discovered []Target, snapshot ma
 // build selections stand untouched and cross-selection survivor verdicts
 // are re-annotated across the merged set.
 func MergeWholeFindingsForSelection(prior, fresh []Finding, discovered []Target, snapshot map[string][]Attestation, selKey string) ([]Finding, []AttestationShed) {
+	return MergeDiscoveredFindingsForSelection(prior, fresh, discovered, snapshot, selKey, func(string) bool { return true })
+}
+
+// MergeDiscoveredFindingsForSelection merges fresh into prior and removes
+// unshaped records belonging to selKey for which pruneSymbol returns true
+// when their symbol is absent from discovered (REQ-result-hygiene).
+func MergeDiscoveredFindingsForSelection(prior, fresh []Finding, discovered []Target, snapshot map[string][]Attestation, selKey string, pruneSymbol func(string) bool) ([]Finding, []AttestationShed) {
 	current := make(map[string]bool, len(discovered))
 	for _, target := range discovered {
 		current[target.Symbol] = true
 	}
 	merged, shed := MergeFindings(prior, fresh, snapshot)
+	if pruneSymbol == nil {
+		return AnnotateSelectionVerdicts(merged), shed
+	}
 	kept := merged[:0]
 	for _, finding := range merged {
 		// A shaped finding's identity is never discovered: absence from
@@ -3003,8 +3012,14 @@ func MergeWholeFindingsForSelection(prior, fresh []Finding, discovered []Target,
 		// spares it exactly as lifecycle pruning does — retirement is
 		// the caller's explicit edit (REQ-target-structural,
 		// REQ-target-manual-recipes). Records belonging to another build
-		// selection are likewise spared by a whole-tree run of selKey.
-		if finding.Selection != selKey || current[finding.Symbol] || finding.Shape != nil {
+		// selection or outside pruneSymbol's discovery scope are likewise spared.
+		var inScope bool
+		if pkg := finding.TargetEvidence.ObservationProof.Subject.Package; pkg != "" {
+			inScope = pruneSymbol(pkg + "._")
+		} else {
+			inScope = pruneSymbol(finding.Symbol)
+		}
+		if finding.Selection != selKey || !inScope || current[finding.Symbol] || finding.Shape != nil {
 			kept = append(kept, finding)
 		}
 	}

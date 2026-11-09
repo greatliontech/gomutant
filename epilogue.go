@@ -21,7 +21,12 @@ type RunLedger struct {
 	store     *Store
 	runID     string
 	wholeTree bool
-	snapshot  map[string][]Attestation
+	// PruneSymbol, when non-nil, names the symbols belonging to the run's
+	// complete discovery scope (the whole tree or a package-only discovery
+	// filter) so absent symbols in that scope are reconciled on Finish
+	// (REQ-result-hygiene).
+	PruneSymbol func(string) bool
+	snapshot    map[string][]Attestation
 	// overlaid names the prior records that sat in the machine-local
 	// overlay at the run's start — their placement, the baseline the
 	// promoted count is judged against.
@@ -65,11 +70,16 @@ type RunLedger struct {
 // against, and the store's last read says which of its records sat in
 // the overlay — the promoted count's baseline.
 func NewRunLedger(store *Store, prior []Finding, runID string, wholeTree bool) *RunLedger {
+	var pruneSymbol func(string) bool
+	if wholeTree {
+		pruneSymbol = func(string) bool { return true }
+	}
 	l := &RunLedger{
-		store:     store,
-		runID:     runID,
-		wholeTree: wholeTree,
-		snapshot:  make(map[string][]Attestation, len(prior)),
+		store:       store,
+		runID:       runID,
+		wholeTree:   wholeTree,
+		PruneSymbol: pruneSymbol,
+		snapshot:    make(map[string][]Attestation, len(prior)),
 		overlaid:  make(map[string]bool, len(prior)),
 		postMerge: map[string]Finding{},
 		reported:  map[string]bool{},
@@ -219,10 +229,13 @@ type RunOutcome struct {
 	// machine-local, the aggregate REQ-result-local-signpost states
 	// beside the per-record disqualifiers.
 	MachineLocal int
-	// Dropped counts the symbols a whole-tree reconcile removed because
-	// their targets left the code — a persisted document write the face
-	// owns, never buried in an empty success (REQ-mcp-envelope).
+	// Dropped counts the symbols a whole-tree or package reconcile removed
+	// because their targets left the code — a persisted document write the
+	// face owns, never buried in an empty success (REQ-mcp-envelope).
 	Dropped int
+	// PackageReconcile reports whether Dropped came from a package-scoped
+	// discovery reconcile rather than a whole-tree reconcile.
+	PackageReconcile bool
 	// ExemptionsRekeyed names the reviewed exemption entries this run's
 	// first committing write re-keyed to the canonical clause spelling
 	// (REQ-result-exemptions).
@@ -259,6 +272,9 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 		if l.wholeTree {
 			merged, finalSheds = MergeWholeFindingsForSelection(current, findings, targets, l.snapshot, selKey)
 			dropped = droppedSymbols(current, merged)
+		} else if l.PruneSymbol != nil {
+			merged, finalSheds = MergeDiscoveredFindingsForSelection(current, findings, targets, l.snapshot, selKey, l.PruneSymbol)
+			dropped = droppedSymbols(current, merged)
 		} else {
 			merged, finalSheds = MergeFindings(current, findings, l.snapshot)
 		}
@@ -274,6 +290,7 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 		return outcome, err
 	}
 	outcome.Dropped = dropped
+	outcome.PackageReconcile = !l.wholeTree && l.PruneSymbol != nil
 	outcome.Rendered = l.Rendered(findings)
 	outcome.ExemptionsRekeyed = l.store.RekeyedExemptions()
 	for _, d := range DedupeAttestationSheds(append(append([]AttestationShed(nil), l.commitSheds...), finalSheds...)) {
@@ -332,11 +349,14 @@ func (l *RunLedger) Finish(ctx context.Context, findings []Finding, targets []Ta
 	return outcome, nil
 }
 
-// DropText states a whole-tree reconcile's drop for a face, or nothing
-// when nothing dropped: the one spelling on both faces.
+// DropText states a reconcile's drop for a face, or nothing when
+// nothing dropped: the one spelling on both faces.
 func (o RunOutcome) DropText() string {
 	if o.Dropped == 0 {
 		return ""
+	}
+	if o.PackageReconcile {
+		return fmt.Sprintf("the package reconcile dropped %d record(s) whose targets left the code", o.Dropped)
 	}
 	return fmt.Sprintf("the whole-tree reconcile dropped %d record(s) whose targets left the code", o.Dropped)
 }

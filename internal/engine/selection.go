@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // Selection is a run's declared build selection: build tags and a

@@ -3,7 +3,7 @@ package cmd
 import (
 	"time"
 
-	"github.com/greatliontech/gofresh/resident"
+	"github.com/greatliontech/gomutant/internal/resident"
 	gomutant "github.com/greatliontech/gomutant"
 )
 

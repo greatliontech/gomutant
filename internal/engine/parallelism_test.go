@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/gotool"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
 
@@ -129,7 +129,7 @@ func TestMergePreservesWidthReadingEvidence(t *testing.T) {
 			env = append(env, kv)
 		}
 	}
-	obs, err := runtimeinput.FromTestLog([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env, bounds), runtimeinput.WithCompletedProcess("width"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	obs, err := gofresh.FromTestLog([]byte("getenv GOMAXPROCS\n"), root, root, OracleEvidenceEnv(env, bounds), gofresh.WithCompletedProcess("width"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestMergePreservesWidthReadingEvidence(t *testing.T) {
 // stale exactly when the width moves (REQ-exec-oracle-parallelism).
 func TestOracleIngestEnvCarriesInnerParallelismCap(t *testing.T) {
 	four := OracleBounds{Width: 4}
-	frame := runtimeinput.ProducerFrame{PkgDir: "/pkg"}
+	frame := gofresh.ProducerFrame{PkgDir: "/pkg"}
 	// The mirror replaces the ambient working directory — never a
 	// second PWD entry — and carries the effective width, each once;
 	// the entries sit in the policy's order, which the facade
@@ -157,7 +157,7 @@ func TestOracleIngestEnvCarriesInnerParallelismCap(t *testing.T) {
 	if !slices.Equal(env, []string{"A=1", "GOMAXPROCS=4", "PWD=/pkg"}) {
 		t.Fatalf("mirror = %v, want PWD pinned in place of the ambient one and the effective GOMAXPROCS", env)
 	}
-	if refused := oracleIngestEnv([]string{"A=1"}, runtimeinput.ProducerFrame{}, four); !strings.Contains(strings.Join(refused, " "), "GOMAXPROCS=4") {
+	if refused := oracleIngestEnv([]string{"A=1"}, gofresh.ProducerFrame{}, four); !strings.Contains(strings.Join(refused, " "), "GOMAXPROCS=4") {
 		t.Fatalf("refused-frame mirror = %v, want the effective GOMAXPROCS", refused)
 	}
 	if plain := oracleIngestEnv([]string{"A=1"}, frame, OracleBounds{}); strings.Contains(strings.Join(plain, " "), "GOMAXPROCS") {

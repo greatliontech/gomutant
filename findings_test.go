@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 func TestSubjectEvidencePreservesObservationProof(t *testing.T) {
@@ -29,7 +28,7 @@ func TestSubjectEvidencePreservesObservationProof(t *testing.T) {
 			PackageProcessDischarges: "a.example/wire.reg", DynamicStateStrategy: gofresh.DynamicStateStrategy, ClosureStrategy: gofresh.ClosureStrategy,
 			RuntimeInputs: "manifest", RuntimeDigest: "digest", ResultKind: gofresh.CodeResult,
 		}
-		evidence := evidenceFromFingerprint("p.F", fingerprint, runtimeEvidence{state: runtimeinput.State{}})
+		evidence := evidenceFromFingerprint("p.F", fingerprint, runtimeEvidence{state: gofresh.RuntimeState{}})
 		if got := evidence.fingerprint(); got != fingerprint {
 			t.Fatalf("observable %v round trip = %+v, want %+v", observable, got, fingerprint)
 		}
@@ -362,7 +361,7 @@ func TestFingerprintSurfaceIsMappedOrExempt(t *testing.T) {
 		if observable {
 			leg.ObservationProof.Reason = ""
 		}
-		ev := evidenceFromFingerprint("pkg.Sym", leg, runtimeEvidence{state: runtimeinput.State{Unverifiable: true, Reason: "runtime reason"}})
+		ev := evidenceFromFingerprint("pkg.Sym", leg, runtimeEvidence{state: gofresh.RuntimeState{Unverifiable: true, Reason: "runtime reason"}})
 		raw, err := json.Marshal(ev)
 		if err != nil {
 			t.Fatalf("observable=%v: marshal: %v", observable, err)

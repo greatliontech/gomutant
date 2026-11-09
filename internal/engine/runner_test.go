@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // spawnLog records the go commands the tree's runner prepared while an
@@ -111,10 +111,11 @@ func TestTreeGoCommandsRideTheRunner(t *testing.T) {
 	if !log.saw(packageDir, "env") {
 		t.Fatalf("the ingest's roots probe did not ride the runner:\n%s", &log)
 	}
-	// Actual processes receive distinct TMPDIR values. Even under one
-	// run-owned memo these are distinct complete environments and each probes.
+	// Actual processes receive distinct TMPDIR values, while ingest binds
+	// against the run's ambient environment and declares the scratch directory
+	// as an ephemeral filesystem root, reusing the run-owned roots memo.
 	bounds := DeriveOracleBounds(-1, 1)
-	for round, want := range []bool{true, true} {
+	for round, want := range []bool{true, false} {
 		log.dirs = nil
 		if _, _, _, _, state, err := TestProbeObservedEnv(ctx, "testdata/fixturemod", "example.com/fixture/lib", "^TestPickInput$", time.Minute, nil, moduleDir, packageDir, nil, nil, env, bounds); err != nil || !state.OK {
 			t.Fatalf("observed probe %d under one bounds: ok=%v err=%v", round, state.OK, err)
@@ -137,6 +138,7 @@ func TestTreeGoCommandsRideTheRunner(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte("# test log\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	bounds = DeriveOracleBounds(-1, 1)
 	frame := captureOracleFrame(ctx, moduleDir, packageDir, nil)
 	for _, tc := range []struct {
 		name   string

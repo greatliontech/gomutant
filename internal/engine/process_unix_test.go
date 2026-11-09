@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // TestOracleSpawnRidesTheContainedRunner pins the oracle spawn to the

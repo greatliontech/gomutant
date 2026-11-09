@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 )
 
 func TestMutantSchemaGenerationAndMerge(t *testing.T) {
@@ -168,7 +168,7 @@ func TestMath(t *testing.T) {
 		t.Fatalf("baseline probe failed: passed=%v obs=%+v err=%v", passed, baseObs, err)
 	}
 
-	observations := []runtimeinput.Observation{baseObs}
+	observations := []gofresh.Observation{baseObs}
 	for _, group := range [][]Candidate{addGen.Candidates, subGen.Candidates, mulGen.Candidates, brokenGen.Candidates} {
 		for _, c := range group {
 			m, ok := c.Mutant()
@@ -219,16 +219,16 @@ func TestMath(t *testing.T) {
 		t.Fatalf("SchemaCache compiled %d binaries, want 1 coalesced binary for the package", compiledCount)
 	}
 
-	// Verify runtimeinput.Merge across baseline and all schema mutant runs stays verifiable
+	// Verify gofresh.MergeObservations across baseline and all schema mutant runs stays verifiable
 	// (proving GOMUTANT_ACTIVE_MUTANT never leaked into testlog).
-	merged, err := runtimeinput.Merge(dir, env, observations...)
+	merged, err := gofresh.MergeObservations(dir, env, observations...)
 	if err != nil {
-		t.Fatalf("runtimeinput.Merge failed: %v", err)
+		t.Fatalf("gofresh.MergeObservations failed: %v", err)
 	}
 	if !merged.OK || merged.Unverifiable {
 		t.Fatalf("merged observation unverifiable (GOMUTANT_ACTIVE_MUTANT leaked into testlog?): merged=%+v", merged)
 	}
-	current, err := runtimeinput.Current(ctx, merged.Manifest, dir, env)
+	current, err := gofresh.CurrentRuntimeInputs(ctx, merged.Manifest, dir, env)
 	if err != nil || !current.OK || current.Unverifiable || current.Digest != merged.Digest {
 		t.Fatalf("merged observation current check failed: current=%+v merged=%+v err=%v", current, merged, err)
 	}
@@ -566,5 +566,235 @@ func TestGuardExit(t *testing.T) {
 	}
 	if !foundExit0Kill {
 		t.Fatal("did not find os.Exit(0)-triggering mutant on GuardExit")
+	}
+}
+
+func TestSchemaTopLevelHelpersSharedOverlayAndRogueWriteSweep(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test -c and schema binary execution")
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/sharedov\n\ngo 1.26.4\n",
+		"lib/lib.go": `package lib
+
+import (
+	"os"
+	"path/filepath"
+)
+
+func WriteToDir(outDir string) error {
+	if outDir == "" {
+		return os.ErrInvalid
+	}
+	if err := os.MkdirAll(filepath.Join(outDir, "refs"), 0o500); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(outDir, "HEAD"), []byte("ref"), 0o600)
+}
+`,
+		"lib/lib_test.go": `package lib
+
+import "testing"
+
+func TestWriteToDirEmptyGuard(t *testing.T) {
+	if err := WriteToDir(""); err == nil {
+		t.Fatal("expected error for empty outDir")
+	}
+}
+`,
+		"consumer/consumer_test.go": `package consumer
+
+import (
+	"testing"
+
+	"example.com/sharedov/lib"
+)
+
+func TestConsumerCallsWriteToDir(t *testing.T) {
+	if err := lib.WriteToDir(""); err == nil {
+		t.Fatal("expected error for empty outDir")
+	}
+}
+`,
+	}
+	for name, content := range files {
+		full := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	gen, err := tr.CandidatesContext(ctx, "example.com/sharedov/lib.WriteToDir", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var guardMutant Mutant
+	foundGuardMutant := false
+	for _, c := range gen.Candidates {
+		m, ok := c.Mutant()
+		if !ok || m.SchemaMutantID == "" {
+			continue
+		}
+		schemaSrc := string(m.SchemaReplacements[0].Source)
+		if !strings.Contains(schemaSrc, "_default(") {
+			t.Fatalf("expected top-level _default helper function in schema source, got:\n%s", schemaSrc)
+		}
+		if (m.Operator == "condition: force false" || m.Operator == "comparison: == -> !=") && strings.Contains(c.Position, "lib.go:9:") {
+			guardMutant = m
+			foundGuardMutant = true
+		}
+	}
+	if !foundGuardMutant {
+		t.Fatal("expected condition: force false mutant on outDir == \"\" guard")
+	}
+
+	bounds := DeriveOracleBounds(-1, 2)
+	defer bounds.Close()
+	env := tr.GoEnv()
+	moduleDir, libPkgDir, err := tr.PackageContext("example.com/sharedov/lib")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, consumerPkgDir, err := tr.PackageContext("example.com/sharedov/consumer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out1, killer1, _, obs1, inc1, _, err := RunMutantObservedEnv(
+		ctx, dir, guardMutant, []string{"example.com/sharedov/lib"}, "^TestWriteToDirEmptyGuard$", time.Minute,
+		nil, moduleDir, libPkgDir, nil, nil, env, bounds,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out1 != MutantKilled || killer1 != "example.com/sharedov/lib.TestWriteToDirEmptyGuard" {
+		t.Fatalf("lib oracle outcome=(%v, %q), want killed by TestWriteToDirEmptyGuard", out1, killer1)
+	}
+	if inc1 != "" || !obs1.OK || obs1.Unverifiable {
+		t.Fatalf("lib oracle observation after rogue mutant write: inc=%q obs=%+v", inc1, obs1)
+	}
+	if _, statErr := os.Stat(filepath.Join(libPkgDir, "HEAD")); !os.IsNotExist(statErr) {
+		t.Fatalf("rogue mutant write HEAD leaked into libPkgDir: statErr=%v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(libPkgDir, "refs")); !os.IsNotExist(statErr) {
+		t.Fatalf("rogue mutant write refs/ leaked into libPkgDir: statErr=%v", statErr)
+	}
+
+	out2, killer2, _, obs2, inc2, _, err := RunMutantObservedEnv(
+		ctx, dir, guardMutant, []string{"example.com/sharedov/consumer"}, "^TestConsumerCallsWriteToDir$", time.Minute,
+		nil, moduleDir, consumerPkgDir, nil, nil, env, bounds,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out2 != MutantKilled || killer2 != "example.com/sharedov/consumer.TestConsumerCallsWriteToDir" {
+		t.Fatalf("consumer oracle outcome=(%v, %q), want killed by TestConsumerCallsWriteToDir", out2, killer2)
+	}
+	if inc2 != "" || !obs2.OK || obs2.Unverifiable {
+		t.Fatalf("consumer oracle observation after rogue mutant write: inc=%q obs=%+v", inc2, obs2)
+	}
+
+	bounds.Schemas.mu.Lock()
+	overlayCount := len(bounds.Schemas.overlays)
+	entryCount := len(bounds.Schemas.entries)
+	bounds.Schemas.mu.Unlock()
+	if overlayCount != 1 || entryCount != 2 {
+		t.Fatalf("SchemaCache overlays=%d (want 1 shared overlay), entries=%d (want 2 testPkg binaries)", overlayCount, entryCount)
+	}
+}
+
+func TestSchemaParenthesizedGenericReceiverAndConcurrentPkgDirHygiene(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/parengen\n\ngo 1.26.4\n",
+		"box.go": `package parengen
+
+type Box[T comparable] struct {
+	val T
+}
+
+func (_ *(Box[T])) Same(a, b T) bool {
+	return a == b
+}
+
+func (_ (Box[T])) Echo(a, b T) bool {
+	return a != b
+}
+`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tr, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, sym := range []string{"example.com/parengen.Box.Same", "example.com/parengen.Box.Echo"} {
+		gen, err := tr.CandidatesContext(ctx, sym, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sawSchema := false
+		for _, c := range gen.Candidates {
+			if c.SchemaMutantID != "" {
+				sawSchema = true
+			}
+		}
+		if !sawSchema {
+			t.Fatalf("%s: expected parenthesized generic receiver candidates to compile in schema", sym)
+		}
+	}
+
+	pkgDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(pkgDir, "keep.go"), []byte("package p\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := NewSchemaCache()
+	defer cache.Close()
+	namespaces := []gofresh.ScratchNamespace{{Dir: ".", Pattern: "work-*"}}
+
+	// Worker A enters pkgDir and writes rogue file "HEAD".
+	leaveA := enterPkgDir(cache, pkgDir, pkgDir, namespaces)
+	if err := os.WriteFile(filepath.Join(pkgDir, "HEAD"), []byte("rogue-A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Worker B enters pkgDir while Worker A's "HEAD" is on disk, and creates a
+	// legitimate ScratchNamespace entry "work-live".
+	leaveB := enterPkgDir(cache, pkgDir, pkgDir, namespaces)
+	scratchEntry := filepath.Join(pkgDir, "work-live")
+	if err := os.WriteFile(scratchEntry, []byte("scratch-B"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Worker A finishes and sweeps: "HEAD" is removed, while Worker B's
+	// ScratchNamespace entry "work-live" is preserved.
+	leaveA()
+	if _, err := os.Stat(filepath.Join(pkgDir, "HEAD")); !os.IsNotExist(err) {
+		t.Fatalf("after Worker A sweep, HEAD stat err = %v, want IsNotExist", err)
+	}
+	if _, err := os.Stat(scratchEntry); err != nil {
+		t.Fatalf("after Worker A sweep, ScratchNamespace entry work-live was deleted: %v", err)
+	}
+	// Worker B now writes another rogue "HEAD", removes its scratch entry, and leaves.
+	if err := os.WriteFile(filepath.Join(pkgDir, "HEAD"), []byte("rogue-B"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(scratchEntry)
+	leaveB()
+	if _, err := os.Stat(filepath.Join(pkgDir, "HEAD")); !os.IsNotExist(err) {
+		t.Fatalf("after Worker B sweep, HEAD leaked into pkgDir (stat err = %v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(pkgDir, "keep.go")); err != nil {
+		t.Fatalf("baseline file keep.go missing after sweep: %v", err)
 	}
 }

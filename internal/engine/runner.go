@@ -3,7 +3,7 @@ package engine
 import (
 	"os/exec"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // goRunner is the one runner every go command gomutant owns rides

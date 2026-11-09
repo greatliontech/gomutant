@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 

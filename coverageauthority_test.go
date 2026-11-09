@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -249,7 +249,7 @@ func coverageAuthorityRegression(t *testing.T, source, literal, testBody string)
 		original := seams.runMutantObserved
 		var mu sync.Mutex
 		first := map[string]string{}
-		seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, pkgs []string, pattern string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+		seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, pkgs []string, pattern string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 			mu.Lock()
 			key := m.Position + " " + m.Operator
 			if _, ok := first[key]; !ok {

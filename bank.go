@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -23,7 +22,7 @@ import (
 // is sound by construction: the banked oracle-subject evidence rows
 // re-verify against the current views through the same
 // evidencePairsValid discipline finding serves use, and the banked
-// observation re-enters ONLY through runtimeinput.Adopt, which
+// observation re-enters ONLY through gofresh.AdoptObservation, which
 // re-evaluates every recorded identity against disk and refuses on
 // any disagreement, the adopted digest then compared against the
 // banked one — a failed adoption or digest mismatch falls back to a
@@ -326,7 +325,7 @@ func (b *baselineBank) putBaseline(key string, e bankedBaseline) {
 // baseline's own observation, validates the producer bracket, and
 // persists immediately. Any non-cancellation attachment or validation
 // failure skips the deposit without aborting the campaign.
-func depositGroupBaseline(ctx context.Context, bank *baselineBank, key string, w work, g group, observed runtimeinput.Observation, runEnv []string, raw time.Duration, passed []string, testDurations map[string]time.Duration) (bool, error) {
+func depositGroupBaseline(ctx context.Context, bank *baselineBank, key string, w work, g group, observed gofresh.Observation, runEnv []string, raw time.Duration, passed []string, testDurations map[string]time.Duration) (bool, error) {
 	if bank == nil || observed.Unverifiable || observed.Manifest == "" || w.producer == nil {
 		return false, nil
 	}
@@ -559,7 +558,7 @@ func (k baselineKey) persistedKey(scope string) string {
 
 // bankScopeString folds the observation-shaping per-run declarations
 // into one stable key component.
-func bankScopeString(brackets []string, namespaces []runtimeinput.ScratchNamespace) string {
+func bankScopeString(brackets []string, namespaces []gofresh.ScratchNamespace) string {
 	bs := append([]string(nil), brackets...)
 	sort.Strings(bs)
 	var nss []string

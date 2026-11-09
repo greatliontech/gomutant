@@ -10,13 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
-// Check the per-process state before an across-process union can discard
-// disagreeing environment values. This keeps sweep order and root coverage
-// observable even when each process legitimately has a different TMPDIR.
+// Check the per-process state and the across-process union: each oracle
+// process runs under its own minted scratch TMPDIR, while observation ingest
+// binds against the run's ambient environment and declares the minted scratch
+// directory as an ephemeral filesystem root (REQ-exec-oracle-scratch-declared).
 func assertScratchProcessesFinalize(t *testing.T, tree *Tree, dir string) {
 	t.Helper()
 	mutants, err := tree.eng.Mutants("example.com/scratch.F", 1)
@@ -30,7 +31,7 @@ func assertScratchProcessesFinalize(t *testing.T, tree *Tree, dir string) {
 				env = slices.Clone(cmd.Env)
 			}
 		})
-		var observation runtimeinput.Observation
+		var observation gofresh.Observation
 		if baseline {
 			var ran int
 			var passed bool
@@ -49,7 +50,7 @@ func assertScratchProcessesFinalize(t *testing.T, tree *Tree, dir string) {
 		if err != nil || !observation.OK || observation.Unverifiable || len(env) == 0 {
 			t.Fatalf("baseline=%v observation=%+v err=%v", baseline, observation, err)
 		}
-		paths, err := runtimeinput.Paths(observation.Manifest, dir)
+		paths, err := gofresh.RuntimeInputPaths(observation.Manifest, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -58,7 +59,7 @@ func assertScratchProcessesFinalize(t *testing.T, tree *Tree, dir string) {
 				t.Fatalf("scratch identity escaped its root declaration: %s", path)
 			}
 		}
-		state, err := runtimeinput.Current(context.Background(), observation.Manifest, dir, env)
+		state, err := gofresh.CurrentRuntimeInputs(context.Background(), observation.Manifest, dir, tree.eng.GoEnv())
 		if err != nil || state.Unverifiable || state.Digest != observation.Digest {
 			t.Fatalf("baseline=%v post-sweep state=%+v observation=%+v err=%v", baseline, state, observation, err)
 		}
@@ -101,10 +102,8 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 	if err != nil || len(findings) != 1 {
 		t.Fatalf("measure = %+v, %v", findings, err)
 	}
-	// Root coverage and sweep order were checked before union. The actual
-	// TMPDIR reads differ across processes and must not become a stable value.
-	if !findings[0].TargetEvidence.RuntimeUnverifiable || !findings[0].OracleEvidence[0].RuntimeUnverifiable {
-		t.Fatal("different delivered scratch names acquired reusable union evidence")
+	if findings[0].TargetEvidence.RuntimeUnverifiable || findings[0].OracleEvidence[0].RuntimeUnverifiable {
+		t.Fatalf("temp-touching oracle sealed evidence unverifiable: target=%+v oracle=%+v", findings[0].TargetEvidence, findings[0].OracleEvidence[0])
 	}
 	// Containment leaves no record: the minted root is declared as an
 	// ephemeral temp root and the swept scratch reads beneath it are
@@ -112,7 +111,7 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 	// as missing-path identities — a recorded gomutant-oracle-* identity
 	// would mean a scratch read escaped the admission
 	// (REQ-exec-oracle-scratch-declared).
-	paths, err := runtimeinput.Paths(findings[0].OracleEvidence[0].RuntimeInputs, dir)
+	paths, err := gofresh.RuntimeInputPaths(findings[0].OracleEvidence[0].RuntimeInputs, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,10 +130,9 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 	if len(leftovers) != 0 {
 		t.Fatalf("oracle scratch leaked: %q", leftovers)
 	}
-	// The union's explicit refusal survives revalidation; per-process sweep
-	// ordering was checked against each process's actual environment above.
-	state, err := runtimeinput.Current(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
-	if err != nil || !state.OK || !state.Unverifiable {
+	// Post-sweep revalidation against the ambient environment holds.
+	state, err := gofresh.CurrentRuntimeInputs(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
+	if err != nil || !state.OK || state.Unverifiable {
 		t.Fatalf("post-sweep revalidation = %+v, %v", state, err)
 	}
 	if state.Digest != findings[0].OracleEvidence[0].RuntimeDigest {
@@ -147,9 +145,7 @@ func TestOracleScratchContainsAndSweepsTempDirs(t *testing.T) {
 // declares the minted scratch root as an ephemeral temp root, so the
 // root's stat (temp-tree creation machinery minting the per-test
 // subtree) records nothing instead of sealing the evidence as an
-// uncovered runtime input (REQ-exec-oracle-scratch-declared). This checks
-// each process's state under its delivered environment; differing TMPDIR
-// values can independently prevent an across-process reusable union.
+// uncovered runtime input (REQ-exec-oracle-scratch-declared).
 func TestTempTouchingOracleFinalizesVerifiable(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs go test per mutant")
@@ -175,4 +171,15 @@ func TestTempTouchingOracleFinalizesVerifiable(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertScratchProcessesFinalize(t, tree, dir)
+	findings, err := tree.Run(context.Background(), []Target{{Symbol: "example.com/scratch.F", Oracle: []string{"example.com/scratch.TestF"}, OracleExplicit: true}}, Options{Budget: 1, OracleTimeout: 2 * time.Minute})
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("measure = %+v, %v", findings, err)
+	}
+	if findings[0].TargetEvidence.RuntimeUnverifiable || findings[0].OracleEvidence[0].RuntimeUnverifiable {
+		t.Fatalf("t.TempDir() oracle sealed evidence unverifiable: target=%+v oracle=%+v", findings[0].TargetEvidence, findings[0].OracleEvidence[0])
+	}
+	state, err := gofresh.CurrentRuntimeInputs(context.Background(), findings[0].OracleEvidence[0].RuntimeInputs, dir, os.Environ())
+	if err != nil || !state.OK || state.Unverifiable || state.Digest != findings[0].OracleEvidence[0].RuntimeDigest {
+		t.Fatalf("post-run revalidation = %+v, %v", state, err)
+	}
 }

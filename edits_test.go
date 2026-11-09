@@ -98,17 +98,61 @@ func TestMergeFindingsSkipNeverShadows(t *testing.T) {
 }
 
 func TestMergeWholeFindingsPrunesAbsentSymbols(t *testing.T) {
-	prior := []Finding{{Symbol: "p.Present", BodyHash: "old"}, {Symbol: "p.Deleted", BodyHash: "gone"}}
+	prior := []Finding{{Symbol: "p.Present", BodyHash: "old"}, {Symbol: "p.Deleted", BodyHash: "gone"}, {Symbol: "other.Kept", BodyHash: "other"}}
 	fresh := []Finding{{Symbol: "p.Present", BodyHash: "new"}}
-	got := mergeOnly(MergeWholeFindings(prior, fresh, []Target{{Symbol: "p.Present"}, {Symbol: "p.Skipped"}}, nil))
+	got := mergeOnly(MergeWholeFindings(prior[:2], fresh, []Target{{Symbol: "p.Present"}, {Symbol: "p.Skipped"}}, nil))
 	if len(got) != 1 || got[0].Symbol != "p.Present" || got[0].BodyHash != "new" {
 		t.Fatalf("whole-tree merge = %+v", got)
 	}
-	if got := mergeOnly(MergeWholeFindings(prior, nil, nil, nil)); len(got) != 0 {
+	if got := mergeOnly(MergeWholeFindings(prior[:2], nil, nil, nil)); len(got) != 0 {
 		t.Fatalf("empty whole-tree discovery retained findings: %+v", got)
 	}
-	if got := mergeOnly(MergeFindings(prior, fresh, nil)); len(got) != 2 {
+	if got := mergeOnly(MergeFindings(prior[:2], fresh, nil)); len(got) != 2 {
 		t.Fatalf("scoped merge pruned an unmeasured finding: %+v", got)
+	}
+	pkgScoped := mergeOnly(MergeDiscoveredFindingsForSelection(prior, fresh, []Target{{Symbol: "p.Present"}}, nil, "", func(symbol string) bool {
+		return strings.HasPrefix(symbol, "p.")
+	}))
+	if len(pkgScoped) != 2 || pkgScoped[0].Symbol != "p.Present" || pkgScoped[1].Symbol != "other.Kept" {
+		t.Fatalf("package-scoped discovery merge = %+v, want p.Deleted pruned and other.Kept retained", pkgScoped)
+	}
+	dottedFindings := []Finding{
+		{
+			Symbol: "example.com/foo.bar.Baz",
+			TargetEvidence: SubjectEvidence{
+				Fingerprint: gofresh.Fingerprint{
+					ObservationProof: gofresh.ObservationProof{
+						Subject: gofresh.Subject{Package: "example.com/foo.bar", Symbol: "Baz"},
+					},
+				},
+			},
+		},
+		{
+			Symbol: "example.com/my.pkg.Gone",
+			TargetEvidence: SubjectEvidence{
+				Fingerprint: gofresh.Fingerprint{
+					ObservationProof: gofresh.ObservationProof{
+						Subject: gofresh.Subject{Package: "example.com/my.pkg", Symbol: "Gone"},
+					},
+				},
+			},
+		},
+	}
+	dottedMerged := mergeOnly(MergeDiscoveredFindingsForSelection(dottedFindings, nil, nil, nil, "", func(symbol string) bool {
+		pkg, ok := strings.CutSuffix(symbol, "._")
+		if !ok {
+			return false
+		}
+		return pkg == "example.com/foo" || pkg == "example.com/my.pkg"
+	}))
+	if len(dottedMerged) != 1 || dottedMerged[0].Symbol != "example.com/foo.bar.Baz" {
+		t.Fatalf("dotted package-scoped merge = %+v, want example.com/foo.bar.Baz retained and example.com/my.pkg.Gone pruned", dottedMerged)
+	}
+	if got := (RunOutcome{Dropped: 1, PackageReconcile: true}).DropText(); got != "the package reconcile dropped 1 record(s) whose targets left the code" {
+		t.Fatalf("package reconcile DropText = %q", got)
+	}
+	if got := (RunOutcome{Dropped: 1}).DropText(); got != "the whole-tree reconcile dropped 1 record(s) whose targets left the code" {
+		t.Fatalf("whole-tree reconcile DropText = %q", got)
 	}
 }
 

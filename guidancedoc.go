@@ -3,15 +3,15 @@ package gomutant
 import (
 	_ "embed"
 
-	"github.com/greatliontech/gofresh/guidance"
+	"github.com/greatliontech/gomutant/internal/guidance"
 )
 
 // docs/guidance.md is the single home of verb-level served prose
 // (what a verb does, what a knob controls, when to use which),
 // embedded because the binary travels while the repository stays
-// home, and parsed once for every surface to project from (gofresh
-// docs/specs/guidance.md is the format contract; this module's
-// serving contract is REQ-mcp-guidance in docs/specs/mcp.md).
+// home, and parsed once for every surface to project from
+// (internal/guidance parses the format; this module's serving
+// contract is REQ-mcp-guidance in docs/specs/mcp.md).
 //
 //go:embed docs/guidance.md
 var guidanceSrc []byte

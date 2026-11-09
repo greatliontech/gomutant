@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/gotool"
+	"github.com/greatliontech/gofresh"
 )
 
 func TestOracleObservationBindsTheDeliveredMemoryEnvironment(t *testing.T) {
@@ -56,14 +56,14 @@ func TestMemory(t *testing.T) {
 	if len(deliveredEnv) == 0 {
 		t.Fatal("the real oracle spawn was not observed")
 	}
-	delivered, err := runtimeinput.Current(context.Background(), observation.Manifest, dir, deliveredEnv)
+	delivered, err := gofresh.CurrentRuntimeInputs(context.Background(), observation.Manifest, dir, deliveredEnv)
 	if err != nil || delivered.Digest != observation.Digest {
 		t.Fatalf("observation bound the parent environment instead of the delivered value: recorded=%+v delivered=%+v err=%v", observation.State, delivered, err)
 	}
 	assertIdentityOnly(t, observation)
 }
 
-func assertIdentityOnly(t *testing.T, observation runtimeinput.Observation) {
+func assertIdentityOnly(t *testing.T, observation gofresh.Observation) {
 	t.Helper()
 	data, err := base64.RawURLEncoding.DecodeString(observation.Manifest)
 	if err != nil {

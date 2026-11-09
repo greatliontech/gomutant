@@ -27,7 +27,7 @@ import (
 	"sync"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 	"github.com/greatliontech/gomutant/internal/contextio"
 	"golang.org/x/mod/modfile"
 )

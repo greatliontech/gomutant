@@ -11,7 +11,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -83,10 +82,10 @@ func TestCompleteGroupsPreserveMembershipAndBounds(t *testing.T) {
 	for _, derived := range []bool{false, true} {
 		var got []group
 		var budgets []time.Duration
-		seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, pkgs []string, pattern string, bound time.Duration, flags []string, module, dir string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, _ engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+		seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, pkgs []string, pattern string, bound time.Duration, flags []string, module, dir string, _ []string, _ []gofresh.ScratchNamespace, _ []string, _ engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 			got = append(got, group{pkgs: pkgs, runRegex: pattern, flags: flags, moduleDir: module, packageDir: dir})
 			budgets = append(budgets, bound)
-			return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "full process incomplete", "", nil
+			return engine.MutantSurvived, "", false, gofresh.Observation{}, "full process incomplete", "", nil
 		}
 		opts := runOptions{Options: Options{OracleTimeout: time.Minute}, baselineBank: bank}
 		wantBudgets := []time.Duration{time.Minute, time.Minute}
@@ -119,7 +118,7 @@ func TestCompleteGroupOutcomes(t *testing.T) {
 	m := engine.Mutant{Position: "f.go:10:2"}
 	original, ground := seams.runMutantObserved, seams.killGround
 	t.Cleanup(func() { seams.runMutantObserved, seams.killGround = original, ground })
-	seams.killGround = func(context.Context, string, string, string, time.Duration, []string, string, string, []string, []runtimeinput.ScratchNamespace, []string, engine.OracleBounds) (engine.Baseline, error) {
+	seams.killGround = func(context.Context, string, string, string, time.Duration, []string, string, string, []string, []gofresh.ScratchNamespace, []string, engine.OracleBounds) (engine.Baseline, error) {
 		t.Error("fresh full-group execution paid a subset baseline")
 		return engine.Baseline{}, nil
 	}
@@ -137,12 +136,12 @@ func TestCompleteGroupOutcomes(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, pattern string, bound time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, _ engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+			seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, pattern string, bound time.Duration, _ []string, _, _ string, _ []string, _ []gofresh.ScratchNamespace, _ []string, _ engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 				calls++
 				if pattern != "^(TestA|TestB)$" || bound != 19*time.Second {
 					t.Errorf("pattern=%q bound=%v", pattern, bound)
 				}
-				return tc.out, tc.killer, tc.killer == TimeoutKiller, runtimeinput.Observation{}, "", tc.diagnostic, nil
+				return tc.out, tc.killer, tc.killer == TimeoutKiller, gofresh.Observation{}, "", tc.diagnostic, nil
 			}
 			out, killer, decided, _, _, err := (&Tree{}).executeMutant(context.Background(), w, m, runOptions{Options: Options{OracleTimeout: 19 * time.Second}}, nil)
 			if (err != nil) != tc.wantErr || calls != 1 {
@@ -162,9 +161,9 @@ func TestSerialConfirmationRunsUnscheduled(t *testing.T) {
 	original := seams.runMutantObserved
 	t.Cleanup(func() { seams.runMutantObserved = original })
 	var patterns []string
-	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, pattern string, _ time.Duration, _ []string, _, _ string, _ []string, _ []runtimeinput.ScratchNamespace, _ []string, _ engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(_ context.Context, _ string, _ engine.Mutant, _ []string, pattern string, _ time.Duration, _ []string, _, _ string, _ []string, _ []gofresh.ScratchNamespace, _ []string, _ engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 		patterns = append(patterns, pattern)
-		return engine.MutantSurvived, "", false, runtimeinput.Observation{}, "", "", nil
+		return engine.MutantSurvived, "", false, gofresh.Observation{}, "", "", nil
 	}
 	memo := map[scopedBaselineKey][]string{{pkg: pkg, run: "^TestA$"}: nil}
 	if _, _, _, _, _, err := (&Tree{}).confirmMutant(context.Background(), w, m, pkg+".TestA", memo, runOptions{}, nil); err != nil {
@@ -188,7 +187,7 @@ func TestRunKeepsCompleteOracleDespiteCoverage(t *testing.T) {
 	t.Cleanup(func() { seams.runMutantObserved, seams.coveredPositions = original, coverage })
 	var mu sync.Mutex
 	var patterns, probePatterns []string
-	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, pkgs []string, pattern string, bound time.Duration, flags []string, module, wd string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, string, error) {
+	seams.runMutantObserved = func(ctx context.Context, dir string, m engine.Mutant, pkgs []string, pattern string, bound time.Duration, flags []string, module, wd string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.MutantOutcome, string, bool, gofresh.Observation, string, string, error) {
 		mu.Lock()
 		patterns = append(patterns, pattern)
 		mu.Unlock()

@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/greatliontech/gofresh/shapecorpus"
+	"github.com/greatliontech/gomutant/internal/shapecorpus"
 )
 
 // TestLanguageShapeCanaries runs the fleet's shared shape corpus
-// (gofresh/shapecorpus) through candidate generation: each entry must
+// (internal/shapecorpus) through candidate generation: each entry must
 // load, enumerate, and generate AT LEAST ONE candidate — a frontend
 // that silently skips an unrecognized shape (zero candidates, no
 // error: the likeliest breakage for an AST walker) is exactly as red

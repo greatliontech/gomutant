@@ -4,7 +4,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/greatliontech/gofresh/resident"
+	"github.com/greatliontech/gomutant/internal/resident"
 	gomutant "github.com/greatliontech/gomutant"
 )
 
@@ -13,7 +13,7 @@ import (
 // ends the freed heap is returned to the host, and the loaded tree
 // cached across calls is released once the server has been idle for
 // idleTreeRelease, so an idle server holds the runtime's floor alone.
-// The process's own memory limit is the fleet rule's (gofresh/resident)
+// The process's own memory limit is the fleet rule's (internal/resident)
 // — installed where the server and the commands start.
 
 // idleTreeRelease is how long the server keeps its cached tree after
@@ -30,7 +30,7 @@ const idleTreeRelease = 60 * time.Second
 // reads as the host's and the room errs low, and a child caught
 // between its clone and its exec shares the server's memory map and
 // reads as a second copy of the server's held set, so the room can
-// err high by that much until the next derivation (gofresh/resident's
+// err high by that much until the next derivation (internal/resident's
 // stated blind spots; a soft limit cuts nothing either way) — the
 // call is COUNTED before the walk, under the server's lock, which
 // guards only the counter and the idle timer: the pending idle

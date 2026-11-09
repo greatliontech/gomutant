@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/greatliontech/gofresh/toolversion"
+	"github.com/greatliontech/gomutant/internal/toolversion"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/greatliontech/gomutant/internal/gitref"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -1095,6 +1095,7 @@ func (s *Server) runTool(ctx context.Context, in runIn, streams runStreams) (err
 	// (REQ-attest-survivor, REQ-mcp-findings-doc); its writes take the
 	// server's document seam.
 	ledger := gomutant.NewRunLedger(prepared.Store, prior, runID, wholeTree)
+	ledger.PruneSymbol = sel.PruneSymbol
 	ledger.Update = func(ctx context.Context, change func([]gomutant.Finding) ([]gomutant.Finding, error)) (gomutant.Routing, error) {
 		return s.updateStore(ctx, prepared.Store, gomutant.FindingsPathAt(s.dir, in.Findings), change)
 	}

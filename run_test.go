@@ -19,7 +19,6 @@ import (
 	"unsafe"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/windowcost"
@@ -1191,11 +1190,11 @@ func TestMergeFindingObservationsMakesMovementNonReusable(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := os.Environ()
-	stableState, err := runtimeinput.FromTestLog([]byte("open "+stable+"\n"), root, root, env, runtimeinput.WithCompletedProcess("stable"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	stableState, err := gofresh.FromTestLog([]byte("open "+stable+"\n"), root, root, env, gofresh.WithCompletedProcess("stable"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	movingState, err := runtimeinput.FromTestLog([]byte("open "+moving+"\n"), root, root, env, runtimeinput.WithCompletedProcess("moving"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	movingState, err := gofresh.FromTestLog([]byte("open "+moving+"\n"), root, root, env, gofresh.WithCompletedProcess("moving"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1206,7 +1205,7 @@ func TestMergeFindingObservationsMakesMovementNonReusable(t *testing.T) {
 	if err != nil || !merged.OK || !merged.Unverifiable || !strings.Contains(merged.Reason, "could not be merged for reuse") {
 		t.Fatalf("moved observation = %+v, %v", merged, err)
 	}
-	paths, err := runtimeinput.Paths(merged.Manifest, root)
+	paths, err := gofresh.RuntimeInputPaths(merged.Manifest, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1231,7 +1230,7 @@ func TestRunUnionsEveryProcessObservation(t *testing.T) {
 	if len(findings) != 1 || findings[0].Mutants != 2 || findings[0].Killed != 2 {
 		t.Fatalf("PickInput finding = %+v, want two killed mutants", findings)
 	}
-	paths, err := runtimeinput.Paths(findings[0].TargetEvidence.RuntimeInputs, tr.dir)
+	paths, err := gofresh.RuntimeInputPaths(findings[0].TargetEvidence.RuntimeInputs, tr.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2098,15 +2097,15 @@ func TestCompletedObservationUnionIsCandidateGranular(t *testing.T) {
 	root := t.TempDir()
 	env := os.Environ()
 	ctx := context.Background()
-	completedBaseline, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	completedBaseline, err := gofresh.FromTestLog([]byte("# test log\n"), root, root, env, gofresh.WithCompletedProcess("baseline"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	completedCandidate, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("candidate"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	completedCandidate, err := gofresh.FromTestLog([]byte("# test log\n"), root, root, env, gofresh.WithCompletedProcess("candidate"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	incompleteCandidate, err := runtimeinput.Incomplete(root, "incomplete-candidate", "mutant test process panicked before observation finalization", env)
+	incompleteCandidate, err := gofresh.IncompleteRuntimeObservation(root, "incomplete-candidate", "mutant test process panicked before observation finalization", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2117,9 +2116,9 @@ func TestCompletedObservationUnionIsCandidateGranular(t *testing.T) {
 		{Symbol: "p.F", Operator: "op-c", Position: "f.go:3:3"}, // pre-execution discard: never launched, never flagged
 	}
 	outcomes := []engine.MutantOutcome{engine.MutantSurvived, engine.MutantKilled, engine.MutantDiscarded}
-	observations := []runtimeinput.Observation{completedCandidate, incompleteCandidate, {}}
+	observations := []gofresh.Observation{completedCandidate, incompleteCandidate, {}}
 	incompletes := []string{"", "mutant test process panicked before observation finalization", ""}
-	union, evidence, err := completedObservationUnion(ctx, root, env, []runtimeinput.Observation{completedBaseline}, candidates, outcomes, observations, incompletes, nil)
+	union, evidence, err := completedObservationUnion(ctx, root, env, []gofresh.Observation{completedBaseline}, candidates, outcomes, observations, incompletes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2131,11 +2130,11 @@ func TestCompletedObservationUnionIsCandidateGranular(t *testing.T) {
 		t.Fatalf("candidate evidence = %+v, want %+v", evidence, want)
 	}
 
-	incompleteBaseline, err := runtimeinput.Incomplete(root, "incomplete-baseline", "baseline test process produced no runtime-input log", env)
+	incompleteBaseline, err := gofresh.IncompleteRuntimeObservation(root, "incomplete-baseline", "baseline test process produced no runtime-input log", env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	union, evidence, err = completedObservationUnion(ctx, root, env, []runtimeinput.Observation{incompleteBaseline}, candidates[:1], outcomes[:1], observations[:1], incompletes[:1], nil)
+	union, evidence, err = completedObservationUnion(ctx, root, env, []gofresh.Observation{incompleteBaseline}, candidates[:1], outcomes[:1], observations[:1], incompletes[:1], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2809,11 +2808,11 @@ func TestSpliceCountsStampReExecutedSurvivorsUnderUnverifiableEvidence(t *testin
 // diverged; only the equal union keeps the serve reusable.
 func TestSplicedUnionDivergenceIsNonReusable(t *testing.T) {
 	prior := SubjectEvidence{Fingerprint: gofresh.Fingerprint{RuntimeInputs: "manifest-a", RuntimeDigest: "digest-a", ResultKind: gofresh.CodeResult}}
-	equal := runtimeinput.State{OK: true, Manifest: "manifest-a", Digest: "digest-a"}
+	equal := gofresh.RuntimeState{OK: true, Manifest: "manifest-a", Digest: "digest-a"}
 	if splicedUnionDiverged(equal, prior) {
 		t.Fatal("equal union reported diverged")
 	}
-	for name, state := range map[string]runtimeinput.State{
+	for name, state := range map[string]gofresh.RuntimeState{
 		"manifest":     {OK: true, Manifest: "manifest-b", Digest: "digest-a"},
 		"digest":       {OK: true, Manifest: "manifest-a", Digest: "digest-b"},
 		"unverifiable": {OK: true, Manifest: "manifest-a", Digest: "digest-a", Unverifiable: true},
@@ -2904,11 +2903,11 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 	}
 	env := os.Environ()
 	ctx := context.Background()
-	recorded, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	recorded, err := gofresh.FromTestLog([]byte("# test log\n"), root, root, env, gofresh.WithCompletedProcess("baseline"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	recordedState, err := runtimeinput.CompletedState(recorded)
+	recordedState, err := gofresh.CompletedObservationState(recorded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2926,7 +2925,7 @@ func TestApplySplicedUnionMarksDivergedEvidenceNonReusable(t *testing.T) {
 		t.Fatalf("equal union rewrote pinned evidence: %+v", same.TargetEvidence)
 	}
 
-	fresh, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("baseline"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	fresh, err := gofresh.FromTestLog([]byte("open data.txt\n"), root, root, env, gofresh.WithCompletedProcess("baseline"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3728,11 +3727,11 @@ func TestProofAbortErrorKeepsCancellationClass(t *testing.T) {
 func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *testing.T) {
 	root := t.TempDir()
 	env := os.Environ()
-	first, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("first"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	first, err := gofresh.FromTestLog([]byte("# test log\n"), root, root, env, gofresh.WithCompletedProcess("first"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("second"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	second, err := gofresh.FromTestLog([]byte("# test log\n"), root, root, env, gofresh.WithCompletedProcess("second"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3751,7 +3750,7 @@ func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *tes
 		t.Fatal("identical manifests were not shared after interning")
 	}
 	// A distinct manifest keeps its own backing and its own content.
-	incomplete, err := runtimeinput.Incomplete(root, "third", "distinct content", env)
+	incomplete, err := gofresh.IncompleteRuntimeObservation(root, "third", "distinct content", env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3768,11 +3767,11 @@ func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	mergedInterned, err := runtimeinput.CompletedState(fromInterned)
+	mergedInterned, err := gofresh.CompletedObservationState(fromInterned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mergedOriginal, err := runtimeinput.CompletedState(fromOriginals)
+	mergedOriginal, err := gofresh.CompletedObservationState(fromOriginals)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3780,7 +3779,7 @@ func TestManifestInternerSharesIdenticalManifestsAndPreservesObservations(t *tes
 		t.Fatal("interned observations merged to a different union")
 	}
 	// A zero observation passes through untouched.
-	if got := in.intern(runtimeinput.Observation{}); got.State != (runtimeinput.State{}) {
+	if got := in.intern(gofresh.Observation{}); got.State != (gofresh.RuntimeState{}) {
 		t.Fatalf("zero observation changed by interning: %+v", got.State)
 	}
 }
@@ -4254,11 +4253,11 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	}
 	env := os.Environ()
 	ctx := context.Background()
-	recorded, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("prior"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	recorded, err := gofresh.FromTestLog([]byte("open data.txt\n"), root, root, env, gofresh.WithCompletedProcess("prior"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	recordedState, err := runtimeinput.CompletedState(recorded)
+	recordedState, err := gofresh.CompletedObservationState(recorded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4267,7 +4266,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 
 	// The suffix read a subset of the recorded pins: the fold restores the
 	// persisted union exactly and the evidence stays untouched.
-	subset, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	subset, err := gofresh.FromTestLog([]byte("# test log\n"), root, root, env, gofresh.WithCompletedProcess("suffix"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4287,18 +4286,18 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	// The suffix read an input the record never pinned: the fold diverges
 	// and every subject's evidence is stamped non-reusable.
 	sparse := SubjectEvidence{Symbol: "example.com/empty.Gone"}
-	sparseRecorded, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("prior"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	sparseRecorded, err := gofresh.FromTestLog([]byte("# test log\n"), root, root, env, gofresh.WithCompletedProcess("prior"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	sparseState, err := runtimeinput.CompletedState(sparseRecorded)
+	sparseState, err := gofresh.CompletedObservationState(sparseRecorded)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sparse.RuntimeInputs = sparseState.Manifest
 	sparse.RuntimeDigest = sparseState.Digest
 	sparseRec := Finding{TargetEvidence: sparse, OracleEvidence: []SubjectEvidence{sparse}}
-	grew, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	grew, err := gofresh.FromTestLog([]byte("open data.txt\n"), root, root, env, gofresh.WithCompletedProcess("suffix"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4321,7 +4320,7 @@ func TestFoldRecordedUnionKeepsRecordedPinsAndStampsNewReads(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "data.txt"), []byte("moved"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	unadoptable, err := runtimeinput.FromTestLog([]byte("# test log\n"), root, root, env, runtimeinput.WithCompletedProcess("suffix"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	unadoptable, err := gofresh.FromTestLog([]byte("# test log\n"), root, root, env, gofresh.WithCompletedProcess("suffix"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4887,16 +4886,16 @@ func TestConfirmWindowKillsVolatileReArm(t *testing.T) {
 // independently: an unverifiable baseline alone, or any unverifiable
 // mutant observation alone, marks the window volatile.
 func TestWindowEvidenceVolatileArms(t *testing.T) {
-	unver := runtimeinput.Observation{}
+	unver := gofresh.Observation{}
 	unver.Unverifiable = true
-	clean := runtimeinput.Observation{}
+	clean := gofresh.Observation{}
 	if windowEvidenceVolatile(&work{}, nil) {
 		t.Fatal("empty window read volatile")
 	}
-	if !windowEvidenceVolatile(&work{baselines: []runtimeinput.Observation{clean, unver}}, nil) {
+	if !windowEvidenceVolatile(&work{baselines: []gofresh.Observation{clean, unver}}, nil) {
 		t.Fatal("unverifiable baseline not volatile")
 	}
-	if !windowEvidenceVolatile(&work{}, []runtimeinput.Observation{clean, unver}) {
+	if !windowEvidenceVolatile(&work{}, []gofresh.Observation{clean, unver}) {
 		t.Fatal("unverifiable mutant observation not volatile")
 	}
 }

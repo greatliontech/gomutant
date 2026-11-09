@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 // Exemption is one reviewed entry of the committed exemption record
@@ -185,12 +183,12 @@ const coverageEscapeOpen = " (symlink outside every bracket root: "
 func rekeyClause(clause string, roots []string) (string, bool) {
 	const moved = "observation bracket moved: "
 	if strings.HasPrefix(clause, moved) {
-		root := strings.TrimPrefix(runtimeinput.CanonicalMovedBracketClause(clause), moved)
+		root := strings.TrimPrefix(canonicalMovedBracketClause(clause), moved)
 		if strings.HasPrefix(root, `"`) {
 			// The canonicalizer emits a complete Go quoted literal here.
 			root, _ = strconv.Unquote(root)
 		}
-		out := runtimeinput.MovedBracketClause(relativePath(root, roots))
+		out := movedBracketClause(relativePath(root, roots))
 		return out, out != clause
 	}
 	head, escaped, hasEscape := clause, "", false
@@ -308,7 +306,7 @@ func writeExemptions(ctx context.Context, path string, exemptions []Exemption) (
 // detail, fresh per measurement, which the clause does not include
 // (REQ-result-exemptions).
 func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
-	clause := runtimeinput.CanonicalMovedBracketClause(reasonClause(reason))
+	clause := canonicalMovedBracketClause(reasonClause(reason))
 	for i := range exemptions {
 		if exemptions[i].Subject == subject && exemptions[i].Reason == clause {
 			return &exemptions[i]
@@ -322,8 +320,8 @@ func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
 // spelling and target, the operation, logged name and directory a
 // classification refusal carried before Gofresh moved its attribution
 // off the reason onto the observation, and the moved-bracket clause's
-// trailing bracketed member list — split by Gofresh's one
-// implementation (runtimeinput.RefusalClause). A quoted root is read
+// trailing bracketed member list — split by the one refusal-clause
+// implementation (refusalClause). A quoted root is read
 // whole. For legacy bare roots, the first suffix parsing as a labelled
 // member list is the attribution, so that spelling remains ambiguous.
 // The exemption record's readers — the match and the dead-acceptance
@@ -332,7 +330,7 @@ func exemptionFor(exemptions []Exemption, subject, reason string) *Exemption {
 // since there the attribution (a recorded path's resolved target) is
 // part of the state being reproduced (REQ-result-layers).
 func reasonClause(reason string) string {
-	return runtimeinput.RefusalClause(reason)
+	return refusalClause(reason)
 }
 
 // carriesAttribution reports whether an entry's reason is a clause

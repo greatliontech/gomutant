@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -62,7 +62,7 @@ type CampaignInputs struct {
 // material a run needs before its first load, produced by
 // PrepareCampaign.
 type CampaignPreparation struct {
-	ScratchNamespaces []runtimeinput.ScratchNamespace
+	ScratchNamespaces []gofresh.ScratchNamespace
 	Vouches           []string
 	Exemptions        []Exemption
 	Store             *Store
@@ -553,7 +553,7 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 			continue
 		}
 		attr.completed++
-		if state, serr := runtimeinput.CompletedState(observed); serr == nil {
+		if state, serr := gofresh.CompletedObservationState(observed); serr == nil {
 			if paths, pok := moduleRelInputs(state.Manifest, t.dir); pok {
 				for _, rel := range paths {
 					if attr.probedPaths == nil {
@@ -572,11 +572,11 @@ func (t *Tree) probeOracleInstability(ctx context.Context, oracle []string, grou
 			// directory the row does; a conversion that fails leaves
 			// the observation's own form, still the test's own.
 			solo := observed
-			if portable, perr := runtimeinput.Relative(observed, t.dir, runEnv); perr == nil {
+			if portable, perr := gofresh.RelativeObservation(observed, t.dir, runEnv); perr == nil {
 				solo = portable
 			}
 			soloReason := ""
-			if state, serr := runtimeinput.CompletedState(solo); serr == nil {
+			if state, serr := gofresh.CompletedObservationState(solo); serr == nil {
 				soloReason = state.Reason
 			}
 			if attribution := evidenceAttribution(solo.Attribution, soloReason); attribution != "" {
@@ -817,7 +817,7 @@ func orderOracleGroups(
 	}
 	type rankedGroup struct {
 		group    group
-		baseline runtimeinput.Observation
+		baseline gofresh.Observation
 		hasBase  bool
 		pkg      string
 		reaches  bool

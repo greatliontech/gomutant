@@ -17,13 +17,16 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 )
 
-// funcSchemaPiece holds one symbol's validated switch body and its byte
-// coordinates in the original source file so MergeCandidateSchemas can
-// splice multiple functions of the same package into one package-wide
-// schema overlay.
+const maxCandidatesPerSchema = 256
+
+// funcSchemaPiece holds one symbol's validated switch body, any top-level
+// helper declarations appended at EOF, and its byte coordinates in the
+// original source file so MergeCandidateSchemas can splice multiple functions
+// of the same package into a bounded package-wide schema overlay.
 type funcSchemaPiece struct {
 	pkgPath           string
 	filePath          string
@@ -32,6 +35,8 @@ type funcSchemaPiece struct {
 	bodyStart         int
 	bodyEnd           int
 	switchBody        []byte
+	trailingDecls     []byte
+	armCount          int
 	varName           string
 	firstFileInitRepl *Replacement
 }
@@ -39,6 +44,8 @@ type funcSchemaPiece struct {
 type schemaCaseArm struct {
 	candidateIdx int
 	mutantID     string
+	helperName   string
+	helperDecl   []byte
 	innerBody    []byte
 }
 
@@ -108,11 +115,7 @@ func buildFirstFileInitReplacement(catalog *catalog) (*Replacement, bool) {
 	raw.Write(firstSrc[:firstHeaderOff])
 	raw.Write(initHeader)
 	raw.Write(firstSrc[firstHeaderOff:])
-	formatted, err := format.Source(raw.Bytes())
-	if err != nil {
-		return nil, false
-	}
-	return &Replacement{File: firstPath, Source: formatted}, true
+	return &Replacement{File: firstPath, Source: raw.Bytes()}, true
 }
 
 func bodyRedeclaresSignatureVar(fd *ast.FuncDecl) bool {
@@ -267,6 +270,188 @@ func innerBlockBytes(formattedBlock []byte) ([]byte, bool) {
 	return inner, true
 }
 
+func bodyNeedsSameFrame(body *ast.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	needsSame := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if needsSame || n == nil {
+			return false
+		}
+		if _, isFuncLit := n.(*ast.FuncLit); isFuncLit {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch fun := call.Fun.(type) {
+		case *ast.Ident:
+			if fun.Name == "recover" || fun.Name == "Caller" || fun.Name == "Callers" {
+				needsSame = true
+				return false
+			}
+		case *ast.SelectorExpr:
+			if fun.Sel != nil && (fun.Sel.Name == "Caller" || fun.Sel.Name == "Callers" || fun.Sel.Name == "Helper") {
+				needsSame = true
+				return false
+			}
+		}
+		return true
+	})
+	return needsSame
+}
+
+func recvTypeHasTypeParams(expr ast.Expr) bool {
+	for {
+		switch t := expr.(type) {
+		case *ast.ParenExpr:
+			expr = t.X
+		case *ast.StarExpr:
+			expr = t.X
+		case *ast.IndexExpr, *ast.IndexListExpr:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
+func canUseTopLevelHelpers(fd *ast.FuncDecl) (recvName string, dropRecv bool, typeParams []string, paramNames []string, isVariadic bool, hasResults bool, ok bool) {
+	if fd == nil || fd.Body == nil || fd.Name == nil || fd.Type == nil {
+		return "", false, nil, nil, false, false, false
+	}
+	if fd.Name.Name == "init" || fd.Name.Name == "_" || bodyNeedsSameFrame(fd.Body) {
+		return "", false, nil, nil, false, false, false
+	}
+	if fd.Recv != nil && len(fd.Recv.List) > 0 {
+		if len(fd.Recv.List) != 1 {
+			return "", false, nil, nil, false, false, false
+		}
+		rf := fd.Recv.List[0]
+		if rf == nil {
+			return "", false, nil, nil, false, false, false
+		}
+		if len(rf.Names) == 1 && rf.Names[0] != nil && rf.Names[0].Name != "" && rf.Names[0].Name != "_" {
+			recvName = rf.Names[0].Name
+		} else if len(rf.Names) <= 1 && !recvTypeHasTypeParams(rf.Type) {
+			dropRecv = true
+		} else {
+			return "", false, nil, nil, false, false, false
+		}
+	}
+	if fd.Type.TypeParams != nil {
+		for _, field := range fd.Type.TypeParams.List {
+			if field == nil || len(field.Names) == 0 {
+				return "", false, nil, nil, false, false, false
+			}
+			for _, name := range field.Names {
+				if name == nil || name.Name == "" || name.Name == "_" {
+					return "", false, nil, nil, false, false, false
+				}
+				typeParams = append(typeParams, name.Name)
+			}
+		}
+	}
+	if fd.Type.Params != nil {
+		for idx, field := range fd.Type.Params.List {
+			if field == nil || len(field.Names) == 0 {
+				return "", false, nil, nil, false, false, false
+			}
+			for _, name := range field.Names {
+				if name == nil || name.Name == "" || name.Name == "_" {
+					return "", false, nil, nil, false, false, false
+				}
+				paramNames = append(paramNames, name.Name)
+			}
+			if _, ellipsis := field.Type.(*ast.Ellipsis); ellipsis {
+				if idx != len(fd.Type.Params.List)-1 || len(field.Names) != 1 {
+					return "", false, nil, nil, false, false, false
+				}
+				isVariadic = true
+			}
+		}
+	}
+	hasResults = fd.Type.Results != nil && len(fd.Type.Results.List) > 0
+	return recvName, dropRecv, typeParams, paramNames, isVariadic, hasResults, true
+}
+
+func extractFuncHelperDecl(filePath string, src []byte, declOrdinal int, expectedName, helperName string, dropRecv bool) ([]byte, map[string]bool, bool) {
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, filePath, src, 0)
+	if err != nil {
+		return nil, nil, false
+	}
+	fd := nthFuncDecl(parsed, declOrdinal)
+	if fd == nil || fd.Body == nil || fd.Name == nil || fd.Name.Name != expectedName {
+		return nil, nil, false
+	}
+	if bodyRedeclaresSignatureVar(fd) {
+		return nil, nil, false
+	}
+	tf := fset.File(parsed.Pos())
+	if tf == nil {
+		return nil, nil, false
+	}
+	fdStart := tf.Offset(fd.Pos())
+	nameStart := tf.Offset(fd.Name.Pos())
+	nameEnd := tf.Offset(fd.Name.End())
+	fdEnd := tf.Offset(fd.End())
+	if fdStart < 0 || nameStart < fdStart || nameEnd <= nameStart || fdEnd <= nameEnd || fdEnd > len(src) {
+		return nil, nil, false
+	}
+	var buf bytes.Buffer
+	buf.Grow((fdEnd - fdStart) + len(helperName) + 8)
+	buf.WriteByte('\n')
+	if dropRecv {
+		buf.WriteString("func ")
+		buf.WriteString(helperName)
+		buf.Write(src[nameEnd:fdEnd])
+	} else {
+		buf.Write(src[fdStart:nameStart])
+		buf.WriteString(helperName)
+		buf.Write(src[nameEnd:fdEnd])
+	}
+	buf.WriteByte('\n')
+	return buf.Bytes(), importSpecSet(parsed), true
+}
+
+func formatHelperCallStmt(helperName, recvName string, dropRecv bool, typeParams, paramNames []string, isVariadic, hasResults bool) string {
+	callee := helperName
+	if recvName != "" && !dropRecv {
+		callee = recvName + "." + helperName
+	}
+	if len(typeParams) > 0 {
+		callee += "[" + strings.Join(typeParams, ", ") + "]"
+	}
+	args := strings.Join(paramNames, ", ")
+	if isVariadic && len(paramNames) > 0 {
+		args += "..."
+	}
+	if hasResults {
+		return "\t\treturn " + callee + "(" + args + ")\n"
+	}
+	return "\t\t" + callee + "(" + args + ")\n"
+}
+
+func buildHelperSwitchAndDecls(varName, defaultHelperName string, defaultDecl []byte, recvName string, dropRecv bool, typeParams, paramNames []string, isVariadic, hasResults bool, arms []schemaCaseArm) ([]byte, []byte) {
+	var sw bytes.Buffer
+	var decls bytes.Buffer
+	decls.Grow(len(defaultDecl) * (len(arms) + 1))
+	decls.Write(defaultDecl)
+	fmt.Fprintf(&sw, "\n\tswitch %s() {\n", varName)
+	for _, arm := range arms {
+		fmt.Fprintf(&sw, "\tcase %q:\n", arm.mutantID)
+		sw.WriteString(formatHelperCallStmt(arm.helperName, recvName, dropRecv, typeParams, paramNames, isVariadic, hasResults))
+		decls.Write(arm.helperDecl)
+	}
+	sw.WriteString("\tdefault:\n")
+	sw.WriteString(formatHelperCallStmt(defaultHelperName, recvName, dropRecv, typeParams, paramNames, isVariadic, hasResults))
+	sw.WriteString("\t}\n")
+	return sw.Bytes(), decls.Bytes()
+}
+
 func extractFuncBodyInner(filePath string, src []byte, declOrdinal int, expectedName, labelSuffix string) ([]byte, map[string]bool, bool) {
 	fset := token.NewFileSet()
 	parsed, err := parser.ParseFile(fset, filePath, src, 0)
@@ -328,8 +513,12 @@ func spliceSchemaFile(origSource []byte, headerOffset int, varName string, piece
 		}
 	}
 	header := schemaHeaderBytes(varName)
+	extraCap := 1024 * len(sorted)
+	for _, p := range sorted {
+		extraCap += len(p.switchBody) + len(p.trailingDecls)
+	}
 	var raw bytes.Buffer
-	raw.Grow(len(origSource) + len(header) + 1024*len(sorted))
+	raw.Grow(len(origSource) + len(header) + extraCap)
 	raw.Write(origSource[:headerOffset])
 	raw.Write(header)
 	cursor := headerOffset
@@ -339,7 +528,12 @@ func spliceSchemaFile(origSource []byte, headerOffset int, varName string, piece
 		cursor = p.bodyEnd
 	}
 	raw.Write(origSource[cursor:])
-	return format.Source(raw.Bytes())
+	for _, p := range sorted {
+		if len(p.trailingDecls) > 0 {
+			raw.Write(p.trailingDecls)
+		}
+	}
+	return raw.Bytes(), nil
 }
 
 type schemaImporter struct {
@@ -531,12 +725,28 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 		return
 	}
 	funcName := catalog.fd.Name.Name
-	defaultInner, origImports, ok := extractFuncBodyInner(catalog.path, catalog.source, declOrd, funcName, "_gomutant_default")
+	symHash := sha256.Sum256([]byte(symbol))
+	symPrefix := fmt.Sprintf("_gomutant_%x", symHash[:6])
+	if bytes.Contains(catalog.source, []byte(symPrefix)) {
+		return
+	}
+	recvName, dropRecv, typeParams, paramNames, isVariadic, hasResults, useTopLevelHelpers := canUseTopLevelHelpers(catalog.fd)
+	var (
+		defaultHelperName string
+		defaultHelperDecl []byte
+		defaultInner      []byte
+		origImports       map[string]bool
+	)
+	if useTopLevelHelpers {
+		defaultHelperName = symPrefix + "_default"
+		defaultHelperDecl, origImports, ok = extractFuncHelperDecl(catalog.path, catalog.source, declOrd, funcName, defaultHelperName, dropRecv)
+	} else {
+		defaultInner, origImports, ok = extractFuncBodyInner(catalog.path, catalog.source, declOrd, funcName, "_gomutant_default")
+	}
 	if !ok {
 		return
 	}
 	alwaysProcessImports, pkgNameOffsets := declImportReferences(catalog)
-	symHash := sha256.Sum256([]byte(symbol))
 	var arms []schemaCaseArm
 	for i := range candidates {
 		if ctx.Err() != nil {
@@ -548,13 +758,31 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 		if !specEditsInsideBody(specs[i].edits, bodyOpen, bodyClose) {
 			continue
 		}
-		armInner, mutImports, ok := extractFuncBodyInner(
-			catalog.path,
-			candidates[i].Replacements[0].Source,
-			declOrd,
-			funcName,
-			fmt.Sprintf("_gomutant_%d", i+1),
+		var (
+			helperName string
+			helperDecl []byte
+			armInner   []byte
+			mutImports map[string]bool
 		)
+		if useTopLevelHelpers {
+			helperName = fmt.Sprintf("%s_%d", symPrefix, i+1)
+			helperDecl, mutImports, ok = extractFuncHelperDecl(
+				catalog.path,
+				candidates[i].Replacements[0].Source,
+				declOrd,
+				funcName,
+				helperName,
+				dropRecv,
+			)
+		} else {
+			armInner, mutImports, ok = extractFuncBodyInner(
+				catalog.path,
+				candidates[i].Replacements[0].Source,
+				declOrd,
+				funcName,
+				fmt.Sprintf("_gomutant_%d", i+1),
+			)
+		}
 		if !ok || !importsSubset(mutImports, origImports) {
 			continue
 		}
@@ -566,6 +794,8 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 		arms = append(arms, schemaCaseArm{
 			candidateIdx: i,
 			mutantID:     fmt.Sprintf("%x_%d", symHash[:6], i+1),
+			helperName:   helperName,
+			helperDecl:   helperDecl,
 			innerBody:    armInner,
 		})
 	}
@@ -577,7 +807,12 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 		pkgPath = catalog.pkg.Types.Path()
 	}
 	buildPieceAndSource := func(activeArms []schemaCaseArm) (*funcSchemaPiece, []byte, error) {
-		sw := buildSwitchBody(varName, activeArms, defaultInner)
+		var sw, trailing []byte
+		if useTopLevelHelpers {
+			sw, trailing = buildHelperSwitchAndDecls(varName, defaultHelperName, defaultHelperDecl, recvName, dropRecv, typeParams, paramNames, isVariadic, hasResults, activeArms)
+		} else {
+			sw = buildSwitchBody(varName, activeArms, defaultInner)
+		}
 		piece := &funcSchemaPiece{
 			pkgPath:           pkgPath,
 			filePath:          catalog.path,
@@ -586,6 +821,8 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 			bodyStart:         bodyOpen + 1,
 			bodyEnd:           bodyClose,
 			switchBody:        sw,
+			trailingDecls:     trailing,
+			armCount:          len(activeArms),
 			varName:           varName,
 			firstFileInitRepl: firstFileInitRepl,
 		}
@@ -595,53 +832,67 @@ func attachSymbolSchema(ctx context.Context, catalog *catalog, symbol string, sp
 		}
 		return piece, src, nil
 	}
-	piece, schemaSrc, err := buildPieceAndSource(arms)
-	if err != nil {
-		return
-	}
-	if err := schemaTypecheckFile(catalog, schemaSrc); err != nil {
-		if schemaTypecheckFile(catalog, catalog.source) != nil {
+	checkedOrigFile := false
+	origFileValid := false
+	for start := 0; start < len(arms); start += maxCandidatesPerSchema {
+		if ctx.Err() != nil {
 			return
 		}
-		filtered := make([]schemaCaseArm, 0, len(arms))
-		for _, arm := range arms {
-			if ctx.Err() != nil {
+		end := min(start+maxCandidatesPerSchema, len(arms))
+		shardArms := arms[start:end]
+		piece, schemaSrc, err := buildPieceAndSource(shardArms)
+		if err != nil {
+			continue
+		}
+		if err := schemaTypecheckFile(catalog, schemaSrc); err != nil {
+			if !checkedOrigFile {
+				checkedOrigFile = true
+				origFileValid = schemaTypecheckFile(catalog, catalog.source) == nil
+			}
+			if !origFileValid {
 				return
 			}
-			if schemaTypecheckFile(catalog, candidates[arm.candidateIdx].Replacements[0].Source) == nil {
-				filtered = append(filtered, arm)
+			filtered := make([]schemaCaseArm, 0, len(shardArms))
+			for _, arm := range shardArms {
+				if ctx.Err() != nil {
+					return
+				}
+				if schemaTypecheckFile(catalog, candidates[arm.candidateIdx].Replacements[0].Source) == nil {
+					filtered = append(filtered, arm)
+				}
+			}
+			if len(filtered) == 0 {
+				continue
+			}
+			shardArms = filtered
+			piece, schemaSrc, err = buildPieceAndSource(shardArms)
+			if err != nil || schemaTypecheckFile(catalog, schemaSrc) != nil {
+				continue
 			}
 		}
-		if len(filtered) == 0 {
-			return
+		repls := []Replacement{{File: catalog.path, Source: schemaSrc}}
+		if firstFileInitRepl != nil {
+			repls = append(repls, *firstFileInitRepl)
+			sort.Slice(repls, func(i, j int) bool {
+				return repls[i].File < repls[j].File
+			})
 		}
-		arms = filtered
-		piece, schemaSrc, err = buildPieceAndSource(arms)
-		if err != nil || schemaTypecheckFile(catalog, schemaSrc) != nil {
-			return
+		key := schemaReplacementsKey(repls)
+		for _, arm := range shardArms {
+			idx := arm.candidateIdx
+			candidates[idx].SchemaReplacements = repls
+			candidates[idx].SchemaMutantID = arm.mutantID
+			candidates[idx].SchemaKey = key
+			candidates[idx].schemaPiece = piece
 		}
-	}
-	repls := []Replacement{{File: catalog.path, Source: schemaSrc}}
-	if firstFileInitRepl != nil {
-		repls = append(repls, *firstFileInitRepl)
-		sort.Slice(repls, func(i, j int) bool {
-			return repls[i].File < repls[j].File
-		})
-	}
-	key := schemaReplacementsKey(repls)
-	for _, arm := range arms {
-		idx := arm.candidateIdx
-		candidates[idx].SchemaReplacements = repls
-		candidates[idx].SchemaMutantID = arm.mutantID
-		candidates[idx].SchemaKey = key
-		candidates[idx].schemaPiece = piece
 	}
 }
 
 // MergeCandidateSchemas merges per-symbol mutant schemas across all candidate
-// slices belonging to the same Go package into a single package-wide schema
-// replacement set and key, so one `go test -c -overlay` binary serves every
-// mutated function in that package.
+// slices belonging to the same Go package into bounded package-wide schema
+// replacement sets and keys (capped at maxCandidatesPerSchema per shard), so
+// `go test -c -overlay` compiles bounded package binaries across mutated
+// functions in that package.
 func MergeCandidateSchemas(groups ...[]Candidate) {
 	byPkg := map[string][]*funcSchemaPiece{}
 	seenPiece := map[*funcSchemaPiece]bool{}
@@ -655,53 +906,83 @@ func MergeCandidateSchemas(groups ...[]Candidate) {
 			byPkg[p.pkgPath] = append(byPkg[p.pkgPath], p)
 		}
 	}
-	for pkgPath, pieces := range byPkg {
+	type funcSpanKey struct {
+		file      string
+		bodyStart int
+	}
+	for _, pieces := range byPkg {
 		if len(pieces) <= 1 {
 			continue
 		}
-		byFile := map[string][]*funcSchemaPiece{}
-		var files []string
-		var firstInit *Replacement
+		var batches [][]*funcSchemaPiece
+		var curBatch []*funcSchemaPiece
+		curArms := 0
+		curSpans := map[funcSpanKey]bool{}
 		for _, p := range pieces {
-			if p.firstFileInitRepl != nil && firstInit == nil {
-				firstInit = p.firstFileInitRepl
+			span := funcSpanKey{file: p.filePath, bodyStart: p.bodyStart}
+			pArms := max(p.armCount, 1)
+			if len(curBatch) > 0 && (curArms+pArms > maxCandidatesPerSchema || curSpans[span]) {
+				batches = append(batches, curBatch)
+				curBatch = nil
+				curArms = 0
+				curSpans = map[funcSpanKey]bool{}
 			}
-			if _, ok := byFile[p.filePath]; !ok {
-				files = append(files, p.filePath)
+			curBatch = append(curBatch, p)
+			curArms += pArms
+			curSpans[span] = true
+		}
+		if len(curBatch) > 0 {
+			batches = append(batches, curBatch)
+		}
+		for _, batch := range batches {
+			if len(batch) <= 1 {
+				continue
 			}
-			byFile[p.filePath] = append(byFile[p.filePath], p)
-		}
-		sort.Strings(files)
-		mergedRepls := make([]Replacement, 0, len(files)+1)
-		validPkg := true
-		for _, filePath := range files {
-			filePieces := byFile[filePath]
-			first := filePieces[0]
-			mergedSrc, err := spliceSchemaFile(first.origSource, first.headerOffset, first.varName, filePieces)
-			if err != nil {
-				validPkg = false
-				break
+			inBatch := make(map[*funcSchemaPiece]bool, len(batch))
+			byFile := map[string][]*funcSchemaPiece{}
+			var files []string
+			var firstInit *Replacement
+			for _, p := range batch {
+				inBatch[p] = true
+				if p.firstFileInitRepl != nil && firstInit == nil {
+					firstInit = p.firstFileInitRepl
+				}
+				if _, ok := byFile[p.filePath]; !ok {
+					files = append(files, p.filePath)
+				}
+				byFile[p.filePath] = append(byFile[p.filePath], p)
 			}
-			mergedRepls = append(mergedRepls, Replacement{File: filePath, Source: mergedSrc})
-		}
-		if !validPkg || len(mergedRepls) == 0 {
-			continue
-		}
-		if firstInit != nil {
-			if _, alreadyMutated := byFile[firstInit.File]; !alreadyMutated {
-				mergedRepls = append(mergedRepls, *firstInit)
-				sort.Slice(mergedRepls, func(i, j int) bool {
-					return mergedRepls[i].File < mergedRepls[j].File
-				})
+			sort.Strings(files)
+			mergedRepls := make([]Replacement, 0, len(files)+1)
+			validBatch := true
+			for _, filePath := range files {
+				filePieces := byFile[filePath]
+				first := filePieces[0]
+				mergedSrc, err := spliceSchemaFile(first.origSource, first.headerOffset, first.varName, filePieces)
+				if err != nil {
+					validBatch = false
+					break
+				}
+				mergedRepls = append(mergedRepls, Replacement{File: filePath, Source: mergedSrc})
 			}
-		}
-		mergedKey := schemaReplacementsKey(mergedRepls)
-		for _, group := range groups {
-			for i := range group {
-				p := group[i].schemaPiece
-				if p != nil && p.pkgPath == pkgPath && group[i].SchemaMutantID != "" {
-					group[i].SchemaReplacements = mergedRepls
-					group[i].SchemaKey = mergedKey
+			if !validBatch || len(mergedRepls) == 0 {
+				continue
+			}
+			if firstInit != nil {
+				if _, alreadyMutated := byFile[firstInit.File]; !alreadyMutated {
+					mergedRepls = append(mergedRepls, *firstInit)
+					sort.Slice(mergedRepls, func(i, j int) bool {
+						return mergedRepls[i].File < mergedRepls[j].File
+					})
+				}
+			}
+			mergedKey := schemaReplacementsKey(mergedRepls)
+			for _, group := range groups {
+				for i := range group {
+					if inBatch[group[i].schemaPiece] && group[i].SchemaMutantID != "" {
+						group[i].SchemaReplacements = mergedRepls
+						group[i].SchemaKey = mergedKey
+					}
 				}
 			}
 		}

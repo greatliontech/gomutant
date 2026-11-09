@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guidance"
+	"github.com/greatliontech/gomutant/internal/guidance"
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

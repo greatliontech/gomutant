@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/gotool"
+	"github.com/greatliontech/gofresh"
 )
 
 // Store is the two-layer findings persistence (REQ-result-layers): the
@@ -560,7 +560,7 @@ func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopA
 		if ev.ModuleBase != "" {
 			base = filepath.Join(moduleDir, filepath.FromSlash(ev.ModuleBase))
 		}
-		paths, err := runtimeinput.Paths(ev.RuntimeInputs, base)
+		paths, err := gofresh.RuntimeInputPaths(ev.RuntimeInputs, base)
 		if err != nil {
 			if add("unreadable runtime manifest for " + ev.Symbol) {
 				return reasons

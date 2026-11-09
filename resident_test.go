@@ -3,7 +3,7 @@ package gomutant
 import (
 	"testing"
 
-	"github.com/greatliontech/gofresh/resident"
+	"github.com/greatliontech/gomutant/internal/resident"
 )
 
 // The reading both faces carry is the fleet's words at the moment

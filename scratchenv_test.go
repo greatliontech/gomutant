@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // TestRebaseScratchEnvComposesTheWorkspaceOnce pins the scratch

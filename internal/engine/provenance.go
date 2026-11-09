@@ -5,14 +5,64 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
+// ToolchainSampler samples the effective Go toolchain version (`go env GOVERSION`)
+// in dir under env.
+type ToolchainSampler interface {
+	Sample(ctx context.Context, dir string, env []string) (string, error)
+}
+
+// SampleFunc adapts a function to ToolchainSampler.
+type SampleFunc func(ctx context.Context, dir string, env []string) (string, error)
+
+// Sample implements ToolchainSampler.
+func (f SampleFunc) Sample(ctx context.Context, dir string, env []string) (string, error) {
+	return f(ctx, dir, env)
+}
+
+// ErrNoSampler is returned by NewToolchainProvenance when the sampler is nil.
+var ErrNoSampler = errors.New("toolchain provenance: no sampler — a consumer holds one memoized sampler per judged run")
+
+// ToolchainProvenance checks that the ambient toolchain in a directory and
+// environment does not outrun the compiled-in Go frontend.
+type ToolchainProvenance struct {
+	sampler ToolchainSampler
+}
+
+// NewToolchainProvenance constructs a ToolchainProvenance checker over sampler.
+func NewToolchainProvenance(sampler ToolchainSampler) (ToolchainProvenance, error) {
+	if sampler == nil {
+		return ToolchainProvenance{}, ErrNoSampler
+	}
+	return ToolchainProvenance{sampler: sampler}, nil
+}
+
+// Check samples the effective toolchain in dir under env and checks it against
+// gofresh.ToolchainSkew.
+func (p ToolchainProvenance) Check(ctx context.Context, dir string, env []string) (string, error) {
+	if p.sampler == nil {
+		return "", ErrNoSampler
+	}
+	ambient, err := p.sampler.Sample(ctx, dir, env)
+	if err != nil {
+		return "", &gofresh.ToolchainProvenanceError{
+			Err: fmt.Errorf("toolchain provenance: binary built with %s, ambient toolchain unidentifiable — refusing to judge: %w", runtime.Version(), err),
+		}
+	}
+	if err := gofresh.ToolchainSkew(ambient); err != nil {
+		return "", &gofresh.ToolchainProvenanceError{Err: err}
+	}
+	return ambient, nil
+}
+
 // toolchainProvenance guards a load (REQ-exec-provenance) through
-// gofresh's provenance composite over the ladder's sampler (the
+// the provenance composite over the ladder's sampler (the
 // ladder mints it through newToolchainSampler, seams.go): a
 // compiled-in frontend OLDER than the toolchain serving the load
 // judges sources it predates — parse refusals, analysis panics,
@@ -22,8 +72,8 @@ import (
 // the check judged is returned so the build-events floor reads the
 // same one: one ladder is one process, and the sample it reads is the
 // sample that passed.
-func toolchainProvenance(ctx context.Context, sampler gofresh.ToolchainSampler, dir string, env []string) (string, error) {
-	check, err := gofresh.NewToolchainProvenance(sampler)
+func toolchainProvenance(ctx context.Context, sampler ToolchainSampler, dir string, env []string) (string, error) {
+	check, err := NewToolchainProvenance(sampler)
 	if err != nil {
 		return "", err
 	}

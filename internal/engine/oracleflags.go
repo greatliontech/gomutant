@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // goFlag keeps the argument and its original quoted spelling together. Replacing

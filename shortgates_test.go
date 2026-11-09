@@ -3,7 +3,7 @@ package gomutant
 import (
 	"testing"
 
-	"github.com/greatliontech/gofresh/shortgates"
+	"github.com/greatliontech/gomutant/internal/shortgates"
 )
 
 // The fast tier's gates are the partition the default build selection
@@ -11,7 +11,7 @@ import (
 // unless told otherwise): every gate in the repository's test files is
 // a skipping statement of a Test or Fuzz body, never in a helper, an
 // uninvoked closure, or a fixture string
-// (github.com/greatliontech/gofresh/shortgates states the rules and pins
+// (internal/shortgates states the rules and pins
 // its own arms).
 func TestShortGatesLiveInTestBodiesAndSkip(t *testing.T) {
 	shortgates.Pin(t, ".")

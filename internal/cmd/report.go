@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/greatliontech/gofresh/resident"
+	"github.com/greatliontech/gomutant/internal/resident"
 	gomutant "github.com/greatliontech/gomutant"
 
 	"github.com/spf13/pflag"
@@ -315,7 +315,7 @@ type progressPayload struct {
 	Analysis    string `json:"analysis,omitempty"`
 	AnalysisAge string `json:"analysisAge,omitempty"`
 	// Resident is the process's reading in the fleet's words at the
-	// line (gofresh/resident), absent where the host answers none.
+	// line (internal/resident), absent where the host answers none.
 	Resident string `json:"resident,omitempty"`
 	// EstRemaining extrapolates the measured execution pace (first
 	// completion tick to the latest) over the remaining prepared

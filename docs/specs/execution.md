@@ -728,7 +728,7 @@ structured face's progress record carries the phase and elapsed
 time before that point and the tallies, with the same stretch and age,
 after — and both faces' progress lines, the CLI's cadenced line and the
 MCP heartbeat, end with the process's resident reading in the fleet's
-one spelling (gofresh/resident: the moment, the set and peak, the
+one spelling (`internal/resident`: the moment, the set and peak, the
 descendants, the ceiling in force), omitted where the host answers no
 reading; the MCP heartbeat names
 the same stretch in the same words — the stretch in flight is named

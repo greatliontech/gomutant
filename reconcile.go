@@ -12,22 +12,21 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
-func mergeFindingObservationsContext(ctx context.Context, root string, env []string, states ...runtimeinput.Observation) (runtimeinput.Observation, error) {
+func mergeFindingObservationsContext(ctx context.Context, root string, env []string, states ...gofresh.Observation) (gofresh.Observation, error) {
 	if err := ctx.Err(); err != nil {
-		return runtimeinput.Observation{}, err
+		return gofresh.Observation{}, err
 	}
 	// The finding union is judged under the oracle evidence env the
 	// caller composed for its run — the injected width included —
 	// because its children were ingested under it; a raw-env merge
 	// would read a width-reading oracle's records as moved and degrade
 	// the union (REQ-exec-oracle-parallelism).
-	state, err := runtimeinput.Merge(root, env, states...)
+	state, err := gofresh.MergeObservations(root, env, states...)
 	if cancelErr := ctx.Err(); cancelErr != nil {
-		return runtimeinput.Observation{}, cancelErr
+		return gofresh.Observation{}, cancelErr
 	}
 	if err == nil {
 		return state, nil
@@ -44,20 +43,20 @@ func mergeFindingObservationsContext(ctx context.Context, root string, env []str
 			break
 		}
 	}
-	result, incompleteErr := runtimeinput.Incomplete(root, process, reason, env)
+	result, incompleteErr := gofresh.IncompleteRuntimeObservation(root, process, reason, env)
 	if incompleteErr != nil {
-		return runtimeinput.Observation{}, incompleteErr
+		return gofresh.Observation{}, incompleteErr
 	}
 	for _, input := range states {
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.Observation{}, err
+			return gofresh.Observation{}, err
 		}
 		if input.Manifest == "" {
 			continue
 		}
-		merged, mergeErr := runtimeinput.Merge(root, env, result, input)
+		merged, mergeErr := gofresh.MergeObservations(root, env, result, input)
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.Observation{}, err
+			return gofresh.Observation{}, err
 		}
 		if mergeErr == nil {
 			result = merged
@@ -78,7 +77,7 @@ type manifestInterner struct {
 	byDigest map[string]string
 }
 
-func (in *manifestInterner) intern(o runtimeinput.Observation) runtimeinput.Observation {
+func (in *manifestInterner) intern(o gofresh.Observation) gofresh.Observation {
 	if o.Manifest == "" || o.Digest == "" {
 		return o
 	}
@@ -101,12 +100,12 @@ func (in *manifestInterner) intern(o runtimeinput.Observation) runtimeinput.Obse
 // incomplete baseline observation leaves the union — and so the finding —
 // unverifiable. A non-nil flagged set restricts the walk to those candidate
 // indexes (the re-execution splice); nil walks every runnable candidate.
-func completedObservationUnion(ctx context.Context, root string, env []string, baselines []runtimeinput.Observation, candidates []engine.Candidate, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, flagged map[int]bool) (runtimeinput.Observation, []CandidateEvidence, error) {
-	states := append([]runtimeinput.Observation(nil), baselines...)
+func completedObservationUnion(ctx context.Context, root string, env []string, baselines []gofresh.Observation, candidates []engine.Candidate, outcomes []engine.MutantOutcome, observations []gofresh.Observation, incompletes []string, flagged map[int]bool) (gofresh.Observation, []CandidateEvidence, error) {
+	states := append([]gofresh.Observation(nil), baselines...)
 	var evidence []CandidateEvidence
 	for mi, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.Observation{}, nil, err
+			return gofresh.Observation{}, nil, err
 		}
 		if flagged != nil && !flagged[mi] {
 			continue
@@ -127,7 +126,7 @@ func completedObservationUnion(ctx context.Context, root string, env []string, b
 	}
 	union, err := mergeFindingObservationsContext(ctx, root, env, states...)
 	if err != nil {
-		return runtimeinput.Observation{}, nil, err
+		return gofresh.Observation{}, nil, err
 	}
 	return union, evidence, nil
 }
@@ -315,7 +314,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 			evidenceFaults = append(evidenceFaults, fault)
 			break
 		}
-		paths, perr := runtimeinput.Paths(evidence.RuntimeInputs, base)
+		paths, perr := gofresh.RuntimeInputPaths(evidence.RuntimeInputs, base)
 		if perr != nil {
 			fault := "an evidence manifest is unreadable (" + evidence.Symbol + ")"
 			if repository.staged {
@@ -363,7 +362,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 			// forced with the evidence mismatch as its own named cause,
 			// never laundered through the git judgment as a
 			// path-shaped fact.
-			state, serr := runtimeinput.Current(ctx, evidence.RuntimeInputs, base, viewEnvs[evidence.Symbol])
+			state, serr := gofresh.CurrentRuntimeInputs(ctx, evidence.RuntimeInputs, base, viewEnvs[evidence.Symbol])
 			if serr != nil || !state.OK ||
 				state.Unverifiable != evidence.RuntimeUnverifiable || state.Reason != evidence.RuntimeReason ||
 				state.Digest != evidence.RuntimeDigest {
@@ -701,7 +700,7 @@ func extendedPrefixStands(generation engine.Generation, rec Finding) bool {
 // while a read beyond the record's pins is runtime information it never
 // pinned, so the extended outcome is preserved but explicitly non-reusable
 // (REQ-result-stale's fail-closed bound).
-func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, budget int, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, error) {
+func (t *Tree) spliceExtendedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, from int, baselines []gofresh.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []gofresh.Observation, incompletes []string, labels []string, budget int, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, error) {
 	outcomes := scores.outcomes
 	suffix := make(map[int]bool, len(candidates)-from)
 	for mi := from; mi < len(candidates); mi++ {
@@ -737,7 +736,7 @@ type splicedEvidence struct {
 // Counts folding stays with
 // each arm — replacement and append are different truths
 // over the same spine.
-func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, reExecuted map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, observations []runtimeinput.Observation, incompletes []string, labels []string, foldRecorded, cached bool) (splicedEvidence, error) {
+func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, reExecuted map[int]bool, baselines []gofresh.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, outcomes []engine.MutantOutcome, observations []gofresh.Observation, incompletes []string, labels []string, foldRecorded, cached bool) (splicedEvidence, error) {
 	union, freshEvidence, err := completedObservationUnion(ctx, t.dir, env, baselines, candidates, outcomes, observations, incompletes, reExecuted)
 	if err != nil {
 		return splicedEvidence{}, err
@@ -773,16 +772,16 @@ func (t *Tree) spliceRecordedEvidence(ctx context.Context, env []string, rec Fin
 // manifest is left out, and the resulting divergence stamps the extended
 // finding non-reusable rather than serving unpinned runtime information
 // (REQ-result-stale's fail-closed bound).
-func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding, moduleDir string, union runtimeinput.Observation) (runtimeinput.Observation, error) {
+func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding, moduleDir string, union gofresh.Observation) (gofresh.Observation, error) {
 	// Adoption re-evaluates the persisted union's digests; the record was
 	// ingested under the oracle evidence env the caller passes, so
 	// adopting under a raw env would read a width-reading record as
 	// moved and stamp the extension non-reusable
 	// (REQ-exec-oracle-parallelism).
-	adopted, adoptErr := runtimeinput.Adopt(rec.TargetEvidence.RuntimeInputs, moduleDir, fmt.Sprintf("gomutant-extend-%d", findingObservationSequence.Add(1)), env)
+	adopted, adoptErr := gofresh.AdoptObservation(rec.TargetEvidence.RuntimeInputs, moduleDir, fmt.Sprintf("gomutant-extend-%d", findingObservationSequence.Add(1)), env)
 	if adoptErr != nil {
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.Observation{}, err
+			return gofresh.Observation{}, err
 		}
 		return union, nil
 	}
@@ -791,10 +790,10 @@ func (t *Tree) foldRecordedUnion(ctx context.Context, env []string, rec Finding,
 	// the adopted record converts before it re-enters
 	// (REQ-inputs-absolute-identities). An absolute-era record converts
 	// as the identity map.
-	adopted, adoptErr = runtimeinput.Absolute(adopted, moduleDir, env)
+	adopted, adoptErr = gofresh.AbsoluteObservation(adopted, moduleDir, env)
 	if adoptErr != nil {
 		if err := ctx.Err(); err != nil {
-			return runtimeinput.Observation{}, err
+			return gofresh.Observation{}, err
 		}
 		return union, nil
 	}
@@ -899,7 +898,7 @@ func extendFindingCounts(ctx context.Context, rec Finding, candidates []engine.C
 // process's pinned runtime inputs; fresh observations that diverge are runtime
 // information the record never pinned, so the spliced outcome is preserved but
 // explicitly non-reusable (REQ-exec-observation).
-func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []runtimeinput.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []runtimeinput.Observation, incompletes []string, labels []string, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, error) {
+func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Finding, candidates []engine.Candidate, flagged map[int]bool, baselines []gofresh.Observation, targetView *subjectView, oracleViews []*subjectView, currentLedger gofresh.TestVariantLedger, scores windowScores, observations []gofresh.Observation, incompletes []string, labels []string, exemptions []Exemption, memoryPin int64, oracleBudget time.Duration, budgetDerived bool) (Finding, error) {
 	outcomes := scores.outcomes
 	spliced, err := t.spliceRecordedEvidence(ctx, env, rec, candidates, flagged, baselines, targetView, oracleViews, currentLedger, outcomes, observations, incompletes, labels, false, true)
 	if err != nil {
@@ -915,10 +914,10 @@ func (t *Tree) spliceServedFinding(ctx context.Context, env []string, rec Findin
 // into the union and stamps every subject's evidence with the resulting
 // unverifiable state, so the spliced finding is preserved but never reusable
 // (REQ-result-stale's fail-closed bound).
-func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding, union runtimeinput.Observation, portable *portableUnion, recordBase string) (runtimeinput.Observation, Finding, error) {
-	state, err := runtimeinput.CompletedState(union)
+func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding, union gofresh.Observation, portable *portableUnion, recordBase string) (gofresh.Observation, Finding, error) {
+	state, err := gofresh.CompletedObservationState(union)
 	if err != nil {
-		return runtimeinput.Observation{}, Finding{}, err
+		return gofresh.Observation{}, Finding{}, err
 	}
 	// The record's union is judged in its own persisted form: relative
 	// to the base the record is anchored at (the tree, or a pre-anchor
@@ -927,11 +926,11 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 	// (REQ-inputs-relative-identities).
 	relObservation, err := portable.at(recordBase)
 	if err != nil {
-		return runtimeinput.Observation{}, Finding{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
+		return gofresh.Observation{}, Finding{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
-	relState, err := runtimeinput.CompletedState(relObservation)
+	relState, err := gofresh.CompletedObservationState(relObservation)
 	if err != nil {
-		return runtimeinput.Observation{}, Finding{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
+		return gofresh.Observation{}, Finding{}, fmt.Errorf("%w: %w", errEvidenceFinalization, err)
 	}
 	if !splicedUnionDiverged(relState, rec.TargetEvidence) || !splicedUnionDiverged(state, rec.TargetEvidence) {
 		return union, rec, nil
@@ -945,15 +944,15 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 		if delta := manifestPathDelta(rec.TargetEvidence.RuntimeInputs, state.Manifest, t.dir); len(delta) > 0 {
 			divergedReason += "; diverging inputs: " + cappedNameList(delta, "inputs")
 		}
-		incomplete, incompleteErr := runtimeinput.Incomplete(t.dir, fmt.Sprintf("gomutant-splice-%d", findingObservationSequence.Add(1)), divergedReason, env)
+		incomplete, incompleteErr := gofresh.IncompleteRuntimeObservation(t.dir, fmt.Sprintf("gomutant-splice-%d", findingObservationSequence.Add(1)), divergedReason, env)
 		if incompleteErr != nil {
-			return runtimeinput.Observation{}, Finding{}, incompleteErr
+			return gofresh.Observation{}, Finding{}, incompleteErr
 		}
 		if union, err = mergeFindingObservationsContext(ctx, t.dir, env, union, incomplete); err != nil {
-			return runtimeinput.Observation{}, Finding{}, err
+			return gofresh.Observation{}, Finding{}, err
 		}
-		if state, err = runtimeinput.CompletedState(union); err != nil {
-			return runtimeinput.Observation{}, Finding{}, err
+		if state, err = gofresh.CompletedObservationState(union); err != nil {
+			return gofresh.Observation{}, Finding{}, err
 		}
 	}
 	// The merged (possibly incomplete-extended) union re-mints its
@@ -976,12 +975,12 @@ func (t *Tree) applySplicedUnion(ctx context.Context, env []string, rec Finding,
 	}
 	rec.TargetEvidence, err = stampAt(rec.TargetEvidence)
 	if err != nil {
-		return runtimeinput.Observation{}, Finding{}, err
+		return gofresh.Observation{}, Finding{}, err
 	}
 	for i := range rec.OracleEvidence {
 		rec.OracleEvidence[i], err = stampAt(rec.OracleEvidence[i])
 		if err != nil {
-			return runtimeinput.Observation{}, Finding{}, err
+			return gofresh.Observation{}, Finding{}, err
 		}
 	}
 	return union, rec, nil
@@ -1058,7 +1057,7 @@ func resolveThroughAncestor(p string) (string, bool) {
 // decodable manifest with no tree-local entries returns an empty set,
 // which is a statement, not an absence.
 func moduleRelInputs(encoded, treeDir string) (paths []string, ok bool) {
-	abs, err := runtimeinput.Paths(encoded, treeDir)
+	abs, err := gofresh.RuntimeInputPaths(encoded, treeDir)
 	if err != nil {
 		return nil, false
 	}
@@ -1109,7 +1108,7 @@ func manifestPathDelta(prior, fresh, treeDir string) []string {
 // union makes the spliced finding explicitly non-reusable (REQ-result-stale):
 // keeping it reusable would serve kills whose processes read inputs the
 // record never pinned — the forbidden flattering direction.
-func splicedUnionDiverged(state runtimeinput.State, prior SubjectEvidence) bool {
+func splicedUnionDiverged(state gofresh.RuntimeState, prior SubjectEvidence) bool {
 	return state.Unverifiable || state.Manifest != prior.RuntimeInputs || state.Digest != prior.RuntimeDigest
 }
 

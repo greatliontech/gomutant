@@ -4,8 +4,7 @@ import (
 	"context"
 	"os/exec"
 
-	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // The engine package's two test seams, package state read by the
@@ -17,7 +16,7 @@ import (
 // unsynchronized.
 
 // newToolchainSampler mints the sampler one toolchain ladder reads:
-// gofresh's memoized sampler under the tree's runner, asked once per
+// internal/gotool's memoized sampler under the tree's runner, asked once per
 // ladder — the provenance check judges the skew and hands the floor
 // the sample it judged — in the TARGET directory under the
 // SELECTION-APPLIED environment (the declared GOTOOLCHAIN directive
@@ -29,8 +28,8 @@ import (
 // a long-lived server samples again at its next load, so a toolchain
 // moved between two requests is witnessed there (the served face's
 // tree cache keys on GOVERSION for the same reason). A seam for the
-// skew tests; production always mints gofresh's sampler.
-var newToolchainSampler = func() gofresh.ToolchainSampler {
+// skew tests; production always mints internal/gotool's sampler.
+var newToolchainSampler = func() ToolchainSampler {
 	return &gotool.Sampler{Runner: goRunner}
 }
 
@@ -41,7 +40,7 @@ var newToolchainSampler = func() gofresh.ToolchainSampler {
 // counting its asks sees exactly the ladder's reads.
 func SwapGoVersionSamplerForTest(f func(context.Context, string, []string) (string, error)) (restore func()) {
 	prior := newToolchainSampler
-	newToolchainSampler = func() gofresh.ToolchainSampler { return gofresh.SampleFunc(f) }
+	newToolchainSampler = func() ToolchainSampler { return SampleFunc(f) }
 	return func() { newToolchainSampler = prior }
 }
 

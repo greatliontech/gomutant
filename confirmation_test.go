@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
 
@@ -321,7 +321,7 @@ func TestKillGroundIsTheConfirmationsSeam(t *testing.T) {
 	prior := seams.killGround
 	t.Cleanup(func() { seams.killGround = prior })
 	var grounds atomic.Int64
-	seams.killGround = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
+	seams.killGround = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		grounds.Add(1)
 		return prior(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 	}
@@ -360,7 +360,7 @@ func TestRunFoldsCoverageIntoBaselineProbe(t *testing.T) {
 	var baselineProbes atomic.Int64
 	priorBaseline := seams.baselineProbe
 	t.Cleanup(func() { seams.baselineProbe = priorBaseline })
-	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
+	seams.baselineProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (engine.Baseline, error) {
 		baselineProbes.Add(1)
 		b, err := priorBaseline(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 		if err == nil && b.Coverage == nil {
@@ -403,7 +403,7 @@ func TestOrderOracleGroupsByRTAReachabilityAndAscendingDuration(t *testing.T) {
 			{pkgs: []string{"example.com/targetpkg"}, passed: []string{"example.com/targetpkg.TestTargetSuite"}},
 			{pkgs: []string{"example.com/fastreach"}, passed: []string{"example.com/fastreach.TestReachFast"}},
 		},
-		baselines: make([]runtimeinput.Observation, 4),
+		baselines: make([]gofresh.Observation, 4),
 	}
 	reaches := func(fromSymbol, targetSymbol string) bool {
 		return fromSymbol != "example.com/nonreach.TestUnrelated"
@@ -476,7 +476,7 @@ func TestOrderOracleGroupsByRTAReachabilityAndAscendingDuration(t *testing.T) {
 				baseGroups[perm[1]],
 				baseGroups[perm[2]],
 			},
-			baselines: make([]runtimeinput.Observation, 3),
+			baselines: make([]gofresh.Observation, 3),
 		}
 		orderOracleGroups(
 			&pw,

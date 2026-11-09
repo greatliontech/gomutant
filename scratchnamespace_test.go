@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 )
 
 // A DIR:PATTERN declaration parses into the gofresh namespace form;
@@ -19,7 +19,7 @@ func TestParseScratchNamespaces(t *testing.T) {
 	if err != nil || len(parsed) != 2 {
 		t.Fatalf("parse = %+v, %v", parsed, err)
 	}
-	if parsed[0] != (runtimeinput.ScratchNamespace{Dir: "scratch", Pattern: "work-*"}) {
+	if parsed[0] != (gofresh.ScratchNamespace{Dir: "scratch", Pattern: "work-*"}) {
 		t.Fatalf("parsed[0] = %+v", parsed[0])
 	}
 	for name, entry := range map[string]string{
@@ -55,7 +55,7 @@ func TestRunRefusesMalformedScratchNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = tree.Run(context.Background(), nil, Options{
-		ScratchNamespaces: []runtimeinput.ScratchNamespace{{Dir: "../out", Pattern: "p"}},
+		ScratchNamespaces: []gofresh.ScratchNamespace{{Dir: "../out", Pattern: "p"}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "refused before measurement") {
 		t.Fatalf("err = %v, want the run-start refusal", err)
@@ -195,7 +195,7 @@ func TestF(t *testing.T) {
 		}
 		// Finding evidence is finalized with absolute identities for
 		// cross-module reuse, so the filter matches the absolute form.
-		paths, err := runtimeinput.Paths(evidence.RuntimeInputs, ".")
+		paths, err := gofresh.RuntimeInputPaths(evidence.RuntimeInputs, ".")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -209,7 +209,7 @@ func TestF(t *testing.T) {
 	}
 	declared := scratchRecords(Options{
 		Budget: 1, OracleTimeout: 2 * time.Minute,
-		ScratchNamespaces: []runtimeinput.ScratchNamespace{{Dir: "scratch", Pattern: "work-*"}},
+		ScratchNamespaces: []gofresh.ScratchNamespace{{Dir: "scratch", Pattern: "work-*"}},
 	})
 	if len(declared) != 0 {
 		t.Fatalf("declared namespace still records scratch identities: %v", declared)

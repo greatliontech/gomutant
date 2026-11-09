@@ -113,8 +113,8 @@ func goCommandSpawnsOutsideTheRunner(path string, src []byte) []string {
 					}
 				}
 			case "gofresh":
-				if sel.Sel.Name == "NewSession" && !sessionCallHasRunner(file, n) {
-					report(n.Pos(), "gofresh.NewSession without Runner")
+				if sel.Sel.Name == "NewSession" && !sessionCallHasPrepareCommand(file, n) {
+					report(n.Pos(), "gofresh.NewSession without PrepareCommand")
 				}
 			}
 		case *ast.CompositeLit:
@@ -131,7 +131,7 @@ func goCommandSpawnsOutsideTheRunner(path string, src []byte) []string {
 	return out
 }
 
-func sessionPolicyLitHasRunner(lit *ast.CompositeLit) bool {
+func sessionPolicyLitHasPrepareCommand(lit *ast.CompositeLit) bool {
 	sel, ok := lit.Type.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "SessionPolicy" {
 		return false
@@ -142,7 +142,7 @@ func sessionPolicyLitHasRunner(lit *ast.CompositeLit) bool {
 	}
 	for _, elt := range lit.Elts {
 		if kv, ok := elt.(*ast.KeyValueExpr); ok {
-			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Runner" {
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "PrepareCommand" {
 				return true
 			}
 		}
@@ -150,13 +150,13 @@ func sessionPolicyLitHasRunner(lit *ast.CompositeLit) bool {
 	return false
 }
 
-func sessionCallHasRunner(file *ast.File, call *ast.CallExpr) bool {
+func sessionCallHasPrepareCommand(file *ast.File, call *ast.CallExpr) bool {
 	if len(call.Args) < 3 {
 		return false
 	}
 	switch arg := call.Args[2].(type) {
 	case *ast.CompositeLit:
-		return sessionPolicyLitHasRunner(arg)
+		return sessionPolicyLitHasPrepareCommand(arg)
 	case *ast.Ident:
 		var scope ast.Node = file
 		ast.Inspect(file, func(n ast.Node) bool {
@@ -169,7 +169,7 @@ func sessionCallHasRunner(file *ast.File, call *ast.CallExpr) bool {
 			}
 			return true
 		})
-		hasRunner := false
+		hasPrepare := false
 		ast.Inspect(scope, func(n ast.Node) bool {
 			if n == nil || n.Pos() >= call.Pos() {
 				return false
@@ -181,14 +181,14 @@ func sessionCallHasRunner(file *ast.File, call *ast.CallExpr) bool {
 					case *ast.Ident:
 						if l.Name == arg.Name && i < len(stmt.Rhs) {
 							if lit, ok := stmt.Rhs[i].(*ast.CompositeLit); ok {
-								hasRunner = sessionPolicyLitHasRunner(lit)
+								hasPrepare = sessionPolicyLitHasPrepareCommand(lit)
 							} else {
-								hasRunner = false
+								hasPrepare = false
 							}
 						}
 					case *ast.SelectorExpr:
-						if x, ok := l.X.(*ast.Ident); ok && x.Name == arg.Name && l.Sel.Name == "Runner" {
-							hasRunner = true
+						if x, ok := l.X.(*ast.Ident); ok && x.Name == arg.Name && l.Sel.Name == "PrepareCommand" {
+							hasPrepare = true
 						}
 					}
 				}
@@ -197,19 +197,19 @@ func sessionCallHasRunner(file *ast.File, call *ast.CallExpr) bool {
 					if name.Name == arg.Name {
 						if i < len(stmt.Values) {
 							if lit, ok := stmt.Values[i].(*ast.CompositeLit); ok {
-								hasRunner = sessionPolicyLitHasRunner(lit)
+								hasPrepare = sessionPolicyLitHasPrepareCommand(lit)
 							} else {
-								hasRunner = false
+								hasPrepare = false
 							}
 						} else {
-							hasRunner = false
+							hasPrepare = false
 						}
 					}
 				}
 			}
 			return true
 		})
-		return hasRunner
+		return hasPrepare
 	default:
 		return false
 	}
@@ -231,7 +231,7 @@ import (
 	"context"
 	"os/exec"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 func f(ctx context.Context, dir string, env []string) {
@@ -250,7 +250,7 @@ func f(ctx context.Context, dir string, env []string) {
 		`exec.Command(…, "go", …)`, `exec.CommandContext(…, "go", …)`,
 		`exec.Command(…, "git", …)`, `exec.CommandContext(…, "git", …)`,
 		"gotool.Runner{…}", "var … gotool.Runner",
-		"gofresh.NewSession without Runner",
+		"gofresh.NewSession without PrepareCommand",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("walk = %v, want %d sites", got, len(want))
@@ -260,14 +260,14 @@ func f(ctx context.Context, dir string, env []string) {
 			t.Fatalf("site %d = %q, want %q", i, site, want[i])
 		}
 	}
-	if got := goCommandSpawnsOutsideTheRunner(filepath.Join("internal", "engine", "runner.go"), []byte("package engine\nimport \"github.com/greatliontech/gofresh/gotool\"\nvar r = gotool.Runner{}\n")); len(got) != 0 {
+	if got := goCommandSpawnsOutsideTheRunner(filepath.Join("internal", "engine", "runner.go"), []byte("package engine\nimport \"github.com/greatliontech/gomutant/internal/gotool\"\nvar r = gotool.Runner{}\n")); len(got) != 0 {
 		t.Fatalf("the runner's home reported: %v", got)
 	}
-	if got := goCommandSpawnsOutsideTheRunner("x.go", []byte("package p\nimport \"github.com/greatliontech/gofresh\"\nfunc f(dir string) { _, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{Runner: r}) }\n")); len(got) != 0 {
-		t.Fatalf("a session under Runner reported: %v", got)
+	if got := goCommandSpawnsOutsideTheRunner("x.go", []byte("package p\nimport \"github.com/greatliontech/gofresh\"\nfunc f(dir string) { _, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{PrepareCommand: p}) }\n")); len(got) != 0 {
+		t.Fatalf("a session under PrepareCommand reported: %v", got)
 	}
-	mixed := []byte("package p\nimport \"github.com/greatliontech/gofresh\"\nfunc f(dir string) {\n\t_, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{Runner: r})\n\t_, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{})\n}\n")
-	if got := goCommandSpawnsOutsideTheRunner("x.go", mixed); len(got) != 1 || !strings.HasSuffix(got[0], "x.go:5:9: gofresh.NewSession without Runner") {
-		t.Fatalf("mixed NewSession calls reported %v, want [x.go:5:9: gofresh.NewSession without Runner]", got)
+	mixed := []byte("package p\nimport \"github.com/greatliontech/gofresh\"\nfunc f(dir string) {\n\t_, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{PrepareCommand: p})\n\t_, _ = gofresh.NewSession(ctx, gofresh.BuildDescription{Directory: dir}, gofresh.SessionPolicy{})\n}\n")
+	if got := goCommandSpawnsOutsideTheRunner("x.go", mixed); len(got) != 1 || !strings.HasSuffix(got[0], "x.go:5:9: gofresh.NewSession without PrepareCommand") {
+		t.Fatalf("mixed NewSession calls reported %v, want [x.go:5:9: gofresh.NewSession without PrepareCommand]", got)
 	}
 }

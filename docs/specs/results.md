@@ -461,8 +461,8 @@ path by this checkout's absolute spelling — the module directory as
 given or resolved; a record authored before Gofresh spelled such
 paths module-relative — is read as the module-relative clause it now
 matches. A moved-bracket clause takes Gofresh's canonical root spelling
-through `runtimeinput.CanonicalMovedBracketClause`, relocates the decoded
-root as a whole, and renders it through `runtimeinput.MovedBracketClause`:
+through `CanonicalMovedBracketClause`, relocates the decoded
+root as a whole, and renders it through `MovedBracketClause`:
 a root carrying the list's framing is quoted, and an already-canonical
 relative key is unchanged. Matching a finding's reason applies the same
 canonicalizer after splitting its attribution, so an unambiguous older
@@ -1036,11 +1036,14 @@ bakes in.
 **REQ-result-hygiene** (behavior): A whole-tree run MUST remove findings for
 symbols absent from its complete discovery snapshot, including when the tree
 contains no targets, because such records can never be measured again and
-presenting their survivors as open would mislead callers. Changed-scope and
-explicit-target runs retain every unmeasured document entry: their target sets
-assert only what to measure, never that an omitted symbol no longer exists.
-Package- or symbol-filtered runs are likewise scoped and retain every
-unmeasured entry, even when their targets came from whole-tree discovery.
+presenting their survivors as open would mislead callers. A discovery run
+filtered by package alone (without symbol filters, an explicit targets
+document, or a changed-scope ref) has discovered the complete symbol set of
+every matched package and likewise removes findings for absent symbols
+belonging to those matched packages while retaining findings in unmatched
+packages. Changed-scope, explicit-target, and symbol-filtered runs retain
+every unmeasured document entry: their target sets assert only what to measure,
+never that an omitted symbol no longer exists.
 
 **REQ-result-lifecycle** (behavior): The tool MUST offer the two record
 lifecycle verbs a refactor needs, on both faces. Prune removes every

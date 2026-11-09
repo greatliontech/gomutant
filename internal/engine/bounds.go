@@ -3,7 +3,7 @@ package engine
 import (
 	"runtime"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 )
 
 // OracleBounds are the resource bounds one run — a campaign or an
@@ -25,7 +25,7 @@ import (
 type OracleBounds struct {
 	MemoryBytes int64
 	Width       int
-	Roots       *runtimeinput.Roots
+	Roots       *gofresh.InputRoots
 	Schemas     *SchemaCache
 }
 
@@ -44,7 +44,7 @@ func (b OracleBounds) Close() {
 // ceiling still applies as GOMEMLIMIT; the derived default needs a
 // readable RAM total, which only the Linux path currently provides.
 func DeriveOracleBounds(memoryBytes int64, jobs int) OracleBounds {
-	b := OracleBounds{Width: oracleParallelismWidth(jobs), Roots: new(runtimeinput.Roots), Schemas: NewSchemaCache()}
+	b := OracleBounds{Width: oracleParallelismWidth(jobs), Roots: new(gofresh.InputRoots), Schemas: NewSchemaCache()}
 	switch {
 	case memoryBytes < 0:
 		b.MemoryBytes = 0

@@ -175,15 +175,26 @@ type AnalysisEvent struct {
 	Detail  string `json:"detail,omitempty"`
 }
 
+var unitPhases = []string{"list", "typecheck", "load", "hash", "observe", "runtime", "prove"}
+
+func isUnitPhase(phase string) bool {
+	switch phase {
+	case "list", "typecheck", "load", "hash", "observe", "runtime", "prove":
+		return true
+	default:
+		return false
+	}
+}
+
 // Stretch names the stretch a keep-alive announces — the pass's unit
 // with its position, under the analysis lead — and reports false for
 // an event that names no stretch: a fact about an operation or a
 // payload-bearing diagnostic (REQ-exec-run-status). Both faces' cadence
 // surfaces read this one classification, and the per-unit phase set is
-// the engine's own (gofresh.UnitPhases, read through Progress.IsUnit):
+// the engine's own:
 // a phase the engine adds names a stretch here without a change.
 func (a AnalysisEvent) Stretch() (string, bool) {
-	if a.Detail != "" || !(gofresh.Progress{Phase: a.Phase}).IsUnit() {
+	if a.Detail != "" || !isUnitPhase(a.Phase) {
 		return "", false
 	}
 	return StretchAnalysis(a), true

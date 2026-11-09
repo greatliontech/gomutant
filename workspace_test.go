@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 )
 
@@ -100,7 +99,7 @@ func TestWorkspaceMemberBracketPathResolvesAgainstTheTreeRoot(t *testing.T) {
 			t.Fatalf("%s: tree-anchored evidence carries a module base %q", ev.Symbol, ev.ModuleBase)
 		}
 	}
-	paths, err := runtimeinput.Paths(f.OracleEvidence[0].RuntimeInputs, root)
+	paths, err := gofresh.RuntimeInputPaths(f.OracleEvidence[0].RuntimeInputs, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +312,7 @@ func TestF(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := Target{Symbol: "example.com/root/tools.F", Oracle: []string{"example.com/root/tools.TestF"}, OracleExplicit: true}
-	scratchRecords := func(namespaces []runtimeinput.ScratchNamespace) []string {
+	scratchRecords := func(namespaces []gofresh.ScratchNamespace) []string {
 		findings, err := tr.Run(context.Background(), []Target{target}, Options{Budget: 1, OracleTimeout: 2 * time.Minute, ScratchNamespaces: namespaces})
 		if err != nil || len(findings) != 1 {
 			t.Fatalf("measure = %+v, %v", findings, err)
@@ -322,7 +321,7 @@ func TestF(t *testing.T) {
 		if evidence.RuntimeUnverifiable {
 			t.Fatalf("oracle evidence unverifiable: %q", evidence.RuntimeReason)
 		}
-		paths, err := runtimeinput.Paths(evidence.RuntimeInputs, root)
+		paths, err := gofresh.RuntimeInputPaths(evidence.RuntimeInputs, root)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -334,10 +333,10 @@ func TestF(t *testing.T) {
 		}
 		return scratch
 	}
-	if declared := scratchRecords([]runtimeinput.ScratchNamespace{{Dir: "tools/scratch", Pattern: "work-*"}}); len(declared) != 0 {
+	if declared := scratchRecords([]gofresh.ScratchNamespace{{Dir: "tools/scratch", Pattern: "work-*"}}); len(declared) != 0 {
 		t.Fatalf("tree-relative namespace still records the member's scratch: %v", declared)
 	}
-	if memberRelative := scratchRecords([]runtimeinput.ScratchNamespace{{Dir: "scratch", Pattern: "work-*"}}); len(memberRelative) == 0 {
+	if memberRelative := scratchRecords([]gofresh.ScratchNamespace{{Dir: "scratch", Pattern: "work-*"}}); len(memberRelative) == 0 {
 		t.Fatal("the member-relative spelling admitted the member's scratch; a namespace resolves at the tree root")
 	}
 }
@@ -354,15 +353,15 @@ func TestApplySplicedUnionAnchorsAWorkspaceMemberAtTheTree(t *testing.T) {
 	}
 	member := filepath.Join(root, "tools")
 	env := tree.eng.GoEnv()
-	rel, err := runtimeinput.FromTestLog([]byte("open ../shared/fixture.txt\n"), root, member, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	rel, err := gofresh.FromTestLog([]byte("open ../shared/fixture.txt\n"), root, member, env, gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	relState, err := runtimeinput.CompletedState(rel)
+	relState, err := gofresh.CompletedObservationState(rel)
 	if err != nil {
 		t.Fatal(err)
 	}
-	union, err := runtimeinput.Absolute(rel, root, env)
+	union, err := gofresh.AbsoluteObservation(rel, root, env)
 	if err != nil {
 		t.Fatal(err)
 	}

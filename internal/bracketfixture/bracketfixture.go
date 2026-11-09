@@ -7,15 +7,15 @@ package bracketfixture
 import (
 	"testing"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 )
 
 // Capture is the bracket over root's whole tree, under the test's own
 // context: called from the test body, never from a cleanup, whose
 // context is already cancelled.
-func Capture(t testing.TB, root string) runtimeinput.Bracket {
+func Capture(t testing.TB, root string) gofresh.Bracket {
 	t.Helper()
-	b, err := runtimeinput.CaptureBracket(t.Context(), root, []string{"."})
+	b, err := gofresh.CaptureBracket(t.Context(), root, []string{"."})
 	if err != nil {
 		t.Fatal(err)
 	}

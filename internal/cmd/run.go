@@ -172,6 +172,7 @@ func runCommand(ctx context.Context, o runOptions) error {
 	// The ledger is the run's document side on both faces
 	// (REQ-attest-survivor, REQ-mcp-findings-doc).
 	ledger := gomutant.NewRunLedger(docStore, prior, runID, wholeTree)
+	ledger.PruneSymbol = selected.PruneSymbol
 	if len(targets) == 0 {
 		if err := ctx.Err(); err != nil {
 			return err

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -42,11 +41,11 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 
 	// The recorded evidence: a module-relative manifest anchored at the
 	// SUB module — the persisted portable form this era writes.
-	recorded, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), subDir, subDir, env, runtimeinput.WithCompletedProcess("recorded"), runtimeinput.WithBracket(bracketfixture.Capture(t, subDir)))
+	recorded, err := gofresh.FromTestLog([]byte("open data.txt\n"), subDir, subDir, env, gofresh.WithCompletedProcess("recorded"), gofresh.WithBracket(bracketfixture.Capture(t, subDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	recordedState, err := runtimeinput.CompletedState(recorded)
+	recordedState, err := gofresh.CompletedObservationState(recorded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,11 +53,11 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 
 	// The fresh union at the tree root, already absolute (the engine's
 	// in-memory form).
-	fresh, err := runtimeinput.FromTestLog(nil, tree.dir, tree.dir, env, runtimeinput.WithCompletedProcess("fresh"), runtimeinput.WithBracket(bracketfixture.Capture(t, tree.dir)))
+	fresh, err := gofresh.FromTestLog(nil, tree.dir, tree.dir, env, gofresh.WithCompletedProcess("fresh"), gofresh.WithBracket(bracketfixture.Capture(t, tree.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fresh, err = runtimeinput.Absolute(fresh, tree.dir, env)
+	fresh, err = gofresh.AbsoluteObservation(fresh, tree.dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,14 +66,14 @@ func TestFoldRecordedUnionAbsolutizesWorkspaceRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.CompletedState(folded)
+	state, err := gofresh.CompletedObservationState(folded)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if state.Unverifiable {
 		t.Fatalf("workspace fold degraded to unverifiable: %+v", state)
 	}
-	paths, err := runtimeinput.Paths(state.Manifest, tree.dir)
+	paths, err := gofresh.RuntimeInputPaths(state.Manifest, tree.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,16 +110,16 @@ func TestApplySplicedUnionAcceptsRelativeEraRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := tree.eng.GoEnv()
-	rel, err := runtimeinput.FromTestLog([]byte("open data.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	rel, err := gofresh.FromTestLog([]byte("open data.txt\n"), root, root, env, gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	relState, err := runtimeinput.CompletedState(rel)
+	relState, err := gofresh.CompletedObservationState(rel)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The in-memory union is the absolute form of the SAME content.
-	union, err := runtimeinput.Absolute(rel, root, env)
+	union, err := gofresh.AbsoluteObservation(rel, root, env)
 	if err != nil {
 		t.Fatal(err)
 	}

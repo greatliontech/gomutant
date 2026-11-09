@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 )
 
 // The chunk's driving pin: a findings document measured in one
@@ -56,7 +56,7 @@ func TestRunServesAcrossCheckoutRoots(t *testing.T) {
 		if evidence.RuntimeInputs == "" {
 			continue
 		}
-		paths, err := runtimeinput.Paths(evidence.RuntimeInputs, rootB)
+		paths, err := gofresh.RuntimeInputPaths(evidence.RuntimeInputs, rootB)
 		if err != nil {
 			t.Fatalf("%s: recorded manifest unreadable: %v", evidence.Symbol, err)
 		}

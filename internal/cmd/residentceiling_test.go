@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/resident"
+	"github.com/greatliontech/gomutant/internal/resident"
 )
 
 // Every command's process runs under the fleet ceiling from the
@@ -120,7 +120,7 @@ func TestProgressLineCarriesTheReadingInTheFleetsWords(t *testing.T) {
 }
 
 // The suites run with the operator's GOMEMLIMIT cleared — the fleet
-// clause's consumer obligation (gofresh/resident): an environment
+// clause's consumer obligation (internal/resident): an environment
 // carrying it suppresses the ceiling derivation for the whole process,
 // and an oracle sets it on every test binary it runs, so a pin that
 // expects a derived ceiling would read the oracle's word. The one

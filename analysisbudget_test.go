@@ -56,8 +56,8 @@ func TestAnalysisEventStretchIsThePerUnitPhases(t *testing.T) {
 	// literal so a phase the engine adds or drops is a conscious move
 	// on this face too.
 	unit := []string{"list", "typecheck", "load", "hash", "observe", "runtime", "prove"}
-	if got := gofresh.UnitPhases(); !reflect.DeepEqual(got, unit) {
-		t.Fatalf("gofresh.UnitPhases() = %v, want %v", got, unit)
+	if got := unitPhases; !reflect.DeepEqual(got, unit) {
+		t.Fatalf("unitPhases = %v, want %v", got, unit)
 	}
 	for _, phase := range unit {
 		label, ok := (AnalysisEvent{Phase: phase, Package: "p", Index: 1, Total: 2}).Stretch()

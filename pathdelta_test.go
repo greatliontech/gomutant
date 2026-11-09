@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -28,22 +27,22 @@ func TestManifestPathDeltaNamesTheMoverBestEffort(t *testing.T) {
 	}
 	observe := func(log string) (string, string) {
 		t.Helper()
-		obs, err := runtimeinput.FromTestLog([]byte(log), root, root, os.Environ(), runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+		obs, err := gofresh.FromTestLog([]byte(log), root, root, os.Environ(), gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		state, err := runtimeinput.CompletedState(obs)
+		state, err := gofresh.CompletedObservationState(obs)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// The engine absolutizes every observation before it leaves; a
 		// recorded finding keeps the relative form. Naming must read
 		// both, so each case pins both forms.
-		absObs, err := runtimeinput.Absolute(obs, root, os.Environ())
+		absObs, err := gofresh.AbsoluteObservation(obs, root, os.Environ())
 		if err != nil {
 			t.Fatal(err)
 		}
-		absState, err := runtimeinput.CompletedState(absObs)
+		absState, err := gofresh.CompletedObservationState(absObs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,17 +101,17 @@ func TestApplySplicedUnionNamesDivergingInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := tree.eng.GoEnv()
-	observe := func(log string) (runtimeinput.Observation, string) {
+	observe := func(log string) (gofresh.Observation, string) {
 		t.Helper()
-		obs, err := runtimeinput.FromTestLog([]byte(log), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+		obs, err := gofresh.FromTestLog([]byte(log), root, root, env, gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		abs, err := runtimeinput.Absolute(obs, root, env)
+		abs, err := gofresh.AbsoluteObservation(obs, root, env)
 		if err != nil {
 			t.Fatal(err)
 		}
-		state, err := runtimeinput.CompletedState(abs)
+		state, err := gofresh.CompletedObservationState(abs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -121,7 +120,7 @@ func TestApplySplicedUnionNamesDivergingInputs(t *testing.T) {
 	union, _ := observe("open shared.txt\n")
 	// Production evidence is absolutized before it is recorded; the
 	// naming must survive that form.
-	absUnion, err := runtimeinput.Absolute(union, root, env)
+	absUnion, err := gofresh.AbsoluteObservation(union, root, env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +151,7 @@ func TestApplySplicedUnionNamesDivergingInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.CompletedState(merged)
+	state, err := gofresh.CompletedObservationState(merged)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +191,7 @@ func TestProbeOracleInstabilityCollectsProbedPaths(t *testing.T) {
 	prior := seams.advisoryProbe
 	t.Cleanup(func() { seams.advisoryProbe = prior })
 	probes := 0
-	seams.advisoryProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []runtimeinput.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, runtimeinput.Observation, error) {
+	seams.advisoryProbe = func(ctx context.Context, dir, pkg, run string, timeout time.Duration, flags []string, moduleDir, packageDir string, brackets []string, namespaces []gofresh.ScratchNamespace, env []string, bounds engine.OracleBounds) (int, bool, []string, string, gofresh.Observation, error) {
 		probes++
 		return prior(ctx, dir, pkg, run, timeout, flags, moduleDir, packageDir, brackets, namespaces, env, bounds)
 	}
@@ -231,17 +230,17 @@ func TestEmitOracleGuidanceNamesMutantOnlyInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := tree.eng.GoEnv()
-	obs, err := runtimeinput.FromTestLog([]byte("open shared.txt\nopen moved.txt\n"), root, root, env, runtimeinput.WithCompletedProcess("test"), runtimeinput.WithBracket(bracketfixture.Capture(t, root)))
+	obs, err := gofresh.FromTestLog([]byte("open shared.txt\nopen moved.txt\n"), root, root, env, gofresh.WithCompletedProcess("test"), gofresh.WithBracket(bracketfixture.Capture(t, root)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Production finding evidence is absolutized; the wiring must
 	// recover the module-relative form from it.
-	abs, err := runtimeinput.Absolute(obs, root, env)
+	abs, err := gofresh.AbsoluteObservation(obs, root, env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.CompletedState(abs)
+	state, err := gofresh.CompletedObservationState(abs)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	gofresh "github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/bracketfixture"
 	"github.com/greatliontech/gomutant/internal/engine"
 )
@@ -262,7 +261,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		views.bySymbol["example.com/fixture/lib.TestAdd"],
 		views.bySymbol["example.com/fixture/lib.TestWeak"],
 	}
-	state, err := runtimeinput.FromTestLog(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("finding"), runtimeinput.WithBracket(bracketfixture.Capture(t, tree.dir)))
+	state, err := gofresh.FromTestLog(nil, tree.dir, tree.dir, tree.eng.GoEnv(), gofresh.WithCompletedProcess("finding"), gofresh.WithBracket(bracketfixture.Capture(t, tree.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +274,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		TargetEvidence: targetEvidence, OracleEvidence: oracleEvidence,
 	}
 	calls := 0
-	current := func(context.Context, string, string, []string) (runtimeinput.State, error) {
+	current := func(context.Context, string, string, []string) (gofresh.RuntimeState, error) {
 		calls++
 		return state.State, nil
 	}
@@ -286,7 +285,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	movementCalls := 0
 	moved := state.State
 	moved.Digest = "moved"
-	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), false, 0, "", func(context.Context, string, string, []string) (runtimeinput.State, error) {
+	matches, err = evidenceSetMatchesContextWithCurrent(context.Background(), prior, target, oracle, true, engine.OperatorSet, time.Minute.String(), false, 0, "", func(context.Context, string, string, []string) (gofresh.RuntimeState, error) {
 		movementCalls++
 		if movementCalls == 1 {
 			return state.State, nil
@@ -304,7 +303,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 	workspaceViews := observedSubjectViews(t, workspace, []string{"example.com/ws.Root", "example.com/ws/sub.TestNested"})
 	workspaceTarget := workspaceViews.bySymbol["example.com/ws.Root"]
 	workspaceOracle := []*subjectView{workspaceViews.bySymbol["example.com/ws/sub.TestNested"]}
-	workspaceState, err := runtimeinput.FromTestLog(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv(), runtimeinput.WithCompletedProcess("workspace"), runtimeinput.WithBracket(bracketfixture.Capture(t, workspace.dir)))
+	workspaceState, err := gofresh.FromTestLog(nil, workspace.dir, workspace.dir, workspace.eng.GoEnv(), gofresh.WithCompletedProcess("workspace"), gofresh.WithBracket(bracketfixture.Capture(t, workspace.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +316,7 @@ func TestEvidenceSetMemoizesFindingRuntimeManifest(t *testing.T) {
 		TargetEvidence: workspaceTargetEvidence, OracleEvidence: workspaceOracleEvidence,
 	}
 	calls = 0
-	current = func(context.Context, string, string, []string) (runtimeinput.State, error) {
+	current = func(context.Context, string, string, []string) (gofresh.RuntimeState, error) {
 		calls++
 		return workspaceState.State, nil
 	}
@@ -334,7 +333,7 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 	tree := fixtureTree(t)
 	views := observedSubjectViews(t, tree, []string{"example.com/fixture/lib.Add"})
 	target := views.bySymbol["example.com/fixture/lib.Add"]
-	state, err := runtimeinput.FromTestLog(nil, tree.dir, tree.dir, tree.eng.GoEnv(), runtimeinput.WithCompletedProcess("cancellation"), runtimeinput.WithBracket(bracketfixture.Capture(t, tree.dir)))
+	state, err := gofresh.FromTestLog(nil, tree.dir, tree.dir, tree.eng.GoEnv(), gofresh.WithCompletedProcess("cancellation"), gofresh.WithBracket(bracketfixture.Capture(t, tree.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,9 +343,9 @@ func TestEvidenceSetPropagatesRuntimeCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	prior := Finding{OperatorSet: engine.OperatorSet, OracleExplicit: true, OracleTimeout: time.Minute.String(), OracleExecutionPolicy: FullOracleExecutionPolicy, TargetEvidence: evidence}
-	matches, err := evidenceSetMatchesContextWithCurrent(ctx, prior, target, nil, true, engine.OperatorSet, time.Minute.String(), false, 0, "", func(ctx context.Context, _, _ string, _ []string) (runtimeinput.State, error) {
+	matches, err := evidenceSetMatchesContextWithCurrent(ctx, prior, target, nil, true, engine.OperatorSet, time.Minute.String(), false, 0, "", func(ctx context.Context, _, _ string, _ []string) (gofresh.RuntimeState, error) {
 		cancel()
-		return runtimeinput.State{}, ctx.Err()
+		return gofresh.RuntimeState{}, ctx.Err()
 	})
 	if !errors.Is(err, context.Canceled) || matches {
 		t.Fatalf("cancelled runtime check = %v, %v", matches, err)
@@ -649,7 +648,7 @@ func TestInspectFindingStates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := runtimeinput.FromTestLog(nil, moduleDir, packageDir, tr.eng.GoEnv(), runtimeinput.WithCompletedProcess("inspection"), runtimeinput.WithBracket(bracketfixture.Capture(t, moduleDir)))
+	state, err := gofresh.FromTestLog(nil, moduleDir, packageDir, tr.eng.GoEnv(), gofresh.WithCompletedProcess("inspection"), gofresh.WithBracket(bracketfixture.Capture(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,11 +785,11 @@ func TestIncompleteObservationCannotBeFresh(t *testing.T) {
 	}
 	tr := fixtureTree(t)
 	view := observedSubjectViews(t, tr, []string{"example.com/fixture/lib.Add"}).bySymbol["example.com/fixture/lib.Add"]
-	state, err := runtimeinput.Incomplete(view.moduleDir, "timed-out-test", "test process timed out", tr.eng.GoEnv())
+	state, err := gofresh.IncompleteRuntimeObservation(view.moduleDir, "timed-out-test", "test process timed out", tr.eng.GoEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err = runtimeinput.Absolute(state, view.moduleDir, tr.eng.GoEnv())
+	state, err = gofresh.AbsoluteObservation(state, view.moduleDir, tr.eng.GoEnv())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +800,7 @@ func TestIncompleteObservationCannotBeFresh(t *testing.T) {
 	holds := func(evidence SubjectEvidence) (bool, error) {
 		return evidencePairsValid(context.Background(),
 			[]evidencePair{{subject: view, evidence: evidence, accept: acceptValidVerdict}},
-			runtimeinput.Current)
+			gofresh.CurrentRuntimeInputs)
 	}
 	if valid, err := holds(evidence); err != nil || valid {
 		t.Fatalf("incomplete evidence valid = %v, err = %v", valid, err)

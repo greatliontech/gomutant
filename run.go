@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/windowcost"
 )
@@ -247,7 +247,7 @@ type Options struct {
 	// matching the pattern inside the directory - the caller-side
 	// assertion its author takes on. Malformed declarations refuse at
 	// run start, before any measurement.
-	ScratchNamespaces []runtimeinput.ScratchNamespace
+	ScratchNamespaces []gofresh.ScratchNamespace
 	// Jobs bounds concurrent mutant runs; 0 means half the CPUs. Mutant runs
 	// are process-isolated (own overlay, own temp dir, shared
 	// content-addressed build cache), so they parallelize safely — but
@@ -879,7 +879,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		return nil, err
 	}
 	for _, namespace := range opts.ScratchNamespaces {
-		if err := runtimeinput.ValidateScratchNamespace(namespace.Dir, namespace.Pattern); err != nil {
+		if err := gofresh.ValidateScratchNamespace(namespace.Dir, namespace.Pattern); err != nil {
 			return nil, fmt.Errorf("gomutant: scratch namespace %s:%s refused before measurement: %w", namespace.Dir, namespace.Pattern, err)
 		}
 	}
@@ -1027,7 +1027,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// keyFor is the one group→key projection: every map keyed by
 	// baselineKey must agree on it exactly.
 	keyFor := baselineKeyFor
-	baselineCache := map[baselineKey]runtimeinput.Observation{}
+	baselineCache := map[baselineKey]gofresh.Observation{}
 	// scopedBaselines memoizes killer-scoped baseline probes for the
 	// serial confirmation's differential ground — Run-local like
 	// baselineCache, which is what makes the key complete (bounds,
@@ -1602,7 +1602,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	// campaign-wide abort remains reserved for cancellation of the run
 	// itself (REQ-exec-quiescence's baseline locality).
 	probeGroupBaselines := func(ctx context.Context, tg Target, w *work) (string, error) {
-		w.baselines = make([]runtimeinput.Observation, 0, len(w.groups))
+		w.baselines = make([]gofresh.Observation, 0, len(w.groups))
 		for gi := range w.groups {
 			group := w.groups[gi]
 			key := keyFor(group)
@@ -1631,7 +1631,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 						return "", ctx.Err()
 					}
 					if herr == nil && held && len(banked.PassedTests) > 0 {
-						adopted, aerr := runtimeinput.Adopt(banked.Manifest, t.dir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
+						adopted, aerr := gofresh.AdoptObservation(banked.Manifest, t.dir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
 						if aerr == nil && adopted.Digest == banked.Digest {
 							reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0], Banked: true})
 							raw := time.Duration(banked.RawMillis) * time.Millisecond
@@ -2590,7 +2590,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	var tickMu sync.Mutex
 	type executedWindow struct {
 		window       []work
-		observations [][]runtimeinput.Observation
+		observations [][]gofresh.Observation
 		incompletes  [][]string
 		// scores carries each target's verdict-bearing measurement —
 		// outcomes, killers, and the serial-confirmation flips — as one
@@ -2617,13 +2617,13 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		}
 		outcomes := make([][]engine.MutantOutcome, len(window))
 		flips := make([]map[int]string, len(window))
-		observations := make([][]runtimeinput.Observation, len(window))
+		observations := make([][]gofresh.Observation, len(window))
 		incompletes := make([][]string, len(window))
 		killers := make([][]string, len(window))
 		memoryDecided := make([][]bool, len(window))
 		for wi := range window {
 			outcomes[wi] = make([]engine.MutantOutcome, len(window[wi].candidates))
-			observations[wi] = make([]runtimeinput.Observation, len(window[wi].candidates))
+			observations[wi] = make([]gofresh.Observation, len(window[wi].candidates))
 			incompletes[wi] = make([]string, len(window[wi].candidates))
 			killers[wi] = make([]string, len(window[wi].candidates))
 			memoryDecided[wi] = make([]bool, len(window[wi].candidates))
@@ -2636,7 +2636,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// The outcome is written last: an unwritten outcome reads as
 		// the discard zero value, never as a verdict, so it is the
 		// row's sentinel and the other channels are in place before it.
-		score := func(wi, mi int, outcome engine.MutantOutcome, killer string, decided bool, state runtimeinput.Observation, incomplete string) {
+		score := func(wi, mi int, outcome engine.MutantOutcome, killer string, decided bool, state gofresh.Observation, incomplete string) {
 			killers[wi][mi] = killer
 			memoryDecided[wi][mi] = decided
 			observations[wi][mi] = interner.intern(state)
@@ -2828,7 +2828,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		// disposition, observation, and incompleteness, as one value.
 		// The serial execution replaces every channel of the parallel
 		// measurement (REQ-exec-attribution).
-		rescore := func(wi, mi int, run func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error)) (engine.MutantOutcome, string, error) {
+		rescore := func(wi, mi int, run func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, gofresh.Observation, string, error)) (engine.MutantOutcome, string, error) {
 			w := window[wi]
 			m, _ := window[wi].candidates[mi].Mutant()
 			opts.probeGate.Lock()
@@ -2903,7 +2903,7 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 						ConfirmationMode: confirmMode,
 					})
 					initialKiller := killers[wi][k.mi]
-					outcome, killer, err := rescore(wi, k.mi, func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, runtimeinput.Observation, string, error) {
+					outcome, killer, err := rescore(wi, k.mi, func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, gofresh.Observation, string, error) {
 						return t.confirmMutant(ctx, w, m, initialKiller, scopedBaselines, opts, runEnv)
 					})
 					if err != nil {

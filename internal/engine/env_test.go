@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gomutant/internal/gotool"
+	"github.com/greatliontech/gofresh"
 )
 
 // TestComposedKeysReplaceTheAmbientEntryOnce is the property behind
@@ -38,7 +38,7 @@ func TestComposedKeysReplaceTheAmbientEntryOnce(t *testing.T) {
 			return Selection{Tags: []string{"b"}}.applyEnv(env)
 		}},
 		{"PWD", func(env []string) ([]string, error) {
-			return oracleIngestEnv(env, runtimeinput.ProducerFrame{PkgDir: "/pkg"}, OracleBounds{}), nil
+			return oracleIngestEnv(env, gofresh.ProducerFrame{PkgDir: "/pkg"}, OracleBounds{}), nil
 		}},
 		{"TMPDIR", func(env []string) ([]string, error) {
 			out, _, _, remove, err := oracleScratch(env)
@@ -105,7 +105,7 @@ func TestComposedKeysReplaceTheAmbientEntryOnce(t *testing.T) {
 	if v, ok := gotool.LookupEnv(oracleMemoryEnv(nil, 1000), "GOMEMLIMIT"); !ok || v != "900" {
 		t.Fatalf("GOMEMLIMIT = %q/%v, want the soft ceiling", v, ok)
 	}
-	if v, ok := gotool.LookupEnv(oracleIngestEnv([]string{"PWD=/elsewhere"}, runtimeinput.ProducerFrame{PkgDir: "/pkg"}, OracleBounds{}), "PWD"); !ok || v != "/pkg" {
+	if v, ok := gotool.LookupEnv(oracleIngestEnv([]string{"PWD=/elsewhere"}, gofresh.ProducerFrame{PkgDir: "/pkg"}, OracleBounds{}), "PWD"); !ok || v != "/pkg" {
 		t.Fatalf("PWD = %q/%v, want the frame's package directory", v, ok)
 	}
 }

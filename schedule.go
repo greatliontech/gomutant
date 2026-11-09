@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/windowcost"
 )
@@ -346,7 +345,7 @@ func classifyConfirmation(outcome engine.MutantOutcome, killer string) confirmOu
 // unverifiable runtime evidence — in its baselines or any completed
 // mutant observation — the signature of load-sensitive inputs the
 // stride gate must not sample across (REQ-exec-attribution).
-func windowEvidenceVolatile(w *work, observations []runtimeinput.Observation) bool {
+func windowEvidenceVolatile(w *work, observations []gofresh.Observation) bool {
 	for _, b := range w.baselines {
 		if b.Unverifiable {
 			return true

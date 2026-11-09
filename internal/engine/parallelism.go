@@ -3,7 +3,7 @@ package engine
 import (
 	"strconv"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gomutant/internal/gotool"
 )
 
 // OracleEvidenceEnv is the environment oracle evidence digests under:
