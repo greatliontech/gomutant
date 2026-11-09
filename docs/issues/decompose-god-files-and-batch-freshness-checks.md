@@ -1,6 +1,6 @@
 # Split God-Files (`run.go`, `findings.go`, `internal/mcpserver/server.go`), Deduplicate `explain`, and Fix Unbatched Freshness Checks
 
-**Lands:** Chunk 5 in `gofresh/docs/plans/plan.md` (`Decompose gomutant Root Package & Fix Freshness/Oracle Batching`).
+**Lands:** Chunk 8 in `gofresh/docs/plans/plan.md` (`Downstream Fleet Refactoring, Batching & Startup Purity`).
 
 ## Context & Concrete Findings
 
@@ -36,7 +36,7 @@
 
 ## Resolution
 
-During Chunk 5:
+During Chunk 8:
 1. Split `findings.go` (`findings_parse.go`, `findings_merge.go`), `run.go` (`run_prepare.go`, `run_window.go`, `run_aggregate.go`, and decompose `runCounted` into phase methods), and `internal/mcpserver/server.go` (per-tool files matching `internal/cmd/`) within their packages so all `.stipulator/bindings/` symbols remain intact.
 2. Deduplicate `explain` domain logic into root `package gomutant` (`ExplainSymbol` / `ExplainTriage`), shared by `internal/cmd/explain.go` and `internal/mcpserver`.
 3. Share `runtimeMemo` and batch/deduplicate `CheckObservedBatch` / `CheckBatch` checks in `inspectFindings`, `opts.Posture`, and `evidencePairsValid` (with narrowed `Sibling` views per target package).
