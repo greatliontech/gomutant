@@ -7,10 +7,10 @@ github.com/google/jsonschema-go v0.4.3 h1:/DBOLZTfDow7pe2GmaJNhltueGTtDKICi8V8p+
 github.com/google/jsonschema-go v0.4.3/go.mod h1:r5quNTdLOYEz95Ru18zA0ydNbBuYoo9tgaYcxEYhJVE=
 github.com/greatliontech/glob v0.1.0 h1:LwZX7EtMnHypXoZVdvQi/jW34qAtJ3VLdeB5EzTrVqE=
 github.com/greatliontech/glob v0.1.0/go.mod h1:2GCLEmzSHTM+1L3ZxH7gr4CEAOwPM1N1SEyk8R25Ke0=
-github.com/greatliontech/go-x-tools v0.51.1-0.20261110163050-3b0091521e91 h1:SwS7cdlUYOPF3gw6tHW8ceW+ePPluqeAHV52kPllckY=
-github.com/greatliontech/go-x-tools v0.51.1-0.20261110163050-3b0091521e91/go.mod h1:6ZWRszosVL/0Dx6X8TxIjNBTllvMuhlEZ7tpMqc+FqU=
-github.com/greatliontech/gofresh v0.122.4 h1:pnw9VB38i+bd+as63ryk7mefRPvlIP90/vVJpRAtuGw=
-github.com/greatliontech/gofresh v0.122.4/go.mod h1:xGsvsERtU/tJb2k/S54lTZX1LZ11VTRUd3UOIGs3IKE=
+github.com/greatliontech/go-x-tools v0.51.1-0.20261110191506-66fca0a77c41 h1:NSRGuebjAO5u2kwKv3+2jg3VfbXPxJ1CUPVmJq7eR0U=
+github.com/greatliontech/go-x-tools v0.51.1-0.20261110191506-66fca0a77c41/go.mod h1:6ZWRszosVL/0Dx6X8TxIjNBTllvMuhlEZ7tpMqc+FqU=
+github.com/greatliontech/gofresh v0.122.5 h1:wsAdLyBpKIcL7exxRB0MdYd4g61QvGmon5vaIZds9YY=
+github.com/greatliontech/gofresh v0.122.5/go.mod h1:yTLbChFeGZRKBUEkTel7JCNH4//0y7YroCFHS0oYVl0=
 github.com/greatliontech/stipulator/stipulate/structural v0.3.1 h1:FRe2S11CXSP2WnSXM7/RD5iqzn2wYI8kYskD2oGoKUE=
 github.com/greatliontech/stipulator/stipulate/structural v0.3.1/go.mod h1:A+jeHEOG2USUYwkp57hG7Rqk+nng3OSXHwa1nO2YTMY=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
