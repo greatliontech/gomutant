@@ -886,13 +886,12 @@ type evidencePair struct {
 
 // evidencePairsValid reports whether every pair's recorded evidence holds
 // against the current tree. The pre-verdict checks run per subject; the
-// gofresh verdicts then resolve through one CheckObservedBatch per view —
-// the batch shares one runtime-input window across the view's subjects where
-// a per-subject walk pays one window per check, and gofresh guarantees each
-// subject's batched verdict equals its single CheckObserved. Evidence
-// without observation facts keeps the per-subject check, as does a subject
-// appearing twice in one view — the batch map cannot carry two recordings
-// for one subject.
+// gofresh verdicts then resolve through one narrowed CheckObservedBatch or
+// CheckBatch per view — the batch shares one runtime-input window across the
+// target's subjects where a per-subject walk pays one window per check, and
+// gofresh guarantees each subject's batched verdict equals its single check.
+// A subject appearing twice in one view keeps the per-subject check because
+// the batch map cannot carry two recordings for one subject.
 func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(context.Context, string, string, []string) (gofresh.RuntimeState, error)) (bool, error) {
 	for _, pair := range pairs {
 		ok, err := pair.subject.evidencePrecheck(ctx, pair.evidence, current)
@@ -900,17 +899,23 @@ func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(
 			return false, err
 		}
 	}
+	type batchKey struct {
+		view     *gofresh.Snapshot
+		observed bool
+	}
 	type viewBatch struct {
 		recorded map[gofresh.Subject]gofresh.Fingerprint
+		subjects []gofresh.Subject
 		members  []int
 	}
-	batches := map[*gofresh.Snapshot]*viewBatch{}
-	order := make([]*gofresh.Snapshot, 0, len(pairs))
+	batches := map[batchKey]*viewBatch{}
+	order := make([]batchKey, 0, len(pairs))
 	for i, pair := range pairs {
 		fingerprint := pair.evidence.fingerprint()
-		single := !observedFingerprint(fingerprint)
-		batch := batches[pair.subject.view]
-		if !single && batch != nil {
+		key := batchKey{view: pair.subject.view, observed: observedFingerprint(fingerprint)}
+		batch := batches[key]
+		single := false
+		if batch != nil {
 			_, single = batch.recorded[pair.subject.subject]
 		}
 		if single {
@@ -925,15 +930,28 @@ func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(
 		}
 		if batch == nil {
 			batch = &viewBatch{recorded: map[gofresh.Subject]gofresh.Fingerprint{}}
-			batches[pair.subject.view] = batch
-			order = append(order, pair.subject.view)
+			batches[key] = batch
+			order = append(order, key)
 		}
 		batch.recorded[pair.subject.subject] = fingerprint
+		batch.subjects = append(batch.subjects, pair.subject.subject)
 		batch.members = append(batch.members, i)
 	}
-	for _, view := range order {
-		batch := batches[view]
-		verdicts, err := view.CheckObservedBatch(ctx, batch.recorded)
+	for _, key := range order {
+		batch := batches[key]
+		checkView := key.view
+		if sub, err := key.view.Sibling(batch.subjects); err == nil {
+			checkView = sub
+		}
+		var (
+			verdicts map[gofresh.Subject]gofresh.Verdict
+			err      error
+		)
+		if key.observed {
+			verdicts, err = checkView.CheckObservedBatch(ctx, batch.recorded)
+		} else {
+			verdicts, err = checkView.CheckBatch(ctx, batch.recorded)
+		}
 		if err != nil {
 			return false, err
 		}
@@ -946,44 +964,197 @@ func evidencePairsValid(ctx context.Context, pairs []evidencePair, current func(
 	return true, nil
 }
 
-func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEvidence) (FindingInspection, error) {
-	if evidence.Symbol != s.symbol {
-		return FindingInspection{State: FindingStale, Reason: "subject identity changed"}, nil
+type verdictCacheKey struct {
+	view        *gofresh.Snapshot
+	subject     gofresh.Subject
+	fingerprint gofresh.Fingerprint
+}
+
+type verdictBatchKey struct {
+	view     *gofresh.Snapshot
+	observed bool
+}
+
+type verdictBatch struct {
+	key      verdictBatchKey
+	recorded map[gofresh.Subject]gofresh.Fingerprint
+	subjects []gofresh.Subject
+}
+
+type judgmentCache struct {
+	runtime  *runtimeMemo
+	verdicts map[verdictCacheKey]gofresh.Verdict
+	queued   map[verdictCacheKey]bool
+	batches  []*verdictBatch
+}
+
+func newJudgmentCache() *judgmentCache {
+	return &judgmentCache{
+		runtime:  newCurrentRuntimeMemo(),
+		verdicts: map[verdictCacheKey]gofresh.Verdict{},
+		queued:   map[verdictCacheKey]bool{},
 	}
-	if evidence.RuntimeUnverifiable {
-		return FindingInspection{State: FindingUnverifiable, Reason: evidence.RuntimeReason, Channel: PostureRuntimeInputs}, nil
+}
+
+func (c *judgmentCache) enqueue(sv *subjectView, fp gofresh.Fingerprint) {
+	vkey := verdictCacheKey{view: sv.view, subject: sv.subject, fingerprint: fp}
+	if _, ok := c.verdicts[vkey]; ok || c.queued[vkey] {
+		return
 	}
-	state, err := gofresh.CurrentRuntimeInputs(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
-	if err != nil || !state.OK {
-		if ctx.Err() != nil {
-			return FindingInspection{}, ctx.Err()
+	c.queued[vkey] = true
+	bkey := verdictBatchKey{view: sv.view, observed: observedFingerprint(fp)}
+	for _, batch := range c.batches {
+		if batch.key != bkey {
+			continue
+		}
+		if _, exists := batch.recorded[sv.subject]; !exists {
+			batch.recorded[sv.subject] = fp
+			batch.subjects = append(batch.subjects, sv.subject)
+			return
+		}
+	}
+	c.batches = append(c.batches, &verdictBatch{
+		key:      bkey,
+		recorded: map[gofresh.Subject]gofresh.Fingerprint{sv.subject: fp},
+		subjects: []gofresh.Subject{sv.subject},
+	})
+}
+
+func (c *judgmentCache) queueFindingRows(ctx context.Context, f Finding, adm judgmentAdmission, viewFor map[string]*subjectView) {
+	if adm.decided != nil {
+		return
+	}
+	if adm.target != "" {
+		sv := viewFor[adm.target]
+		if !sv.canBatchVerdict(ctx, f.TargetEvidence, c.runtime.once) {
+			return
+		}
+		c.enqueue(sv, f.TargetEvidence.fingerprint())
+	}
+	for _, evidence := range adm.oracle {
+		if ctx.Err() != nil || !adm.validOracle[evidence.Symbol] {
+			return
+		}
+		sv := viewFor[evidence.Symbol]
+		if !sv.canBatchVerdict(ctx, evidence, c.runtime.once) {
+			return
+		}
+		c.enqueue(sv, evidence.fingerprint())
+	}
+}
+
+func (c *judgmentCache) flush(ctx context.Context) error {
+	batches := c.batches
+	c.batches = nil
+	for _, batch := range batches {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		checkView := batch.key.view
+		if sub, err := batch.key.view.Sibling(batch.subjects); err == nil {
+			checkView = sub
+		}
+		var (
+			verdicts map[gofresh.Subject]gofresh.Verdict
+			err      error
+		)
+		if batch.key.observed {
+			verdicts, err = checkView.CheckObservedBatch(ctx, batch.recorded)
+		} else {
+			verdicts, err = checkView.CheckBatch(ctx, batch.recorded)
 		}
 		if err != nil {
-			return FindingInspection{State: FindingUnverifiable, Reason: err.Error(), Channel: PostureRuntimeInputs}, nil
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			continue
 		}
-		return FindingInspection{State: FindingUnverifiable, Reason: "runtime inputs cannot be evaluated", Channel: PostureRuntimeInputs}, nil
+		for subject, fp := range batch.recorded {
+			if verdict, ok := verdicts[subject]; ok {
+				c.verdicts[verdictCacheKey{view: batch.key.view, subject: subject, fingerprint: fp}] = verdict
+			}
+		}
+	}
+	return nil
+}
+
+func (s *subjectView) canBatchVerdict(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (gofresh.RuntimeState, error)) bool {
+	if s == nil || evidence.Symbol != s.symbol || evidence.RuntimeUnverifiable {
+		return false
+	}
+	state, err := current(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
+	if err != nil || !state.OK || state.Unverifiable || state.Digest != evidence.RuntimeDigest {
+		return false
+	}
+	return evidence.PurityAssertion == s.fp.PurityAssertion
+}
+
+func (s *subjectView) inspectPrecheck(ctx context.Context, evidence SubjectEvidence, current func(context.Context, string, string, []string) (gofresh.RuntimeState, error)) (FindingInspection, bool, error) {
+	if evidence.Symbol != s.symbol {
+		return FindingInspection{State: FindingStale, Reason: "subject identity changed"}, true, nil
+	}
+	if evidence.RuntimeUnverifiable {
+		return FindingInspection{State: FindingUnverifiable, Reason: evidence.RuntimeReason, Channel: PostureRuntimeInputs}, true, nil
+	}
+	state, err := current(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)
+	if err != nil || !state.OK {
+		if ctx.Err() != nil {
+			return FindingInspection{}, false, ctx.Err()
+		}
+		if err != nil {
+			return FindingInspection{State: FindingUnverifiable, Reason: err.Error(), Channel: PostureRuntimeInputs}, true, nil
+		}
+		return FindingInspection{State: FindingUnverifiable, Reason: "runtime inputs cannot be evaluated", Channel: PostureRuntimeInputs}, true, nil
 	}
 	if state.Unverifiable {
-		return FindingInspection{State: FindingUnverifiable, Reason: state.Reason, Channel: PostureRuntimeInputs}, nil
+		return FindingInspection{State: FindingUnverifiable, Reason: state.Reason, Channel: PostureRuntimeInputs}, true, nil
 	}
 	if state.Digest != evidence.RuntimeDigest {
-		return FindingInspection{State: FindingStale, Reason: "runtime inputs changed" + movedInputSuffix(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)}, nil
+		return FindingInspection{State: FindingStale, Reason: "runtime inputs changed" + movedInputSuffix(ctx, evidence.RuntimeInputs, evidenceBase(s.evidenceDir, evidence), s.env)}, true, nil
 	}
 	if evidence.PurityAssertion != s.fp.PurityAssertion {
-		return FindingInspection{State: FindingStale, Reason: "purity assertion changed"}, nil
+		return FindingInspection{State: FindingStale, Reason: "purity assertion changed"}, true, nil
 	}
-	verdict, err := s.checkContext(ctx, evidence.fingerprint())
+	return FindingInspection{}, false, nil
+}
+
+func inspectionFromVerdict(verdict gofresh.Verdict) FindingInspection {
+	switch verdict.Status {
+	case gofresh.Valid:
+		return FindingInspection{State: FindingCurrent}
+	case gofresh.Unverifiable:
+		return FindingInspection{State: FindingUnverifiable, Reason: verdict.Reason}
+	default:
+		return FindingInspection{State: FindingStale, Reason: verdict.Reason}
+	}
+}
+
+func (s *subjectView) inspectContext(ctx context.Context, evidence SubjectEvidence) (FindingInspection, error) {
+	return s.inspectContextWithCache(ctx, evidence, nil)
+}
+
+func (s *subjectView) inspectContextWithCache(ctx context.Context, evidence SubjectEvidence, cache *judgmentCache) (FindingInspection, error) {
+	current := gofresh.CurrentRuntimeInputs
+	if cache != nil && cache.runtime != nil {
+		current = cache.runtime.once
+	}
+	if inspection, decided, err := s.inspectPrecheck(ctx, evidence, current); err != nil || decided {
+		return inspection, err
+	}
+	fp := evidence.fingerprint()
+	if cache != nil {
+		if verdict, ok := cache.verdicts[verdictCacheKey{view: s.view, subject: s.subject, fingerprint: fp}]; ok {
+			return inspectionFromVerdict(verdict), nil
+		}
+	}
+	verdict, err := s.checkContext(ctx, fp)
 	if err != nil {
 		return FindingInspection{}, err
 	}
-	switch verdict.Status {
-	case gofresh.Valid:
-		return FindingInspection{State: FindingCurrent}, nil
-	case gofresh.Unverifiable:
-		return FindingInspection{State: FindingUnverifiable, Reason: verdict.Reason}, nil
-	default:
-		return FindingInspection{State: FindingStale, Reason: verdict.Reason}, nil
+	if cache != nil {
+		cache.verdicts[verdictCacheKey{view: s.view, subject: s.subject, fingerprint: fp}] = verdict
 	}
+	return inspectionFromVerdict(verdict), nil
 }
 
 // movedInputSuffix names the moved runtime-input identities behind a
@@ -1011,10 +1182,14 @@ func observedFingerprint(fingerprint gofresh.Fingerprint) bool {
 }
 
 func (s *subjectView) checkContext(ctx context.Context, fingerprint gofresh.Fingerprint) (gofresh.Verdict, error) {
-	if observedFingerprint(fingerprint) {
-		return s.view.CheckObserved(ctx, fingerprint, s.subject)
+	checkView := s.view
+	if sub, err := s.view.Sibling([]gofresh.Subject{s.subject}); err == nil {
+		checkView = sub
 	}
-	return s.view.Check(ctx, fingerprint, s.subject)
+	if observedFingerprint(fingerprint) {
+		return checkView.CheckObserved(ctx, fingerprint, s.subject)
+	}
+	return checkView.Check(ctx, fingerprint, s.subject)
 }
 
 // InspectFinding is InspectFindings over one record; progress, when
@@ -1107,6 +1282,21 @@ func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress
 		}
 		prebuilt[packageProcess] = views
 	}
+	cache := newJudgmentCache()
+	for i, f := range findings {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		if errs[i] != nil {
+			continue
+		}
+		if views := prebuilt[admissions[i].packageProcess]; views != nil {
+			cache.queueFindingRows(ctx, f, admissions[i], views.bySymbol)
+		}
+	}
+	if err := cache.flush(ctx); err != nil {
+		return nil, nil, err
+	}
 	out := make([]FindingInspection, len(findings))
 	for i, f := range findings {
 		if err := ctx.Err(); err != nil {
@@ -1116,7 +1306,7 @@ func (t *Tree) inspectFindings(ctx context.Context, findings []Finding, progress
 			continue
 		}
 		report("judging " + f.Symbol)
-		inspection, err := t.judgeAdmittedContext(ctx, f, admissions[i], prebuilt[admissions[i].packageProcess])
+		inspection, err := t.judgeAdmittedContextWithCache(ctx, f, admissions[i], prebuilt[admissions[i].packageProcess], cache)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()
@@ -1307,6 +1497,10 @@ func (t *Tree) admitFindingContext(ctx context.Context, f Finding, shared *admis
 // supplementary view otherwise (the per-record judgment's own path,
 // reported through seams.inspectionSupplementaryView).
 func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgmentAdmission, prebuilt *subjectViewSet) (FindingInspection, error) {
+	return t.judgeAdmittedContextWithCache(ctx, f, adm, prebuilt, nil)
+}
+
+func (t *Tree) judgeAdmittedContextWithCache(ctx context.Context, f Finding, adm judgmentAdmission, prebuilt *subjectViewSet, cache *judgmentCache) (FindingInspection, error) {
 	if adm.decided != nil {
 		inspection := *adm.decided
 		if adm.enrichDelta != nil {
@@ -1316,12 +1510,19 @@ func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgment
 		}
 		return inspection, nil
 	}
+	if cache == nil {
+		cache = newJudgmentCache()
+	}
 	viewFor, err := t.viewsFor(ctx, adm.symbols, prebuilt, adm.packageProcess)
 	if err != nil {
 		return FindingInspection{}, err
 	}
+	cache.queueFindingRows(ctx, f, adm, viewFor)
+	if err := cache.flush(ctx); err != nil {
+		return FindingInspection{}, err
+	}
 	if adm.target != "" {
-		inspection, err := viewFor[adm.target].inspectContext(ctx, f.TargetEvidence)
+		inspection, err := viewFor[adm.target].inspectContextWithCache(ctx, f.TargetEvidence, cache)
 		if err != nil || inspection.State != FindingCurrent {
 			if err == nil && inspection.Reason != "" {
 				inspection.Reason = targetReasonPrefix + inspection.Reason
@@ -1336,7 +1537,7 @@ func (t *Tree) judgeAdmittedContext(ctx context.Context, f Finding, adm judgment
 		if !adm.validOracle[evidence.Symbol] {
 			return FindingInspection{State: FindingStale, Reason: "oracle " + evidence.Symbol + " no longer resolves"}, nil
 		}
-		inspection, err := viewFor[evidence.Symbol].inspectContext(ctx, evidence)
+		inspection, err := viewFor[evidence.Symbol].inspectContextWithCache(ctx, evidence, cache)
 		if err != nil {
 			return FindingInspection{}, err
 		}

@@ -1454,3 +1454,145 @@ func RollUpMachineLocalInputs(reasons []string) []string {
 	}
 	return out
 }
+
+// SelectExplainFinding resolves the single finding record for symbol
+// under sel: when hasSel is false and multiple selections match, an
+// exact default-selection match wins before reporting ambiguity.
+func SelectExplainFinding(all []Finding, symbol string, sel Selection, hasSel bool) (finding Finding, matches int) {
+	selKey := SelectionKey(sel)
+	var matched []Finding
+	for _, f := range all {
+		if f.Symbol != symbol {
+			continue
+		}
+		if hasSel && f.Selection != selKey {
+			continue
+		}
+		matched = append(matched, f)
+	}
+	if len(matched) > 1 {
+		for _, m := range matched {
+			if m.Selection == selKey {
+				matched = []Finding{m}
+				break
+			}
+		}
+	}
+	if len(matched) == 1 {
+		return matched[0], 1
+	}
+	return Finding{}, len(matched)
+}
+
+// ExplainedSurvivor pairs one open survivor with its prescribed action.
+type ExplainedSurvivor struct {
+	Position  string `json:"position"`
+	Operator  string `json:"operator"`
+	Execution string `json:"execution,omitempty"`
+	Advice    string `json:"advice" jsonschema:"the action the execution bucket prescribes"`
+}
+
+// SymbolExplanation is one symbol record's causal explanation.
+type SymbolExplanation struct {
+	Symbol       string              `json:"symbol"`
+	Selection    string              `json:"selection,omitempty"`
+	State        FindingState        `json:"state"`
+	Reason       string              `json:"reason,omitempty"`
+	Layer        string              `json:"layer"`
+	LayerReasons []string            `json:"layerReasons,omitempty"`
+	Open         []ExplainedSurvivor `json:"open,omitempty"`
+	Attested     int                 `json:"attested,omitempty"`
+	Withdrawn    int                 `json:"withdrawn,omitempty"`
+}
+
+// ExplainSymbolFinding builds the causal explanation of finding from its
+// freshness inspection and the store's portable-line clauses.
+func (s *Store) ExplainSymbolFinding(finding Finding, inspection FindingInspection) SymbolExplanation {
+	layer, layerReasons := s.LayerReasons(finding)
+	out := SymbolExplanation{
+		Symbol:       finding.Symbol,
+		Selection:    finding.Selection,
+		State:        inspection.State,
+		Reason:       inspection.Reason,
+		Layer:        layer,
+		LayerReasons: RollUpMachineLocalInputs(layerReasons),
+		Attested:     len(finding.AttestedDispositions()),
+		Withdrawn:    len(finding.WithdrawnDispositions()),
+	}
+	for _, surv := range finding.Open() {
+		out.Open = append(out.Open, ExplainedSurvivor{
+			Position:  surv.Position,
+			Operator:  surv.Operator,
+			Execution: surv.Execution,
+			Advice:    SurvivorAdvice(surv.Execution),
+		})
+	}
+	return out
+}
+
+// PromotionGroup aggregates machine-local records sharing one failing
+// portable-line clause.
+type PromotionGroup struct {
+	Reason  string   `json:"reason"`
+	Count   int      `json:"count"`
+	Symbols []string `json:"symbols"`
+}
+
+// TriageExplanation is a findings document's promotion triage.
+type TriageExplanation struct {
+	RepoCommittable int
+	LocalOnly       int
+	Promotion       []PromotionGroup
+	Note            string
+}
+
+// ExplainTriage classifies all findings matching filter into
+// repo-committable vs. machine-local groups sorted by descending count.
+func (s *Store) ExplainTriage(ctx context.Context, all []Finding, filter RecordFilter, docPath string) (TriageExplanation, error) {
+	repo, local := 0, 0
+	groups := map[string][]string{}
+	for _, finding := range all {
+		if err := ctx.Err(); err != nil {
+			return TriageExplanation{}, err
+		}
+		if !filter.Admits(finding) {
+			continue
+		}
+		layer, layerReasons := s.LayerReasons(finding)
+		if layer == LayerRepo {
+			repo++
+			continue
+		}
+		local++
+		for _, reason := range RollUpMachineLocalInputs(layerReasons) {
+			groups[reason] = append(groups[reason], finding.RecordKey().String())
+		}
+	}
+	out := TriageExplanation{RepoCommittable: repo, LocalOnly: local}
+	switch {
+	case len(all) == 0:
+		out.Note = "no findings recorded at " + docPath + " - run measures the tree first"
+	case filter.Label != "" && repo+local == 0:
+		out.Note = fmt.Sprintf("label %q matched none of %d recorded finding(s); drop it to triage the document", filter.Label, len(all))
+	}
+	reasons := make([]string, 0, len(groups))
+	for reason := range groups {
+		reasons = append(reasons, reason)
+	}
+	sort.Slice(reasons, func(i, j int) bool {
+		if len(groups[reasons[i]]) != len(groups[reasons[j]]) {
+			return len(groups[reasons[i]]) > len(groups[reasons[j]])
+		}
+		return reasons[i] < reasons[j]
+	})
+	for _, reason := range reasons {
+		syms := groups[reason]
+		sort.Strings(syms)
+		out.Promotion = append(out.Promotion, PromotionGroup{
+			Reason:  reason,
+			Count:   len(syms),
+			Symbols: syms,
+		})
+	}
+	return out, nil
+}

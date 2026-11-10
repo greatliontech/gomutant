@@ -264,12 +264,16 @@ func cleanLinkedImportPath(line string) string {
 	return line
 }
 
-// warmLinkedTestPackagesContext resolves the linked dependency sets of
+// WarmLinkedTestPackagesContext resolves the linked dependency sets of
 // multiple test packages in a single `go list -test` invocation when
 // more than one package is uncached. If the batch fails with an
 // ExitError (for example, when one package's closure does not build),
 // it leaves the cache untouched so the caller's per-package
 // LinkedTestPackagesContext loop isolates the broken closure.
+func (t *Tree) WarmLinkedTestPackagesContext(ctx context.Context, testPkgs []string) error {
+	return t.warmLinkedTestPackagesContext(ctx, testPkgs)
+}
+
 func (t *Tree) warmLinkedTestPackagesContext(ctx context.Context, testPkgs []string) error {
 	t.linkedMu.Lock()
 	var missing []string

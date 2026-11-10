@@ -6,10 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	iofs "io/fs"
 	"os"
 	"runtime"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -19,7 +17,6 @@ import (
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
 	"github.com/greatliontech/gomutant/internal/trace"
-	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
 var findingObservationSequence atomic.Uint64
@@ -869,6 +866,112 @@ func (t *Tree) Run(ctx context.Context, targets []Target, caller Options) ([]Fin
 	return findings, err
 }
 
+type resolvedTarget struct {
+	index  int
+	oracle []string
+	// oracleNote is the derivation's self-description for the
+	// measure decision: breadth, and any stood-down packages
+	// (REQ-target-default's stand-down naming).
+	oracleNote string
+	// attested carries this target's package-process pairing: its
+	// oracle packages all equal its own, so the processes that
+	// attribute its subjects' verdicts are its own package's test
+	// binaries (gofresh WithPackageProcessExecution's honesty
+	// condition, held per target — a cross-package sibling never
+	// drops it for the rest of the run).
+	attested bool
+	// shaped carries a shaped target's pre-resolved candidates;
+	// nil for symbol targets (REQ-target-structural,
+	// REQ-target-manual-recipes).
+	shaped       []engine.Candidate
+	shapedDigest string
+	// shapedFiles are the shape's provenance inputs, derived once
+	// beside the candidates and threaded to every stamp of this
+	// target's findings (REQ-result-layers).
+	shapedFiles []string
+}
+
+type modeViews struct {
+	engines    *subjectEngines
+	symbols    []string
+	views      *subjectViewSet
+	viewFaults map[string]error
+}
+
+type groupBaseline struct {
+	raw           time.Duration
+	budget        time.Duration
+	passed        []string
+	testDurations map[string]time.Duration
+	coverage      *engine.Coverage
+	coverPkgs     []string
+}
+
+type executedWindow struct {
+	window       []work
+	observations [][]gofresh.Observation
+	incompletes  [][]string
+	// scores carries each target's verdict-bearing measurement —
+	// outcomes, killers, and the serial-confirmation flips — as one
+	// value, so no assembly path can receive the verdicts without
+	// the flips (REQ-exec-survivor-evidence).
+	scores []windowScores
+	// discard is non-nil exactly when Options.SoftStop drained the
+	// window: the fresh works were truncated to their dispatched
+	// candidate prefixes and restamped as candidate-capped, each
+	// true entry marks a work with nothing committable, and the run
+	// ends after this window aggregates (REQ-exec-cancellation's
+	// graceful-interrupt clause).
+	discard []bool
+}
+
+type campaignRunner struct {
+	t                    *Tree
+	targets              []Target
+	opts                 runOptions
+	deriveOracleBudgets  bool
+	runStart             time.Time
+	repository           repositoryState
+	residue              func() string
+	driftedMu            sync.Mutex
+	drifted              []TargetDrift
+	preparation          *runPreparation
+	jobs                 int
+	runEnv               []string
+	oracleMemoryPin      int64
+	selKey               string
+	prior                map[string]*Finding
+	crossSelectionPrior  []Finding
+	findings             []Finding
+	resolvedTargets      []resolvedTarget
+	baselineCache        map[baselineKey]gofresh.Observation
+	scopedBaselines      map[scopedBaselineKey][]string
+	coverageCache        map[string]engine.Coverage
+	bankScope            string
+	guidanceCache        map[string]oracleAttribution
+	decisions            []RunDecision
+	modes                map[bool]*modeViews
+	probeGate            sync.RWMutex
+	unitOf               []*proofUnit
+	proofUnits           map[string]*proofUnit
+	unitMu               sync.Mutex
+	unitDone             []bool
+	oraclePackages       []string
+	coverPkgsByOraclePkg map[string][]string
+	preflightBracket     func() error
+	preparedTargets      atomic.Int64
+	preparedCandidates   atomic.Int64
+	baselineFailures     map[baselineKey]string
+	groupBudgetMu        sync.Mutex
+	groupBaselines       map[baselineKey]groupBaseline
+	pendingBankDeposits  map[baselineKey]pendingBankDeposit
+	interner             *manifestInterner
+	committed            []bool
+	dispatchedTargets    int
+	mutantsDone          atomic.Int64
+	tickMu               sync.Mutex
+}
+
 func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options) ([]Finding, error) {
 	// The run's view of its options: the caller's surface beside the
 	// services this function installs — the one constructor of
@@ -929,22 +1032,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 	residue := sync.OnceValue(func() string {
 		return measurementResidue(ctx, repository, runStart, append(append([]string(nil), opts.OwnWrites...), StoreOwnPaths(t.dir)...))
 	})
-	// driftedMu guards drifted: the preparation goroutine's cached-serve
-	// refusal and the aggregation loop's refusals append concurrently
-	// (the pipeline runs preparation ahead of execution).
-	var driftedMu sync.Mutex
-	var drifted []TargetDrift
-	// targetDone records a target's terminal disposition for its proof
-	// unit — committed, cached, skipped, refused or discarded — once per
-	// target; the unit releases at its last. Assigned once the units
-	// exist; a terminal reached before then belongs to no unit.
-	targetDone := func(int) {}
-	refuseTarget := func(i int, reason string) {
-		driftedMu.Lock()
-		drifted = append(drifted, TargetDrift{Symbol: targets[i].Symbol, Reason: reason})
-		driftedMu.Unlock()
-		targetDone(i)
-	}
 
 	preparation := newRunPreparation(t)
 	jobs := opts.Jobs
@@ -984,25 +1071,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 			prior[f.Symbol] = f
 		}
 	}
-	annotateCrossSelection := func(f Finding) Finding {
-		if len(crossSelectionPrior) == 0 || f.Skipped != "" {
-			return f
-		}
-		bundle := make([]Finding, 0, 1+len(crossSelectionPrior))
-		bundle = append(bundle, f)
-		for _, other := range crossSelectionPrior {
-			if other.Symbol == f.Symbol {
-				bundle = append(bundle, other)
-			}
-		}
-		if len(bundle) < 2 {
-			return f
-		}
-		return AnnotateSelectionVerdicts(bundle)[0]
-	}
-
-	// Phase one, sequential: resolve every target to a terminal finding
-	// (skipped, cached) or to a mutant work list.
 	// Findings are keyed by symbol (REQ-result-record): two targets naming
 	// one symbol would collide in the document, so the set is refused up
 	// front rather than one silently shadowing the other.
@@ -1013,46 +1081,6 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		}
 		seen[tg.Symbol] = true
 	}
-
-	findings := make([]Finding, len(targets))
-	type resolvedTarget struct {
-		index  int
-		oracle []string
-		// oracleNote is the derivation's self-description for the
-		// measure decision: breadth, and any stood-down packages
-		// (REQ-target-default's stand-down naming).
-		oracleNote string
-		// attested carries this target's package-process pairing: its
-		// oracle packages all equal its own, so the processes that
-		// attribute its subjects' verdicts are its own package's test
-		// binaries (gofresh WithPackageProcessExecution's honesty
-		// condition, held per target — a cross-package sibling never
-		// drops it for the rest of the run).
-		attested bool
-		// shaped carries a shaped target's pre-resolved candidates;
-		// nil for symbol targets (REQ-target-structural,
-		// REQ-target-manual-recipes).
-		shaped       []engine.Candidate
-		shapedDigest string
-		// shapedFiles are the shape's provenance inputs, derived once
-		// beside the candidates and threaded to every stamp of this
-		// target's findings (REQ-result-layers).
-		shapedFiles []string
-	}
-	var resolvedTargets []resolvedTarget
-	// keyFor is the one group→key projection: every map keyed by
-	// baselineKey must agree on it exactly.
-	keyFor := baselineKeyFor
-	baselineCache := map[baselineKey]gofresh.Observation{}
-	// scopedBaselines memoizes killer-scoped baseline probes for the
-	// serial confirmation's differential ground — Run-local like
-	// baselineCache, which is what makes the key complete (bounds,
-	// brackets, namespaces, and the injected env are per-Run pins)
-	// and the lock-free access true (this Run's probe gate serializes
-	// every confirmation; a Tree-scoped map would race across the
-	// MCP server's concurrent campaigns over one cached Tree).
-	scopedBaselines := map[scopedBaselineKey][]string{}
-	coverageCache := map[string]engine.Coverage{}
 	// The bank is WRITTEN by findings-producing runs only (OwnWrites is
 	// their marker, and the campaign lock they hold serializes the
 	// file); library embeddings and probes deposit nothing — the
@@ -1065,2501 +1093,143 @@ func (t *Tree) runCounted(ctx context.Context, targets []Target, caller Options)
 		opts.baselineBank = openBaselineBank(t.dir)
 		defer opts.baselineBank.save()
 	}
-	// bankScope folds the observation-shaping per-run axes into the
-	// persisted bank key: bracket paths and scratch namespaces change
-	// what a probe records, so entries never serve across differing
-	// declarations. The remaining per-run axes are deliberately
-	// unpinned — budget bounds never shape the observation (and a
-	// stale duration is evidence-gated), and the environment is
-	// re-verified at serve time by the evidence memo and adoption.
-	bankScope := bankScopeString(opts.BracketPaths, opts.ScratchNamespaces)
-	guidanceCache := map[string]oracleAttribution{}
-	decisions := make([]RunDecision, len(targets))
-	// skipTarget is the one no-measurement exit: the finding's mark and
-	// the decision row (vocabulary "skipped" — the decision stream's
-	// only no-measurement action, REQ-exec-run-status). emit=true for
-	// exits past deliverPrepared's ordered walk, which must stream their
-	// own row; resolve-phase exits leave emission to the walk. The
-	// hand-picked per-site subsets this replaces bred out-of-order and
-	// missing-row defects; every new exit goes through here.
-	skipTarget := func(i int, reason string, emit bool) {
-		findings[i].Skipped = reason
-		decisions[i] = RunDecision{Symbol: targets[i].Symbol, Action: "skipped", Reason: reason}
-		trace.Emit(ctx, trace.DomainReconcile, "target_decision", targets[i].Symbol,
-			trace.String("action", "skipped"),
-			trace.String("reason", reason),
-		)
-		if emit && opts.Decision != nil {
-			opts.Decision(decisions[i])
-		}
-		targetDone(i)
+
+	r := &campaignRunner{
+		t:                    t,
+		targets:              targets,
+		opts:                 opts,
+		deriveOracleBudgets:  deriveOracleBudgets,
+		runStart:             runStart,
+		repository:           repository,
+		residue:              residue,
+		preparation:          preparation,
+		jobs:                 jobs,
+		runEnv:               runEnv,
+		oracleMemoryPin:      oracleMemoryPin,
+		selKey:               selKey,
+		prior:                prior,
+		crossSelectionPrior:  crossSelectionPrior,
+		findings:             make([]Finding, len(targets)),
+		baselineCache:        map[baselineKey]gofresh.Observation{},
+		scopedBaselines:      map[scopedBaselineKey][]string{},
+		coverageCache:        map[string]engine.Coverage{},
+		bankScope:            bankScopeString(opts.BracketPaths, opts.ScratchNamespaces),
+		guidanceCache:        map[string]oracleAttribution{},
+		decisions:            make([]RunDecision, len(targets)),
+		modes:                map[bool]*modeViews{},
+		proofUnits:           map[string]*proofUnit{},
+		coverPkgsByOraclePkg: map[string][]string{},
+		baselineFailures:     map[baselineKey]string{},
+		groupBaselines:       map[baselineKey]groupBaseline{},
+		pendingBankDeposits:  map[baselineKey]pendingBankDeposit{},
+		interner:             &manifestInterner{byDigest: map[string]string{}},
+		committed:            make([]bool, len(targets)),
 	}
-	// refuseSkipped is a preparation-phase drift refusal: the refused
-	// registry entry (the run fails operationally with the refused set,
-	// REQ-exec-quiescence) plus the same skipped decision every
-	// no-measurement target reports, both carrying the run's residue
-	// provenance — the decision line names it per REQ-exec-quiescence.
-	// Execution-phase refusals call refuseTarget alone: their measure
-	// decision already streamed, and a second row per target would break
-	// the once-per-target decision discipline.
-	refuseSkipped := func(i int, reason string, emit bool) {
-		full := reason + residue()
-		refuseTarget(i, full)
-		skipTarget(i, full, emit)
-	}
-	// cacheTarget records a wholesale cached serve's decision, always
-	// emitted inline: every serve runs past deliverPrepared's walk. (A
-	// cached serve that re-executes flagged candidates flows through
-	// the shared measure-decision path instead, carrying its count.)
-	cacheTarget := func(i int, reason string) {
-		decisions[i] = RunDecision{Symbol: targets[i].Symbol, Action: "cached", Reason: reason}
-		trace.Emit(ctx, trace.DomainReconcile, "target_decision", targets[i].Symbol,
-			trace.String("action", "cached"),
-			trace.String("reason", reason),
-		)
-		if opts.Decision != nil {
-			opts.Decision(decisions[i])
-		}
-		targetDone(i)
-	}
-	for i, tg := range targets {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationResolving, Symbol: tg.Symbol})
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		f := &findings[i]
-		*f = Finding{Symbol: tg.Symbol, Selection: selKey, Labels: tg.Labels, OperatorSet: engine.OperatorSet, OracleExplicit: tg.explicitOracle(), OracleTimeout: opts.OracleTimeout.String(), OracleMemoryBytes: oracleMemoryPin}
-		if deriveOracleBudgets {
-			// The derived record's bound starts at the floor and raises
-			// to the loosest budget any verdict runs under
-			// (mergeScoredFacts); the leash is a measurement ceiling,
-			// never a recorded bound.
-			f.OracleTimeout = seams.ephemeralBudgetFloor.String()
-			f.OracleTimeoutDerived = true
-		}
-		if tg.Shaped() {
-			// Validation precedes oracle derivation: a shaped identity
-			// resolves to no package, so deriving an oracle from it
-			// would be a run fault where the contract wants a
-			// target-local refusal (an explicit oracle is required).
-			if err := validateShapedTarget(tg); err != nil {
-				skipTarget(i, "shaped target refused: "+err.Error(), false)
-				continue
-			}
-		}
-		oracle, oracleStoodDown, oracleDerived, err := preparation.oracle(ctx, tg)
-		if err != nil {
-			return nil, err
-		}
-		// The derivation names its own caps and breadth: the measure
-		// decision carries how wide the derived oracle is and which
-		// test-bearing packages the derivation could not consult — a
-		// silently narrowed oracle is the defect class this derivation
-		// exists to close (REQ-target-default's stand-down naming).
-		oracleNote := ""
-		if len(tg.Oracle) == 0 && !tg.OracleExplicit {
-			if len(oracle) > 0 {
-				oracleNote = fmt.Sprintf("; oracle: %s across %s", testNoun(len(oracle)), packageNoun(len(pkgRuns(oracle))))
-			}
-			if len(oracleStoodDown) > 0 {
-				oracleNote += "; derivation stood down on: " + strings.Join(oracleStoodDown, ", ")
-			}
-		}
-		if len(oracle) == 0 {
-			// Nothing can kill: the caller sees it and decides
-			// (REQ-target-default). An oracle that exists but could not
-			// be consulted is NOT "no oracle" — the stood-down packages
-			// and the escape ride the skip, the naming duty's worst
-			// case (a dark symbol filed as unwitnessed when a consumer
-			// suite merely failed to resolve).
-			reason := "no oracle"
-			if len(oracleStoodDown) > 0 {
-				reason += " — derivation stood down on: " + strings.Join(oracleStoodDown, ", ") + "; resolve the closure, or pass an explicit oracle"
-			}
-			skipTarget(i, reason, false)
-			// A derivation that ran over the target's resolved package
-			// and found no test with nothing stood down is the
-			// selection's coverage bound: no test of the declared leg
-			// reaches the target. An explicit empty statement and an
-			// unresolved symbol never are (REQ-result-unreached-bound).
-			findings[i].Unreached = oracleDerived && len(oracleStoodDown) == 0
-			continue
-		}
-		if err := preparation.validateOracle(ctx, oracle); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			// Target-local: one target's broken oracle set never takes
-			// sibling targets down (REQ-exec-quiescence's locality,
-			// which governs resolution and decision evidence exactly as
-			// it governs freshness-proof construction).
-			skipTarget(i, "oracle validation failed: "+err.Error(), false)
-			continue
-		}
-		if tg.Shaped() {
-			// A shaped target resolves from its declared parameters:
-			// no body, no catalog, its own pin (REQ-target-structural,
-			// REQ-target-manual-recipes). Refusals are target-local
-			// skips exactly as resolution failures are.
-			candidates, digest, shapedFiles, err := t.shapedCandidates(ctx, tg)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				// A drift-shaped cause (a recipe or probe file moved or
-				// vanished since load) refuses into the operational-
-				// failure set exactly as the phase-one paths do — the
-				// amended contract holds universally, shaped targets
-				// included (REQ-exec-quiescence).
-				var sourceDrift *engine.SourceDriftError
-				if errors.As(err, &sourceDrift) || errors.Is(err, iofs.ErrNotExist) {
-					refuseSkipped(i, "shaped source drifted since load: "+err.Error()+" - re-run when the tree settles", false)
-					continue
-				}
-				skipTarget(i, "shaped resolution failed: "+err.Error(), false)
-				continue
-			}
-			f.BodyHash = digest
-			f.OperatorSet = shapedOperatorSet
-			f.Shape = &TargetShape{Structural: tg.Structural, Manual: tg.Manual}
-			resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, oracleNote: oracleNote, shaped: candidates, shapedDigest: digest, shapedFiles: shapedFiles, attested: packageProcessAttestable(t.PackageOf, tg.Symbol, oracle)})
-			continue
-		}
-		bodyHash, err := t.eng.BodyHashContext(ctx, tg.Symbol)
-		if errors.Is(err, engine.ErrNotFunction) {
-			// A type or variable target is a legitimate reference with no
-			// body to mutate: reported, never fatal, never silently dropped.
-			skipTarget(i, "not a function - for mutation adequacy, target its methods or the bound function-level subjects", false)
-			continue
-		}
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			// A resolution failure caused by a loaded file VANISHING is
-			// drift exactly like a modified one (a checkout mid-run) —
-			// refused into the operational-failure set, never a quiet
-			// skip a pipeline reads as success. Every other typed-load
-			// breakage stays this target's own skip with the cause
-			// (REQ-exec-quiescence).
-			if errors.Is(err, iofs.ErrNotExist) {
-				refuseSkipped(i, "source vanished since load: "+err.Error()+" - re-run when the tree settles", false)
-				continue
-			}
-			skipTarget(i, "target resolution failed: "+err.Error(), false)
-			continue
-		}
-		f.BodyHash = bodyHash
-		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationFreshness, Symbol: tg.Symbol})
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		resolvedTargets = append(resolvedTargets, resolvedTarget{index: i, oracle: oracle, oracleNote: oracleNote, attested: packageProcessAttestable(t.PackageOf, tg.Symbol, oracle)})
-	}
-	// Per-mode view bundles: each target's attestation is its own (the
-	// pairing above), so a mixed run builds one engine and view set per
-	// mode present rather than dropping the attestation run-wide — the
-	// coupling that made an unrelated cross-package target re-measure a
-	// same-package sibling's verifiable records.
-	type modeViews struct {
-		engines    *subjectEngines
-		symbols    []string
-		views      *subjectViewSet
-		viewFaults map[string]error
-	}
-	modes := map[bool]*modeViews{}
-	// eachMode walks the modes present in a fixed order (cross-package
-	// first): with at most two entries the order carries no semantics,
-	// but a map range would make which mode's error text surfaces
-	// nondeterministic when both fail.
-	eachMode := func(fn func(mv *modeViews) error) error {
-		for _, attested := range []bool{false, true} {
-			if mv, ok := modes[attested]; ok {
-				if err := fn(mv); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	modeFor := func(attested bool) *modeViews {
-		mv, ok := modes[attested]
-		if !ok {
-			mv = &modeViews{
-				engines:    t.newSubjectEngines(opts.AnalysisEvent, attested, opts.bounds, opts.AnalysisBudget),
-				views:      &subjectViewSet{bySymbol: map[string]*subjectView{}, bounds: opts.bounds, packageProcess: attested},
-				viewFaults: map[string]error{},
-			}
-			modes[attested] = mv
-		}
-		return mv
-	}
-	for _, resolved := range resolvedTargets {
-		mv := modeFor(resolved.attested)
-		if resolved.shaped == nil {
-			mv.symbols = append(mv.symbols, targets[resolved.index].Symbol)
-		}
-		mv.symbols = append(mv.symbols, resolved.oracle...)
-	}
-	if err := eachMode(func(mv *modeViews) error {
-		if len(mv.symbols) == 0 {
-			return nil
-		}
-		reportPreparation(opts.Progress, pricedPass(PreparationViews, mv.symbols, t.PackageOf))
-		var err error
-		mv.views, mv.viewFaults, err = t.buildSubjectViews(ctx, mv.symbols, preparation.packageContext, mv.engines)
-		if err != nil {
-			return fmt.Errorf("freshness: %w", err)
-		}
-		return nil
-	}); err != nil {
+	if err := r.resolveTargetsAndViews(ctx); err != nil {
 		return nil, err
 	}
-	// Decision-evidence faults route target-locally exactly as the
-	// observed union's do (REQ-exec-quiescence): a target whose own
-	// symbol or any of whose oracle symbols has no decision view skips
-	// with the cause, and its siblings proceed.
-	{
-		kept := resolvedTargets[:0]
-		for _, rt := range resolvedTargets {
-			mv := modeFor(rt.attested)
-			var cause error
-			needed := rt.oracle
-			if rt.shaped == nil {
-				needed = append([]string{targets[rt.index].Symbol}, rt.oracle...)
-			}
-			for _, symbol := range needed {
-				if fault, ok := mv.viewFaults[symbol]; ok {
-					cause = fault
-					break
-				}
-				if mv.views.bySymbol[symbol] == nil {
-					cause = fmt.Errorf("no decision view for %s", symbol)
-					break
-				}
-			}
-			if cause == nil {
-				kept = append(kept, rt)
-				continue
-			}
-			skipTarget(rt.index, "decision evidence unavailable: "+cause.Error(), false)
-		}
-		resolvedTargets = kept
+	r.setupGroupBudgetServices()
+	if r.opts.PlanOnly {
+		return r.runPlanOnly(ctx)
 	}
-	// probeGate serializes producer-side oracle probes against serial kill
-	// confirmations: a confirmation's scored run shares no process with any
-	// preparation probe, so a probe's test-level side effects (an exclusive
-	// port, a file lock) can never manufacture a false reproduction or a
-	// false flip. Probes hold it shared among themselves; each confirmation
-	// holds it exclusively (REQ-exec-attribution).
-	var probeGate sync.RWMutex
-	opts.probeGate = &probeGate
-	if seams.probeGateInstalled != nil {
-		seams.probeGateInstalled(&probeGate)
-	}
-	// The proof units — the targets of one mode sharing an oracle
-	// package set — are the unit loop's vertical for the derived
-	// oracle: a unit's union proves its targets' own symbols and their
-	// oracles together, as siblings of the mode's decision views (one
-	// observation per module group serves the decision and the proof
-	// roles; per-subject evidence is identical by gofresh's
-	// batch-equivalence contract; the per-target build survives only as
-	// the bounded retry, REQ-exec-quiescence), when its first target
-	// reaches the proof, and releases its union and faults when its
-	// last target reaches a terminal disposition. A fully-cached warm
-	// run — every target served — pays no pass at all. Preparation is
-	// serial, so no two units prove at once, and it runs ahead of
-	// execution without bound (the window gatherer blocks for its
-	// budget: the execution window is a pure function of the tree, the
-	// target order and the worker count, REQ-exec-oracle-run), so a
-	// window's commits wait for the next window's preparation — a later
-	// unit's pass included — and the proofs of every prepared, not yet
-	// committed unit are held until their units release
-	// (REQ-exec-analysis-budget). The pass runs its observed captures
-	// (test processes) under the probe gate held shared, exactly like
-	// the per-target retry builds: a later target prepares while
-	// earlier targets' windows execute, so a serial confirmation can be
-	// in flight — the gate, not any ordering premise, is what keeps the
-	// pass's processes out of a confirmation's isolation window. Built
-	// over the targets a decision fault left standing: a skipped target
-	// belongs to no unit.
-	unitOf := make([]*proofUnit, len(targets))
-	proofUnits := map[string]*proofUnit{}
-	for _, resolved := range resolvedTargets {
-		var pkgs []string
-		for _, run := range pkgRuns(resolved.oracle) {
-			pkgs = append(pkgs, run.pkg)
-		}
-		key := fmt.Sprintf("%t\x00%s", resolved.attested, strings.Join(pkgs, "\x00"))
-		u, ok := proofUnits[key]
-		if !ok {
-			mv := modes[resolved.attested]
-			u = &proofUnit{key: key, packages: pkgs, decision: mv.views, engines: mv.engines}
-			proofUnits[key] = u
-		}
-		if resolved.shaped == nil {
-			u.symbols = append(u.symbols, targets[resolved.index].Symbol)
-		}
-		u.symbols = append(u.symbols, resolved.oracle...)
-		u.remaining++
-		unitOf[resolved.index] = u
-	}
-	for _, u := range proofUnits {
-		sort.Strings(u.symbols)
-		u.symbols = slices.Compact(u.symbols)
-	}
-	var unitMu sync.Mutex
-	unitDone := make([]bool, len(targets))
-	targetDone = func(i int) {
-		unitMu.Lock()
-		defer unitMu.Unlock()
-		if unitDone[i] {
-			return
-		}
-		unitDone[i] = true
-		if u := unitOf[i]; u != nil {
-			u.remaining--
-			if u.remaining == 0 {
-				u.release()
-			}
-		}
-	}
-	buildProofUnit := func(u *proofUnit) error {
-		if u.built {
-			return nil
-		}
-		u.built = true
-		if opts.proofAttempt != nil {
-			opts.proofAttempt(strings.Join(u.packages, ","), 1)
-		}
-		// The unit's pass is priced before it is paid: its subjects and
-		// the packages they span (REQ-exec-run-status).
-		reportPreparation(opts.Progress, pricedPass(PreparationProofs, u.symbols, t.PackageOf))
-		probeGate.RLock()
-		defer probeGate.RUnlock()
-		// Every symbol a standing target needs has a decision view (a
-		// decision fault skipped its targets before this point), so the
-		// unit's faults are its proof captures' alone.
-		union, faults, err := u.decision.observedFor(ctx, u.symbols)
-		if err != nil {
-			return fmt.Errorf("freshness proofs (unit over %d subjects): %w", len(u.symbols), err)
-		}
-		u.union, u.faults = union, faults
-		return nil
-	}
-	var oraclePackages []string
-	seenOraclePackage := map[string]bool{}
-	coverPkgsByOraclePkg := map[string][]string{}
-	for _, resolved := range resolvedTargets {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		var targetPkg string
-		if resolved.shaped == nil {
-			mv := modeFor(resolved.attested)
-			if tv := mv.views.bySymbol[targets[resolved.index].Symbol]; tv != nil {
-				targetPkg = tv.subject.Package
-			}
-		}
-		for _, run := range pkgRuns(resolved.oracle) {
-			if !seenOraclePackage[run.pkg] {
-				seenOraclePackage[run.pkg] = true
-				oraclePackages = append(oraclePackages, run.pkg)
-			}
-			if targetPkg != "" && !slices.Contains(coverPkgsByOraclePkg[run.pkg], targetPkg) {
-				coverPkgsByOraclePkg[run.pkg] = append(coverPkgsByOraclePkg[run.pkg], targetPkg)
-			}
-		}
-	}
-	for pkg := range coverPkgsByOraclePkg {
-		slices.Sort(coverPkgsByOraclePkg[pkg])
-	}
-	// Bracket-path preflight is once per run at the tree root — the base
-	// every spawn's frame resolves against — fired at the first target's
-	// measure decision before its observed union (REQ-exec-preparation's
-	// loaded-set stage): a run serving every target never captures the
-	// preflight bracket (the faces proved the paths exist before the
-	// load), a plan reaches it, and nothing costly precedes it.
-	preflightBracket := sync.OnceValue(func() error {
-		return preflightBracketPaths(ctx, t.dir, opts.BracketPaths)
-	})
-	preflightOracleModules := func(oracle []string) error {
-		if len(opts.BracketPaths) == 0 {
-			return nil
-		}
-		return preflightBracket()
-	}
-	// producerViewsFor builds a target's observed producer views: its
-	// proof unit's union narrowed to the target or, on a fault the
-	// campaign has not cancelled, one bounded per-target rebuild — the field
-	// failure mode is transient pressure faulting one symbol or module
-	// group out of the shared union, gone by the time anyone reads the
-	// fault, so a transient union fault costs one extra pass for one
-	// target, never a skip (REQ-exec-quiescence); the second attempt is
-	// reported to the proof hook. A union that cannot build at all is
-	// the campaign's failure (err); a per-target fault is the caller's
-	// to route (fault).
-	producerViewsFor := func(u *proofUnit, target string, oracle []string, rebuild []string) (views *subjectViewSet, fault, err error) {
-		if err := buildProofUnit(u); err != nil {
-			return nil, nil, err
-		}
-		views, fault = u.union.forTarget(target, oracle, u.faults)
-		if fault != nil && ctx.Err() == nil {
-			if opts.proofAttempt != nil {
-				opts.proofAttempt(target, 2)
-			}
-			probeGate.RLock()
-			var rebuilt *observedViewSet
-			rebuilt, fault = t.newStrictObservedViews(ctx, rebuild, preparation.packageContext, u.engines)
-			if fault == nil {
-				views = rebuilt.subjectViewSet
-			}
-			probeGate.RUnlock()
-		}
-		return views, fault, nil
-	}
-	// preparedTargets and preparedCandidates are the pipelined campaign's
-	// running tallies: written by the preparation goroutine as each measure
-	// target readies, read by the advisory execution events, which grow to
-	// the campaign-wide totals as preparation completes
-	// (REQ-exec-run-status's advisory classes).
-	var preparedTargets, preparedCandidates atomic.Int64
-	// prepareTarget runs one target's whole preparation — reuse gates,
-	// candidate generation, decision, oracle groups, and baseline probes —
-	// and returns its work item, or nil when the target completed without
-	// execution (skipped, cached, plan-only). Its decision is delivered
-	// after the target's own preparation events, streaming in target order
-	// (REQ-exec-run-status); the caller drives it serially, either inline
-	// (plan-only) or from the preparation goroutine pipelined with the
-	// execution windows.
-	// baselineFailures memoizes a package group's failing baseline for
-	// the campaign: siblings sharing the flaky package skip on the
-	// recorded reason without re-probing. Serial-only (the preparation
-	// alone touches it), so it rides under no lock.
-	baselineFailures := map[baselineKey]string{}
-	// groupBudgetMu guards the two group maps the preparation and the
-	// pipelined workers share: groupBaselines (written by the serial
-	// preparation as each group first probes, read by the workers —
-	// REQ-exec-oracle-run's derived campaign budget) and
-	// pendingBankDeposits (written by the preparation, read and deleted
-	// on the commit path, which runs concurrently with it).
-	var groupBudgetMu sync.Mutex
-	// groupBaselines keys each group's ONE baseline measurement: the
-	// raw passing wall-clock (the window cost model's whole-group
-	// price, recorded in every budget mode — an explicit timeout
-	// changes the budget, not what the baseline measured) and the
-	// budget derived from it (derive mode only). One entry per probe
-	// makes "a group with a budget has a raw duration" structural.
-	type groupBaseline struct {
-		raw           time.Duration
-		budget        time.Duration
-		passed        []string
-		testDurations map[string]time.Duration
-		coverage      *engine.Coverage
-		coverPkgs     []string
-	}
-	groupBaselines := map[baselineKey]groupBaseline{}
-	// pendingBankDeposits holds really-probed baselines until their
-	// finding's evidence rows complete the deposit (guarded by
-	// groupBudgetMu; the scope is stated there).
-	pendingBankDeposits := map[baselineKey]pendingBankDeposit{}
-	budgetFor := func(g group) time.Duration {
-		if !deriveOracleBudgets {
-			return opts.OracleTimeout
-		}
-		groupBudgetMu.Lock()
-		defer groupBudgetMu.Unlock()
-		if b, ok := groupBaselines[keyFor(g)]; ok && b.budget > 0 {
-			return b.budget
-		}
-		// A group never baselined under this run (a narrowed
-		// confirmation scope, a probe): the leash — a generous bound
-		// that fabricates nothing.
-		return opts.OracleTimeout
-	}
-	opts.groupBudget = budgetFor
-	// The leash a group's advisory probes run under: the campaign leash
-	// lifted by the group's own baseline (measured or served from the
-	// bank) in derive mode — the same lift the baseline itself gets on
-	// the miss path — and the caller's explicit timeout otherwise.
-	opts.groupLeash = func(g group) time.Duration {
-		if !deriveOracleBudgets {
-			return opts.OracleTimeout
-		}
-		groupBudgetMu.Lock()
-		defer groupBudgetMu.Unlock()
-		b, ok := groupBaselines[keyFor(g)]
-		if !ok {
-			return opts.OracleTimeout
-		}
-		return leashFor(opts.OracleTimeout, b.raw)
-	}
-	opts.baselineDur = func(g group) (time.Duration, bool) {
-		if seams.baselinePrice != nil {
-			if d, ok := seams.baselinePrice(g.pkgs); ok {
-				return d, true
-			}
-		}
-		groupBudgetMu.Lock()
-		defer groupBudgetMu.Unlock()
-		b, ok := groupBaselines[keyFor(g)]
-		return b.raw, ok
-	}
-	opts.foldedCoverage = func(g group, coverPkg string) (engine.Coverage, bool) {
-		groupBudgetMu.Lock()
-		defer groupBudgetMu.Unlock()
-		b, ok := groupBaselines[keyFor(g)]
-		if !ok || b.coverage == nil || !slices.Contains(b.coverPkgs, coverPkg) {
-			return engine.Coverage{}, false
-		}
-		return *b.coverage, true
-	}
-	// probeGroupBaselines fills w.baselines for the target's oracle
-	// groups. A non-cancellation baseline condition - a probe failure,
-	// an empty match, a failing test - is the target's own condition:
-	// returned as a skip reason with the cause named (a flaky test
-	// reads as itself, with the failing tests listed, never as a
-	// campaign failure), and memoized per package group. A
-	// campaign-wide abort remains reserved for cancellation of the run
-	// itself (REQ-exec-quiescence's baseline locality).
-	probeGroupBaselines := func(ctx context.Context, tg Target, w *work) (string, error) {
-		w.baselines = make([]gofresh.Observation, 0, len(w.groups))
-		for gi := range w.groups {
-			group := w.groups[gi]
-			key := keyFor(group)
-			if reason, failed := baselineFailures[key]; failed {
-				return reason, nil
-			}
-			state, ok := baselineCache[key]
-			var banked bankedBaseline
-			var hit bool
-			if !ok {
-				// The bank consult (REQ-result-baseline-bank): a banked
-				// group whose pins re-verify serves its measurement —
-				// the observation re-enters through adoption, which
-				// re-evaluates every recorded identity against disk and
-				// refuses on drift; any failure falls through to the
-				// probe.
-				banked, hit = opts.baselineBank.baseline(key.persistedKey(bankScope))
-				if !opts.Force && hit {
-					views := groupOracleViews(*w, group)
-					// A pin-check ERROR falls through to the probe
-					// exactly like a pin mismatch — the bank never
-					// aborts a campaign (REQ-result-baseline-bank);
-					// only the run's own cancellation propagates.
-					held, herr := bankPinsHold(ctx, banked.Evidence, views)
-					if herr != nil && ctx.Err() != nil {
-						return "", ctx.Err()
-					}
-					if herr == nil && held && len(banked.PassedTests) > 0 {
-						adopted, aerr := gofresh.AdoptObservation(banked.Manifest, t.dir, fmt.Sprintf("gomutant-banked-baseline-%d", findingObservationSequence.Add(1)), runEnv)
-						if aerr == nil && adopted.Digest == banked.Digest {
-							reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0], Banked: true})
-							raw := time.Duration(banked.RawMillis) * time.Millisecond
-							testDurs := millisToDurations(banked.TestDurationMillis)
-							if deriveOracleBudgets {
-								budget := derivedOracleBudget(raw)
-								groupBudgetMu.Lock()
-								groupBaselines[key] = groupBaseline{raw: raw, budget: budget, passed: banked.PassedTests, testDurations: testDurs}
-								groupBudgetMu.Unlock()
-								reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: budget.String()})
-							} else {
-								groupBudgetMu.Lock()
-								groupBaselines[key] = groupBaseline{raw: raw, passed: banked.PassedTests, testDurations: testDurs}
-								groupBudgetMu.Unlock()
-							}
-							state, ok = adopted, true
-							baselineCache[key] = state
-						}
-					}
-				}
-			}
-			if !ok {
-				reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationBaseline, Symbol: tg.Symbol, Package: group.pkgs[0]})
-				if err := ctx.Err(); err != nil {
-					return "", err
-				}
-				// The measurement leash, lifted by the group's banked
-				// duration when the bank holds one whose pins no longer
-				// serve (the entry still says how long this oracle takes).
-				baselineBound := opts.OracleTimeout
-				if deriveOracleBudgets {
-					baselineBound = leashFor(opts.OracleTimeout, time.Duration(banked.RawMillis)*time.Millisecond)
-				}
-				coverPkgs := coverPkgsByOraclePkg[group.pkgs[0]]
-				if !w.shaped && w.targetView != nil && w.targetView.subject.Package != "" && !slices.Contains(coverPkgs, w.targetView.subject.Package) {
-					coverPkgs = append(slices.Clone(coverPkgs), w.targetView.subject.Package)
-					slices.Sort(coverPkgs)
-				}
-				probeCtx := ctx
-				if !w.shaped && seams.hasDefaultCoveredPositions() && len(coverPkgs) > 0 {
-					probeCtx = engine.WithBaselineCoverage(ctx, coverPkgs, t.eng.DirectiveCoverage())
-				}
-				baselineStart := time.Now()
-				probeGate.RLock()
-				baseline, err := seams.baselineProbe(probeCtx, t.dir, group.pkgs[0], group.runRegex, baselineBound, group.flags, group.moduleDir, group.packageDir, opts.BracketPaths, opts.ScratchNamespaces, runEnv, opts.bounds)
-				probeGate.RUnlock()
-				ran, passed, failedTests, diagnostic, observed := baseline.Ran, baseline.Passed, baseline.Failed, baseline.Diagnostic, baseline.Observation
-				baselineElapsed := time.Since(baselineStart)
-				var reason string
-				switch {
-				case err != nil && ctx.Err() != nil:
-					return "", ctx.Err()
-				case err != nil:
-					reason = fmt.Sprintf("oracle baseline probe failed in %s: %v", group.pkgs[0], err)
-				case ran == 0:
-					reason = fmt.Sprintf("oracle baseline matched no tests in %s", group.pkgs[0])
-				case !passed:
-					reason = fmt.Sprintf("oracle baseline does not pass in %s (failed: %s)", group.pkgs[0], strings.Join(failedTests, ", "))
-				}
-				// What the oracle saw rides the analysis channel as a
-				// payload-bearing event beside the skip decision — the
-				// decision line names the tests, the event carries their
-				// output — for a reported failure and for a result that
-				// drifted between the discovery and measurement runs alike,
-				// so a baseline failing under the campaign and passing for
-				// the caller's plain go test is diagnosable from the run
-				// (REQ-exec-run-status).
-				if reason != "" && diagnostic != "" && opts.AnalysisEvent != nil {
-					opts.AnalysisEvent(AnalysisEvent{Phase: "baseline-output", Package: group.pkgs[0], Detail: diagnostic})
-				}
-				// A refusing CONSUMER package of a derived oracle names
-				// the escape: the oracle-of-record is a derivation-time
-				// fact, so the group is never silently dropped (record
-				// identity must not follow transient suite health) —
-				// the caller fixes the suite or narrows explicitly
-				// (REQ-target-default's cross-package baseline clause).
-				if reason != "" && len(tg.Oracle) == 0 && !tg.OracleExplicit && w.targetView != nil && group.pkgs[0] != w.targetView.subject.Package {
-					reason += fmt.Sprintf(" — a consumer package of the derived oracle; fix its suite, or pass an explicit oracle to measure %s without it", tg.Symbol)
-				}
-				if reason != "" {
-					baselineFailures[key] = reason
-					return reason, nil
-				}
-				// Only a PASSING baseline reaches here — a failing or
-				// refused one returned above and records nothing (a
-				// baseline dying at the leash must not register a
-				// leash-multiple budget for its group's siblings, and
-				// prices nothing). The raw wall-clock records in every
-				// budget mode; the derived budget only in derive mode.
-				entry := groupBaseline{
-					raw:           baselineElapsed,
-					passed:        baseline.Tests,
-					testDurations: baseline.TestDurations,
-					coverage:      baseline.Coverage,
-					coverPkgs:     coverPkgs,
-				}
-				if deriveOracleBudgets {
-					entry.budget = derivedOracleBudget(baselineElapsed)
-				}
-				groupBudgetMu.Lock()
-				groupBaselines[key] = entry
-				groupBudgetMu.Unlock()
-				// The deposit is PENDING (REQ-result-baseline-bank): a
-				// clean, verifiable, passing probe records what it
-				// measured; the pins — observation-bearing evidence
-				// rows — are built once by the finding assembly, so the
-				// deposit completes at commit time from the finding's
-				// own rows. The unverifiable guard is belt-and-braces:
-				// a banked unverifiable row could never SERVE anyway
-				// (bankPinsHold runs the finding-serve pair discipline,
-				// whose accept refuses unverifiable evidence) — the
-				// guard only keeps dead weight out of the bank. The
-				// manifest guard is load-bearing: adoption needs one.
-				if !observed.Unverifiable && observed.Manifest != "" {
-					deposited, derr := depositGroupBaseline(ctx, opts.baselineBank, key.persistedKey(bankScope), *w, group, observed, runEnv, baselineElapsed, baseline.Tests, baseline.TestDurations)
-					if derr != nil {
-						return "", derr
-					}
-					if !deposited {
-						groupBudgetMu.Lock()
-						pendingBankDeposits[key] = pendingBankDeposit{
-							manifest:      observed.Manifest,
-							digest:        observed.Digest,
-							raw:           baselineElapsed,
-							passed:        baseline.Tests,
-							testDurations: baseline.TestDurations,
-						}
-						groupBudgetMu.Unlock()
-					}
-				}
-				if deriveOracleBudgets {
-					reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationOracleBudget, Symbol: tg.Symbol, Package: group.pkgs[0], OracleBudget: entry.budget.String()})
-				}
-				state = observed
-				if err := ctx.Err(); err != nil {
-					return "", err
-				}
-				baselineCache[key] = state
-			}
-			w.baselines = append(w.baselines, state)
-			groupBudgetMu.Lock()
-			w.groups[gi].passed = groupBaselines[key].passed
-			groupBudgetMu.Unlock()
-		}
-		if !w.shaped && len(w.groups) > 1 && w.targetView != nil {
-			orderOracleGroups(
-				w,
-				tg.Symbol,
-				w.targetView.subject.Package,
-				t.eng.ReachesSymbol,
-				func(g group) (time.Duration, map[string]time.Duration) {
-					if seams.baselinePrice != nil {
-						if d, ok := seams.baselinePrice(g.pkgs); ok {
-							return d, nil
-						}
-					}
-					groupBudgetMu.Lock()
-					defer groupBudgetMu.Unlock()
-					b := groupBaselines[keyFor(g)]
-					return b.raw, b.testDurations
-				},
-			)
-		}
-		return "", nil
-	}
-	// prepareShaped is the shaped lane of target preparation: wholesale
-	// serve-or-remeasure on the shape digest and oracle evidence, then
-	// the same per-package oracle groups and baselines every measure
-	// target earns (REQ-target-structural, REQ-target-manual-recipes).
-	prepareShaped := func(ctx context.Context, resolved resolvedTarget) (*work, error) {
-		i := resolved.index
-		tg := targets[i]
-		f := &findings[i]
-		mv := modeFor(resolved.attested)
-		oracle := resolved.oracle
-		oracleViews := make([]*subjectView, 0, len(oracle))
-		for _, symbol := range oracle {
-			oracleViews = append(oracleViews, mv.views.bySymbol[symbol])
-		}
-		rec, hasPrior := prior[tg.Symbol]
-		// The property-runtime regime is a measurement pin for shaped
-		// findings exactly as for symbol findings: a rapid oracle
-		// package pins its draws (REQ-exec-property-oracles). A
-		// detection failure (a go list spawn failing under load) is
-		// this target's own condition, never a campaign abort — the
-		// same locality every other preparation probe keeps
-		// (REQ-exec-quiescence).
-		targetRapid, err := preparation.rapidPackages(ctx, oraclePackages)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			skipTarget(i, "property-runtime detection unavailable: "+err.Error(), true)
-			return nil, nil
-		}
-		regime := ""
-		for _, run := range pkgRuns(oracle) {
-			if targetRapid[run.pkg] {
-				regime = engine.PropertyRegimeRapid
-				break
-			}
-		}
-		f.PropertyRegime = regime
-		f.OracleExecutionPolicy = FullOracleExecutionPolicy
-		reason := "no-prior"
-		var decision RunDecision
-		if hasPrior && opts.Force {
-			reason = "forced"
-		}
-		if hasPrior && !opts.Force {
-			matches, err := shapedEvidenceMatchesContext(ctx, *rec, oracleViews, shapedOperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				refuseSkipped(i, serveCheckRefusal(err), true)
-				return nil, nil
-			}
-			if matches && rec.BodyHash == resolved.shapedDigest && shapeEqual(rec.Shape, &TargetShape{Structural: tg.Structural, Manual: tg.Manual}) {
-				// Wholesale serve: shaped findings take no splice
-				// carve-outs — any moved pin re-measures every
-				// candidate, and the candidate sets are small by
-				// construction (REQ-result-stale). Provenance
-				// re-stamps and staged drift refuses exactly as a
-				// symbol serve (REQ-result-layers).
-				served := snapshotFindings([]Finding{*rec})[0]
-				served.Selection = selKey
-				served.Labels = append([]string(nil), tg.Labels...)
-				served.Cached = true
-				if stagedDrift, err := t.stampProvenance(ctx, repository, nil, oracleViews, resolved.shapedFiles, &served); err != nil {
-					return nil, err
-				} else if stagedDrift != "" {
-					refuseSkipped(i, "staged drift: "+stagedDrift, true)
-					return nil, nil
-				}
-				served = annotateCrossSelection(served)
-				*f = served
-				cacheTarget(i, "served: shape and oracle pins unchanged"+resolved.oracleNote)
-				return nil, nil
-			}
-			reason = "stale"
-			if issue := OracleExecutionPolicyIssue(*rec); issue != "" {
-				reason = "stale: " + issue
-			} else if !matches {
-				reason = "stale: an oracle or measurement pin moved"
-			} else if rec.BodyHash != resolved.shapedDigest {
-				reason = "stale: the declared shape or a probed file moved"
-			}
-		}
-		// The measure path attaches evidence, so it needs the OBSERVED
-		// producer views — the decision views above serve only the pin
-		// checks; a shaped identity is not in the union, so the subset
-		// derives from the oracle symbols alone.
-		if err := preflightOracleModules(oracle); err != nil {
-			return nil, err
-		}
-		// A plan pays no observed union: its decision derives from the
-		// decision views' pin checks and the shape's own candidates, and
-		// the union only attaches execution evidence
-		// (REQ-exec-plan-only).
-		var producerViews *subjectViewSet
-		if !opts.PlanOnly {
-			views, fault, err := producerViewsFor(unitOf[i], oracle[0], oracle[1:], oracle)
-			if err != nil {
-				return nil, err
-			}
-			if fault != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
-					return nil, ctxErr
-				}
-				skipTarget(i, "producer evidence unavailable: "+fault.Error(), true)
-				return nil, nil
-			}
-			producerViews = views
-		}
-		// Producer enrollment mirrors the symbol path's: the global
-		// modules enter end-of-run producer validation so the epilogue's
-		// transient global-drift report covers shaped-only campaigns too;
-		// the narrowed sibling modules below get their own per-window
-		// validation. Enrollment happens only past the serve return, so a
-		// served or skipped shaped target never turns a target-local
-		// condition into a campaign-level drift report.
-		for _, oracleView := range oracleViews {
-			oracleView.module.producer = true
-		}
-		if producerViews != nil {
-			oracleViews = oracleViews[:0]
-			for _, symbol := range oracle {
-				oracleViews = append(oracleViews, producerViews.bySymbol[symbol])
-			}
-			for _, module := range producerViews.modules {
-				module.producer = true
-			}
-		}
-		item := work{target: i, oracle: oracle, reason: reason, shaped: true, candidates: resolved.shaped, shapedFiles: resolved.shapedFiles, oracleViews: oracleViews, producer: producerViews}
-		w := &item
-		oracleSet := make(map[string]bool, len(oracle))
-		for _, o := range oracle {
-			oracleSet[o] = true
-		}
-		w.oracleSet = oracleSet
-		decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: reason + resolved.oracleNote, Candidates: len(w.candidates)}
-		f.Budget = 0
-		f.CandidateCount = len(w.candidates)
-		f.Generated = len(w.candidates)
-		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
-		if opts.PlanOnly {
-			if opts.Decision != nil {
-				opts.Decision(decision)
-			}
-			return nil, nil
-		}
-		runs := pkgRuns(w.oracle)
-		runtimes, err := preparation.propertyRuntimes(ctx, oraclePackages)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			skipTarget(i, "property-runtime detection unavailable: "+err.Error(), true)
-			return nil, nil
-		}
-		for _, pr := range runs {
-			flags := propertyOracleFlags(slices.Contains(runtimes[pr.pkg], "rapid"))
-			// The shaped lane states what it pins exactly as the
-			// symbol lane's group construction does: a shaped-only
-			// campaign over a property package must not pin silently
-			// (REQ-exec-property-oracles' once-per-package statement).
-			for _, runtime := range runtimes[pr.pkg] {
-				note, ok := propertyOracleNote(pr.pkg, runtime)
-				if ok && preparation.noteProperty(pr.pkg+"/"+runtime) && opts.PropertyOracle != nil {
-					opts.PropertyOracle(note)
-				}
-			}
-			moduleDir, packageDir, err := preparation.packageContext(ctx, pr.pkg)
-			if err != nil {
-				return nil, err
-			}
-			w.groups = append(w.groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
-		}
-		if reason, err := probeGroupBaselines(ctx, tg, w); err != nil {
-			return nil, err
-		} else if reason != "" {
-			skipTarget(i, reason, true)
-			return nil, nil
-		}
-		if opts.Decision != nil {
-			opts.Decision(decision)
-		}
-		preparedTargets.Add(1)
-		preparedCandidates.Add(int64(len(w.candidates)))
-		return w, nil
-	}
-	prepareTarget := func(ctx context.Context, resolved resolvedTarget) (*work, error) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		i := resolved.index
-		tg := targets[i]
-		f := &findings[i]
-		mv := modeFor(resolved.attested)
-		oracle := resolved.oracle
-		targetView := mv.views.bySymbol[tg.Symbol]
-		oracleViews := make([]*subjectView, 0, len(oracle))
-		for _, symbol := range oracle {
-			oracleViews = append(oracleViews, mv.views.bySymbol[symbol])
-		}
-		// A staged run's one external-input judgment, before the shaped
-		// dispatch: both preparation paths derive their provenance inputs
-		// from these views (a shaped target has no target view of its
-		// own, and its probed files ride resolved.shapedFiles).
-		if repository.staged {
-			external, unlisted, err := t.externalInputs(ctx, repository, targetView, oracleViews, resolved.shapedFiles)
-			if err != nil {
-				return nil, err
-			}
-			if len(unlisted) != 0 {
-				// The historical listing is a provenance input the
-				// snapshot cannot vouch for when it fails: the target
-				// refuses with the failure named (REQ-exec-quiescence).
-				refuseSkipped(i, unlistedRefusal(unlisted, "; measure unstaged"), true)
-				return nil, nil
-			}
-			if len(external) != 0 {
-				refuseSkipped(i, "measured input outside the repository: "+cappedJoin(external, 8)+" - the index snapshot cannot vouch for it; measure unstaged", true)
-				return nil, nil
-			}
-		}
-		if resolved.shaped != nil {
-			return prepareShaped(ctx, resolved)
-		}
-		// driftSkip converts a source-drift refusal from candidate
-		// generation into the contracted target-local skip: the tree
-		// moved under the run, so this target refuses with the drift
-		// named while completed siblings keep their findings
-		// (REQ-exec-quiescence); a true generator fault still aborts.
-		driftSkip := func(err error) bool {
-			var sourceDrift *engine.SourceDriftError
-			if !errors.As(err, &sourceDrift) {
-				return false
-			}
-			refuseSkipped(i, "source changed since load: "+sourceDrift.Path+" - re-run when the tree settles", true)
-			return true
-		}
-		rec, hasPrior := prior[tg.Symbol]
-		// The target's property-runtime measurement regime: a rapid
-		// oracle package pins its draws, and the regime is a measurement
-		// pin - a record measured under other draws re-measures
-		// (REQ-exec-property-oracles). A detection failure is this
-		// target's own condition, never a campaign abort
-		// (REQ-exec-quiescence's locality).
-		targetRapid, err := preparation.rapidPackages(ctx, oraclePackages)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			skipTarget(i, "property-runtime detection unavailable: "+err.Error(), true)
-			return nil, nil
-		}
-		regime := ""
-		for _, run := range pkgRuns(oracle) {
-			if targetRapid[run.pkg] {
-				regime = engine.PropertyRegimeRapid
-				break
-			}
-		}
-		f.PropertyRegime = regime
-		f.OracleExecutionPolicy = FullOracleExecutionPolicy
-		reason := "no-prior"
-		if hasPrior {
-			switch {
-			case opts.Force:
-				reason = "forced"
-			case !budgetCovers(*rec, opts.Budget):
-				reason = fmt.Sprintf("budget: prior generated %d of %d candidates, request wants budget %d", rec.Generated, rec.CandidateCount, opts.Budget)
-			default:
-				reason = "stale"
-			}
-		}
-		var serve *Finding
-		// refuseServeCheck is the serve block's target-local exit for a
-		// failed evidence check (serveCheckRefusal, any non-ctx error):
-		// the condition is this target's own, the campaign proceeds.
-		refuseServeCheck := func(reason string) {
-			refuseSkipped(i, reason, true)
-		}
-		if hasPrior && !opts.Force && budgetCovers(*rec, opts.Budget) {
-			matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime)
-			if err != nil {
-				if ctx.Err() != nil {
-					return nil, ctx.Err()
-				}
-				refuseServeCheck(serveCheckRefusal(err))
-				return nil, nil
-			}
-			if !matches {
-				// A named killer is not an independence proof: another test
-				// can alter its shared state, and an added test can un-kill it.
-				// Keep the actual refusal attribution and remeasure the target
-				// against its complete current oracle (REQ-result-stale).
-				probeGate.RLock()
-				reason = t.movedPinAttribution(ctx, *rec, mv.views, "stale: a measurement pin moved (oracle timeout, oracle selection, operator set, or runtime inputs moved during evaluation)")
-				probeGate.RUnlock()
-			}
-			if matches && len(rec.CandidateEvidence) == 0 {
-				cached := *rec
-				cached.Selection = selKey
-				cached.Labels = append([]string(nil), tg.Labels...)
-				cached.Cached = true
-				// Serving retains the historical ledger, including absent
-				// binding evidence. Current analysis cannot backfill it.
-				// The serve's freshness proof validated every subject's
-				// evidence against the run-start view capture, so provenance
-				// recomputes like a fresh measure's - a dirty-born record
-				// promotes to the portable layer once its paths are clean
-				// (REQ-result-stale, REQ-result-layers). A serve's evidence checks
-				// re-observe the view against disk when they close over the
-				// record's required runtime-input evidence, so a content
-				// move past the capture surfaces at the checks above and
-				// classifies target-locally (serveCheckRefusal) — no
-				// separate ref-motion gate is needed
-				// (REQ-exec-quiescence).
-				if stagedDrift, err := t.stampProvenance(ctx, repository, targetView, oracleViews, nil, &cached); err != nil {
-					return nil, err
-				} else if stagedDrift != "" {
-					refuseSkipped(i, "staged drift: "+stagedDrift, true)
-					return nil, nil
-				}
-				cached = annotateCrossSelection(cached)
-				findings[i] = cached
-				// Commit precedes the decision: a caller canceling at the
-				// decision callback still holds the persisted finding
-				// (REQ-exec-cancellation's incremental-commit clause).
-				if err := commitFinding(ctx, opts.Commit, cached); err != nil {
-					return nil, err
-				}
-				cacheTarget(i, "served: body, oracle closure, and runtime inputs unchanged"+resolved.oracleNote)
-				return nil, nil
-			}
-			if matches {
-				// The record's only unverifiable runtime evidence is
-				// candidate-local: serve its covered candidates and
-				// re-execute exactly the flagged ones under a passing
-				// current baseline probe (REQ-result-stale). Candidate
-				// regeneration below decides whether the splice can proceed.
-				snapshot := snapshotFindings([]Finding{*rec})[0]
-				serve = &snapshot
-			}
-		}
-		var extend *Finding
-		if hasPrior && !opts.Force && !budgetCovers(*rec, opts.Budget) {
-			if len(rec.CandidateEvidence) != 0 {
-				// The budget extension never composes with the
-				// candidate-evidence serve: the flagged splice re-identifies
-				// candidates under the record's own selection, so a wider
-				// request re-measures whole rather than mixing the two
-				// disciplines (REQ-result-stale).
-				reason += "; prior candidate evidence re-executes only under its recorded budget, so the whole target re-measures"
-				if issue := OracleExecutionPolicyIssue(*rec); issue != "" {
-					reason += "; " + issue
-				}
-			} else {
-				matches, err := evidenceSetMatchesContext(ctx, *rec, targetView, oracleViews, f.OracleExplicit, engine.OperatorSet, opts.OracleTimeout.String(), deriveOracleBudgets, oracleMemoryPin, regime)
-				if err != nil {
-					return nil, err
-				}
-				if matches {
-					// Every pin except the budget holds, so the record's
-					// measured prefix stands as exact evidence for candidates
-					// [0, generated) and only the unmeasured suffix executes
-					// (REQ-mut-budget, REQ-result-stale's budget-extension
-					// carve-out). Candidate regeneration below decides whether
-					// the prefix re-identifies.
-					snapshot := snapshotFindings([]Finding{*rec})[0]
-					extend = &snapshot
-				} else {
-					// The budget was not the only moved pin, so the prefix
-					// cannot stand; the appended attribution keeps the
-					// re-measure reason honest (REQ-result-stale). Gated
-					// shared like the other attribution site: the call may
-					// build a supplementary view.
-					probeGate.RLock()
-					attribution := t.movedPinAttribution(ctx, *rec, mv.views, "a measurement pin also moved, so the measured prefix cannot stand")
-					probeGate.RUnlock()
-					reason += "; " + attribution
-				}
-			}
-		}
+	return r.runExecutionPipeline(ctx)
+}
 
-		if err := preflightOracleModules(oracle); err != nil {
-			return nil, err
-		}
-		// A plan pays no observed union: the decision below derives from
-		// the decision views and the candidate generation alone, and the
-		// union only attaches execution evidence (REQ-exec-plan-only).
-		var producerViews *subjectViewSet
-		if !opts.PlanOnly {
-			views, fault, err := producerViewsFor(unitOf[i], tg.Symbol, oracle, append([]string{tg.Symbol}, oracle...))
-			if err != nil {
-				return nil, err
-			}
-			if fault != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
-					// The campaign itself is canceled: abort is the answer.
-					return nil, proofAbortError(tg.Symbol, oracle, fault, ctxErr)
-				}
-				// A per-target evidence condition, target-local by the same
-				// rule as drift refusal (REQ-exec-quiescence): this target
-				// skips with the cause on its decision line — a skip never
-				// overwrites a prior record — and the campaign proceeds.
-				skipTarget(i, fmt.Sprintf("freshness proof unavailable (oracle %s): %v", strings.Join(oracle, ", "), fault), true)
-				return nil, nil
-			}
-			producerViews = views
-		}
-		// Producer enrollment happens only for targets whose proof
-		// exists: enrolling before the build would put a skipped
-		// target's module into end-of-run producer validation, turning a
-		// target-local condition into a campaign-level drift report; a
-		// shared oracle module is enrolled by the measured sibling
-		// itself.
-		targetView.module.producer = true
-		for _, oracleView := range oracleViews {
-			oracleView.module.producer = true
-		}
-		if opts.producer != nil {
-			opts.producer(tg.Symbol)
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if producerViews != nil {
-			targetView = producerViews.bySymbol[tg.Symbol]
-			oracleViews = oracleViews[:0]
-			for _, symbol := range oracle {
-				oracleViews = append(oracleViews, producerViews.bySymbol[symbol])
-			}
-			for _, module := range producerViews.modules {
-				module.producer = true
-			}
-		}
-		oracleSet := make(map[string]bool, len(oracle))
-		for _, o := range oracle {
-			oracleSet[o] = true
-		}
-		currentLedger, err := targetView.view.TestVariantLedger(targetView.subject)
-		if err != nil {
-			return nil, err
-		}
-		item := work{target: i, oracle: oracle, reason: reason, oracleSet: oracleSet, targetView: targetView, oracleViews: oracleViews, producer: producerViews, currentLedger: currentLedger, serve: serve, extend: extend}
-		w := &item
-		var decision RunDecision
-		reportPreparation(opts.Progress, PreparationEvent{Stage: PreparationMutants, Symbol: tg.Symbol})
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		budget := opts.Budget
-		if w.serve != nil {
-			// Regenerate the served record's exact selected prefix so its
-			// flagged candidates re-identify deterministically.
-			budget = w.serve.Budget
-		}
-		// regenerateAtBudget re-enumerates at the request budget when a
-		// carve-out's record-shaped regeneration cannot be spliced —
-		// one exit for the retained reuse fallbacks (source drift skips
-		// target-locally, any other failure aborts as ever).
-		regenerateAtBudget := func() (engine.Generation, bool, error) {
-			g, gerr := t.eng.CandidatesContext(ctx, tg.Symbol, opts.Budget)
-			if gerr != nil {
-				if driftSkip(gerr) {
-					return engine.Generation{}, true, nil
-				}
-				return engine.Generation{}, false, fmt.Errorf("target %s: %w", tg.Symbol, gerr)
-			}
-			return g, false, nil
-		}
-		generation, err := t.eng.CandidatesContext(ctx, tg.Symbol, budget)
-		if err != nil {
-			if driftSkip(err) {
-				return nil, nil
-			}
-			return nil, fmt.Errorf("target %s: %w", tg.Symbol, err)
-		}
-		if w.serve != nil {
-			if flagged, ok := flaggedCandidateIndexes(generation, *w.serve); ok {
-				w.candidates = generation.Candidates
-				w.flagged = flagged
-				decision = RunDecision{Symbol: tg.Symbol, Action: "cached", Reason: fmt.Sprintf("served: pins unchanged; re-executing %s", candidateNoun(len(flagged))) + resolved.oracleNote, Candidates: len(flagged)}
-			} else {
-				// Deterministic regeneration cannot re-identify every flagged
-				// candidate and recorded survivor, so the record cannot be
-				// spliced: the whole target re-measures (REQ-result-stale).
-				w.serve, w.flagged = nil, nil
-				if budget != opts.Budget {
-					var regenerated bool
-					if generation, regenerated, err = regenerateAtBudget(); regenerated {
-						return nil, nil
-					} else if err != nil {
-						return nil, err
-					}
-				}
-			}
-		}
-		if w.extend != nil {
-			if extendedPrefixStands(generation, *w.extend) {
-				w.candidates = generation.Candidates
-				w.extendFrom = w.extend.Generated
-				suffix := len(generation.Candidates) - w.extendFrom
-				decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: fmt.Sprintf("served: prefix of %s stands; measuring %d more", candidateNoun(w.extendFrom), suffix) + resolved.oracleNote, Candidates: suffix}
-			} else {
-				// Deterministic regeneration cannot re-identify the recorded
-				// prefix, so the record cannot be extended: the whole target
-				// re-measures (REQ-result-stale).
-				w.extend = nil
-				w.reason += "; deterministic regeneration cannot re-identify the measured prefix"
-			}
-		}
-		if w.serve == nil && w.extend == nil {
-			w.candidates = generation.Candidates
-			decision = RunDecision{Symbol: tg.Symbol, Action: "measure", Reason: w.reason + resolved.oracleNote, Candidates: len(generation.Candidates)}
-			f.Budget = opts.Budget
-			f.CandidateCount = generation.CandidateCount
-			f.Generated = len(generation.Candidates)
-		}
-		// Per-package oracle scoping (REQ-exec-oracle-run), with the rapid
-		// failfile flag only in front of binaries that register it
-		// (REQ-mut-overlay). Every complete current group earns its own
-		// baseline before any mutant runs.
-		if opts.PlanOnly {
-			// The plan needs candidate counts and decisions, never
-			// baseline probes: group construction and probing are
-			// execution cost the plan exists to preview.
-			if opts.Decision != nil {
-				opts.Decision(decision)
-			}
-			return nil, nil
-		}
-		runtimes, err := preparation.propertyRuntimes(ctx, oraclePackages)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			skipTarget(i, "property-runtime detection unavailable: "+err.Error(), true)
-			return nil, nil
-		}
-		buildGroups := func(oracle []string) ([]group, error) {
-			var groups []group
-			for _, pr := range pkgRuns(oracle) {
-				// Flags and statements derive from the one detection scan:
-				// a package whose runtimes include rapid pins, and each
-				// detected runtime earns its own statement
-				// (REQ-exec-property-oracles).
-				flags := propertyOracleFlags(slices.Contains(runtimes[pr.pkg], "rapid"))
-				for _, runtime := range runtimes[pr.pkg] {
-					note, ok := propertyOracleNote(pr.pkg, runtime)
-					if ok && preparation.noteProperty(pr.pkg+"/"+runtime) && opts.PropertyOracle != nil {
-						opts.PropertyOracle(note)
-					}
-				}
-				moduleDir, packageDir, err := preparation.packageContext(ctx, pr.pkg)
-				if err != nil {
-					return nil, err
-				}
-				groups = append(groups, group{pkgs: []string{pr.pkg}, runRegex: pr.runRegex, flags: flags, moduleDir: moduleDir, packageDir: packageDir})
-			}
-			return groups, nil
-		}
-		if w.groups, err = buildGroups(w.oracle); err != nil {
-			return nil, err
-		}
-		if reason, err := probeGroupBaselines(ctx, tg, w); err != nil {
-			return nil, err
-		} else if reason != "" {
-			skipTarget(i, reason, true)
-			return nil, nil
-		}
-		// The target's own preparation events — mutants and baselines —
-		// all precede its decision (REQ-exec-run-status).
-		if opts.Decision != nil {
-			opts.Decision(decision)
-		}
-		preparedTargets.Add(1)
-		preparedCandidates.Add(int64(len(w.candidates)))
-		return w, nil
+func (r *campaignRunner) targetDone(i int) {
+	if r.unitOf == nil {
+		return
 	}
+	r.unitMu.Lock()
+	defer r.unitMu.Unlock()
+	if r.unitDone[i] {
+		return
+	}
+	r.unitDone[i] = true
+	if u := r.unitOf[i]; u != nil {
+		u.remaining--
+		if u.remaining == 0 {
+			u.release()
+		}
+	}
+}
 
-	// deliverPrepared walks every target in order — streaming resolve-phase
-	// skip decisions and preparing resolved targets — so the decision
-	// stream's order is exactly the preparation sequence's target order
-	// (REQ-exec-run-status). emit receives each measure target's work item.
-	deliverPrepared := func(ctx context.Context, emit func(work) error) error {
-		next := 0
-		for i := range targets {
-			if next < len(resolvedTargets) && resolvedTargets[next].index == i {
-				w, err := prepareTarget(ctx, resolvedTargets[next])
-				next++
-				if err != nil {
-					return err
-				}
-				if w != nil && emit != nil {
-					if err := emit(*w); err != nil {
-						return err
-					}
-				}
-				continue
-			}
-			if decisions[i].Action != "" && opts.Decision != nil {
-				opts.Decision(decisions[i])
-			}
-		}
-		return nil
-	}
+func (r *campaignRunner) refuseTarget(i int, reason string) {
+	r.driftedMu.Lock()
+	r.drifted = append(r.drifted, TargetDrift{Symbol: r.targets[i].Symbol, Reason: reason})
+	r.driftedMu.Unlock()
+	r.targetDone(i)
+}
 
-	if opts.PlanOnly {
-		if err := deliverPrepared(ctx, nil); err != nil {
-			return nil, err
-		}
-		// A plan is a decision about committing budget, so it refuses
-		// on the same tree-motion evidence an executing run's epilogue
-		// checks — neither is a baseline probe or a mutant execution.
-		// Ref motion alone is not tree motion: capture commits are read
-		// at stamp time, so only content drift refuses
-		// (REQ-exec-quiescence).
-		if err := eachMode(func(mv *modeViews) error {
-			// The plan re-establishes no proof — it pays no observed
-			// union, so its decision views validate their base facts
-			// alone — and the analysis budget cannot cut it: the
-			// campaign's passes are the budget's whole reach
-			// (REQ-exec-analysis-budget).
-			return mv.views.validateProducers(ctx)
-		}); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, &TreeDriftError{Transient: err.Error()}
-		}
-		// A staged drift refused during preparation surfaces exactly as
-		// an executing run's epilogue would surface it - a plan
-		// delivering success while silently dropping a refused target
-		// would misreport the budget decision (REQ-exec-plan-only,
-		// REQ-result-staged).
-		driftedMu.Lock()
-		planDrifted := append([]TargetDrift(nil), drifted...)
-		driftedMu.Unlock()
-		if len(planDrifted) > 0 {
-			return nil, &TreeDriftError{Drifted: planDrifted}
-		}
-		// Only findings complete without execution return (cached
-		// serves and skips), so a partially-enumerated measure target
-		// never escapes as evidence.
-		var planned []Finding
-		for i := range findings {
-			if findings[i].Cached || findings[i].Skipped != "" {
-				planned = append(planned, findings[i])
-			}
-		}
-		return planned, nil
+func (r *campaignRunner) skipTarget(ctx context.Context, i int, reason string, emit bool) {
+	r.findings[i].Skipped = reason
+	r.decisions[i] = RunDecision{Symbol: r.targets[i].Symbol, Action: "skipped", Reason: reason}
+	trace.Emit(ctx, trace.DomainReconcile, "target_decision", r.targets[i].Symbol,
+		trace.String("action", "skipped"),
+		trace.String("reason", reason),
+	)
+	if emit && r.opts.Decision != nil {
+		r.opts.Decision(r.decisions[i])
 	}
+	r.targetDone(i)
+}
 
-	// Phase two: preparation pipelined with the pool. A single preparation
-	// goroutine drives prepareTarget serially in target order — the
-	// deterministic preparation-and-decision sequence is its alone — and
-	// feeds ready work items to the window loop below, so execution
-	// overlaps only later targets' preparation (REQ-exec-run-status). The
-	// buffer holds every possible item, so preparation never blocks behind
-	// execution; clean-tree probes beside executing mutants are sound
-	// because a mutant runs through its own overlay and never touches the
-	// tree (REQ-mut-overlay).
-	items := make(chan work, len(targets))
-	var prepErr error
-	prepDone := make(chan struct{})
-	runCtx, cancelRun := context.WithCancel(ctx)
-	// The join runs on every return path: no caller callback may fire
-	// after Run returns (the synchronous-caller-code contract), and a
-	// canceled run still waits for producer-side probe cleanup
-	// (REQ-exec-cancellation). Receiving from the closed prepDone is
-	// idempotent, so the deferred join composes with the loop's own read.
-	defer func() {
-		cancelRun()
-		<-prepDone
-	}()
-	go func() {
-		defer close(prepDone)
-		defer close(items)
-		delivered := 0
-		err := deliverPrepared(runCtx, func(w work) error {
-			if seams.truncateAfterItems > 0 && delivered >= seams.truncateAfterItems {
-				return errTruncateSeam
-			}
-			select {
-			case items <- w:
-				delivered++
-				return nil
-			case <-runCtx.Done():
-				return runCtx.Err()
-			}
-		})
-		if errors.Is(err, errTruncateSeam) {
-			// The seam models the failure REQ-exec-completion exists
-			// for: a pipeline that ends early with its error lost.
-			// With seams.truncateErr set it models the OTHER failure - a
-			// preparation error that surfaces - so the error path's
-			// held-window aggregation is testable.
-			err = seams.truncateErr
-		}
-		prepErr = err
-	}()
-	interner := &manifestInterner{byDigest: map[string]string{}}
-	// A job carries the already-scoped work: the dispatch loop derives it
-	// once and the worker executes that value; the executor emits the
-	// scope it runs through the executedScope seam off the same variable.
-	type job struct {
-		wi, mi int
-		w      work
+func (r *campaignRunner) refuseSkipped(ctx context.Context, i int, reason string, emit bool) {
+	full := reason + r.residue()
+	r.refuseTarget(i, full)
+	r.skipTarget(ctx, i, full, emit)
+}
+
+func (r *campaignRunner) cacheTarget(ctx context.Context, i int, reason string) {
+	r.decisions[i] = RunDecision{Symbol: r.targets[i].Symbol, Action: "cached", Reason: reason}
+	trace.Emit(ctx, trace.DomainReconcile, "target_decision", r.targets[i].Symbol,
+		trace.String("action", "cached"),
+		trace.String("reason", reason),
+	)
+	if r.opts.Decision != nil {
+		r.opts.Decision(r.decisions[i])
 	}
-	// Execution proceeds in bounded target windows: each window's pool
-	// drains, its kills confirm serially against an idle pool, and its
-	// findings aggregate and COMMIT before the next window dispatches
-	// (REQ-exec-cancellation's incremental-commit clause). One
-	// campaign-global pool would hold every target's observations
-	// resident until the end and commit nothing for hours, so a single
-	// late abort cost the whole campaign's verdicts. Serial
-	// confirmation's isolation contract is "alone after the pool
-	// drains", which the per-window drain preserves.
-	// The window's bounds are content-stable — a function of the tree's
-	// candidate counts, the target order, the worker count, and the
-	// run's derived oracle lists (a stood-down derivation shortens them
-	// for that run alone), never of a measured duration — so the
-	// partition never moves between runs of an unchanged tree under the
-	// same workers and the same derivations
-	// (REQ-exec-oracle-run's window rule).
-	windowBudget, windowMinimum := windowcost.Bounds(jobs, seams.windowCandidates)
-	var treeDrift error
-	// commitAndAttribute is the one epilogue every measured or spliced
-	// finding leaves aggregation through: install, persist, and — when
-	// the evidence landed unverifiable under a package-derived oracle —
-	// emit the oracle-instability attribution
-	// (REQ-exec-oracle-guidance). One exit keeps the attribution
-	// structurally coupled to the commit: no serve arm can persist an
-	// unverifiable record silently.
-	// committed is the completion ledger for measured targets: a clean
-	// return vouches for the whole announced roster, and this ledger is
-	// how the vouch is checked - phase-one serves and skips carry their
-	// own marks (Cached, Skipped), drifted targets are named in the
-	// drift error, and everything else must pass through here.
-	committed := make([]bool, len(targets))
-	commitAndAttribute := func(ctx context.Context, f Finding, w work) error {
-		f.Selection = selKey
-		f = annotateCrossSelection(f)
-		findings[w.target] = f
-		if err := commitFinding(ctx, opts.Commit, f); err != nil {
-			return err
-		}
-		committed[w.target] = true
-		targetDone(w.target)
-		// Complete pending bank deposits (REQ-result-baseline-bank):
-		// the committed finding's OracleEvidence rows are the pins —
-		// the exact observation-bearing rows finding freshness
-		// compares, so a banked serve inherits the finding-serve
-		// semantics verbatim.
-		for _, g := range w.groups {
-			key := keyFor(g)
-			groupBudgetMu.Lock()
-			pd, pending := pendingBankDeposits[key]
-			groupBudgetMu.Unlock()
-			if !pending {
-				continue
-			}
-			rows := bankOracleRowsFor(f, g.pkgs[0])
-			if len(rows) == 0 {
-				continue
-			}
-			opts.baselineBank.putBaseline(key.persistedKey(bankScope), bankedBaseline{
-				Evidence: rows, Manifest: pd.manifest, Digest: pd.digest,
-				PassedTests:        pd.passed,
-				TestDurationMillis: durationsToMillis(pd.testDurations),
-				RawMillis:          pd.raw.Milliseconds(), MeasuredAtUnix: time.Now().Unix(),
-			})
-			groupBudgetMu.Lock()
-			delete(pendingBankDeposits, key)
-			groupBudgetMu.Unlock()
-		}
-		return t.emitOracleGuidance(ctx, f, w, targets[w.target].Symbol, opts, runEnv, guidanceCache)
+	r.targetDone(i)
+}
+
+func (r *campaignRunner) annotateCrossSelection(f Finding) Finding {
+	if len(r.crossSelectionPrior) == 0 || f.Skipped != "" {
+		return f
 	}
-	// Advisory execution progress rides window boundaries and
-	// per-candidate ticks: totals are exact, per-window timing is not
-	// part of the deterministic sequence (REQ-exec-run-status's
-	// advisory classes). mutantsDone is atomic because workers tick it
-	// as candidates finish; windows execute serially, so the boundary
-	// true-up (Store) never races a tick.
-	dispatchedTargets := 0
-	var mutantsDone atomic.Int64
-	// tickMu serializes the counter advance WITH its event delivery:
-	// without it two workers can Add in one order and deliver in the
-	// other, and the tick stream — pinned monotone — regresses.
-	// Ordering is tickMu → the callback lock, never inverted.
-	var tickMu sync.Mutex
-	type executedWindow struct {
-		window       []work
-		observations [][]gofresh.Observation
-		incompletes  [][]string
-		// scores carries each target's verdict-bearing measurement —
-		// outcomes, killers, and the serial-confirmation flips — as one
-		// value, so no assembly path can receive the verdicts without
-		// the flips (REQ-exec-survivor-evidence).
-		scores []windowScores
-		// discard is non-nil exactly when Options.SoftStop drained the
-		// window: the fresh works were truncated to their dispatched
-		// candidate prefixes and restamped as candidate-capped, each
-		// true entry marks a work with nothing committable, and the run
-		// ends after this window aggregates (REQ-exec-cancellation's
-		// graceful-interrupt clause).
-		discard []bool
+	bundle := make([]Finding, 0, 1+len(r.crossSelectionPrior))
+	bundle = append(bundle, f)
+	for _, other := range r.crossSelectionPrior {
+		if other.Symbol == f.Symbol {
+			bundle = append(bundle, other)
+		}
 	}
-	executeWindow := func(window []work) (*executedWindow, error) {
-		schemaGroups := make([][]engine.Candidate, 0, len(window))
-		for wi := range window {
-			if !window[wi].shaped && len(window[wi].candidates) > 0 {
-				schemaGroups = append(schemaGroups, window[wi].candidates)
-			}
-		}
-		if len(schemaGroups) > 1 {
-			engine.MergeCandidateSchemas(schemaGroups...)
-		}
-		outcomes := make([][]engine.MutantOutcome, len(window))
-		flips := make([]map[int]string, len(window))
-		observations := make([][]gofresh.Observation, len(window))
-		incompletes := make([][]string, len(window))
-		killers := make([][]string, len(window))
-		memoryDecided := make([][]bool, len(window))
-		for wi := range window {
-			outcomes[wi] = make([]engine.MutantOutcome, len(window[wi].candidates))
-			observations[wi] = make([]gofresh.Observation, len(window[wi].candidates))
-			incompletes[wi] = make([]string, len(window[wi].candidates))
-			killers[wi] = make([]string, len(window[wi].candidates))
-			memoryDecided[wi] = make([]bool, len(window[wi].candidates))
-		}
-		// score is the window's ONE score writer: every measurement of a
-		// candidate — the parallel worker's or serial confirmation's —
-		// records its channels through it, so a
-		// measurement cannot replace the verdict and keep another
-		// channel's stale value.
-		// The outcome is written last: an unwritten outcome reads as
-		// the discard zero value, never as a verdict, so it is the
-		// row's sentinel and the other channels are in place before it.
-		score := func(wi, mi int, outcome engine.MutantOutcome, killer string, decided bool, state gofresh.Observation, incomplete string) {
-			killers[wi][mi] = killer
-			memoryDecided[wi][mi] = decided
-			observations[wi][mi] = interner.intern(state)
-			incompletes[wi][mi] = incomplete
-			outcomes[wi][mi] = outcome
-		}
-		windowBase := mutantsDone.Load()
-		reportExecuting(opts.Executing, ExecutionEvent{
-			Phase:       "executing",
-			TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
-			Symbol:         targets[window[0].target].Symbol,
-			CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
-		})
-		// Price complete groups; coverage carries no omission authority.
-		est := estimateWindow(window, opts.baselineDur)
-		reportExecuting(opts.Executing, ExecutionEvent{
-			Phase:       "estimate",
-			TargetIndex: dispatchedTargets + 1, TargetCount: int(preparedTargets.Load()),
-			Symbol:         targets[window[0].target].Symbol,
-			CandidatesDone: int(windowBase), CandidatesTotal: int(preparedCandidates.Load()),
-			EstimateFull: est.full, EstimateUnknown: est.unknown,
-			EstimateProjected: est.projectedString(),
-		})
-		jobCh := make(chan job)
-		poolCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		var wg sync.WaitGroup
-		var errOnce sync.Once
-		var poolErr error
-		for range jobs {
-			if err := poolCtx.Err(); err != nil {
-				break
-			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for j := range jobCh {
-					if poolCtx.Err() != nil {
-						return
-					}
-					w := j.w
-					m, runnable := w.candidates[j.mi].Mutant()
-					if !runnable {
-						continue
-					}
-					outcome, killer, candidateMemoryDecided, state, incompleteReason, err := t.executeWorkMutant(poolCtx, w, m, opts, runEnv)
-					if err != nil {
-						if poolCtx.Err() != nil {
-							return
-						}
-						errOnce.Do(func() {
-							poolErr = err
-							cancel()
-						})
-						return
-					}
-					score(j.wi, j.mi, outcome, killer, candidateMemoryDecided, state, incompleteReason)
-					// The completion tick: done advances candidate by
-					// candidate instead of window by window, the pace
-					// ground a multi-hour window would otherwise hide
-					// (REQ-exec-run-status's estimate class). tickMu
-					// binds the Add to its delivery — without it a
-					// preempted worker delivers a smaller done AFTER a
-					// sibling's larger one and the pinned-monotone
-					// stream regresses.
-					tickMu.Lock()
-					reportExecuting(opts.Executing, ExecutionEvent{
-						Phase:       "tick",
-						TargetIndex: dispatchedTargets + j.wi + 1, TargetCount: int(preparedTargets.Load()),
-						Symbol:         w.candidates[j.mi].Symbol,
-						CandidatesDone: int(mutantsDone.Add(1)), CandidatesTotal: int(preparedCandidates.Load()),
-					})
-					tickMu.Unlock()
-				}
-			}()
-		}
-		// The graceful drain (REQ-exec-cancellation's graceful-interrupt
-		// clause): a fired SoftStop stops admitting candidates; every
-		// already-dispatched mutant finishes under the still-live pool
-		// context, and prefixes records how far each work's candidate
-		// walk got — the contiguous handled prefix, the capped-record
-		// boundary the truncation below commits (-1 = fully handled).
-		softStopped := false
-		breakWi := len(window)
-		prefixes := make([]int, len(window))
-		for wi := range prefixes {
-			prefixes[wi] = -1
-		}
-	dispatching:
-		for wi := range window {
-			for mi := range window[wi].candidates {
-				select {
-				case <-opts.SoftStop:
-					softStopped = true
-					prefixes[wi], breakWi = mi, wi
-					break dispatching
-				default:
-				}
-				// executesCandidate is the ONE candidate selection —
-				// serve/extension/drift carve-outs (REQ-result-stale)
-				// and pre-execution discards — shared with the window
-				// cost model; the walk still visits every index so the
-				// drain prefix can land on a skipped candidate exactly
-				// as it always has.
-				if !executesCandidate(window[wi], mi) {
-					continue
-				}
-				if opts.dispatched != nil {
-					opts.dispatched(window[wi].candidates[mi].Symbol, mi)
-				}
-				select {
-				case jobCh <- job{wi, mi, window[wi]}:
-				case <-opts.SoftStop:
-					softStopped = true
-					prefixes[wi], breakWi = mi, wi
-					break dispatching
-				case <-poolCtx.Done():
-					break dispatching
-				}
-			}
-		}
-		close(jobCh)
-		wg.Wait()
-		if poolErr != nil {
-			return nil, poolErr
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		var discard []bool
-		if softStopped {
-			// The drained window truncates before confirmation and
-			// assembly: each fresh work keeps its handled candidate
-			// prefix and restamps as candidate-capped — the committed
-			// record is indistinguishable from a budget-K run's, so its
-			// reuse follows the budget-extension carve-out exactly and a
-			// re-run measures only the remainder. Serve, splice, and
-			// drift work, and a fresh work with an empty prefix, discard
-			// whole — their prior records stand
-			// (REQ-exec-cancellation's graceful-interrupt clause).
-			discard = make([]bool, len(window))
-			for wi := range window {
-				k := prefixes[wi]
-				if wi > breakWi {
-					k = 0
-				}
-				if k < 0 {
-					continue
-				}
-				if window[wi].serve != nil || window[wi].extend != nil || k == 0 {
-					discard[wi] = true
-					window[wi].candidates = nil
-					outcomes[wi], observations[wi], incompletes[wi], killers[wi], memoryDecided[wi] = nil, nil, nil, nil, nil
-					continue
-				}
-				window[wi].candidates = window[wi].candidates[:k]
-				outcomes[wi] = outcomes[wi][:k]
-				observations[wi] = observations[wi][:k]
-				incompletes[wi] = incompletes[wi][:k]
-				killers[wi] = killers[wi][:k]
-				memoryDecided[wi] = memoryDecided[wi][:k]
-				f := &findings[window[wi].target]
-				f.Budget = k
-				f.Generated = k
-			}
-		}
-		// Serial kill confirmation (REQ-exec-attribution): a test-attributed
-		// or package-scope kill measured beside sibling mutants re-executes
-		// alone, and the serial execution is the scored one - outcome,
-		// observation, and candidate evidence replaced wholesale - so
-		// interference from a sibling never reads as a kill. Timeout kills
-		// are excluded: confirming one costs the full timeout again, and the
-		// hang bound is the caller's own budget - the named residual.
-		// Boundary true-up: worker ticks counted executed candidates;
-		// skipped, non-runnable, and served ones join here so done
-		// converges on the prepared totals at every window boundary
-		// (windows execute serially — the Store never races a tick).
-		windowTotal := int64(0)
-		for wi := range window {
-			windowTotal += int64(len(window[wi].candidates))
-		}
-		mutantsDone.Store(advanceDone(windowBase, windowTotal, mutantsDone.Load()))
-		// rescore is the window's serial confirmation discipline: the
-		// candidate re-executes alone under the exclusively held probe
-		// gate — so no pipelined sibling's preparation probe shares its
-		// isolation window — and the scored serial run replaces the
-		// window's verdict for it wholesale through the same score
-		// writer the parallel workers use: outcome, killer, memory
-		// disposition, observation, and incompleteness, as one value.
-		// The serial execution replaces every channel of the parallel
-		// measurement (REQ-exec-attribution).
-		rescore := func(wi, mi int, run func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, gofresh.Observation, string, error)) (engine.MutantOutcome, string, error) {
-			w := window[wi]
-			m, _ := window[wi].candidates[mi].Mutant()
-			opts.probeGate.Lock()
-			outcome, killer, decided, state, incomplete, err := run(w, m)
-			opts.probeGate.Unlock()
-			if err != nil {
-				return outcome, killer, err
-			}
-			score(wi, mi, outcome, killer, decided, state, incomplete)
-			return outcome, killer, nil
-		}
-		if jobs > 1 {
-			// Each confirmation re-runs a full oracle, so per-confirmation
-			// events are naturally sparse; a window with nothing to
-			// confirm reports nothing.
-			confirmTotal := 0
-			for wi := range window {
-				for mi := range window[wi].candidates {
-					if outcomes[wi][mi] == engine.MutantKilled && killers[wi][mi] != engine.TimeoutKiller {
-						if _, runnable := window[wi].candidates[mi].Mutant(); runnable {
-							confirmTotal++
-						}
-					}
-				}
-			}
-			confirmDone := 0
-			var kills []windowKill
-			for wi := range window {
-				for mi := range window[wi].candidates {
-					if outcomes[wi][mi] != engine.MutantKilled || killers[wi][mi] == engine.TimeoutKiller {
-						continue
-					}
-					if _, runnable := window[wi].candidates[mi].Mutant(); !runnable {
-						continue
-					}
-					kills = append(kills, windowKill{target: wi, mi: mi})
-				}
-			}
-			// Volatile evidence anywhere in a target's window — the
-			// baseline or any mutant observation — is load sensitivity's
-			// signature: that target's gate never samples. Snapshots are
-			// per target at walk start; serial evidence arriving
-			// unverifiable re-arms mid-walk through the walk's own
-			// callback.
-			volatileMemo := map[int]bool{}
-			err := confirmWindowKills(
-				func(wi int) bool {
-					v, ok := volatileMemo[wi]
-					if !ok {
-						v = windowEvidenceVolatile(&window[wi], observations[wi])
-						volatileMemo[wi] = v
-					}
-					return v
-				},
-				kills,
-				func(k windowKill, confirmMode string) (confirmOutcome, error) {
-					if err := ctx.Err(); err != nil {
-						return confirmInconclusive, err
-					}
-					wi := k.target
-					reportExecuting(opts.Executing, ExecutionEvent{
-						Phase: "confirming",
-						// The confirmed kill's own target, not the
-						// window head: a window spans many targets
-						// and the walk crosses them, so a head-pinned
-						// index reads as a stuck campaign while the
-						// symbol changes underneath it.
-						TargetIndex: dispatchedTargets + wi + 1, TargetCount: int(preparedTargets.Load()),
-						Symbol:         targets[window[wi].target].Symbol,
-						CandidatesDone: int(mutantsDone.Load()), CandidatesTotal: int(preparedCandidates.Load()),
-						ConfirmationsDone: confirmDone, ConfirmationsTotal: confirmTotal,
-						ConfirmationMode: confirmMode,
-					})
-					initialKiller := killers[wi][k.mi]
-					outcome, killer, err := rescore(wi, k.mi, func(w work, m engine.Mutant) (engine.MutantOutcome, string, bool, gofresh.Observation, string, error) {
-						return t.confirmMutant(ctx, w, m, initialKiller, scopedBaselines, opts, runEnv)
-					})
-					if err != nil {
-						return confirmInconclusive, err
-					}
-					confirmDone++
-					classified := classifyConfirmation(outcome, killer)
-					if classified == confirmFlipped {
-						if flips[wi] == nil {
-							flips[wi] = map[int]string{}
-						}
-						flips[wi][k.mi] = initialKiller
-						reportConfirmationFlip(opts.Executing,
-							targets[window[wi].target].Symbol,
-							window[wi].candidates[k.mi].Position,
-							initialKiller,
-							dispatchedTargets+wi+1, int(preparedTargets.Load()))
-					}
-					return classified, nil
-				},
-				func(k windowKill) bool {
-					return observations[k.target][k.mi].Unverifiable
-				},
-			)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		cancel()
-		dispatchedTargets += len(window)
-		scores := make([]windowScores, len(window))
-		for wi := range window {
-			scores[wi] = windowScores{outcomes: outcomes[wi], killers: killers[wi], flips: flips[wi], memoryDecided: memoryDecided[wi]}
-		}
-		return &executedWindow{window: window, scores: scores, observations: observations, incompletes: incompletes, discard: discard}, nil
+	if len(bundle) < 2 {
+		return f
 	}
-	// aggregateWindow folds one executed window into findings and commits
-	// each one — always before the next window dispatches
-	// (REQ-exec-cancellation's incremental-commit clause): the main loop
-	// aggregates window N right after gathering window N+1, so in the
-	// common case (preparation running ahead of execution) commits land
-	// immediately, and only a preparation-bound campaign holds one
-	// window's aggregation until the next window's items arrive — which is
-	// what lets the campaign epilogue fire between the LAST window's
-	// execution and its aggregation, exactly where it always sat.
-	aggregateWindow := func(st *executedWindow) error {
-		window, observations, incompletes, scores := st.window, st.observations, st.incompletes, st.scores
-		for wi := range window {
-			if st.discard != nil && st.discard[wi] {
-				// A work the graceful drain discarded whole: nothing
-				// committable, the prior record stands, and the
-				// interrupt error names the truncation
-				// (REQ-exec-cancellation's graceful-interrupt clause).
-				window[wi].candidates = nil
-				targetDone(window[wi].target)
-				continue
-			}
-			w := window[wi]
-			window[wi].candidates = nil
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if opts.aggregate != nil {
-				opts.aggregate()
-			}
-			f := &findings[w.target]
-			if w.serve != nil {
-				spliced, err := t.spliceServedFinding(ctx, runEnv, *w.serve, w.candidates, w.flagged, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Exemptions, oracleMemoryPin, maxGroupBudget(w, opts), deriveOracleBudgets)
-				if err != nil {
-					// The splice revalidates recorded and fresh evidence
-					// against disk; motion between execution and here is
-					// this target's drift, never the campaign's — the
-					// same locality the fresh-assembly attach has.
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					if !errors.Is(err, errEvidenceFinalization) {
-						return err
-					}
-					refuseTarget(w.target, err.Error()+residue())
-					continue
-				}
-				// The aggregated work item's retained observations are dead past
-				// this point; releasing them per item keeps the run's peak at the
-				// in-flight items rather than the whole campaign.
-				observations[wi] = nil
-				if unavailable, err := producerValidation(ctx, w.producer); err != nil {
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					refuseTarget(w.target, err.Error()+residue())
-					continue
-				} else if unavailable != "" {
-					stampUnverifiable(&spliced, unavailable)
-					// The splice bucketed its survivors before this
-					// record-wide stamp: under it, uncovered by an
-					// exemption, every survivor's advisory bucket
-					// re-derives as a fresh measure's would
-					// (REQ-exec-survivor-evidence).
-					if unstableForBuckets(&spliced, opts.Exemptions) {
-						if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
-							return err
-						}
-					}
-				}
-				// Served prefix + re-executed candidates both validated
-				// against the current tree; provenance recomputes like a
-				// fresh measure's (REQ-result-stale, REQ-result-layers).
-				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, nil, &spliced); err != nil {
-					return err
-				} else if stagedDrift != "" {
-					refuseTarget(w.target, stagedDrift+residue())
-					continue
-				}
-				if spliced.EvidenceFault != "" && unstableForBuckets(&spliced, opts.Exemptions) {
-					if err := t.bucketSurvivorExecution(ctx, &spliced, w, opts, runEnv, coverageCache, 0); err != nil {
-						return err
-					}
-				}
-				// The exemption record is derived after every unverifiable stamp
-				// the record can carry, never before one (the exemptions'
-				// derived-state rule).
-				stampExemptions(&spliced, opts.Exemptions)
-				spliced.Run = opts.RunID
-				// Evidence beats attestation on the flagged re-execution
-				// exactly as on a fresh measure: an attested flagged
-				// candidate the re-execution killed contradicts its
-				// equivalence claim, with the killer named, before the
-				// commit - never left to the merge layer's vaguer
-				// no-longer-reported shed (REQ-attest-survivor).
-				contradictKilledDispositions(spliced.Symbol, w.serve.Attested, spliced.Survivors, spliced.Kills, opts.Contradiction)
-				if err := commitAndAttribute(ctx, spliced, w); err != nil {
-					return err
-				}
-				continue
-			}
-			if w.extend != nil {
-				extended, err := t.spliceExtendedFinding(ctx, runEnv, *w.extend, w.candidates, w.extendFrom, w.baselines, w.targetView, w.oracleViews, w.currentLedger, scores[wi], observations[wi], incompletes[wi], targets[w.target].Labels, opts.Budget, opts.Exemptions, oracleMemoryPin, maxGroupBudget(w, opts), deriveOracleBudgets)
-				if err != nil {
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					if !errors.Is(err, errEvidenceFinalization) {
-						return err
-					}
-					refuseTarget(w.target, err.Error()+residue())
-					continue
-				}
-				// Same release as the served branch: the splice is computed, the
-				// per-candidate observations are dead.
-				observations[wi] = nil
-				if unavailable, err := producerValidation(ctx, w.producer); err != nil {
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					refuseTarget(w.target, err.Error()+residue())
-					continue
-				} else if unavailable != "" {
-					stampUnverifiable(&extended, unavailable)
-					// The record-wide stamp re-derives every survivor's
-					// advisory bucket, the prefix's included: unlike the
-					// suffix-local divergence stamp the splice classifies
-					// itself, this one is the whole record's
-					// (REQ-exec-survivor-evidence).
-					if unstableForBuckets(&extended, opts.Exemptions) {
-						if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, 0); err != nil {
-							return err
-						}
-					}
-				}
-				// Served prefix + measured suffix both validated against the
-				// current tree; provenance recomputes like a fresh measure's
-				// (REQ-result-stale, REQ-result-layers).
-				if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, nil, &extended); err != nil {
-					return err
-				} else if stagedDrift != "" {
-					refuseTarget(w.target, stagedDrift+residue())
-					continue
-				}
-				// Advisory execution buckets: a verifiable extension's suffix
-				// survivors earn theirs from the current probe like any measured
-				// run's, while carried prefix survivors keep their recorded
-				// buckets verbatim; a divergence-stamped extension's suffix
-				// survivors were already classified unstable by the splice, and
-				// a validation- or provenance-stamped record's every survivor.
-				if extended.EvidenceFault != "" && unstableForBuckets(&extended, opts.Exemptions) {
-					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, 0); err != nil {
-						return err
-					}
-				} else if !unstableForBuckets(&extended, opts.Exemptions) {
-					if err := t.bucketSurvivorExecution(ctx, &extended, w, opts, runEnv, coverageCache, len(w.extend.Survivors)); err != nil {
-						return err
-					}
-				}
-				// The exemption record is derived after every unverifiable stamp
-				// the record can carry, never before one (the exemptions'
-				// derived-state rule).
-				stampExemptions(&extended, opts.Exemptions)
-				extended.Run = opts.RunID
-				if err := commitAndAttribute(ctx, extended, w); err != nil {
-					return err
-				}
-				continue
-			}
-			unionCandidates := w.candidates
-			unionOutcomes := scores[wi].outcomes
-			unionObservations := observations[wi]
-			unionIncompletes := incompletes[wi]
-			if w.shaped {
-				// Shaped candidates run unobserved in the scratch tree:
-				// the union spans the baselines alone (observed on the
-				// real tree), and no candidate evidence exists — a
-				// shaped record with candidate evidence would never
-				// serve (REQ-target-structural).
-				unionCandidates, unionOutcomes, unionObservations, unionIncompletes = nil, nil, nil, nil
-			}
-			state, candidateEvidence, err := completedObservationUnion(ctx, t.dir, runEnv, w.baselines, unionCandidates, unionOutcomes, unionObservations, unionIncompletes, nil)
-			if err != nil {
-				return err
-			}
-			// Same release as the served branch: the union is computed, the
-			// per-candidate observations are dead.
-			observations[wi] = nil
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			f.CandidateEvidence = candidateEvidence
-			portable := newPortableUnion(state, runEnv)
-			// The relative conversion inside the attach revalidates the
-			// union against disk, so an input moving between execution
-			// and attach surfaces here; that is this target's drift, not
-			// the campaign's — the same locality the producer and
-			// provenance refusals below have (REQ-exec-attribution).
-			if w.shaped {
-				// A shaped finding carries oracle evidence only: its
-				// subject is the declared shape, pinned by the shape
-				// digest in BodyHash, never a resolvable symbol
-				// (REQ-target-structural, REQ-target-manual-recipes).
-				oracleEvidence, err := attachOracleEvidence(w.oracleViews, portable)
-				if err != nil {
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					if !errors.Is(err, errEvidenceFinalization) {
-						return err
-					}
-					refuseTarget(w.target, err.Error()+residue())
-					continue
-				}
-				f.OracleEvidence = oracleEvidence
-			} else {
-				targetEvidence, oracleEvidence, err := attachEvidence(w.targetView, w.oracleViews, portable)
-				if err != nil {
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					if !errors.Is(err, errEvidenceFinalization) {
-						return err
-					}
-					refuseTarget(w.target, err.Error()+residue())
-					continue
-				}
-				f.TargetEvidence = targetEvidence
-				f.OracleEvidence = oracleEvidence
-				f.CompartmentLedger = compartmentLedgerFromView(w.currentLedger)
-			}
-			if unavailable, err := producerValidation(ctx, w.producer); err != nil {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				refuseTarget(w.target, err.Error()+residue())
-				continue
-			} else if unavailable != "" {
-				stampUnverifiable(f, unavailable)
-			}
-			if stagedDrift, err := t.stampProvenance(ctx, repository, w.targetView, w.oracleViews, w.shapedFiles, f); err != nil {
-				return err
-			} else if stagedDrift != "" {
-				refuseTarget(w.target, stagedDrift+residue())
-				continue
-			}
-			f.Run = opts.RunID
-			stampExemptions(f, opts.Exemptions)
-			// Fresh path: the memory pin IS the entry-resolved pin, so
-			// its raise is vacuous by construction, while the budget
-			// raise is exactly where a fresh derived record's bound
-			// climbs from the skeleton floor to the loosest group budget
-			// its verdicts ran under; the same call is load-bearing on
-			// the four serve arms.
-			*f = mergeScoredFacts(*f, scores[wi], f.OracleMemoryBytes, maxGroupBudget(w, opts), deriveOracleBudgets)
-			f.Operators = summarizeOperators(w.candidates, scores[wi].outcomes)
-			for _, summary := range f.Operators {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				f.Discarded += summary.Discarded
-				f.Mutants += summary.Killed + summary.Survived
-				f.Killed += summary.Killed
-			}
-			for mi, candidate := range w.candidates {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				switch scores[wi].outcomes[mi] {
-				case engine.MutantSurvived:
-					f.Survivors = append(f.Survivors, newSurvivor(candidate, "", scores[wi].flips, mi))
-				case engine.MutantKilled:
-					// The keystone persisted: every kill names its killer
-					// (REQ-core-attributed-kills). Attribution is evidence of
-					// the event, never an oracle-independence license.
-					f.Kills = append(f.Kills, Kill{Position: candidate.Position, Operator: candidate.Operator, Killer: scores[wi].killers[mi]})
-				}
-			}
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if w.shaped {
-				// Survivor execution buckets are body semantics
-				// (coverage of the mutated symbol); a shaped survivor
-				// is a vacuous-oracle finding with nothing to bucket.
-			} else if err := t.bucketSurvivorExecution(ctx, f, w, opts, runEnv, coverageCache, 0); err != nil {
-				return err
-			}
-			// A re-measure carries prior dispositions exactly when the
-			// mutation domain holds - the judged subject (body hash,
-			// operator set) unchanged, the same position and operator
-			// surviving re-execution, site content unchanged - regardless
-			// of moved measurement pins: "judged afresh" is delivered by
-			// the re-execution itself, and a disposition whose mutant a
-			// test now kills sheds as a contradiction naming the killer
-			// (REQ-attest-survivor).
-			domainHeld := func(rec Finding) bool {
-				if w.shaped {
-					// A shaped target's domain is unobservable from its
-					// digest: content-independent for import-boundary,
-					// and covering only the one rewritten file for the
-					// other classes - never the wider surface the
-					// oracle analyzes, which is pinned only by the
-					// oracle's runtime evidence - and shaped candidates
-					// carry no site anchor. So a shaped disposition
-					// carries only under the full pin gate
-					// (REQ-attest-survivor's shaped clause).
-					return mutationDomainHeld(rec, *f) && shapeEqual(rec.Shape, f.Shape) && sameAttestationPins(rec, *f)
-				}
-				return mutationDomainHeld(rec, *f)
-			}
-			if rec, ok := prior[targets[w.target].Symbol]; ok && domainHeld(*rec) {
-				kept, siteSheds, gone := carryAnchoredAttestations(rec.Attested, f.Survivors)
-				f.Attested = append(f.Attested, kept...)
-				f.Withdrawn = carryAnchoredWithdrawn(rec.Withdrawn, f.Attested, f.Survivors)
-				// A carry across moved pins is an acceptance that outlives
-				// the environment it was judged in - reported distinctly
-				// at the moment it rides, so it is auditable
-				// (REQ-attest-survivor). A pins-held carry restores the
-				// record verbatim and stays quiet, as it always has.
-				if !sameAttestationPins(*rec, *f) && opts.AttestationCarried != nil {
-					for _, attestation := range kept {
-						opts.AttestationCarried(AttestationCarry{
-							Symbol: f.Symbol, Position: attestation.Position, Derivation: derivationMove(rec.TargetEvidence, f.TargetEvidence),
-							Operator: attestation.Operator, Reason: attestation.Reason,
-						})
-					}
-				}
-				// Domain identity does NOT imply equal sites: the site
-				// window spans raw file lines and can overhang the
-				// symbol's closure by one line, so an adjacent-line edit
-				// under a forced re-measure reaches this arm - surfaced,
-				// never silent (REQ-attest-survivor).
-				for _, d := range siteSheds {
-					d.Symbol = f.Symbol
-					if opts.AttestationSiteShed != nil {
-						opts.AttestationSiteShed(d)
-					}
-				}
-				// Evidence beats attestation: an attested mutant the
-				// re-execution killed contradicts its equivalence claim -
-				// the specific story, with the killer named, told before
-				// the commit so the merge layer's vaguer shed defers to it
-				// (REQ-attest-survivor).
-				contradictKilledDispositions(f.Symbol, gone, f.Survivors, f.Kills, opts.Contradiction)
-			}
-			if err := commitAndAttribute(ctx, *f, w); err != nil {
+	return AnnotateSelectionVerdicts(bundle)[0]
+}
+
+func (r *campaignRunner) eachMode(fn func(mv *modeViews) error) error {
+	for _, attested := range []bool{false, true} {
+		if mv, ok := r.modes[attested]; ok {
+			if err := fn(mv); err != nil {
 				return err
 			}
 		}
-		return nil
 	}
-	// The window gather is deterministic: items arrive in target order from
-	// the serial preparation goroutine, and window boundaries follow the
-	// same budget rule as ever — blocking until each next item is prepared
-	// keeps membership independent of execution timing, so the
-	// window-scoped confirmation flip signal covers the same kills on
-	// every run (REQ-exec-attribution).
-	var held *executedWindow
-	// aggregateHeld folds the previously executed window on the exit
-	// paths: measured evidence is never discarded by a later preparation
-	// failure — an abort that discards completed measurements is reserved
-	// for corrupted orchestration state (REQ-exec-attribution's abort
-	// terms) — while a canceled context refuses inside aggregation as
-	// ever, cancellation discarding unfinished work whole.
-	aggregateHeld := func() error {
-		if held == nil {
-			return nil
+	return nil
+}
+
+func (r *campaignRunner) modeFor(attested bool) *modeViews {
+	mv, ok := r.modes[attested]
+	if !ok {
+		mv = &modeViews{
+			engines:    r.t.newSubjectEngines(r.opts.AnalysisEvent, attested, r.opts.bounds, r.opts.AnalysisBudget),
+			views:      &subjectViewSet{bySymbol: map[string]*subjectView{}, bounds: r.opts.bounds, packageProcess: attested},
+			viewFaults: map[string]error{},
 		}
-		err := aggregateWindow(held)
-		held = nil
-		return err
+		r.modes[attested] = mv
 	}
-	// Window EXECUTION order is value-ordered (REQ-exec-run-status's
-	// estimate class): the gathering goroutine runs the SAME blocking
-	// gather rule as ever — membership stays deterministic and
-	// independent of execution timing (REQ-exec-attribution) — and the
-	// driver picks the cheapest READY window by the pre-probe
-	// projection, so an interrupt at any point has banked the most
-	// verdicts its elapsed time could buy. The channel is sized for
-	// every possible window, so the gatherer never blocks behind
-	// execution and the ready pool deepens while long windows run.
-	windowCh := make(chan []work, len(targets))
-	go func() {
-		defer close(windowCh)
-		for {
-			window, ok := gatherWindow(items, windowBudget, windowMinimum)
-			if !ok {
-				return
-			}
-			windowCh <- window
-		}
-	}()
-	mkReady := func(window []work) readyWindow {
-		cost, priced := windowPrice(window, opts.baselineDur)
-		return readyWindow{window: window, cost: cost, priced: priced}
-	}
-	var pool []readyWindow
-	windowChOpen := true
-	for {
-		if len(pool) == 0 {
-			if !windowChOpen {
-				break
-			}
-			window, ok := <-windowCh
-			if !ok {
-				break
-			}
-			pool = append(pool, mkReady(window))
-		}
-		if windowChOpen {
-			if seams.waitPreparedBeforePick {
-				// Test seam: hold each pick until preparation
-				// completes, so ordering assertions see the whole
-				// pool instead of racing the serial preparation.
-				<-prepDone
-			}
-			select {
-			case <-prepDone:
-				// Preparation is complete, so every remaining window
-				// is imminent (the gatherer only drains the buffered
-				// items and closes): drain to closure so the pick sees
-				// the WHOLE remaining pool — without this, a window in
-				// flight between the items buffer and windowCh loses
-				// the pick by a scheduling race.
-				for window := range windowCh {
-					pool = append(pool, mkReady(window))
-				}
-				windowChOpen = false
-			default:
-			drainReady:
-				for {
-					select {
-					case window, ok := <-windowCh:
-						if !ok {
-							windowChOpen = false
-							break drainReady
-						}
-						pool = append(pool, mkReady(window))
-					default:
-						break drainReady
-					}
-				}
-			}
-		}
-		// A failed preparation surfaces before the next window executes,
-		// not after every buffered item is paid for: gathered-but-unmeasured
-		// items are just preparation, dropped without loss.
-		select {
-		case <-prepDone:
-			if prepErr != nil {
-				if err := aggregateHeld(); err != nil {
-					return nil, err
-				}
-				return nil, prepErr
-			}
-		default:
-		}
-		pick := nextReadyWindow(pool)
-		window := pool[pick].window
-		copy(pool[pick:], pool[pick+1:])
-		pool[len(pool)-1] = readyWindow{}
-		pool = pool[:len(pool)-1]
-		// The previously executed window aggregates only now, with the
-		// next window in hand proving it was not the last: its commits
-		// still land before this window dispatches
-		// (REQ-exec-cancellation's incremental-commit clause).
-		if err := aggregateHeld(); err != nil {
-			return nil, err
-		}
-		executed, err := executeWindow(window)
-		if err != nil {
-			return nil, err
-		}
-		if executed.discard != nil {
-			// The drained window aggregates NOW — its capped prefixes
-			// commit under the incremental-commit clause — and the run
-			// ends with the operational interrupt error; later windows
-			// never dispatch (REQ-exec-cancellation's graceful-interrupt
-			// clause).
-			if err := aggregateWindow(executed); err != nil {
-				return nil, err
-			}
-			return nil, ErrInterrupted
-		}
-		held = executed
-	}
-	<-prepDone
-	if prepErr != nil {
-		if err := aggregateHeld(); err != nil {
-			return nil, err
-		}
-		return nil, prepErr
-	}
-	// The campaign epilogue fires between the last window's execution and
-	// its aggregation, exactly where it always sat: preparation and every
-	// mutant are done, the last findings fold has not happened, so a
-	// transient global drift no surviving target's evidence reflects is
-	// reported rather than silently absorbed (REQ-exec-quiescence), and an
-	// edit landing at this seam is refused by the last window's own
-	// per-target validations.
-	if opts.afterExecution != nil {
-		opts.afterExecution()
-	}
-	if err := eachMode(func(mv *modeViews) error {
-		return mv.views.validateProducers(ctx)
-	}); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		treeDrift = err
-	}
-	if held != nil {
-		if err := aggregateWindow(held); err != nil {
-			return nil, err
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	// A run that returns success has dispositioned every announced
-	// target: measured and committed, served, skipped, or named in the
-	// drift error. There is no fourth silent outcome - a pipeline that
-	// ended early with a lost error would otherwise report a truncated
-	// campaign as complete, indistinguishable from success unless the
-	// operator diffs the document against the roster
-	// (REQ-exec-completion).
-	driftedSymbols := make(map[string]bool, len(drifted))
-	for _, d := range drifted {
-		driftedSymbols[d.Symbol] = true
-	}
-	var unfinished []string
-	for i := range findings {
-		if findings[i].Cached || findings[i].Skipped != "" || committed[i] || driftedSymbols[targets[i].Symbol] {
-			continue
-		}
-		unfinished = append(unfinished, targets[i].Symbol)
-	}
-	if len(unfinished) > 0 {
-		return nil, fmt.Errorf("gomutant: campaign truncated - %s ended without a result and without an error; the findings document keeps each unfinished target's prior record", cappedNameList(unfinished, "target"))
-	}
-	if opts.Posture != nil {
-		// Every completed record's reuse posture, judged over the views
-		// this run built (the inspection pass's chain without its view
-		// builds), keyed by the record's posture; a judgment fault
-		// is that record's posture, never the run's error, and a
-		// cancellation here stops the postures, never the finished run.
-		shared := t.newAdmissionShared()
-		for i := range findings {
-			if ctx.Err() != nil {
-				break
-			}
-			f := findings[i]
-			if driftedSymbols[targets[i].Symbol] {
-				continue
-			}
-			if f.Skipped != "" {
-				opts.Posture(RecordPosture{Symbol: f.Symbol, Measurement: "skipped"})
-				continue
-			}
-			// The record's own posture, decided at its admission, keys
-			// the set, exactly as the inspection pass keys its prebuilt
-			// views: the set's engine carries the package-process
-			// execution posture, which changes what the evidence check
-			// means, so a set built under the other posture is never
-			// read even when it holds the symbol; a posture the run built
-			// no set under is judged over a supplementary view, as the
-			// inspection pass would.
-			var inspection FindingInspection
-			adm, err := t.admitFindingContext(ctx, f, shared)
-			if err == nil {
-				var prebuilt *subjectViewSet
-				if mv, ok := modes[adm.packageProcess]; ok {
-					prebuilt = mv.views
-				}
-				inspection, err = t.judgeAdmittedContext(ctx, f, adm, prebuilt)
-			}
-			if err == nil {
-				inspection = withCandidateEvidence(inspection, f)
-			}
-			if ctx.Err() != nil {
-				break
-			}
-			opts.Posture(posture(f, inspection, err))
-		}
-	}
-	if len(drifted) > 0 || treeDrift != nil {
-		completed := completedFindings(findings, drifted)
-		if len(drifted) == 0 {
-			return completed, &TreeDriftError{Completed: len(completed), Transient: treeDrift.Error()}
-		}
-		return completed, &TreeDriftError{Drifted: drifted, Completed: len(completed)}
-	}
-	return findings, nil
+	return mv
 }
 
 // ErrInterrupted is the graceful-interrupt run result: an operational

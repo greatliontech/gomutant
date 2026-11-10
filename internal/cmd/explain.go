@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
-
 	gomutant "github.com/greatliontech/gomutant"
 	"github.com/spf13/cobra"
 )
@@ -21,34 +19,21 @@ type explainOptions struct {
 	json              bool
 }
 
-type explainedSurvivorView struct {
-	Position  string `json:"position"`
-	Operator  string `json:"operator"`
-	Execution string `json:"execution,omitempty"`
-	Advice    string `json:"advice"`
-}
-
-type promotionGroupView struct {
-	Reason  string   `json:"reason"`
-	Count   int      `json:"count"`
-	Symbols []string `json:"symbols"`
-}
-
 type explainView struct {
-	Symbol          string                  `json:"symbol,omitempty"`
-	Selection       string                  `json:"selection,omitempty"`
-	State           gomutant.FindingState   `json:"state,omitempty"`
-	Reason          string                  `json:"reason,omitempty"`
-	Layer           string                  `json:"layer,omitempty"`
-	LayerReasons    []string                `json:"layerReasons,omitempty"`
-	Open            []explainedSurvivorView `json:"open,omitempty"`
-	Attested        int                     `json:"attested,omitempty"`
-	Withdrawn       int                     `json:"withdrawn,omitempty"`
-	RepoCommittable *int                    `json:"repoCommittable,omitempty"`
-	LocalOnly       *int                    `json:"localOnly,omitempty"`
-	Promotion       []promotionGroupView    `json:"promotion,omitempty"`
-	Note            string                  `json:"note,omitempty"`
-	Document        string                  `json:"document,omitempty"`
+	Symbol          string                       `json:"symbol,omitempty"`
+	Selection       string                       `json:"selection,omitempty"`
+	State           gomutant.FindingState        `json:"state,omitempty"`
+	Reason          string                       `json:"reason,omitempty"`
+	Layer           string                       `json:"layer,omitempty"`
+	LayerReasons    []string                     `json:"layerReasons,omitempty"`
+	Open            []gomutant.ExplainedSurvivor `json:"open,omitempty"`
+	Attested        int                          `json:"attested,omitempty"`
+	Withdrawn       int                          `json:"withdrawn,omitempty"`
+	RepoCommittable *int                         `json:"repoCommittable,omitempty"`
+	LocalOnly       *int                         `json:"localOnly,omitempty"`
+	Promotion       []gomutant.PromotionGroup    `json:"promotion,omitempty"`
+	Note            string                       `json:"note,omitempty"`
+	Document        string                       `json:"document,omitempty"`
 }
 
 func newExplainCommand() *cobra.Command {
@@ -97,34 +82,15 @@ func explainCommand(ctx context.Context, o explainOptions, out io.Writer) error 
 	if err != nil {
 		return err
 	}
+	hasSel := len(o.tags) > 0 || o.toolchain != ""
 	if o.symbol != "" {
-		selKey := gomutant.SelectionKey(sel)
-		hasSel := len(o.tags) > 0 || o.toolchain != ""
-		var matches []gomutant.Finding
-		for _, finding := range all {
-			if finding.Symbol != o.symbol {
-				continue
-			}
-			if hasSel && finding.Selection != selKey {
-				continue
-			}
-			matches = append(matches, finding)
-		}
-		if len(matches) > 1 {
-			for _, m := range matches {
-				if m.Selection == selKey {
-					matches = []gomutant.Finding{m}
-					break
-				}
-			}
-		}
-		if len(matches) > 1 {
+		finding, matches := gomutant.SelectExplainFinding(all, o.symbol, sel, hasSel)
+		if matches > 1 {
 			return fmt.Errorf("explain: multiple finding records for %s across build selections; specify --tag or --toolchain", o.symbol)
 		}
-		if len(matches) == 0 {
+		if matches == 0 {
 			return fmt.Errorf("explain: no finding for %s; gomutant findings lists the recorded symbols", o.symbol)
 		}
-		finding := matches[0]
 		loadSel := gomutant.AttestedLoadSelection(sel, hasSel, finding)
 		tree, err := gomutant.LoadContextSelection(ctx, o.dir, loadSel)
 		if err != nil {
@@ -137,25 +103,18 @@ func explainCommand(ctx context.Context, o explainOptions, out io.Writer) error 
 		if err != nil {
 			return err
 		}
-		layer, layerReasons := store.LayerReasons(finding)
+		explained := store.ExplainSymbolFinding(finding, inspection)
 		view := explainView{
-			Symbol:       finding.Symbol,
-			Selection:    finding.Selection,
-			State:        inspection.State,
-			Reason:       inspection.Reason,
-			Layer:        layer,
-			LayerReasons: gomutant.RollUpMachineLocalInputs(layerReasons),
-			Attested:     len(finding.AttestedDispositions()),
-			Withdrawn:    len(finding.WithdrawnDispositions()),
+			Symbol:       explained.Symbol,
+			Selection:    explained.Selection,
+			State:        explained.State,
+			Reason:       explained.Reason,
+			Layer:        explained.Layer,
+			LayerReasons: explained.LayerReasons,
+			Open:         explained.Open,
+			Attested:     explained.Attested,
+			Withdrawn:    explained.Withdrawn,
 			Document:     docPath,
-		}
-		for _, s := range finding.Open() {
-			view.Open = append(view.Open, explainedSurvivorView{
-				Position:  s.Position,
-				Operator:  s.Operator,
-				Execution: s.Execution,
-				Advice:    gomutant.SurvivorAdvice(s.Execution),
-			})
 		}
 		if o.json {
 			enc := json.NewEncoder(out)
@@ -175,52 +134,21 @@ func explainCommand(ctx context.Context, o explainOptions, out io.Writer) error 
 		}
 		return nil
 	}
-	repo, local := 0, 0
-	groups := map[string][]string{}
-	hasSel := len(o.tags) > 0 || o.toolchain != ""
-	selKey := gomutant.SelectionKey(sel)
-	for _, finding := range all {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if !(gomutant.RecordFilter{Label: o.label, Selection: selKey, HasSelection: hasSel}).Admits(finding) {
-			continue
-		}
-		layer, layerReasons := store.LayerReasons(finding)
-		if layer == gomutant.LayerRepo {
-			repo++
-			continue
-		}
-		local++
-		for _, reason := range gomutant.RollUpMachineLocalInputs(layerReasons) {
-			groups[reason] = append(groups[reason], finding.RecordKey().String())
-		}
+	triage, err := store.ExplainTriage(ctx, all, gomutant.RecordFilter{
+		Label:        o.label,
+		Selection:    gomutant.SelectionKey(sel),
+		HasSelection: hasSel,
+	}, docPath)
+	if err != nil {
+		return err
 	}
-	view := explainView{RepoCommittable: &repo, LocalOnly: &local, Document: docPath}
-	switch {
-	case len(all) == 0:
-		view.Note = "no findings recorded at " + docPath + " - run measures the tree first"
-	case o.label != "" && repo+local == 0:
-		view.Note = fmt.Sprintf("label %q matched none of %d recorded finding(s); drop it to triage the document", o.label, len(all))
-	}
-	reasons := make([]string, 0, len(groups))
-	for reason := range groups {
-		reasons = append(reasons, reason)
-	}
-	sort.Slice(reasons, func(i, j int) bool {
-		if len(groups[reasons[i]]) != len(groups[reasons[j]]) {
-			return len(groups[reasons[i]]) > len(groups[reasons[j]])
-		}
-		return reasons[i] < reasons[j]
-	})
-	for _, reason := range reasons {
-		syms := groups[reason]
-		sort.Strings(syms)
-		view.Promotion = append(view.Promotion, promotionGroupView{
-			Reason:  reason,
-			Count:   len(syms),
-			Symbols: syms,
-		})
+	repo, local := triage.RepoCommittable, triage.LocalOnly
+	view := explainView{
+		RepoCommittable: &repo,
+		LocalOnly:       &local,
+		Promotion:       triage.Promotion,
+		Note:            triage.Note,
+		Document:        docPath,
 	}
 	if o.json {
 		enc := json.NewEncoder(out)

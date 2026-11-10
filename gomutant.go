@@ -677,7 +677,11 @@ func (t *Tree) OracleClosureSignpostContext(ctx context.Context, residue []Resid
 		progress(fmt.Sprintf("closure signpost listing the test closure of %d changed package(s)", len(changed)))
 	}
 	linked := map[string]bool{}
-	for _, pkg := range slices.Sorted(maps.Keys(changed)) {
+	sortedChanged := slices.Sorted(maps.Keys(changed))
+	if err := t.eng.WarmLinkedTestPackagesContext(ctx, sortedChanged); err != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	for _, pkg := range sortedChanged {
 		set, err := t.eng.LinkedTestPackagesContext(ctx, pkg)
 		if err != nil {
 			if ctx.Err() != nil {
