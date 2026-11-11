@@ -20,6 +20,7 @@ import (
 
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/gotool"
+	"github.com/greatliontech/gomutant/internal/trace"
 )
 
 // Store is the two-layer findings persistence (REQ-result-layers): the
@@ -534,6 +535,7 @@ func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopA
 		}
 	}
 	subjects := append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...)
+	seenManifest := map[[2]string]bool{}
 	for _, ev := range subjects {
 		if ev.RuntimeUnverifiable && !exempted {
 			// The recorded gofresh reason names its discharge channel;
@@ -560,6 +562,10 @@ func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopA
 		if ev.ModuleBase != "" {
 			base = filepath.Join(moduleDir, filepath.FromSlash(ev.ModuleBase))
 		}
+		manifestKey := [2]string{base, ev.RuntimeInputs}
+		if seenManifest[manifestKey] {
+			continue
+		}
 		paths, err := gofresh.RuntimeInputPaths(ev.RuntimeInputs, base)
 		if err != nil {
 			if add("unreadable runtime manifest for " + ev.Symbol) {
@@ -567,6 +573,7 @@ func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopA
 			}
 			continue
 		}
+		seenManifest[manifestKey] = true
 		for _, p := range paths {
 			if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
 				if add("machine-local runtime input " + p) {
@@ -1210,8 +1217,18 @@ func (s *Store) committable(f, form Finding) bool {
 // every record the update returned, as it judged them under the lock:
 // the one source a run's ledger, tallies, and echoes read, never a
 // re-classification after the write (REQ-result-layers).
-func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Finding, error)) (Routing, error) {
+func (s *Store) Update(ctx context.Context, update func(prior []Finding) ([]Finding, error)) (r Routing, retErr error) {
+	updateStart := time.Now()
 	var next, rows []Finding
+	defer func() {
+		if trace.AnyEnabled() {
+			trace.Emit(ctx, trace.DomainReconcile, "store_update", s.path,
+				trace.Int("findings", len(next)),
+				trace.Int64("duration_ms", time.Since(updateStart).Milliseconds()),
+				trace.Err(retErr),
+			)
+		}
+	}()
 	var bounds []CoverageBound
 	var pruned []string
 	committable := map[string]bool{}

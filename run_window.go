@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/greatliontech/gofresh"
 	"github.com/greatliontech/gomutant/internal/engine"
+	"github.com/greatliontech/gomutant/internal/trace"
 	"github.com/greatliontech/gomutant/internal/windowcost"
 )
 
@@ -223,6 +225,8 @@ dispatching:
 				kills = append(kills, windowKill{target: wi, mi: mi})
 			}
 		}
+		confirmStart := time.Now()
+		var lastConfirmMode string
 		volatileMemo := map[int]bool{}
 		err := confirmWindowKills(
 			func(wi int) bool {
@@ -235,6 +239,7 @@ dispatching:
 			},
 			kills,
 			func(k windowKill, confirmMode string) (confirmOutcome, error) {
+				lastConfirmMode = confirmMode
 				if err := ctx.Err(); err != nil {
 					return confirmInconclusive, err
 				}
@@ -276,6 +281,19 @@ dispatching:
 				return observations[k.target][k.mi].Unverifiable
 			},
 		)
+		if trace.AnyEnabled() {
+			var firstSymbol string
+			if len(window) > 0 {
+				firstSymbol = targets[window[0].target].Symbol
+			}
+			trace.Emit(ctx, trace.DomainOracle, "window_confirm", firstSymbol,
+				trace.String("mode", lastConfirmMode),
+				trace.Int("kills", len(kills)),
+				trace.Int("confirmations", confirmDone),
+				trace.Int64("duration_ms", time.Since(confirmStart).Milliseconds()),
+				trace.Err(err),
+			)
+		}
 		if err != nil {
 			return nil, err
 		}

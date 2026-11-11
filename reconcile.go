@@ -290,6 +290,7 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 		viewEnvs[oracleView.symbol] = oracleView.env
 	}
 	var evidenceFaults []string
+	seenManifest := map[[2]string][]string{}
 	for _, evidence := range append([]SubjectEvidence{f.TargetEvidence}, f.OracleEvidence...) {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -314,40 +315,44 @@ func (t *Tree) stampProvenance(ctx context.Context, repository repositoryState, 
 			evidenceFaults = append(evidenceFaults, fault)
 			break
 		}
-		paths, perr := gofresh.RuntimeInputPaths(evidence.RuntimeInputs, base)
-		if perr != nil {
-			fault := "an evidence manifest is unreadable (" + evidence.Symbol + ")"
-			if repository.staged {
-				return fault + "; the staged snapshot cannot vouch for it", nil
+		manifestKey := [2]string{base, evidence.RuntimeInputs}
+		unresolvable, cached := seenManifest[manifestKey]
+		if !cached {
+			paths, perr := gofresh.RuntimeInputPaths(evidence.RuntimeInputs, base)
+			if perr != nil {
+				fault := "an evidence manifest is unreadable (" + evidence.Symbol + ")"
+				if repository.staged {
+					return fault + "; the staged snapshot cannot vouch for it", nil
+				}
+				evidenceFaults = append(evidenceFaults, fault)
+				break
 			}
-			evidenceFaults = append(evidenceFaults, fault)
-			break
-		}
-		// An identity outside the repository is not git's to vouch for:
-		// dirty means git-visible drift, and the portable line already
-		// keeps a record with external identities machine-local with the
-		// truthful machine-local-input reason. Stamping such records
-		// dirty forever would only mislabel why they cannot promote
-		// (REQ-result-layers). The judgment is placement's — the one
-		// physical-form rule the dirty walk shares: an in-repo identity
-		// (an alias form included) joins the pathspec at its physical
-		// form or, when it no longer exists, at the first unresolved
-		// component under its in-repo ancestor; a resolvable external
-		// identity is dropped; an identity missing under an external
-		// ancestor, or one whose location cannot be established, is a
-		// candidate for the digest vouch below - fail-closed, never
-		// silently external. The identity itself is what the dirty walk
-		// re-judges (placement is idempotent over it), so a tracked link
-		// it traverses reaches git even for an outside identity.
-		var unresolvable []string
-		for _, p := range paths {
-			_, kind := repository.placement(p)
-			if kind != placedUnknown {
-				sourceFiles = append(sourceFiles, p)
+			// An identity outside the repository is not git's to vouch for:
+			// dirty means git-visible drift, and the portable line already
+			// keeps a record with external identities machine-local with the
+			// truthful machine-local-input reason. Stamping such records
+			// dirty forever would only mislabel why they cannot promote
+			// (REQ-result-layers). The judgment is placement's — the one
+			// physical-form rule the dirty walk shares: an in-repo identity
+			// (an alias form included) joins the pathspec at its physical
+			// form or, when it no longer exists, at the first unresolved
+			// component under its in-repo ancestor; a resolvable external
+			// identity is dropped; an identity missing under an external
+			// ancestor, or one whose location cannot be established, is a
+			// candidate for the digest vouch below - fail-closed, never
+			// silently external. The identity itself is what the dirty walk
+			// re-judges (placement is idempotent over it), so a tracked link
+			// it traverses reaches git even for an outside identity.
+			for _, p := range paths {
+				_, kind := repository.placement(p)
+				if kind != placedUnknown {
+					sourceFiles = append(sourceFiles, p)
+				}
+				if kind == placedOutsideMissing || kind == placedUnknown {
+					unresolvable = append(unresolvable, p)
+				}
 			}
-			if kind == placedOutsideMissing || kind == placedUnknown {
-				unresolvable = append(unresolvable, p)
-			}
+			seenManifest[manifestKey] = unresolvable
 		}
 		if len(unresolvable) > 0 {
 			// An externally rooted identity that cannot be established
