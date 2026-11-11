@@ -28,8 +28,10 @@ func TestBoundsDeriveFromTheWorkerCount(t *testing.T) {
 			t.Fatalf("Bounds(%d): ceiling %d below minimum %d", tc.jobs, c, m)
 		}
 	}
-	if c, m := Bounds(16, 5); c != 5 || m != 5 {
-		t.Fatalf("Bounds(16, 5) = %d, %d; want 5, 5", c, m)
+	for _, override := range []int{1, 5} {
+		if c, m := Bounds(16, override); c != override || m != override {
+			t.Fatalf("Bounds(16, %d) = %d, %d; want %d, %d", override, c, m, override, override)
+		}
 	}
 }
 

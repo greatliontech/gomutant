@@ -563,17 +563,21 @@ func portableLineWalk(f Finding, moduleDir string, exemptions []Exemption, stopA
 			base = filepath.Join(moduleDir, filepath.FromSlash(ev.ModuleBase))
 		}
 		manifestKey := [2]string{base, ev.RuntimeInputs}
-		if seenManifest[manifestKey] {
+		if unreadable, seen := seenManifest[manifestKey]; seen {
+			if unreadable && add("unreadable runtime manifest for "+ev.Symbol) {
+				return reasons
+			}
 			continue
 		}
 		paths, err := gofresh.RuntimeInputPaths(ev.RuntimeInputs, base)
 		if err != nil {
+			seenManifest[manifestKey] = true
 			if add("unreadable runtime manifest for " + ev.Symbol) {
 				return reasons
 			}
 			continue
 		}
-		seenManifest[manifestKey] = true
+		seenManifest[manifestKey] = false
 		for _, p := range paths {
 			if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
 				if add("machine-local runtime input " + p) {
